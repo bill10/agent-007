@@ -1,0 +1,26 @@
+{
+  "name": "agent-007",
+  "version": "0.1.0",
+  "description": "Pixel office for AI terminal agents. Spawn multiple Claude Code agents, watch them work in a virtual office, manage git worktrees, and view file changes.",
+  "license": "MIT",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.1.0"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-pty": "^1.2.0-beta.12",
+    "strip-ansi": "^7.1.0",
+    "ws": "^8.18.0"
+  }
+}

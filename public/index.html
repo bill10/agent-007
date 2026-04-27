@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent 007</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 4 L16 16 L28 4 Z' fill='%23d4a847' opacity='0.25' stroke='%23d4a847' stroke-width='3' stroke-linejoin='round'/%3E%3Cline x1='16' y1='16' x2='16' y2='26' stroke='%23d4a847' stroke-width='2.5'/%3E%3Cline x1='10' y1='26' x2='22' y2='26' stroke='%23d4a847' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='6' r='3' fill='%23d4a847'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <span class="topbar-status" id="status-bar" style="display:none"></span>
+
+  <!-- Spawn form (hidden by default) -->
+  <div class="spawn-form" id="spawn-form" style="display:none">
+    <div class="spawn-form-inner">
+      <div class="spawn-form-main">
+        <label class="spawn-repo-label">Repository
+          <div class="spawn-repo-wrapper">
+            <input type="text" id="spawn-repo" placeholder="/path/to/repo" spellcheck="false" autocomplete="off"><button type="button" class="spawn-browse-btn" id="btn-browse-repo" title="Browse directories">&#128194;</button>
+            <div class="repo-dropdown" id="repo-dropdown" style="display:none"></div>
+          </div>
+        </label>
+        <div class="spawn-form-actions">
+          <button id="btn-spawn-start">Start</button>
+          <button id="btn-spawn-cancel" class="secondary">Cancel</button>
+        </div>
+      </div>
+      <div class="spawn-advanced-toggle" id="spawn-advanced-toggle">Advanced &#x25B6;</div>
+      <div class="spawn-advanced" id="spawn-advanced" style="display:none">
+        <label>Command<input type="text" id="spawn-command" value="claude" spellcheck="false"></label>
+        <label>Agent / worktree name<input type="text" id="spawn-name" placeholder="auto" spellcheck="false"></label>
+        <label>Branch name<input type="text" id="spawn-branch" placeholder="auto" spellcheck="false"></label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Directory browser modal -->
+  <div class="dir-browser-modal" id="dir-browser-modal" style="display:none">
+    <div class="dir-browser-inner">
+      <div class="dir-browser-header">
+        <span class="dir-browser-title">Select Repository</span>
+        <button class="dir-browser-close" id="btn-dir-browser-close">&times;</button>
+      </div>
+      <div class="dir-browser-path" id="dir-browser-path"></div>
+      <div class="dir-browser-list" id="dir-browser-list"></div>
+      <div class="dir-browser-actions">
+        <button id="btn-dir-browser-select" disabled>Select This Directory</button>
+        <button id="btn-dir-browser-cancel" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main layout -->
+  <div class="main">
+    <!-- Left panel: File Explorer -->
+    <div class="explorer" id="explorer-panel">
+      <div class="panel-header">
+        <span class="topbar-title">Agent<svg class="app-logo" width="16" height="16" viewBox="0 0 32 32"><path d="M4 4 L16 16 L28 4 Z" fill="#d4a847" opacity="0.2" stroke="#d4a847" stroke-width="2" stroke-linejoin="round"/><line x1="16" y1="16" x2="16" y2="26" stroke="#d4a847" stroke-width="2"/><line x1="10" y1="26" x2="22" y2="26" stroke="#d4a847" stroke-width="2.5" stroke-linecap="round"/><circle cx="22" cy="6" r="2.5" fill="#d4a847"/></svg>007</span>
+      </div>
+      <div class="explorer-header">
+        <span class="explorer-label">REPOS</span>
+        <span class="explorer-header-actions">
+          <button class="explorer-icon-btn" id="btn-add-repo" title="Add repository"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
+          <button class="explorer-icon-btn" id="btn-refresh-tree" title="Refresh file trees"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M10 4.5A4 4 0 1 0 9 9" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M10 1.5v3h-3" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
+          <button class="explorer-icon-btn" id="btn-toggle-explorer" title="Toggle explorer (Cmd+E)"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M8 1L3 6l5 5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
+        </span>
+      </div>
+      <div class="add-repo-bar" id="add-repo-bar" style="display:none">
+        <input type="text" id="add-repo-input" placeholder="/path/to/repo" spellcheck="false" autocomplete="off">
+        <button class="add-repo-browse" id="add-repo-browse" title="Browse">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M1 3h4l1-1h5v8H1z" stroke="currentColor" stroke-width="1" fill="none"/></svg>
+        </button>
+      </div>
+      <div class="explorer-content" id="explorer-content" role="tree"></div>
+    </div>
+
+    <!-- Explorer reopen button (visible when collapsed) -->
+    <button class="explorer-reopen-btn" id="btn-reopen-explorer" title="Show file explorer (Cmd+E)" style="display:none"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 1l5 5-5 5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></button>
+
+    <!-- Divider: Explorer | Office -->
+    <div class="divider" id="divider-explorer"></div>
+
+    <!-- Middle panel: Pixel Office / Diff Viewer -->
+    <div class="office" id="office-panel">
+      <div class="panel-header office-header">
+        <button class="topbar-btn" id="btn-new-agent">+ New Agent</button>
+      </div>
+      <canvas id="office-canvas"></canvas>
+      <div class="office-empty" id="office-empty">
+        <p>No agents yet</p>
+        <p class="dim">Click "+ New Agent" to get started</p>
+      </div>
+      <div class="diff-viewer" id="diff-viewer" style="display:none">
+        <div class="diff-viewer-header">
+          <span class="diff-viewer-path" id="diff-viewer-path"></span>
+          <button class="diff-viewer-close" id="diff-viewer-close" title="Back to office">&times;</button>
+        </div>
+        <pre class="diff-viewer-content" id="diff-viewer-content"></pre>
+      </div>
+    </div>
+
+    <!-- Divider: Office | Terminal -->
+    <div class="divider" id="divider"></div>
+
+    <!-- Right panel: Terminal -->
+    <div class="terminal-panel" id="terminal-panel">
+      <div class="panel-header terminal-header">
+        <span class="topbar-agent-info" id="topbar-agent-info"></span>
+        <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
+          <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 14 14" style="display:none"><path d="M12 8.5A5.5 5.5 0 1 1 5.5 2 4 4 0 0 0 12 8.5z" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+          <svg id="theme-icon-sun" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.8 2.8l1.4 1.4M9.8 9.8l1.4 1.4M11.2 2.8l-1.4 1.4M4.2 9.8l-1.4 1.4" stroke="currentColor" stroke-width="1.2"/></svg>
+        </button>
+      </div>
+      <div class="terminal-tabs" id="terminal-tabs"></div>
+      <div class="terminal-viewport" id="terminal-viewport">
+        <div class="terminal-empty" id="terminal-empty">
+          <p>No agent selected</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reconnecting banner -->
+  <div class="reconnecting" id="reconnecting" style="display:none">
+    Reconnecting...
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+node_modules/
+.uploads/
+.context/
+.gstack/
+.env
+.claude/
