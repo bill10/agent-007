@@ -36,5 +36,9 @@ export function connect(onMessage) {
 }
 
 export function send(msg) {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify(msg));
+    return true;
+  }
+  return false;
 }

@@ -90,6 +90,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
 
+      try {
       switch (msg.type) {
         case 'spawn': {
           const result = await createSession(msg.command || 'claude', msg.name, msg.repoPath || null, msg.branch || null);
@@ -260,6 +261,18 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           if (!session.exited) session.pty.write(relativePath);
           ws.send(JSON.stringify({ type: 'upload-complete', sessionId: msg.sessionId, path: relativePath, filename: finalName }));
           break;
+        }
+      }
+      } catch (err) {
+        console.error(`WebSocket handler error (msg.type=${msg.type}):`, err);
+        if (msg.type === 'spawn') {
+          try {
+            ws.send(JSON.stringify({
+              type: 'spawn-error',
+              command: msg.command || 'claude',
+              error: `Server error: ${err.message || err}`,
+            }));
+          } catch {}
         }
       }
     });

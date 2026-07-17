@@ -41,6 +41,16 @@ function setupSpawnForm() {
     advancedToggle.innerHTML = open ? 'Advanced &#x25B6;' : 'Advanced &#x25BC;';
   };
 
+  const errorEl = document.getElementById('spawn-form-error');
+  function showSpawnError(text) {
+    errorEl.textContent = text;
+    errorEl.style.display = 'block';
+  }
+  function clearSpawnError() {
+    errorEl.textContent = '';
+    errorEl.style.display = 'none';
+  }
+
   document.getElementById('btn-new-agent').onclick = () => {
     form.style.display = 'flex';
     nameInput.value = '';
@@ -48,12 +58,14 @@ function setupSpawnForm() {
     cmdInput.value = 'claude';
     advancedSection.style.display = 'none';
     advancedToggle.innerHTML = 'Advanced &#x25B6;';
+    clearSpawnError();
     updateRepoDropdown();
     repoInput.focus();
   };
 
   document.getElementById('btn-spawn-cancel').onclick = () => {
     form.style.display = 'none';
+    clearSpawnError();
   };
 
   const startBtn = document.getElementById('btn-spawn-start');
@@ -64,14 +76,17 @@ function setupSpawnForm() {
     const name = nameInput.value.trim() || undefined;
     const branch = branchInput.value.trim() || undefined;
     const repoPath = repoInput.value.trim() || undefined;
-    send({ type: 'spawn', command, name, branch, repoPath });
+    clearSpawnError();
+    const ok = send({ type: 'spawn', command, name, branch, repoPath });
+    if (!ok) {
+      showSpawnError('Not connected to server — refresh the page and try again.');
+      return;
+    }
     startBtn.disabled = true;
     startBtn.textContent = 'Creating...';
     spawnTimeout = setTimeout(() => {
       resetSpawnForm();
-      const bar = document.getElementById('status-bar');
-      bar.textContent = 'Spawn timed out';
-      bar.style.color = 'var(--state-disconnected)';
+      showSpawnError('Spawn timed out — server did not reply within 10 seconds. Check server logs.');
     }, 10000);
   }
 
@@ -87,13 +102,12 @@ function setupSpawnForm() {
       savedActiveTab = null;
     }
     form.style.display = 'none';
+    clearSpawnError();
     resetSpawnForm();
   };
   window._onSpawnErrorInForm = (error) => {
     resetSpawnForm();
-    const bar = document.getElementById('status-bar');
-    bar.textContent = `Error: ${error}`;
-    bar.style.color = 'var(--state-disconnected)';
+    showSpawnError(`Error: ${error}`);
   };
 
   startBtn.onclick = doSpawn;

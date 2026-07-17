@@ -251,6 +251,15 @@ body {
   padding: 8px 0 0;
   border-top: 1px solid var(--border);
 }
+.spawn-form-error {
+  font-size: 12px;
+  color: var(--state-disconnected);
+  background: rgba(255, 80, 80, 0.08);
+  border: 1px solid var(--state-disconnected);
+  border-radius: 4px;
+  padding: 6px 10px;
+  word-break: break-word;
+}
 .spawn-form-actions { display: flex; gap: 8px; }
 .spawn-form-actions button {
   padding: 6px 16px;
