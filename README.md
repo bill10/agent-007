@@ -87,6 +87,28 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 > open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
 > Tailscale setup.
 
+### Multiplayer & login
+
+By default there are no user accounts and no login — the app runs open on
+localhost, exactly as before. To turn on per-user login (for shared/remote use),
+create a user:
+
+```bash
+npm run adduser -- "Alice"     # prints a one-time login token
+```
+
+The moment the first user exists, the server **requires a token** for every
+`/api` call and WebSocket connection. Log in by opening the app and pasting the
+token, or visit `http://<host>:7007/?token=<token>` once (the token is stored in
+your browser and stripped from the URL). Add a user per person; each gets a
+distinct color and shows up in the presence indicator.
+
+> Login establishes **identity**, not isolation — every logged-in user can still
+> spawn shells on the host. Only issue tokens to people you'd give an SSH login,
+> and keep the server behind Tailscale/a trusted network. Read-only sharing of
+> other people's agents lands in a later phase (see
+> [docs/designs/multiplayer.md](docs/designs/multiplayer.md)).
+
 ## Requirements
 
 - Node.js 20.12+

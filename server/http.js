@@ -5,6 +5,7 @@ import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { resolve } from 'path';
 import { isAllowedOrigin } from './state.js';
+import { authEnabled, resolveToken, tokenFromRequest } from './auth.js';
 
 // --- Origin Check Middleware (B2) ---
 // Rejects cross-origin requests from disallowed origins. localhost is always
@@ -16,11 +17,23 @@ export function checkOrigin(req, res, next) {
   return res.status(403).json({ error: 'Forbidden: cross-origin request' });
 }
 
+// --- Auth Middleware (phase 1) ---
+// No-op until the first user exists (keeps zero-config localhost working). Once
+// users are configured, /api requires a valid bearer token (header or ?token=).
+// Attaches req.user for downstream handlers.
+export function requireAuth(req, res, next) {
+  if (!authEnabled()) return next();
+  const user = resolveToken(tokenFromRequest(req));
+  if (!user) return res.status(401).json({ error: 'Unauthorized: valid token required' });
+  req.user = user;
+  return next();
+}
+
 // --- Routes ---
 export function setupRoutes(app, staticDir) {
   app.use(express_static(staticDir));
 
-  app.get('/api/browse', checkOrigin, (req, res) => {
+  app.get('/api/browse', checkOrigin, requireAuth, (req, res) => {
     try {
       const dirPath = req.query.path ? resolve(req.query.path) : homedir();
       if (!existsSync(dirPath)) return res.status(400).json({ error: 'Directory does not exist' });

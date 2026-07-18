@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { app, server, startup, sessions } from '../server.js';
+import { hashToken } from '../server/auth.js';
 import WebSocket from 'ws';
 import { tmpdir } from 'os';
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync, existsSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 
 const PORT = 17007; // Use non-default port to avoid conflicts
@@ -304,4 +305,58 @@ describe('PTY lifecycle', () => {
 
     ws.close();
   }, 15000);
+});
+
+// --- Auth enforcement (phase 1) ---
+// Runs LAST: writes a user to the hermetic users path so the running server
+// (which started auth-disabled) picks it up live, then removes it so nothing
+// after this block is affected.
+
+describe('auth enforcement (live enable)', () => {
+  const usersPath = process.env.AGENT007_USERS_PATH;
+  const token = 'tok_' + Math.random().toString(36).slice(2, 12);
+
+  beforeAll(() => {
+    writeFileSync(usersPath, JSON.stringify([
+      { id: 'u_test', displayName: 'Tester', color: '#d4a847', tokenHash: hashToken(token) },
+    ]));
+  });
+  afterAll(() => { try { rmSync(usersPath, { force: true }); } catch {} });
+
+  it('rejects an /api request with no token (401)', async () => {
+    const res = await fetch(`${baseUrl}/api/browse?path=${tmpdir()}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('accepts an /api request with a valid Bearer token (200)', async () => {
+    const res = await fetch(`${baseUrl}/api/browse?path=${tmpdir()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('closes a WS handshake without a token (code 4401)', async () => {
+    // The server accepts the socket then closes it with 4401 in the connection
+    // handler, so the client sees a brief open followed by a 4401 close.
+    const code = await new Promise((resolve) => {
+      const ws = new WebSocket(wsUrl);
+      ws.on('close', (c) => resolve(c));
+      ws.on('error', () => {});
+    });
+    expect(code).toBe(4401);
+  });
+
+  it('accepts a WS handshake with a valid token and sends welcome', async () => {
+    const welcome = await new Promise((resolve, reject) => {
+      const s = new WebSocket(`${wsUrl}/?token=${encodeURIComponent(token)}`);
+      s.on('message', (d) => {
+        const m = JSON.parse(d);
+        if (m.type === 'welcome') { resolve(m); s.close(); }
+      });
+      s.on('close', () => reject(new Error('closed before welcome')));
+      s.on('error', reject);
+    });
+    expect(welcome.authEnabled).toBe(true);
+    expect(welcome.user.displayName).toBe('Tester');
+  });
 });

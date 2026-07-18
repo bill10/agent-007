@@ -16,6 +16,10 @@ import {
   handleRepoError as explorerHandleRepoError,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
+import { captureTokenFromUrl, authHeaders, showLogin, renderPresence } from './modules/auth.js';
+
+// Current viewer identity (phase 1) — set from the server's `welcome` message.
+let selfUserId = null;
 
 // Cross-module coordination: when sessions change, re-render office + explorer
 setOnSessionChanged(() => {
@@ -167,7 +171,12 @@ async function fetchDirectory(path) {
 
   const url = path ? `/api/browse?path=${encodeURIComponent(path)}` : '/api/browse';
   try {
-    const resp = await fetch(url);
+    const resp = await fetch(url, { headers: authHeaders() });
+    if (resp.status === 401) {
+      showLogin('Enter your access token to continue.');
+      list.innerHTML = '<div class="dir-browser-error">Not authorized</div>';
+      return;
+    }
     const data = await resp.json();
     if (!resp.ok) {
       list.innerHTML = `<div class="dir-browser-error">${data.error || 'Failed to browse'}</div>`;
@@ -375,6 +384,10 @@ function setupResize() {
 // --- WS Message Router ---
 function onMessage(msg) {
   switch (msg.type) {
+    case 'welcome':
+      selfUserId = msg.user ? msg.user.id : null;
+      break;
+    case 'presence': renderPresence(msg.users, selfUserId); break;
     case 'session-created':
       handleSessionCreated(msg);
       if (window._onSessionCreatedCloseSpawn) window._onSessionCreatedCloseSpawn();
@@ -487,6 +500,7 @@ function scheduleTabRestore() {
 
 // --- Init ---
 async function init() {
+  captureTokenFromUrl();
   setupThemePicker();
   setupSpawnForm();
   setupDirBrowser();

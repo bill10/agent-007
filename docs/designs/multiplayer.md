@@ -142,17 +142,19 @@ calls `pty-resize`, but a PTY has one set of dimensions. Rule:
 
 Each phase is independently shippable and leaves the app working.
 
-- **Phase 0 — Remote-access foundation (no multiplayer yet).**
+- **Phase 0 — Remote-access foundation (no multiplayer yet).** ✅ **Shipped** (#3).
   Make `HOST` bind and an **allowed-origins allowlist** env-configurable,
-  replacing the hardcoded `127.0.0.1` checks in `server.js:149`, `server/http.js`,
+  replacing the hardcoded `127.0.0.1` checks in `server.js`, `server/http.js`,
   and `server/ws.js`. Write the Tailscale setup doc. Ships "reach my own server
   remotely" and de-risks networking before any multiplayer logic.
   Effort: **S** (CC ~20 min).
 
-- **Phase 1 — Identity & auth.**
-  `users` config + `adduser` CLI, login page, token-gated WS + HTTP, `ws.user`,
-  presence broadcast. Still single-owner behavior (everyone can do everything) —
-  this phase only *establishes who is who*. Effort: **M**.
+- **Phase 1 — Identity & auth.** ✅ **Shipped.**
+  Users in a separate `~/.agent-007/users.json` + `adduser` CLI, login overlay,
+  token-gated WS + HTTP (`server/auth.js`), `ws.user`, presence broadcast. Auth
+  stays **off until the first user is created**, preserving zero-config localhost.
+  Still single-owner behavior (everyone can do everything) — this phase only
+  *establishes who is who*. Effort: **M**.
 
 - **Phase 2 — Ownership & authorization.**
   Add `ownerId` to sessions + orphans + persistence; extend `sessionPayload`;
