@@ -19,7 +19,7 @@ import { dirname, join, basename } from 'path';
 import { mkdirSync } from 'fs';
 
 import {
-  PORT, HOST, WORKTREE_DIR, sessions,
+  PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
   codenamePool, cocktailPool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig } from './server/config.js';
@@ -147,10 +147,12 @@ async function startup() {
   await pruneWorktrees();
   await scanForOrphanedWorktrees(broadcast);
   server.listen(PORT, HOST, () => {
-    const shownHost = (HOST === '0.0.0.0' || HOST === '::') ? 'localhost' : HOST;
-    console.log(`\n  Agent 007 is running at http://${shownHost}:${PORT}`);
-    if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
-      console.log(`  Listening on ${HOST}:${PORT} — reachable from other machines. Keep this behind Tailscale/a trusted network.`);
+    // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
+    const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
+    const displayHost = WILDCARD_BIND_HOSTS.includes(HOST) ? 'localhost' : bracket(HOST);
+    console.log(`\n  Agent 007 is running at http://${displayHost}:${PORT}`);
+    if (!LOOPBACK_HOSTS.includes(HOST)) {
+      console.log(`  Listening on ${bracket(HOST)}:${PORT} — reachable from other machines. Keep this behind Tailscale/a trusted network.`);
     }
     console.log('');
   });

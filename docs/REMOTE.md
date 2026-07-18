@@ -82,6 +82,8 @@ expose the raw server.
 |-------------------|-------------|---------|
 | `PORT`            | `7007`      | Listen port |
 | `HOST`            | `127.0.0.1` | Bind interface. `0.0.0.0` = all interfaces (use only behind Tailscale/trusted network) |
-| `ALLOWED_ORIGINS` | *(none)*    | Comma-separated extra origins allowed by the cross-origin check. Bare hostnames (`mac-mini.tailXXXX.ts.net`) or full origins (`https://mac-mini:7007`); only the hostname is used. `*` disables the check (allow any origin — not recommended) |
+| `ALLOWED_ORIGINS` | *(none)*    | Comma-separated extra origins allowed by the cross-origin check. Bare hostnames (`mac-mini.tailXXXX.ts.net`), `host:port` (`mac-mini:7007`), or full origins (`https://mac-mini:7007`); only the hostname is used. `*` disables the check for **any** origin — avoid it: even on the default localhost bind, `*` lets any website you visit drive this server through your browser (drive-by command execution) |
 
-`localhost` and `127.0.0.1` are always allowed regardless of `ALLOWED_ORIGINS`.
+Loopback origins (`localhost`, `127.0.0.1`, `[::1]`) are always allowed regardless of `ALLOWED_ORIGINS`.
+
+The origin check only blocks cross-origin **browser** requests — it is not access control. Non-browser clients (curl, native WebSocket) send no `Origin` and always pass. When `HOST` is remote, the network boundary (Tailscale / a trusted LAN) is what actually gates who can reach the server.
