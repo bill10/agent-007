@@ -56,6 +56,7 @@ export function saveActiveSession(session, broadcast) {
     branchName: session.branchName,
     color: session.color,
     cocktail: session.cocktail,
+    ownerId: session.ownerId || null,
     savedAt: new Date().toISOString(),
   });
   saveConfig(broadcast);
@@ -82,6 +83,7 @@ export function recoverCrashedSessions(broadcast) {
       worktreePath: s.worktreePath,
       branchName: s.branchName,
       color: s.color,
+      ownerId: s.ownerId || null,
       reason: 'server-restart',
       createdAt: new Date().toISOString(),
     };

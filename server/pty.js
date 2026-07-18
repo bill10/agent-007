@@ -44,7 +44,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId }, broadcast) {
   const { file, args } = parseCommand(command);
 
   let ptyProcess;
@@ -74,6 +74,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     lastStrippedLine: '',
     recentStrippedLines: [],
     isTUI: isTUI ?? /^(claude|aider)\b/.test(command),
+    ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     exited: false,
     stateCheckInterval: null,
     repoPath,

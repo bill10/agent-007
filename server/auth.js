@@ -85,6 +85,12 @@ export function publicUser(u) {
   return u && { id: u.id, displayName: u.displayName, color: u.color };
 }
 
+// Look up a user by id (for labeling session owners). Returns publicUser or null.
+export function userById(id) {
+  if (!id) return null;
+  return publicUser(loadUsers().find(u => u.id === id)) || null;
+}
+
 // Resolve a bearer token to a user, or null. Constant-time compare against each
 // stored hash so a wrong token can't be distinguished by timing.
 export function resolveToken(token) {

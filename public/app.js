@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handleStateChange,
@@ -17,9 +17,6 @@ import {
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence } from './modules/auth.js';
-
-// Current viewer identity (phase 1) — set from the server's `welcome` message.
-let selfUserId = null;
 
 // Cross-module coordination: when sessions change, re-render office + explorer
 setOnSessionChanged(() => {
@@ -385,7 +382,7 @@ function setupResize() {
 function onMessage(msg) {
   switch (msg.type) {
     case 'welcome':
-      selfUserId = msg.user ? msg.user.id : null;
+      setSelf(msg.user ? msg.user.id : null, msg.authEnabled);
       break;
     case 'presence': renderPresence(msg.users, selfUserId); break;
     case 'session-created':
