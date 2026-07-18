@@ -854,6 +854,9 @@ body {
   gap: 8px;
   color: var(--text-dim);
   font-size: 14px;
+  /* Passive text overlay — must not intercept clicks on the header's
+     "+ New Agent" button, which sits beneath it when the office is empty. */
+  pointer-events: none;
 }
 .office-empty .dim { font-size: 12px; color: var(--text-dim); }
 
