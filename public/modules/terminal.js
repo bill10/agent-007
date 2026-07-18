@@ -14,7 +14,27 @@ function waitForXterm() {
 function getTerminalTheme() {
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   return isLight
-    ? { background: '#f9f8f7', foreground: '#222222', cursor: '#a07d2e', selectionBackground: '#e4e2dd' }
+    ? {
+        // GitHub-light ANSI palette — the dark palette's cyan/green/yellow
+        // were near-invisible on the light terminal background.
+        background: '#f9f8f7', foreground: '#24292f', cursor: '#a07d2e', selectionBackground: '#dcd8d0',
+        black: '#24292f',
+        red: '#cf222e',
+        green: '#1a7f37',
+        yellow: '#7d4e00',
+        blue: '#0969da',
+        magenta: '#8250df',
+        cyan: '#1b7c83',
+        white: '#6e7781',
+        brightBlack: '#57606a',
+        brightRed: '#a40e26',
+        brightGreen: '#1a7f37',
+        brightYellow: '#633c01',
+        brightBlue: '#218bff',
+        brightMagenta: '#a475f9',
+        brightCyan: '#3192aa',
+        brightWhite: '#24292f',
+      }
     : {
         background: '#0d1117',
         foreground: '#c9d1d9',
@@ -290,7 +310,7 @@ export function updateTopbarAgent() {
     parts.push(`<span class="topbar-repo-label">Repo:</span> <span class="topbar-repo-name">${agent.repoSlug}</span>`);
   }
   if (agent.branchName) {
-    parts.push(`<svg class="topbar-branch-icon" width="12" height="12" viewBox="0 0 12 12"><circle cx="6" cy="2.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><circle cx="6" cy="9.5" r="1.5" stroke="currentColor" stroke-width="1" fill="none"/><path d="M6 4v4" stroke="currentColor" stroke-width="1"/></svg><span class="topbar-branch-name">${agent.branchName}</span>`);
+    parts.push(`<svg class="topbar-branch-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="3.5" cy="2.5" r="1.2"/><circle cx="3.5" cy="9.5" r="1.2"/><circle cx="8.5" cy="4" r="1.2"/><path d="M3.5 3.7v4.6"/><path d="M8.5 5.2c0 2.2-1.8 2.6-3.4 3.1"/></svg><span class="topbar-branch-name">${agent.branchName}</span>`);
   }
   el.innerHTML = parts.join(' ');
 }

@@ -2,7 +2,7 @@
 
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
-import { stripAnsiComplete, detectState, createRingBuffer } from '../lib/helpers.js';
+import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
 import { RING_BUFFER_MAX } from './state.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
@@ -45,9 +45,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Used by both fresh spawn and orphan re-adopt.
  */
 export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI }, broadcast) {
-  const parts = command.split(/\s+/);
-  const file = parts[0];
-  const args = parts.slice(1);
+  const { file, args } = parseCommand(command);
 
   let ptyProcess;
   try {

@@ -2,9 +2,55 @@ import { describe, it, expect } from 'vitest';
 import {
   createCodenamePool, createCocktailPool, createColorCycler,
   stripAnsiComplete, detectState, parseGitStatus, buildFileTree,
-  createRingBuffer, repoDirName,
+  createRingBuffer, repoDirName, parseCommand,
   CODENAMES, COCKTAILS, AGENT_COLORS, STATE_TIMEOUT_MS,
 } from '../lib/helpers.js';
+
+// --- parseCommand ---
+
+describe('parseCommand', () => {
+  it('splits a simple command on whitespace', () => {
+    expect(parseCommand('claude')).toEqual({ file: 'claude', args: [] });
+    expect(parseCommand('claude --continue')).toEqual({ file: 'claude', args: ['--continue'] });
+  });
+
+  it('keeps a double-quoted argument with spaces intact', () => {
+    expect(parseCommand('bash -lc "echo hi; ls -la"')).toEqual({
+      file: 'bash', args: ['-lc', 'echo hi; ls -la'],
+    });
+  });
+
+  it('keeps a single-quoted argument with spaces intact', () => {
+    expect(parseCommand("bash -lc 'for i in 1 2 3; do echo $i; done'")).toEqual({
+      file: 'bash', args: ['-lc', 'for i in 1 2 3; do echo $i; done'],
+    });
+  });
+
+  it('handles a quoted executable path containing spaces', () => {
+    expect(parseCommand('"/opt/my tools/agent.sh" --flag')).toEqual({
+      file: '/opt/my tools/agent.sh', args: ['--flag'],
+    });
+  });
+
+  it('handles backslash-escaped spaces', () => {
+    expect(parseCommand('/opt/my\\ tool/run.sh')).toEqual({
+      file: '/opt/my tool/run.sh', args: [],
+    });
+  });
+
+  it('collapses extra whitespace between tokens', () => {
+    expect(parseCommand('  npm   run    dev  ')).toEqual({ file: 'npm', args: ['run', 'dev'] });
+  });
+
+  it('preserves an empty double-quoted argument', () => {
+    expect(parseCommand('cmd ""')).toEqual({ file: 'cmd', args: [''] });
+  });
+
+  it('returns an empty file for an empty string', () => {
+    expect(parseCommand('')).toEqual({ file: '', args: [] });
+    expect(parseCommand('   ')).toEqual({ file: '', args: [] });
+  });
+});
 
 // --- createRingBuffer ---
 
