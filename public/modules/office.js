@@ -111,7 +111,11 @@ function getWindowColors(tod) {
   }
 }
 
-// --- Grid layout: center workstations both horizontally and vertically ---
+// --- Grid layout: center workstations horizontally, and vertically within
+// the open floor (below the windows + seating zone). Centering in the FULL
+// panel height left the desks floating mid-canvas with a large dead band of
+// empty floor below them when only a few agents were running. ---
+const FLOOR_TOP = WALL_BOTTOM + 26 * Z; // reserve the top zone for windows + couches
 function computeGridLayout(agentCount, panelWidth, panelHeight) {
   const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z + WS_GAP_X) / (WS_W + WS_GAP_X))));
   const count = Math.max(1, agentCount);
@@ -123,7 +127,8 @@ function computeGridLayout(agentCount, panelWidth, panelHeight) {
 
   const startX = Math.floor((panelWidth - gridW) / 2);
 
-  const startY = Math.floor((panelHeight - gridH) / 2);
+  // Center within [FLOOR_TOP, panelHeight]; never start above the floor.
+  const startY = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (panelHeight - FLOOR_TOP - gridH) / 2));
 
   return { startX, startY, cols };
 }

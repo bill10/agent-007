@@ -379,14 +379,16 @@ function createBranchEntry(sessionId, agent) {
       loading.textContent = 'Loading file tree\u2026';
       wrapper.appendChild(loading);
     } else if (treeData) {
+      // Filter toggle gets its own row above the tree, so it no longer
+      // overlaps (and looks attached to) the first file/folder row.
+      if (toggleEl) {
+        const toggleRow = document.createElement('div');
+        toggleRow.className = 'explorer-tree-toggle-row';
+        toggleRow.appendChild(toggleEl);
+        wrapper.appendChild(toggleRow);
+      }
       const treeEl = document.createElement('div');
       treeEl.className = 'explorer-file-tree';
-      // Toggle floats right at top of tree
-      if (toggleEl) {
-        toggleEl.style.float = 'right';
-        toggleEl.style.margin = '2px 4px 2px 0';
-        treeEl.appendChild(toggleEl);
-      }
       renderTreeNode(treeEl, treeData, sessionId, 1, showFull);
       wrapper.appendChild(treeEl);
     }

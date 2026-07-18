@@ -23,15 +23,15 @@
 /* Theme: Light */
 [data-theme="light"] {
   color-scheme: light;
-  --bg-dark: #f2f1ee;
+  --bg-dark: #eae7e0;
   --bg-panel: #f9f8f7;
   --bg-office: #f2f1ee;
   --bg-terminal: #f9f8f7;
-  --bg-tabs: #f2f1ee;
-  --border: #e4e2dd;
+  --bg-tabs: #eae7e0;
+  --border: #d9d4ca;
   --text: #222222;
   --text-muted: #6b6b6b;
-  --text-dim: #999999;
+  --text-dim: #6e6e6e;
   --accent: #a07d2e;
   --state-working: #bf8700;
   --state-waiting: #1a7f37;
@@ -98,6 +98,18 @@ body {
   transition: color 0.15s;
 }
 .topbar-btn:hover { color: var(--accent); }
+/* Primary action — give it button chrome so it reads as a CTA, not a label. */
+#btn-new-agent {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+#btn-new-agent:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
 .topbar-agent-info {
   display: inline-flex;
   align-items: center;
@@ -659,6 +671,12 @@ body {
 }
 
 /* Explorer: tree mode toggle switch */
+/* Dedicated row so the changes/all filter doesn't overlap the first file row. */
+.explorer-tree-toggle-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 8px 4px 0;
+}
 .explorer-tree-toggle {
   display: inline-flex;
   align-items: center;
@@ -818,7 +836,7 @@ body {
 
 /* Office panel */
 .office {
-  width: 300px;
+  width: 440px;
   min-width: 160px;
   max-width: 80vw;
   background: var(--bg-office);
