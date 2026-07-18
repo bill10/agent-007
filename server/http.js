@@ -4,18 +4,15 @@ import { existsSync, readdirSync, realpathSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { resolve } from 'path';
+import { isAllowedOrigin } from './state.js';
 
 // --- Origin Check Middleware (B2) ---
-// Rejects cross-origin requests from non-localhost origins.
+// Rejects cross-origin requests from disallowed origins. localhost is always
+// allowed; add remote hostnames via ALLOWED_ORIGINS (see server/state.js).
 // Requests with no Origin header are allowed through
 // (covers same-origin browser requests and non-browser clients like curl).
 export function checkOrigin(req, res, next) {
-  const origin = req.headers.origin;
-  if (!origin) return next(); // same-origin or non-browser client
-  try {
-    const url = new URL(origin);
-    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return next();
-  } catch {}
+  if (isAllowedOrigin(req.headers.origin)) return next();
   return res.status(403).json({ error: 'Forbidden: cross-origin request' });
 }
 

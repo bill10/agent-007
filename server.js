@@ -19,7 +19,7 @@ import { dirname, join, basename } from 'path';
 import { mkdirSync } from 'fs';
 
 import {
-  PORT, WORKTREE_DIR, sessions,
+  PORT, HOST, WORKTREE_DIR, sessions,
   codenamePool, cocktailPool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig } from './server/config.js';
@@ -146,8 +146,13 @@ async function startup() {
   mkdirSync(WORKTREE_DIR, { recursive: true });
   await pruneWorktrees();
   await scanForOrphanedWorktrees(broadcast);
-  server.listen(PORT, '127.0.0.1', () => {
-    console.log(`\n  Agent 007 is running at http://localhost:${PORT}\n`);
+  server.listen(PORT, HOST, () => {
+    const shownHost = (HOST === '0.0.0.0' || HOST === '::') ? 'localhost' : HOST;
+    console.log(`\n  Agent 007 is running at http://${shownHost}:${PORT}`);
+    if (HOST !== '127.0.0.1' && HOST !== 'localhost') {
+      console.log(`  Listening on ${HOST}:${PORT} — reachable from other machines. Keep this behind Tailscale/a trusted network.`);
+    }
+    console.log('');
   });
 }
 

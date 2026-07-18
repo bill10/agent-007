@@ -60,13 +60,36 @@ Each agent runs in its own [git worktree](https://git-scm.com/docs/git-worktree)
 
 ## Configuration
 
+Configure via environment variables, either inline or in a `.env` file. On
+startup `npm start` auto-loads `.env` if present (via Node's built-in
+`--env-file-if-exists`). Copy the template to get going:
+
 ```bash
-PORT=8080 npm start    # Custom port (default: 7007)
+cp .env.example .env    # then edit; .env is gitignored
+npm start
 ```
+
+Or set them inline:
+
+```bash
+PORT=8080 npm start                       # Custom port (default: 7007)
+HOST=0.0.0.0 npm start                    # Bind all interfaces (default: 127.0.0.1)
+ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser origin
+```
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `7007` | Listen port |
+| `HOST` | `127.0.0.1` | Bind interface. Use `0.0.0.0` only behind Tailscale/a trusted network |
+| `ALLOWED_ORIGINS` | *(none)* | Comma-separated extra origins for the cross-origin check (`localhost` is always allowed) |
+
+> **Running remotely?** The server spawns real shells, so never expose it to the
+> open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
+> Tailscale setup.
 
 ## Requirements
 
-- Node.js 18+
+- Node.js 20.12+
 - Git
 - Desktop browser (900px+ viewport)
 - A CLI to run as the agent (defaults to `claude`, but works with any command)

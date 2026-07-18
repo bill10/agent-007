@@ -6,11 +6,11 @@
   "type": "module",
   "main": "server.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.12"
   },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "node --env-file-if-exists=.env server.js",
+    "dev": "node --env-file-if-exists=.env --watch server.js",
     "test": "vitest run",
     "test:watch": "vitest"
   },

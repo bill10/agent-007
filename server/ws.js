@@ -5,7 +5,7 @@ import { basename, join } from 'path';
 import {
   config, sessions, orphans, adoptingOrphans,
   codenamePool, cocktailPool, colorCycler, nextSessionId,
-  GIT_USER_TIMEOUT,
+  GIT_USER_TIMEOUT, isAllowedOrigin,
 } from './state.js';
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec } from './git.js';
@@ -44,15 +44,11 @@ export function broadcastOrphansList() {
 }
 
 // --- WebSocket origin check (B3) ---
-// verifyClient rejects with HTTP 403 for non-localhost origins.
+// verifyClient rejects the handshake for disallowed origins. localhost is always
+// allowed; add remote hostnames via ALLOWED_ORIGINS (see server/state.js).
 // Requests with no Origin header are allowed (same-origin or non-browser).
 export function verifyClient({ origin }) {
-  if (!origin) return true;
-  try {
-    const url = new URL(origin);
-    if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
-  } catch {}
-  return false;
+  return isAllowedOrigin(origin);
 }
 
 // --- Setup ---
