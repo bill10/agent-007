@@ -5,9 +5,9 @@ const TOKEN_KEY = 'agent007-token';
 export const WS_UNAUTHORIZED = 4401;
 export const DEFAULT_LOGIN_MESSAGE = 'Enter your access token to continue.';
 
-const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
+export const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const safeColor = (c) => /^#[0-9a-fA-F]{3,8}$/.test(String(c)) ? c : 'var(--accent)';
+export const safeColor = (c) => /^#[0-9a-fA-F]{3,8}$/.test(String(c)) ? c : 'var(--accent)';
 
 // On load, pull ?token= out of the URL, persist it, and strip it from the
 // address bar so it doesn't linger in history or get shared accidentally.

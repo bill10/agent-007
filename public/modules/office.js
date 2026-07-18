@@ -1,5 +1,5 @@
 // Pixel office rendering — canvas drawing, click handling, animation
-import { agents, activeSessionId } from './state.js';
+import { agents, activeSessionId, canControlAgent } from './state.js';
 import { switchToSession } from './terminal.js';
 
 const Z = 3;
@@ -999,6 +999,9 @@ export function renderOffice() {
     const palette = CHAR_PALETTES[idx % CHAR_PALETTES.length];
     const state = agent.state;
     const alive = state !== 'DISCONNECTED';
+    // Colleague agents (you don't own them) render dimmed with an owner label (phase 3).
+    const readOnly = !canControlAgent(agent);
+    if (readOnly) ctx.globalAlpha = 0.5;
 
     drawWorkstation(ctx, sx, sy, state, theme, idx, agent);
     drawMonitorGlow(ctx, sx, sy, state, theme);
@@ -1055,6 +1058,18 @@ export function renderOffice() {
       drawConflictBadge(ctx, sx, sy);
     }
 
+    // Owner label (full opacity) under the dimmed colleague tile.
+    if (readOnly && agent.ownerName) {
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'center';
+      ctx.font = '9px monospace';
+      // Concrete fallback (canvas fillStyle ignores invalid colors like CSS vars).
+      ctx.fillStyle = /^#[0-9a-fA-F]{3,8}$/.test(String(agent.ownerColor)) ? agent.ownerColor : '#9ca3af';
+      // maxWidth clamps a long owner name to the tile so it can't overflow onto neighbors.
+      ctx.fillText(agent.ownerName, sx + (WS_W / 2) * Z, sy + 46 * Z, WS_W * Z);
+      ctx.textAlign = 'start';
+    }
+    ctx.globalAlpha = 1;
 
     idx++;
   }
