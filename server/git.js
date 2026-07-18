@@ -3,7 +3,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { mkdirSync } from 'fs';
-import { basename, join } from 'path';
+import { basename, join, sep } from 'path';
 import { realpathSync } from 'fs';
 import { createHash } from 'crypto';
 import {
@@ -268,6 +268,19 @@ export function detectConflicts(repoPath) {
 }
 
 // --- Diff ---
+// Read a file inside the worktree, refusing paths that escape it. `filePath` is
+// client-controlled and get-diff is open to non-owners (phase 2 read surface), so
+// without this a `../../../etc/passwd` reads arbitrary host files. realpathSync
+// also collapses symlinks, blocking symlink-based escapes.
+function readInsideWorktree(worktreePath, filePath) {
+  const root = realpathSync(worktreePath);
+  const full = realpathSync(join(worktreePath, filePath));
+  if (full !== root && !full.startsWith(root + sep)) {
+    throw new Error('path escapes worktree');
+  }
+  return readFileSync(full, 'utf8');
+}
+
 export async function getDiff(session, filePath, status) {
   if (!session.worktreePath) return '';
   try {
@@ -280,14 +293,14 @@ export async function getDiff(session, filePath, status) {
           if (cached.trim()) return cached;
         } catch {}
         try { return await gitExec(['-C', session.worktreePath, 'show', `:${filePath}`], { timeout: GIT_USER_TIMEOUT }); } catch {
-          return readFileSync(join(session.worktreePath, filePath), 'utf8');
+          return readInsideWorktree(session.worktreePath, filePath);
         }
       }
       case 'D':
         return await gitExec(['-C', session.worktreePath, 'diff', '--', filePath], { timeout: GIT_USER_TIMEOUT });
       case '?': {
         try {
-          const content = readFileSync(join(session.worktreePath, filePath), 'utf8');
+          const content = readInsideWorktree(session.worktreePath, filePath);
           return content.split('\n').map((line) => `+${line}`).join('\n');
         } catch (err) { return `Error reading file: ${err.message}`; }
       }

@@ -40,7 +40,7 @@ setupRoutes(app, join(__dirname, 'public'));
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.
 
-async function createSession(command, name, repoPath, customBranch) {
+async function createSession(command, name, repoPath, customBranch, ownerId) {
   const sessionId = nextSessionId();
   const agentName = name || codenamePool.pick();
   if (name) codenamePool.addUsed(name);
@@ -71,7 +71,7 @@ async function createSession(command, name, repoPath, customBranch) {
   const result = createSessionFromConfig({
     sessionId, name: agentName, color, command,
     repoPath: resolvedRepoPath, worktreePath, branchName,
-    repoSlug, cocktail,
+    repoSlug, cocktail, ownerId: ownerId || null,
   }, broadcast);
 
   if (result.error) {
@@ -123,6 +123,7 @@ async function killSession(sessionId) {
       id: orphanId, name: session.name, repoPath: session.repoPath,
       repoSlug: session.repoSlug, worktreePath: session.worktreePath,
       branchName: session.branchName, color: session.color,
+      ownerId: session.ownerId || null,
       reason, createdAt: new Date().toISOString(),
     };
     orphans.set(orphanId, orphan);

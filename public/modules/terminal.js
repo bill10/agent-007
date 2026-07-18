@@ -1,5 +1,5 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
-import { agents, activeSessionId, setActiveSession, stateColor } from './state.js';
+import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent } from './state.js';
 import { send } from './ws.js';
 
 function waitForXterm() {
@@ -72,7 +72,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId } = msg;
 
   if (agents.has(sessionId)) {
     agents.get(sessionId).state = state || 'WORKING';
@@ -116,6 +116,7 @@ export async function handleSessionCreated(msg) {
     name, color, command, fitAddon,
     state: state || 'WORKING',
     term, termEl,
+    ownerId: ownerId || null,
     repoPath: repoPath || null,
     repoSlug: repoSlug || null,
     branchName: branchName || null,
@@ -130,12 +131,15 @@ export async function handleSessionCreated(msg) {
     requestAnimationFrame(() => {
       if (termEl.offsetWidth > 0) {
         fitAddon.fit();
-        send({ type: 'pty-resize', sessionId, cols: term.cols, rows: term.rows });
+        // Only the owner drives the PTY size; viewers fit locally without resizing it.
+        if (canControlAgent(agents.get(sessionId))) send({ type: 'pty-resize', sessionId, cols: term.cols, rows: term.rows });
       }
     });
   }
 
   term.onData((data) => {
+    // Read-only for non-owners: don't forward keystrokes (server enforces too).
+    if (!canControlAgent(agents.get(sessionId))) return;
     send({ type: 'pty-input', sessionId, data });
   });
 
@@ -196,7 +200,7 @@ export function switchToSession(sessionId) {
     requestAnimationFrame(() => {
       if (agent.fitAddon && agent.termEl.offsetWidth > 0) {
         agent.fitAddon.fit();
-        send({ type: 'pty-resize', sessionId, cols: agent.term.cols, rows: agent.term.rows });
+        if (canControlAgent(agent)) send({ type: 'pty-resize', sessionId, cols: agent.term.cols, rows: agent.term.rows });
       }
       agent.term.scrollToBottom();
       agent.term.focus();
@@ -336,7 +340,7 @@ export function fitActiveTerminal() {
     const agent = agents.get(activeSessionId);
     if (agent && agent.fitAddon && agent.termEl.offsetWidth > 0) {
       agent.fitAddon.fit();
-      send({ type: 'pty-resize', sessionId: activeSessionId, cols: agent.term.cols, rows: agent.term.rows });
+      if (canControlAgent(agent)) send({ type: 'pty-resize', sessionId: activeSessionId, cols: agent.term.cols, rows: agent.term.rows });
     }
   }
 }

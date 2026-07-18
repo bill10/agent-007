@@ -395,3 +395,146 @@ describe('auth revocation (live socket)', () => {
     expect(code).toBe(WS_UNAUTHORIZED);
   });
 });
+
+// --- Ownership authorization (phase 2) ---
+// With auth on, only the owner may control a session. A non-owner's kill is
+// rejected with a notification and the session survives; the owner's kill works.
+
+describe('ownership authorization', () => {
+  const usersPath = process.env.AGENT007_USERS_PATH;
+  const tokenA = 'ownA_' + Math.random().toString(36).slice(2, 10);
+  const tokenB = 'ownB_' + Math.random().toString(36).slice(2, 10);
+
+  beforeAll(() => {
+    writeFileSync(usersPath, JSON.stringify([
+      { id: 'u_a', displayName: 'Aowner', color: '#d4a847', tokenHash: hashToken(tokenA) },
+      { id: 'u_b', displayName: 'Bviewer', color: '#58a6ff', tokenHash: hashToken(tokenB) },
+    ]));
+  });
+  afterAll(() => { try { rmSync(usersPath, { force: true }); } catch {} });
+
+  const connect = (token) => new Promise((resolve, reject) => {
+    const ws = new WebSocket(`${wsUrl}/?token=${encodeURIComponent(token)}`);
+    ws.on('open', () => resolve(ws));
+    ws.on('error', reject);
+  });
+  const nextMatching = (ws, pred, timeoutMs = 4000) => new Promise((resolve) => {
+    const to = setTimeout(() => { ws.off('message', h); resolve(null); }, timeoutMs);
+    const h = (d) => { const m = JSON.parse(d); if (pred(m)) { clearTimeout(to); ws.off('message', h); resolve(m); } };
+    ws.on('message', h);
+  });
+
+  it('tags a spawned session with its owner and blocks a non-owner kill', async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'sleep 5' }));
+    const payload = await created;
+    expect(payload).toBeTruthy();
+    expect(payload.ownerId).toBe('u_a');
+    expect(payload.ownerName).toBe('Aowner');
+    const sessionId = payload.sessionId;
+
+    // B (non-owner) tries to kill -> gets a read-only notification, session survives.
+    const b = await connect(tokenB);
+    const denied = nextMatching(b, (m) => m.type === 'notification' && /read-only/i.test(m.message || ''));
+    b.send(JSON.stringify({ type: 'kill', sessionId }));
+    const note = await denied;
+    expect(note).toBeTruthy();
+    expect(note.message).toMatch(/owned by Aowner/);
+    expect(sessions.has(sessionId)).toBe(true);
+
+    // A (owner) kills successfully.
+    const ended = nextMatching(a, (m) => m.type === 'session-ended' && m.sessionId === sessionId);
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    expect(await ended).toBeTruthy();
+
+    a.close(); b.close();
+  }, 15000);
+
+  it('silently drops pty-input from a non-owner but forwards the owner\'s', async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /cat/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
+    const { sessionId } = await created;
+    const b = await connect(tokenB);
+
+    const marker = 'BINTRUDER_' + Math.random().toString(36).slice(2, 8);
+    const echoOfB = nextMatching(a, (m) => m.type === 'pty-output'
+      && Buffer.from(m.data || '', 'base64').toString().includes(marker), 1500);
+    b.send(JSON.stringify({ type: 'pty-input', sessionId, data: marker + '\n' }));
+    expect(await echoOfB).toBeNull(); // dropped server-side; cat never saw it
+
+    const own = 'AOWNER_' + Math.random().toString(36).slice(2, 8);
+    const echoOfA = nextMatching(a, (m) => m.type === 'pty-output'
+      && Buffer.from(m.data || '', 'base64').toString().includes(own), 3000);
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: own + '\n' }));
+    expect(await echoOfA).toBeTruthy();
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
+  it('rejects refresh-tree and upload-file from a non-owner', async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'sleep 5' }));
+    const { sessionId } = await created;
+    const b = await connect(tokenB);
+
+    const t = nextMatching(b, (m) => m.type === 'notification' && /read-only/i.test(m.message || ''));
+    b.send(JSON.stringify({ type: 'refresh-tree', sessionId }));
+    expect(await t).toBeTruthy();
+
+    const u = nextMatching(b, (m) => m.type === 'notification' && /read-only/i.test(m.message || ''));
+    b.send(JSON.stringify({ type: 'upload-file', sessionId, filename: 'x.txt', data: Buffer.from('hi').toString('base64') }));
+    expect((await u).message).toMatch(/owned by Aowner/);
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
+  it('keeps read paths (get-diff) open to a non-owner', async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'sleep 5' }));
+    const { sessionId } = await created;
+    const b = await connect(tokenB);
+
+    // Non-owner get-diff must return a file-diff response, not a read-only notice.
+    const resp = nextMatching(b, (m) =>
+      (m.type === 'file-diff' && m.sessionId === sessionId) ||
+      (m.type === 'notification' && /read-only/i.test(m.message || '')));
+    b.send(JSON.stringify({ type: 'get-diff', sessionId, filePath: 'anything', status: 'M' }));
+    expect((await resp).type).toBe('file-diff');
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+});
+
+describe('ownership is inert when auth is disabled', () => {
+  // No users file here (default hermetic state) => authEnabled() false.
+  const open = () => new Promise((res, rej) => {
+    const s = new WebSocket(wsUrl); s.on('open', () => res(s)); s.on('error', rej);
+  });
+  const next = (ws, pred, ms = 4000) => new Promise((res) => {
+    const to = setTimeout(() => { ws.off('message', h); res(null); }, ms);
+    const h = (d) => { const m = JSON.parse(d); if (pred(m)) { clearTimeout(to); ws.off('message', h); res(m); } };
+    ws.on('message', h);
+  });
+
+  it('lets any socket control any session in single-player mode', async () => {
+    const w1 = await open();
+    const created = next(w1, (m) => m.type === 'session-created' && /sleep/.test(m.command || ''));
+    w1.send(JSON.stringify({ type: 'spawn', command: 'sleep 5' }));
+    const { sessionId, ownerId } = await created;
+    expect(ownerId ?? null).toBeNull(); // unowned in single-player
+
+    const w2 = await open();
+    const ended = next(w2, (m) => m.type === 'session-ended' && m.sessionId === sessionId);
+    w2.send(JSON.stringify({ type: 'kill', sessionId }));
+    expect(await ended).toBeTruthy(); // second socket kills it — no ownership block
+
+    w1.close(); w2.close();
+  }, 15000);
+});

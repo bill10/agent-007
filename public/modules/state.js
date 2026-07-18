@@ -8,6 +8,24 @@ export function setActiveSession(id) {
   activeSessionId = id;
 }
 
+// --- Viewer identity & ownership (phase 2) ---
+export let selfUserId = null;
+export let authEnabled = false;
+
+export function setSelf(userId, enabled) {
+  selfUserId = userId;
+  authEnabled = !!enabled;
+}
+
+// True if the current viewer may control this agent: always in single-player
+// (auth off) or for unowned agents; otherwise only the owner. Server enforces
+// this regardless — the client guard just avoids a broken "type → nothing" feel.
+export function canControlAgent(agent) {
+  if (!authEnabled) return true;
+  if (!agent || !agent.ownerId) return true;
+  return agent.ownerId === selfUserId;
+}
+
 export function stateColor(state) {
   switch (state) {
     case 'WORKING': return 'var(--state-working)';

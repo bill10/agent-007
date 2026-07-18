@@ -156,10 +156,15 @@ Each phase is independently shippable and leaves the app working.
   Still single-owner behavior (everyone can do everything) — this phase only
   *establishes who is who*. Effort: **M**.
 
-- **Phase 2 — Ownership & authorization.**
-  Add `ownerId` to sessions + orphans + persistence; extend `sessionPayload`;
-  implement the authorization matrix server-side with rejection notifications.
-  After this, read-only is *enforced* even if the UI lies. Effort: **M**.
+- **Phase 2 — Ownership & authorization.** ✅ **Shipped.**
+  `ownerId` on sessions + orphans + persistence; `sessionPayload` carries
+  `ownerId`/`ownerName`/`ownerColor`; the authorization matrix is enforced
+  server-side (`owns()` in `server/ws.js`) with rejection notifications — input/
+  resize are silently dropped for non-owners, discrete actions (kill, upload,
+  refresh, orphan re-adopt/delete) get a read-only notice; read paths stay open.
+  A minimal client guard blocks typing into terminals you don't own. Read-only is
+  now *enforced* even if the UI lies. (Enforcement only when auth is enabled.)
+  Effort: **M**.
 
 - **Phase 3 — Multiplayer office UI.**
   Dimmed colleague tiles + name/color labels, read-only terminal (input disabled,

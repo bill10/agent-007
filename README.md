@@ -104,10 +104,18 @@ your browser and stripped from the URL). Add a user per person; each gets a
 distinct color and shows up in the presence indicator.
 
 > Login establishes **identity**, not isolation — every logged-in user can still
-> spawn shells on the host. Only issue tokens to people you'd give an SSH login,
-> and keep the server behind Tailscale/a trusted network. Read-only sharing of
-> other people's agents lands in a later phase (see
-> [docs/designs/multiplayer.md](docs/designs/multiplayer.md)).
+> spawn their own shells on the host. Only issue tokens to people you'd give an
+> SSH login, and keep the server behind Tailscale/a trusted network.
+>
+> Each agent is owned by the user who spawned it. You have full control of your
+> own agents and are **read-only** on everyone else's — you see their live
+> terminal but can't type into, resize, kill, or upload to it (enforced
+> server-side). The dimmed-tile / read-only-terminal UI polish is still to come
+> (see [docs/designs/multiplayer.md](docs/designs/multiplayer.md)).
+>
+> Caveat: agents you spawned **before** creating the first user are unowned, so
+> once auth is on anyone can still control them. Spawn agents after enabling auth
+> (or restart them) if you want them owned.
 
 ## Requirements
 

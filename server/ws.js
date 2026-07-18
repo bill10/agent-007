@@ -7,7 +7,7 @@ import {
   codenamePool, cocktailPool, colorCycler, nextSessionId,
   GIT_USER_TIMEOUT, isAllowedOrigin,
 } from './state.js';
-import { authEnabled, resolveToken, tokenFromRequest, publicUser, loadUsers, WS_UNAUTHORIZED } from './auth.js';
+import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec } from './git.js';
 import { createSessionFromConfig } from './pty.js';
@@ -24,6 +24,7 @@ export function broadcast(message) {
 }
 
 export function sessionPayload(session) {
+  const owner = userById(session.ownerId);
   return {
     type: 'session-created',
     sessionId: session.id,
@@ -37,6 +38,9 @@ export function sessionPayload(session) {
     changedCount: session.changedCount,
     additions: session.additions || 0,
     removals: session.removals || 0,
+    ownerId: session.ownerId || null,
+    ownerName: owner ? owner.displayName : null,
+    ownerColor: owner ? owner.color : null,
   };
 }
 
@@ -61,6 +65,29 @@ export function broadcastPresence() {
 // Requests with no Origin header are allowed (same-origin or non-browser).
 export function verifyClient({ origin }) {
   return isAllowedOrigin(origin);
+}
+
+// --- Ownership (phase 2) ---
+// Only the owner may control a session/orphan. When auth is disabled (single-
+// player) or the item is unowned (spawned before auth existed), anyone may.
+//
+// Two rejection shapes for non-owners, by design:
+//  - high-frequency streaming (pty-input, pty-resize): silently drop, so a
+//    read-only viewer's keystrokes don't spam a notification per character.
+//  - discrete user actions (kill, upload-file, refresh-tree, orphan
+//    re-adopt/delete): call denyControl() to surface a read-only notice.
+// Match this when wiring any new gated message.
+function owns(ws, ownerId) {
+  if (!authEnabled()) return true;
+  if (!ownerId) return true;
+  return !!(ws.user && ws.user.id === ownerId);
+}
+function denyControl(ws, name, ownerId) {
+  const owner = userById(ownerId);
+  ws.send(JSON.stringify({
+    type: 'notification', level: 'error',
+    message: `Read-only — ${name} is owned by ${owner ? owner.displayName : 'someone else'}`,
+  }));
 }
 
 // --- Setup ---
@@ -125,7 +152,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
       try {
       switch (msg.type) {
         case 'spawn': {
-          const result = await createSession(msg.command || 'claude', msg.name, msg.repoPath || null, msg.branch || null);
+          const result = await createSession(msg.command || 'claude', msg.name, msg.repoPath || null, msg.branch || null, ws.user ? ws.user.id : null);
           if (result.error) {
             ws.send(JSON.stringify({ type: 'spawn-error', command: msg.command || 'claude', error: result.error }));
           } else if (result.session) {
@@ -135,18 +162,22 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         }
         case 'pty-input': {
           const session = sessions.get(msg.sessionId);
-          if (session && !session.exited) session.pty.write(msg.data);
+          // Non-owners are read-only: silently drop input (no per-keystroke error).
+          if (session && !session.exited && owns(ws, session.ownerId)) session.pty.write(msg.data);
           break;
         }
         case 'pty-resize': {
           const session = sessions.get(msg.sessionId);
-          if (session && !session.exited) {
+          // Only the owner drives PTY dimensions; viewers render at their own size.
+          if (session && !session.exited && owns(ws, session.ownerId)) {
             session.lastResizeAt = Date.now();
             session.pty.resize(msg.cols, msg.rows);
           }
           break;
         }
         case 'kill': {
+          const session = sessions.get(msg.sessionId);
+          if (session && !owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
           await killSession(msg.sessionId);
           break;
         }
@@ -161,6 +192,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         }
         case 'refresh-tree': {
           const session = sessions.get(msg.sessionId);
+          if (session && !owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
           if (session) { session.lastTreeHash = null; await scanFileTree(session, broadcast); }
           break;
         }
@@ -198,6 +230,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 're-adopt-orphan': {
           const orphan = orphans.get(msg.orphanId);
           if (!orphan) { ws.send(JSON.stringify({ type: 'spawn-error', error: 'Orphan not found' })); break; }
+          if (!owns(ws, orphan.ownerId)) { denyControl(ws, orphan.name, orphan.ownerId); break; }
           if (adoptingOrphans.has(msg.orphanId)) { ws.send(JSON.stringify({ type: 'spawn-error', error: 'Orphan is already being re-adopted' })); break; }
           adoptingOrphans.add(msg.orphanId);
           if (!existsSync(join(orphan.worktreePath, '.git'))) {
@@ -230,6 +263,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             repoSlug: orphan.repoSlug,
             cocktail: (orphan.branchName || '').split('/').pop(),
             isTUI: true,
+            ownerId: orphan.ownerId || null,
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);
@@ -250,6 +284,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'delete-orphan': {
           const orphan = orphans.get(msg.orphanId);
           if (!orphan) break;
+          if (!owns(ws, orphan.ownerId)) { denyControl(ws, orphan.name, orphan.ownerId); break; }
           let worktreeRemoved = true;
           if (existsSync(orphan.worktreePath)) {
             try { await gitExec(['-C', orphan.repoPath, 'worktree', 'remove', '--force', orphan.worktreePath]); } catch (err) {
@@ -274,6 +309,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         }
         case 'upload-file': {
           const session = sessions.get(msg.sessionId);
+          if (session && !owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
           if (!session || !session.worktreePath) { ws.send(JSON.stringify({ type: 'notification', level: 'error', message: 'No worktree for file upload' })); break; }
           if (!msg.filename || !msg.data) { ws.send(JSON.stringify({ type: 'notification', level: 'error', message: 'Invalid upload data' })); break; }
           const buf = Buffer.from(msg.data, 'base64');
