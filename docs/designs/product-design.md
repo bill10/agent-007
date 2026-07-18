@@ -176,7 +176,7 @@ For MVP: use a free pixel art character asset pack from itch.io (e.g., "Tiny RPG
 
 ### Security Note
 
-Daegu binds to `localhost` only. The server exposes full PTY access (equivalent to a shell) and must never be exposed to a network. This is intentional — it is a local development tool. The future multiplayer feature will require a separate auth/trust model (SSH tunneling, token auth, or similar) and will be designed when that feature is scoped.
+Daegu binds to `localhost` by **default**. The server exposes full PTY access (equivalent to a shell), so the default is localhost-only and it must never be exposed to an untrusted network. As of Phase 0 (see `docs/REMOTE.md` and `docs/designs/multiplayer.md`), the bind can be widened via `HOST`/`ALLOWED_ORIGINS` for remote access behind a trusted network (e.g. Tailscale); the multiplayer auth/trust model is being built in later phases.
 
 ### Wireframe
 

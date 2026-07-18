@@ -32,6 +32,45 @@ afterAll(async () => {
   await new Promise(r => server.close(r));
 });
 
+// --- Cross-origin check (HTTP + WS integration) ---
+
+describe('cross-origin origin check', () => {
+  it('rejects an HTTP request from a disallowed origin with 403', async () => {
+    const res = await fetch(`${baseUrl}/api/browse?path=${tmpdir()}`, {
+      headers: { Origin: 'http://evil.example.com' },
+    });
+    expect(res.status).toBe(403);
+    const data = await res.json();
+    expect(data.error).toMatch(/cross-origin/i);
+  });
+
+  it('allows an HTTP request from a localhost origin', async () => {
+    const res = await fetch(`${baseUrl}/api/browse?path=${tmpdir()}`, {
+      headers: { Origin: 'http://localhost:3000' },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('rejects a WebSocket handshake from a disallowed origin', async () => {
+    const result = await new Promise((resolve) => {
+      const ws = new WebSocket(wsUrl, { origin: 'http://evil.example.com' });
+      ws.on('open', () => { ws.close(); resolve('open'); });
+      ws.on('error', () => resolve('rejected'));
+    });
+    expect(result).toBe('rejected');
+  });
+
+  it('accepts a WebSocket handshake from a localhost origin', async () => {
+    const ws = await new Promise((resolve, reject) => {
+      const s = new WebSocket(wsUrl, { origin: 'http://localhost:3000' });
+      s.on('open', () => resolve(s));
+      s.on('error', reject);
+    });
+    expect(ws.readyState).toBe(WebSocket.OPEN);
+    ws.close();
+  });
+});
+
 // --- /api/browse endpoint ---
 
 describe('/api/browse', () => {
