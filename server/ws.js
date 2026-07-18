@@ -7,6 +7,7 @@ import {
   codenamePool, cocktailPool, colorCycler, nextSessionId,
   GIT_USER_TIMEOUT, isAllowedOrigin,
 } from './state.js';
+import { authEnabled, resolveToken, tokenFromRequest, publicUser, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec } from './git.js';
 import { createSessionFromConfig } from './pty.js';
@@ -43,6 +44,17 @@ export function broadcastOrphansList() {
   broadcast({ type: 'orphans-list', orphans: [...orphans.values()] });
 }
 
+// --- Presence (phase 1) ---
+// The distinct set of authenticated users currently connected. Empty when auth
+// is disabled (no identities to report).
+export function broadcastPresence() {
+  const seen = new Map();
+  for (const ws of clients) {
+    if (ws.readyState === 1 && ws.user) seen.set(ws.user.id, publicUser(ws.user));
+  }
+  broadcast({ type: 'presence', users: [...seen.values()] });
+}
+
 // --- WebSocket origin check (B3) ---
 // verifyClient rejects the handshake for disallowed origins. localhost is always
 // allowed; add remote hostnames via ALLOWED_ORIGINS (see server/state.js).
@@ -53,8 +65,21 @@ export function verifyClient({ origin }) {
 
 // --- Setup ---
 export function setupWebSocket(wss, { createSession, killSession }) {
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    // Auth gate (phase 1): when users are configured, require a valid token
+    // (?token= on the WS URL, since browsers can't set handshake headers).
+    // Close code 4401 tells the client to prompt for a token.
+    const enabled = authEnabled();
+    const user = enabled ? resolveToken(tokenFromRequest(req)) : null;
+    if (enabled && !user) {
+      try { ws.close(WS_UNAUTHORIZED, 'Unauthorized'); } catch {}
+      return;
+    }
+    ws.user = user; // null when auth is disabled
     clients.add(ws);
+
+    // Tell the client who it is and whether auth is on.
+    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user) }));
 
     // Send repos list
     ws.send(JSON.stringify({
@@ -82,9 +107,20 @@ export function setupWebSocket(wss, { createSession, killSession }) {
 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
 
+    broadcastPresence();
+
     ws.on('message', async (raw) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
+
+      // Re-check auth per message (connect-time gating alone misses two cases):
+      //  - a socket that connected while auth was disabled, then auth was enabled
+      //  - a user removed from users.json while their socket is still open
+      // Both must lose access without waiting for a voluntary reconnect.
+      if (authEnabled() && !(ws.user && loadUsers().some(u => u.id === ws.user.id))) {
+        try { ws.close(WS_UNAUTHORIZED, 'Unauthorized'); } catch {}
+        return;
+      }
 
       try {
       switch (msg.type) {
@@ -273,6 +309,6 @@ export function setupWebSocket(wss, { createSession, killSession }) {
       }
     });
 
-    ws.on('close', () => { clients.delete(ws); });
+    ws.on('close', () => { clients.delete(ws); broadcastPresence(); });
   });
 }

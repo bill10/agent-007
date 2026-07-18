@@ -5,10 +5,12 @@ it runs on. This is the safe default: **the app spawns real shells, so anyone wh
 can reach it effectively has terminal access to the host.** Follow this guide to
 reach it from another machine *without* exposing it to the public internet.
 
-> Phase 0 (this doc) enables *you* to reach *your own* server remotely. It does
-> not add user accounts or read-only sharing yet — that's multiplayer
-> (`docs/designs/multiplayer.md`). Until then, treat every connection as full
-> control.
+> This guide enables *you* to reach *your own* server remotely. Per-user login
+> now exists (`npm run adduser` — see the README "Multiplayer & login" section),
+> but it establishes **identity, not isolation**: every logged-in user can still
+> spawn shells on the host, and read-only sharing of others' agents is a later
+> phase (`docs/designs/multiplayer.md`). Keep the server behind Tailscale and
+> only issue tokens to people you'd give an SSH login.
 
 ## Recommended: Tailscale
 
