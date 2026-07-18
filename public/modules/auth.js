@@ -1,6 +1,14 @@
 // Client-side identity & login (phase 1)
 const TOKEN_KEY = 'agent007-token';
 
+// Mirrors WS_UNAUTHORIZED in server/auth.js — keep in sync.
+export const WS_UNAUTHORIZED = 4401;
+export const DEFAULT_LOGIN_MESSAGE = 'Enter your access token to continue.';
+
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const safeColor = (c) => /^#[0-9a-fA-F]{3,8}$/.test(String(c)) ? c : 'var(--accent)';
+
 // On load, pull ?token= out of the URL, persist it, and strip it from the
 // address bar so it doesn't linger in history or get shared accidentally.
 export function captureTokenFromUrl() {
@@ -26,7 +34,7 @@ export function authHeaders() {
 
 // Full-screen login overlay. Submitting stores the token and reloads so every
 // connection (WS + fetch) picks it up cleanly.
-export function showLogin(message) {
+export function showLogin(message = DEFAULT_LOGIN_MESSAGE) {
   const existing = document.getElementById('login-overlay');
   if (existing) {
     if (message) existing.querySelector('#login-message').textContent = message;
@@ -69,6 +77,7 @@ export function renderPresence(users, selfId) {
   el.innerHTML = users.map(u => {
     const initials = (u.displayName || '?').trim().slice(0, 2).toUpperCase();
     const isSelf = u.id === selfId;
-    return `<span class="presence-dot${isSelf ? ' presence-self' : ''}" style="background:${u.color}" title="${u.displayName}${isSelf ? ' (you)' : ''}">${initials}</span>`;
+    const title = escapeHtml(u.displayName) + (isSelf ? ' (you)' : '');
+    return `<span class="presence-dot${isSelf ? ' presence-self' : ''}" style="background:${safeColor(u.color)}" title="${title}">${escapeHtml(initials)}</span>`;
   }).join('');
 }

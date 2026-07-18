@@ -7,7 +7,7 @@ import {
   codenamePool, cocktailPool, colorCycler, nextSessionId,
   GIT_USER_TIMEOUT, isAllowedOrigin,
 } from './state.js';
-import { authEnabled, resolveToken, tokenFromRequest, publicUser } from './auth.js';
+import { authEnabled, resolveToken, tokenFromRequest, publicUser, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec } from './git.js';
 import { createSessionFromConfig } from './pty.js';
@@ -72,7 +72,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
     const enabled = authEnabled();
     const user = enabled ? resolveToken(tokenFromRequest(req)) : null;
     if (enabled && !user) {
-      try { ws.close(4401, 'Unauthorized'); } catch {}
+      try { ws.close(WS_UNAUTHORIZED, 'Unauthorized'); } catch {}
       return;
     }
     ws.user = user; // null when auth is disabled
@@ -112,6 +112,15 @@ export function setupWebSocket(wss, { createSession, killSession }) {
     ws.on('message', async (raw) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
+
+      // Re-check auth per message (connect-time gating alone misses two cases):
+      //  - a socket that connected while auth was disabled, then auth was enabled
+      //  - a user removed from users.json while their socket is still open
+      // Both must lose access without waiting for a voluntary reconnect.
+      if (authEnabled() && !(ws.user && loadUsers().some(u => u.id === ws.user.id))) {
+        try { ws.close(WS_UNAUTHORIZED, 'Unauthorized'); } catch {}
+        return;
+      }
 
       try {
       switch (msg.type) {

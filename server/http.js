@@ -33,7 +33,11 @@ export function requireAuth(req, res, next) {
 export function setupRoutes(app, staticDir) {
   app.use(express_static(staticDir));
 
-  app.get('/api/browse', checkOrigin, requireAuth, (req, res) => {
+  // Gate the whole /api surface once, so new routes are origin- and auth-checked
+  // by default (a per-route guard that someone forgets to add fails OPEN).
+  app.use('/api', checkOrigin, requireAuth);
+
+  app.get('/api/browse', (req, res) => {
     try {
       const dirPath = req.query.path ? resolve(req.query.path) : homedir();
       if (!existsSync(dirPath)) return res.status(400).json({ error: 'Directory does not exist' });

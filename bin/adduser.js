@@ -7,10 +7,10 @@
 // is shown ONCE and only its hash is stored — if it's lost, re-run to mint a new
 // one. Creating the first user switches the server into authenticated mode.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
 import { dirname } from 'path';
 import {
-  USERS_PATH, USER_COLORS, hashToken, generateToken, newUserId,
+  USERS_PATH, USER_COLORS, hashToken, generateToken, newUserId, normalizeUsers,
 } from '../server/auth.js';
 
 const displayName = process.argv.slice(2).join(' ').trim();
@@ -22,8 +22,7 @@ if (!displayName) {
 let users = [];
 if (existsSync(USERS_PATH)) {
   try {
-    const raw = JSON.parse(readFileSync(USERS_PATH, 'utf8'));
-    users = Array.isArray(raw) ? raw : (Array.isArray(raw.users) ? raw.users : []);
+    users = normalizeUsers(JSON.parse(readFileSync(USERS_PATH, 'utf8')));
   } catch (err) {
     console.error(`Cannot read ${USERS_PATH}: ${err.message}`);
     process.exit(1);
@@ -47,7 +46,11 @@ users.push(user);
 
 try {
   mkdirSync(dirname(USERS_PATH), { recursive: true });
-  writeFileSync(USERS_PATH, JSON.stringify(users, null, 2));
+  // Atomic write: a concurrent server read sees either the old or new complete
+  // file, never a torn one (which would otherwise trip the fail-closed path).
+  const tmp = `${USERS_PATH}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(users, null, 2));
+  renameSync(tmp, USERS_PATH);
 } catch (err) {
   console.error(`Cannot write ${USERS_PATH}: ${err.message}`);
   process.exit(1);

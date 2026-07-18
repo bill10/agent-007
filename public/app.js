@@ -173,7 +173,7 @@ async function fetchDirectory(path) {
   try {
     const resp = await fetch(url, { headers: authHeaders() });
     if (resp.status === 401) {
-      showLogin('Enter your access token to continue.');
+      showLogin();
       list.innerHTML = '<div class="dir-browser-error">Not authorized</div>';
       return;
     }

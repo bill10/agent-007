@@ -1,5 +1,5 @@
 // WebSocket connection management
-import { getToken, clearToken, showLogin } from './auth.js';
+import { getToken, clearToken, showLogin, WS_UNAUTHORIZED } from './auth.js';
 
 let ws = null;
 let reconnectTimer = null;
@@ -29,9 +29,9 @@ export function connect(onMessage) {
   ws.onclose = (event) => {
     // 4401 = server requires auth and our token was missing/invalid. Don't
     // reconnect-loop; clear the bad token and prompt for a new one.
-    if (event && event.code === 4401) {
+    if (event && event.code === WS_UNAUTHORIZED) {
       clearToken();
-      showLogin('Enter your access token to continue.');
+      showLogin();
       return;
     }
     document.getElementById('reconnecting').style.display = 'block';

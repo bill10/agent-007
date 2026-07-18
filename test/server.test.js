@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { app, server, startup, sessions } from '../server.js';
-import { hashToken } from '../server/auth.js';
+import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
 import WebSocket from 'ws';
 import { tmpdir } from 'os';
 import { mkdirSync, existsSync, writeFileSync, rmSync } from 'fs';
@@ -358,5 +358,40 @@ describe('auth enforcement (live enable)', () => {
     });
     expect(welcome.authEnabled).toBe(true);
     expect(welcome.user.displayName).toBe('Tester');
+  });
+});
+
+// --- Auth revocation (phase 1 hardening) ---
+// A user removed from users.json must lose access on their LIVE socket, not just
+// on the next reconnect. Two users so auth stays enabled after removing one.
+
+describe('auth revocation (live socket)', () => {
+  const usersPath = process.env.AGENT007_USERS_PATH;
+  const tokenA = 'tokA_' + Math.random().toString(36).slice(2, 10);
+  const tokenB = 'tokB_' + Math.random().toString(36).slice(2, 10);
+
+  beforeAll(() => {
+    writeFileSync(usersPath, JSON.stringify([
+      { id: 'u_a', displayName: 'A', color: '#d4a847', tokenHash: hashToken(tokenA) },
+      { id: 'u_b', displayName: 'B', color: '#58a6ff', tokenHash: hashToken(tokenB) },
+    ]));
+  });
+  afterAll(() => { try { rmSync(usersPath, { force: true }); } catch {} });
+
+  it('closes a live socket with 4401 when its user is removed', async () => {
+    const ws = await new Promise((resolve, reject) => {
+      const s = new WebSocket(`${wsUrl}/?token=${encodeURIComponent(tokenA)}`);
+      s.on('message', (d) => { if (JSON.parse(d).type === 'welcome') resolve(s); });
+      s.on('error', reject);
+    });
+    // Revoke A, keep B so auth remains enabled.
+    writeFileSync(usersPath, JSON.stringify([
+      { id: 'u_b', displayName: 'B', color: '#58a6ff', tokenHash: hashToken(tokenB) },
+    ]));
+    const code = await new Promise((resolve) => {
+      ws.on('close', (c) => resolve(c));
+      ws.send(JSON.stringify({ type: 'refresh-tree', sessionId: 'none' }));
+    });
+    expect(code).toBe(WS_UNAUTHORIZED);
   });
 });

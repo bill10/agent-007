@@ -27,8 +27,18 @@ export const USER_COLORS = [
   '#d4a847', '#58a6ff', '#7fbc6a', '#e0853a', '#bc8cff', '#76d9e6', '#ff7b72', '#e3b341',
 ];
 
+// WebSocket close code for "authentication required/failed". Shared so the
+// server and client agree (client mirrors this in public/modules/auth.js).
+export const WS_UNAUTHORIZED = 4401;
+
 export function hashToken(token) {
   return createHash('sha256').update(String(token)).digest('hex');
+}
+
+// users.json may be a bare array or a { users: [...] } wrapper. One normalizer
+// so auth.js and bin/adduser.js can't drift.
+export function normalizeUsers(raw) {
+  return Array.isArray(raw) ? raw : (Array.isArray(raw?.users) ? raw.users : []);
 }
 
 export function generateToken() {
@@ -39,21 +49,30 @@ export function newUserId() {
   return 'u_' + randomBytes(4).toString('hex');
 }
 
-// mtime-cached read so per-request auth doesn't hit disk every time, but a fresh
-// `adduser` is picked up without a server restart.
-let _cache = { mtimeMs: -1, users: [] };
+// Sentinel served when users.json exists but can't be read/parsed and we have no
+// last-known-good copy: length > 0 keeps auth ENABLED, but its unmatchable id and
+// empty tokenHash reject every token. This makes a corrupt file fail CLOSED
+// (deny) rather than open (silently disabling auth for the whole server).
+const DENY_ALL = Object.freeze([Object.freeze({ id: '__deny__', displayName: '', color: '', tokenHash: '' })]);
+
+// Cache keyed on mtime AND size so same-second / coarse-FS-resolution rewrites
+// aren't missed (mtime alone can collide on HFS+/NFS). Refreshes without a
+// restart when `adduser` changes the file.
+let _cache = { key: null, users: [] };
 export function loadUsers() {
+  if (!existsSync(USERS_PATH)) { _cache = { key: null, users: [] }; return []; }
   try {
-    if (!existsSync(USERS_PATH)) { _cache = { mtimeMs: -1, users: [] }; return []; }
-    const mtimeMs = statSync(USERS_PATH).mtimeMs;
-    if (mtimeMs === _cache.mtimeMs) return _cache.users;
-    const raw = JSON.parse(readFileSync(USERS_PATH, 'utf8'));
-    const users = Array.isArray(raw) ? raw : (Array.isArray(raw.users) ? raw.users : []);
-    _cache = { mtimeMs, users };
+    const st = statSync(USERS_PATH);
+    const key = `${st.mtimeMs}:${st.size}`;
+    if (key === _cache.key) return _cache.users;
+    const users = normalizeUsers(JSON.parse(readFileSync(USERS_PATH, 'utf8')));
+    _cache = { key, users };
     return users;
   } catch (err) {
-    console.warn('users.json unreadable, treating as no users:', err.message);
-    return [];
+    // File exists but couldn't be read/parsed. NEVER disable auth on error:
+    // serve the last known-good users if we have them, otherwise deny everything.
+    console.warn('users.json unreadable — failing closed (auth stays on):', err.message);
+    return _cache.users.length ? _cache.users : DENY_ALL;
   }
 }
 
@@ -72,11 +91,10 @@ export function resolveToken(token) {
   if (!token) return null;
   const presented = Buffer.from(hashToken(token), 'utf8');
   for (const u of loadUsers()) {
+    // Skip malformed records; the length guard also satisfies timingSafeEqual's
+    // equal-length requirement (hex strings of equal length → equal-size buffers).
     if (!u.tokenHash || u.tokenHash.length !== presented.length) continue;
-    const stored = Buffer.from(u.tokenHash, 'utf8');
-    if (stored.length === presented.length && timingSafeEqual(stored, presented)) {
-      return u;
-    }
+    if (timingSafeEqual(Buffer.from(u.tokenHash, 'utf8'), presented)) return u;
   }
   return null;
 }
