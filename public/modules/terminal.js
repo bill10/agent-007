@@ -1,6 +1,7 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
 import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent } from './state.js';
 import { send } from './ws.js';
+import { escapeHtml, safeColor } from './auth.js';
 
 function waitForXterm() {
   return new Promise((resolve) => {
@@ -72,10 +73,15 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor } = msg;
 
   if (agents.has(sessionId)) {
-    agents.get(sessionId).state = state || 'WORKING';
+    const a = agents.get(sessionId);
+    a.state = state || 'WORKING';
+    // Keep ownership fresh if the session is re-emitted (reconnect/reassignment).
+    a.ownerId = ownerId || null;
+    a.ownerName = ownerName || null;
+    a.ownerColor = ownerColor || null;
     updateStatusBar();
     if (onSessionChanged) onSessionChanged();
     return;
@@ -117,6 +123,8 @@ export async function handleSessionCreated(msg) {
     state: state || 'WORKING',
     term, termEl,
     ownerId: ownerId || null,
+    ownerName: ownerName || null,
+    ownerColor: ownerColor || null,
     repoPath: repoPath || null,
     repoSlug: repoSlug || null,
     branchName: branchName || null,
@@ -307,9 +315,19 @@ export function updateTopbarAgent() {
     el.innerHTML = '';
     return;
   }
-  const agent = agents.get(activeSessionId);
+  const agent = activeSessionId ? agents.get(activeSessionId) : null;
+  // Read-only visual treatment, recomputed here so it stays fresh even if identity
+  // (welcome) or ownership arrives after the tab was switched.
+  const panel = document.getElementById('terminal-panel');
+  if (panel) panel.classList.toggle('readonly', !!agent && !canControlAgent(agent));
   if (!agent) { el.innerHTML = ''; return; }
   const parts = [];
+  // Read-only badge when viewing an agent you don't own (phase 3).
+  if (!canControlAgent(agent)) {
+    const c = safeColor(agent.ownerColor);
+    const who = agent.ownerName ? ` · ${escapeHtml(agent.ownerName)}` : '';
+    parts.push(`<span class="topbar-readonly" style="color:${c};border-color:${c}">\u{1F441} view-only${who}</span>`);
+  }
   if (agent.repoSlug) {
     parts.push(`<span class="topbar-repo-label">Repo:</span> <span class="topbar-repo-name">${agent.repoSlug}</span>`);
   }

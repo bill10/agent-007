@@ -1065,3 +1065,14 @@ body {
   border: 1px solid rgba(0, 0, 0, 0.3);
 }
 .presence-self { box-shadow: 0 0 0 2px var(--accent); }
+
+/* --- Read-only / ownership (phase 3) --- */
+.topbar-readonly {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 600;
+  padding: 1px 7px; margin-right: 8px;
+  border: 1px solid currentColor; border-radius: 10px;
+  opacity: 0.9;
+}
+/* Subtle cue that the active terminal is view-only. */
+.terminal-panel.readonly .terminal-viewport { opacity: 0.92; }
