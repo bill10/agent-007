@@ -23,7 +23,7 @@ import {
   codenamePool, cocktailPool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig } from './server/config.js';
-import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, scanFileTree, detectConflicts, gitExec } from './server/git.js';
+import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, scanFileTree, detectConflicts, gitExec, deleteBranch } from './server/git.js';
 import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
@@ -85,13 +85,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
       } catch (e) {
         console.error(`Failed to remove worktree ${worktreePath}:`, e.message);
       }
-      if (branchName) {
-        try {
-          await gitExec(['-C', resolvedRepoPath, 'branch', '-D', branchName]);
-        } catch (e) {
-          console.error(`Failed to delete branch ${branchName}:`, e.message);
-        }
-      }
+      await deleteBranch(resolvedRepoPath, branchName);
     }
     return { error: result.error };
   }

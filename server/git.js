@@ -136,11 +136,26 @@ export async function removeWorktree(session) {
         return { orphaned: true, reason: 'cleanup-failed' };
       }
     }
-    try { await gitExec(['-C', session.repoPath, 'branch', '-D', session.branchName]); } catch {}
+    await deleteBranch(session.repoPath, session.branchName);
     return { orphaned: false };
   } catch (err) {
     console.error('Worktree cleanup error:', err.message);
     return { orphaned: true, reason: 'cleanup-failed' };
+  }
+}
+
+// Delete an agent's branch, cleaning up first so it actually succeeds. If the
+// worktree directory was removed but git still registers it (a "prunable"
+// worktree), `git branch -D` refuses with "branch is checked out at <path>" and
+// the branch leaks. Pruning stale registrations first clears that, so the branch
+// is really deleted instead of accumulating until every cocktail name is taken.
+export async function deleteBranch(repoPath, branchName) {
+  if (!repoPath || !branchName) return;
+  try { await gitExec(['-C', repoPath, 'worktree', 'prune']); } catch {}
+  try {
+    await gitExec(['-C', repoPath, 'branch', '-D', branchName]);
+  } catch (err) {
+    console.error(`Failed to delete branch ${branchName}:`, err.stderr || err.message);
   }
 }
 

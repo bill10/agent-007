@@ -9,7 +9,7 @@ import {
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
-import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec } from './git.js';
+import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree } from '../lib/helpers.js';
 
@@ -296,7 +296,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             broadcast({ type: 'notification', level: 'error', message: `Failed to delete orphan ${orphan.name} — worktree removal failed` });
             break;
           }
-          try { await gitExec(['-C', orphan.repoPath, 'branch', '-D', orphan.branchName]); } catch {}
+          await deleteBranch(orphan.repoPath, orphan.branchName);
           codenamePool.recycle(orphan.name);
           if (orphan.branchName && orphan.branchName.includes('/')) {
             cocktailPool.recycle(orphan.repoPath, orphan.branchName.split('/').pop());
