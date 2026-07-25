@@ -14,7 +14,7 @@ mission control dashboard — calm, information-dense, utility-first.
 ## Naming Conventions
 
 **Agents** — Spy codenames from a fixed pool:
-`shadow, phantom, viper, cipher, raven, onyx, echo, spectre, falcon, ghost, dagger, mirage, cobra, apex, ember`
+`Shadow, Phantom, Viper, Cipher, Raven, Onyx, Echo, Spectre, Falcon, Ghost, Dagger, Mirage, Cobra, Apex, Ember`
 
 Random assignment, recycled on agent death. User can override with custom name.
 
