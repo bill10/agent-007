@@ -88,6 +88,8 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     removals: 0,
     lastTreeHash: null,
     scanTimer: null,
+    scannedOnce: false,        // first scan cycle always runs (see startTreeScanLoop)
+    lastScanOutputAt: null,    // value of lastOutputAt at the last git scan (idle gate)
   };
 
   setupPtyHandlers(session, sessionId, broadcast);

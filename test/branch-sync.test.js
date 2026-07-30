@@ -9,6 +9,10 @@ import { tmpdir } from 'os';
 // the branch shown in the UI *without* a manual tree refresh. The branch is polled
 // on every file-tree scan cycle (DESIGN.md "Branch sync"), so the scan must recur —
 // it previously ran only once at spawn, so a new branch was never picked up.
+//
+// The scan loop has an idle gate: it only scans on cycles where the PTY produced
+// new output (session.lastOutputAt advanced) since the last scan, so idle sessions
+// cost zero git calls. Terminal activity is simulated here by bumping lastOutputAt.
 describe('branch sync polls on the recurring scan loop', () => {
   let base, repo, wt, session;
 
@@ -26,6 +30,7 @@ describe('branch sync polls on the recurring scan loop', () => {
     session = {
       id: 'sess-bsync', repoPath: repo, worktreePath: wt,
       branchName: 'bill-slung/negroni', lastTreeHash: null, exited: false, scanTimer: null,
+      lastOutputAt: 0, scannedOnce: false, lastScanOutputAt: null,
     };
     sessions.set(session.id, session);
   });
@@ -47,8 +52,10 @@ describe('branch sync polls on the recurring scan loop', () => {
     await new Promise(r => setTimeout(r, SCAN_INTERVAL_MS + 300));
     expect(events.filter(e => e.type === 'branch-changed')).toHaveLength(0);
 
-    // Create a new branch out-of-band, the way an agent would from its terminal.
+    // Create a new branch the way an agent would from its terminal — the command
+    // prints to the PTY, so simulate that output bump so the idle gate opens.
     await gitExec(['-C', wt, 'checkout', '-q', '-b', 'bill-slung/martini']);
+    session.lastOutputAt = Date.now();
 
     // A later scan cycle must pick it up — no manual refresh is triggered.
     await new Promise(r => setTimeout(r, SCAN_INTERVAL_MS + 500));
@@ -59,4 +66,28 @@ describe('branch sync polls on the recurring scan loop', () => {
     });
     expect(session.branchName).toBe('bill-slung/martini');
   }, 15000);
+
+  it('idle gate: skips the git scan while the terminal is idle, resumes on activity', async () => {
+    const events = [];
+    startTreeScanLoop(session, (msg) => events.push(msg));
+
+    // First cycle scans unconditionally (sees negroni, no change event).
+    await new Promise(r => setTimeout(r, SCAN_INTERVAL_MS + 300));
+    expect(events.filter(e => e.type === 'branch-changed')).toHaveLength(0);
+
+    // Change the branch WITHOUT any terminal output (lastOutputAt stays put).
+    // The gate must skip these cycles, so the change is NOT observed yet.
+    await gitExec(['-C', wt, 'checkout', '-q', '-b', 'bill-slung/martini']);
+    await new Promise(r => setTimeout(r, SCAN_INTERVAL_MS * 2 + 300));
+    expect(events.filter(e => e.type === 'branch-changed')).toHaveLength(0);
+    expect(session.branchName).toBe('bill-slung/negroni');
+
+    // Now simulate terminal activity — the very next cycle scans and catches up.
+    session.lastOutputAt = Date.now();
+    await new Promise(r => setTimeout(r, SCAN_INTERVAL_MS + 500));
+    expect(session.branchName).toBe('bill-slung/martini');
+    expect(events.filter(e => e.type === 'branch-changed').at(-1)).toMatchObject({
+      branchName: 'bill-slung/martini',
+    });
+  }, 20000);
 });
