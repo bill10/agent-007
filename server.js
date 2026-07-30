@@ -23,7 +23,7 @@ import {
   codenamePool, cocktailPool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig } from './server/config.js';
-import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, scanFileTree, detectConflicts, gitExec, deleteBranch } from './server/git.js';
+import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
 import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
@@ -95,7 +95,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
   saveActiveSession(session, broadcast);
 
   if (worktreePath) {
-    session.scanTimer = setTimeout(() => scanFileTree(session, broadcast), 1000);
+    startTreeScanLoop(session, broadcast);
   }
 
   return { session };
