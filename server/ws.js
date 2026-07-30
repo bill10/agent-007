@@ -9,7 +9,7 @@ import {
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
-import { addRepo, removeRepo, scanFileTree, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
+import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree } from '../lib/helpers.js';
 
@@ -273,7 +273,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           const session = result.session;
           sessions.set(session.id, session);
           saveActiveSession(session, broadcast);
-          session.scanTimer = setTimeout(() => scanFileTree(session, broadcast), 1000);
+          startTreeScanLoop(session, broadcast);
           adoptingOrphans.delete(msg.orphanId);
           orphans.delete(msg.orphanId);
           syncOrphansToConfig(broadcast);

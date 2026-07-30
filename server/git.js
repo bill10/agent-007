@@ -254,6 +254,40 @@ export async function scanFileTree(session, broadcast) {
   }
 }
 
+// Poll cadence for the recurring file-tree/branch scan. The branch shown in the
+// UI is refreshed on every cycle (see DESIGN.md "Branch sync"), so this also
+// governs how quickly a `git checkout -b` inside the terminal is reflected.
+export const SCAN_INTERVAL_MS = 1500;
+
+// Start (or restart) the recurring scan loop for a session. Self-reschedules
+// after each scan completes rather than using setInterval, so slow git calls
+// never overlap. Stops once the session has exited. `session.scanTimer` holds
+// the pending timer so killSession/onExit can cancel it.
+//
+// Idle gate: a session's branch/tree/diff only changes as a result of terminal
+// activity (the agent running git/edit commands), which bumps lastOutputAt in
+// the PTY onData handler. So we skip the git scan on cycles where there's been
+// no new output since the last scan — an idle session costs zero git calls.
+// The first cycle always scans so a fresh session shows its initial tree. This
+// gate lives in the loop, not scanFileTree, so manual refresh-tree still scans
+// unconditionally. Tradeoff: worktree changes made outside this terminal aren't
+// picked up until the next terminal activity or a manual refresh.
+export function startTreeScanLoop(session, broadcast) {
+  clearTimeout(session.scanTimer);
+  const tick = async () => {
+    const hasNewOutput = session.lastOutputAt !== session.lastScanOutputAt;
+    if (!session.scannedOnce || hasNewOutput) {
+      session.scannedOnce = true;
+      // Capture before the await: output arriving mid-scan advances lastOutputAt
+      // past this value, so the next cycle rescans instead of dropping the change.
+      session.lastScanOutputAt = session.lastOutputAt;
+      await scanFileTree(session, broadcast);
+    }
+    if (!session.exited) session.scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
+  };
+  session.scanTimer = setTimeout(tick, SCAN_INTERVAL_MS);
+}
+
 // --- Conflict Detection ---
 export function detectConflicts(repoPath) {
   const repoSessions = [...sessions.values()].filter(s => s.repoPath === repoPath && s.fileTree);
