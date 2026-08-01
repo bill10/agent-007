@@ -14,6 +14,10 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   `docs/screenshot.png` since the initial commit, but the image was never
   captured, so the link rendered broken on GitHub.
 - Version tracking via a `VERSION` file and this changelog.
+- CI: a GitHub Actions workflow that runs the test suite on pushes to `main` and
+  on every pull request. The README's Tests badge had pointed at
+  `.github/workflows/test.yml` since the initial commit, but no workflow existed,
+  so the badge never resolved.
 
 ### Changed
 
