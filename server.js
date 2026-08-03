@@ -57,11 +57,17 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
     if (result.error) { codenamePool.recycle(agentName); return { error: result.error }; }
     resolvedRepoPath = result.path;
     repoSlug = result.slug;
-    // A custom name is reserved just like a picked one. Without this it lived in
-    // neither pool set until createWorktree made its branch, so a second spawn
-    // racing this one could pick or reuse the same name and hit "already in use" —
-    // the exact failure the pool exists to prevent. Reserving closes the window
-    // between here and branch creation.
+    // A custom name is reserved like a picked one so all three release sites can
+    // treat pool entries the same way (see the recycle calls below and in
+    // killSession); guarding two of them on !customBranch made ownership depend on
+    // how the name was chosen.
+    //
+    // This is bookkeeping, not a correctness guard. `worktree add -b` is what
+    // actually prevents a duplicate branch — a loser gets "already exists" and the
+    // spawn fails cleanly. Reserving only helps the narrow case where a custom
+    // name happens to BE a cocktail and a concurrent spawn would otherwise pick
+    // it; two spawns naming the same custom branch still both reach git, since
+    // nothing consults the reservation on this path.
     if (customBranch) {
       cocktail = customBranch;
       cocktailPool.addUsed(resolvedRepoPath, cocktail);
