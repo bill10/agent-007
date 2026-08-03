@@ -57,11 +57,23 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
     if (result.error) { codenamePool.recycle(agentName); return { error: result.error }; }
     resolvedRepoPath = result.path;
     repoSlug = result.slug;
-    cocktail = customBranch || cocktailPool.pick(resolvedRepoPath);
+    // A custom name is reserved just like a picked one. Without this it lived in
+    // neither pool set until createWorktree made its branch, so a second spawn
+    // racing this one could pick or reuse the same name and hit "already in use" —
+    // the exact failure the pool exists to prevent. Reserving closes the window
+    // between here and branch creation.
+    if (customBranch) {
+      cocktail = customBranch;
+      cocktailPool.addUsed(resolvedRepoPath, cocktail);
+    } else {
+      cocktail = cocktailPool.pick(resolvedRepoPath);
+    }
     const wtResult = await createWorktree(resolvedRepoPath, agentName, cocktail);
     if (wtResult.error) {
       codenamePool.recycle(agentName);
-      if (!customBranch) cocktailPool.recycle(resolvedRepoPath, cocktail);
+      // Unconditional now that custom names are reserved too — matching the
+      // release in killSession, so all three sites agree on who owns an entry.
+      cocktailPool.recycle(resolvedRepoPath, cocktail);
       return { error: wtResult.error };
     }
     worktreePath = wtResult.worktreePath;
@@ -76,7 +88,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
 
   if (result.error) {
     codenamePool.recycle(agentName);
-    if (resolvedRepoPath && cocktail && !customBranch) cocktailPool.recycle(resolvedRepoPath, cocktail);
+    if (resolvedRepoPath && cocktail) cocktailPool.recycle(resolvedRepoPath, cocktail);
     // Spawn failed after the worktree was created — remove it and its branch
     // so a bad command doesn't leak a worktree + branch on disk.
     if (worktreePath && resolvedRepoPath) {
