@@ -52,10 +52,32 @@ export async function validateRepoPath(repoPath) {
 }
 
 // --- Repo Management ---
+
+// Teach the cocktail pool which names this repo's branches already occupy.
+//
+// The pool's own bookkeeping only covers names handed out since the process
+// started. Branches from earlier runs — or made outside the app entirely — are
+// invisible to it, so pick() would return a cocktail whose branch exists,
+// `worktree add` would fail with "already exists", and the retry would draw from
+// the same unshrunk pool. Syncing first makes those names unavailable up front.
+//
+// Best-effort: a failure here costs an occasional collision, not a spawn.
+export async function syncCocktailPool(repoPath) {
+  try {
+    const out = await gitExec(['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads']);
+    cocktailPool.syncFromBranches(repoPath, out.split('\n').filter(l => l.trim()));
+  } catch (err) {
+    console.error(`Cocktail pool sync failed for ${repoPath}:`, err.message);
+  }
+}
+
 export async function addRepo(repoPath, broadcast) {
   const validation = await validateRepoPath(repoPath);
   if (!validation.valid) return { error: validation.error };
   const resolved = validation.resolvedPath;
+  // Runs on every spawn (server.js awaits addRepo immediately before pick), which
+  // is what keeps the pool current against branches created since the last one.
+  await syncCocktailPool(resolved);
   if (config.repos.some(r => r.path === resolved)) {
     return { ok: true, path: resolved, slug: basename(resolved) };
   }
@@ -201,6 +223,12 @@ export async function scanForOrphanedWorktrees(broadcast) {
         };
         orphans.set(orphanId, orphan);
         codenamePool.addUsed(agentDir);
+        // Claim the cocktail too — an orphan still holds its branch, and this
+        // path previously reserved only the codename (config.js does both when
+        // loading orphans from disk).
+        if (branchName && branchName !== 'unknown') {
+          cocktailPool.addUsed(repoPath, branchName.split('/').pop());
+        }
         console.log(`Discovered orphaned worktree: ${agentDir} in ${repoPath}`);
       }
     }

@@ -196,6 +196,64 @@ describe('createCocktailPool', () => {
     const pool = createCocktailPool(['vesper']);
     pool.recycle('/unknown', 'vesper'); // should not throw
   });
+
+  // --- syncFromBranches: shrink the pool to names no branch already holds ---
+
+  it('should not pick a cocktail an existing branch already holds', () => {
+    const pool = createCocktailPool(['vesper', 'martini']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    expect(pool.pick('/repo/a')).toBe('martini');
+  });
+
+  it('should strip the user prefix when reading branch names', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.syncFromBranches('/repo/a', ['some-user/vesper']);
+    expect(pool.pick('/repo/a')).toBe('vesper-2');
+  });
+
+  it('should handle branch names with no prefix', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.syncFromBranches('/repo/a', ['vesper']);
+    expect(pool.pick('/repo/a')).toBe('vesper-2');
+  });
+
+  it('should keep synced branches per repo', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    // /repo/b has its own branches; /repo/a's say nothing about it
+    expect(pool.pick('/repo/b')).toBe('vesper');
+  });
+
+  it('should free a cocktail whose branch was deleted outside the app', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    pool.syncFromBranches('/repo/a', []);
+    expect(pool.pick('/repo/a')).toBe('vesper');
+  });
+
+  it('should not hand a live session\'s name away on a resync', () => {
+    const pool = createCocktailPool(['vesper', 'martini']);
+    const held = pool.pick('/repo/a');
+    // The branch exists but git is slow to reflect it — resync must not free it
+    pool.syncFromBranches('/repo/a', []);
+    expect(pool.pick('/repo/a')).not.toBe(held);
+  });
+
+  it('should report how many names are left for a repo', () => {
+    const pool = createCocktailPool(['vesper', 'martini', 'negroni']);
+    expect(pool.availableCount('/repo/a')).toBe(3);
+    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    expect(pool.availableCount('/repo/a')).toBe(2);
+    pool.pick('/repo/a');
+    expect(pool.availableCount('/repo/a')).toBe(1);
+    expect(pool.availableCount('/repo/b')).toBe(3);
+  });
+
+  it('should ignore blank branch entries', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.syncFromBranches('/repo/a', ['', '   ']);
+    expect(pool.pick('/repo/a')).toBe('vesper');
+  });
 });
 
 // --- stripAnsiComplete ---
