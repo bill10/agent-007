@@ -246,6 +246,13 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             if (!recreated) {
               ws.send(JSON.stringify({ type: 'spawn-error', error: 'Worktree directory no longer exists' }));
               adoptingOrphans.delete(msg.orphanId);
+              // Dropping the orphan record has to hand its codename back, or the
+              // name is burned for the life of the process — nothing else releases
+              // it. The cocktail needs no release here: it lives in the pool's
+              // branch-backed set, which syncCocktailPool re-derives from git on
+              // the next spawn, and unlike the delete-orphan path below we never
+              // deleted the branch — it may still legitimately hold the name.
+              codenamePool.recycle(orphan.name);
               orphans.delete(msg.orphanId);
               syncOrphansToConfig(broadcast);
               broadcastOrphansList();

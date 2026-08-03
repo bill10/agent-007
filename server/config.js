@@ -22,7 +22,7 @@ export function loadConfig() {
       orphans.set(o.id, o);
       codenamePool.addUsed(o.name);
       if (o.branchName && o.branchName.includes('/')) {
-        cocktailPool.addUsed(o.repoPath, o.branchName.split('/').pop());
+        cocktailPool.markTaken(o.repoPath, o.branchName.split("/").pop());
       }
     }
   } catch (err) {
@@ -90,7 +90,7 @@ export function recoverCrashedSessions(broadcast) {
     orphans.set(orphanId, orphan);
     codenamePool.addUsed(s.name);
     if (s.branchName && s.branchName.includes('/')) {
-      cocktailPool.addUsed(s.repoPath, s.branchName.split('/').pop());
+      cocktailPool.markTaken(s.repoPath, s.branchName.split("/").pop());
     }
     console.log(`Recovered crashed session: ${s.name} in ${s.repoPath}`);
   }

@@ -201,33 +201,42 @@ describe('createCocktailPool', () => {
 
   it('should not pick a cocktail an existing branch already holds', () => {
     const pool = createCocktailPool(['vesper', 'martini']);
-    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper'], 'bill');
     expect(pool.pick('/repo/a')).toBe('martini');
   });
 
-  it('should strip the user prefix when reading branch names', () => {
-    const pool = createCocktailPool(['vesper']);
-    pool.syncFromBranches('/repo/a', ['some-user/vesper']);
-    expect(pool.pick('/repo/a')).toBe('vesper-2');
+  // Only branches this app would itself create can collide. `worktree add -b
+  // bill/negroni` succeeds happily alongside `feature/negroni`, so blocking on the
+  // last path segment would shrink the pool for no reason.
+  it('should not block a cocktail held by an unrelated branch', () => {
+    const pool = createCocktailPool(['negroni']);
+    pool.syncFromBranches('/repo/a', ['feature/negroni', 'wip/negroni'], 'bill');
+    expect(pool.pick('/repo/a')).toBe('negroni');
   });
 
-  it('should handle branch names with no prefix', () => {
+  it('should not block a cocktail held by another user\'s branch', () => {
+    const pool = createCocktailPool(['rickey']);
+    pool.syncFromBranches('/repo/a', ['lawson-wong/rickey'], 'bill');
+    expect(pool.pick('/repo/a')).toBe('rickey');
+  });
+
+  it('should not block a cocktail held by an unprefixed branch', () => {
     const pool = createCocktailPool(['vesper']);
-    pool.syncFromBranches('/repo/a', ['vesper']);
-    expect(pool.pick('/repo/a')).toBe('vesper-2');
+    pool.syncFromBranches('/repo/a', ['vesper'], 'bill');
+    expect(pool.pick('/repo/a')).toBe('vesper');
   });
 
   it('should keep synced branches per repo', () => {
     const pool = createCocktailPool(['vesper']);
-    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper'], 'bill');
     // /repo/b has its own branches; /repo/a's say nothing about it
     expect(pool.pick('/repo/b')).toBe('vesper');
   });
 
   it('should free a cocktail whose branch was deleted outside the app', () => {
     const pool = createCocktailPool(['vesper']);
-    pool.syncFromBranches('/repo/a', ['bill/vesper']);
-    pool.syncFromBranches('/repo/a', []);
+    pool.syncFromBranches('/repo/a', ['bill/vesper'], 'bill');
+    pool.syncFromBranches('/repo/a', [], 'bill');
     expect(pool.pick('/repo/a')).toBe('vesper');
   });
 
@@ -235,14 +244,14 @@ describe('createCocktailPool', () => {
     const pool = createCocktailPool(['vesper', 'martini']);
     const held = pool.pick('/repo/a');
     // The branch exists but git is slow to reflect it — resync must not free it
-    pool.syncFromBranches('/repo/a', []);
+    pool.syncFromBranches('/repo/a', [], 'bill');
     expect(pool.pick('/repo/a')).not.toBe(held);
   });
 
   it('should report how many names are left for a repo', () => {
     const pool = createCocktailPool(['vesper', 'martini', 'negroni']);
     expect(pool.availableCount('/repo/a')).toBe(3);
-    pool.syncFromBranches('/repo/a', ['bill/vesper']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper'], 'bill');
     expect(pool.availableCount('/repo/a')).toBe(2);
     pool.pick('/repo/a');
     expect(pool.availableCount('/repo/a')).toBe(1);
@@ -251,8 +260,48 @@ describe('createCocktailPool', () => {
 
   it('should ignore blank branch entries', () => {
     const pool = createCocktailPool(['vesper']);
-    pool.syncFromBranches('/repo/a', ['', '   ']);
+    pool.syncFromBranches('/repo/a', ['', '   '], 'bill');
     expect(pool.pick('/repo/a')).toBe('vesper');
+  });
+
+  // The overflow path matters most here: once every base name is branch-held, the
+  // app starts creating `bill/vesper-2`, and a later restart must not re-offer it.
+  it('should skip a suffixed name an existing branch already holds', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper', 'bill/vesper-2'], 'bill');
+    expect(pool.pick('/repo/a')).toBe('vesper-3');
+  });
+
+  // availableCount reports base names only. Zero here does NOT mean pick() fails.
+  it('should report zero available once every base name is branch-held', () => {
+    const pool = createCocktailPool(['vesper', 'martini']);
+    pool.syncFromBranches('/repo/a', ['bill/vesper', 'bill/martini'], 'bill');
+    expect(pool.availableCount('/repo/a')).toBe(0);
+    expect(pool.pick('/repo/a')).toBe('vesper-2');
+  });
+
+  // --- markTaken: branch-existence claims that a git resync can correct ---
+
+  it('should treat markTaken names as unavailable', () => {
+    const pool = createCocktailPool(['vesper', 'martini']);
+    pool.markTaken('/repo/a', 'vesper');
+    expect(pool.pick('/repo/a')).toBe('martini');
+  });
+
+  it('should let a resync release a markTaken name whose branch is gone', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.markTaken('/repo/a', 'vesper');       // orphan loaded at startup
+    pool.syncFromBranches('/repo/a', [], 'bill'); // git says the branch is gone
+    expect(pool.pick('/repo/a')).toBe('vesper');
+  });
+
+  // The distinction that motivates markTaken: addUsed survives a resync (a live
+  // session holds it), markTaken does not (git is the source of truth).
+  it('should keep an addUsed name across a resync', () => {
+    const pool = createCocktailPool(['vesper']);
+    pool.addUsed('/repo/a', 'vesper');
+    pool.syncFromBranches('/repo/a', [], 'bill');
+    expect(pool.pick('/repo/a')).toBe('vesper-2');
   });
 });
 
