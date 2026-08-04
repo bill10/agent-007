@@ -329,10 +329,10 @@ export function updateTopbarAgent() {
     parts.push(`<span class="topbar-readonly" style="color:${c};border-color:${c}">\u{1F441} view-only${who}</span>`);
   }
   if (agent.repoSlug) {
-    parts.push(`<span class="topbar-repo-label">Repo:</span> <span class="topbar-repo-name">${agent.repoSlug}</span>`);
+    parts.push(`<span class="topbar-repo-label">Repo:</span> <span class="topbar-repo-name">${escapeHtml(agent.repoSlug)}</span>`);
   }
   if (agent.branchName) {
-    parts.push(`<svg class="topbar-branch-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="3.5" cy="2.5" r="1.2"/><circle cx="3.5" cy="9.5" r="1.2"/><circle cx="8.5" cy="4" r="1.2"/><path d="M3.5 3.7v4.6"/><path d="M8.5 5.2c0 2.2-1.8 2.6-3.4 3.1"/></svg><span class="topbar-branch-name">${agent.branchName}</span>`);
+    parts.push(`<svg class="topbar-branch-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="3.5" cy="2.5" r="1.2"/><circle cx="3.5" cy="9.5" r="1.2"/><circle cx="8.5" cy="4" r="1.2"/><path d="M3.5 3.7v4.6"/><path d="M8.5 5.2c0 2.2-1.8 2.6-3.4 3.1"/></svg><span class="topbar-branch-name">${escapeHtml(agent.branchName)}</span>`);
   }
   el.innerHTML = parts.join(' ');
 }

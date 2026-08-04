@@ -53,10 +53,8 @@ export async function validateRepoPath(repoPath) {
 
 // --- Repo Management ---
 
-// The `${gitUser}` half of every branch this app creates. Shared by createWorktree
-// and syncCocktailPool so they can never disagree about which branches are ours —
-// if they drift, the pool either blocks names that are free or hands out names
-// whose branch already exists.
+// The `${gitUser}` half of every branch this app creates, e.g. `bill/vesper`.
+// Falls back to `agent` when the repo has no user.name configured.
 async function branchPrefix(repoPath) {
   try {
     return (await gitExec(['-C', repoPath, 'config', 'user.name'])).trim().toLowerCase().replace(/\s+/g, '-');
@@ -65,35 +63,10 @@ async function branchPrefix(repoPath) {
   }
 }
 
-// Teach the cocktail pool which names this repo's branches already occupy.
-//
-// The pool's own bookkeeping only covers names handed out since the process
-// started. Branches from earlier runs — or made outside the app entirely — are
-// invisible to it, so pick() would return a cocktail whose branch exists and
-// `worktree add` would fail with "already exists". There is no automatic retry:
-// the spawn errors out, and the user's next attempt drew from the same unshrunk
-// pool. Syncing first makes those names unavailable up front.
-//
-// Best-effort: a failure here costs an occasional collision, not a spawn.
-export async function syncCocktailPool(repoPath) {
-  try {
-    const [out, prefix] = await Promise.all([
-      gitExec(['-C', repoPath, 'for-each-ref', '--format=%(refname:short)', 'refs/heads']),
-      branchPrefix(repoPath),
-    ]);
-    cocktailPool.syncFromBranches(repoPath, out.split('\n').filter(l => l.trim()), prefix);
-  } catch (err) {
-    console.error(`Cocktail pool sync failed for ${repoPath}:`, err.message);
-  }
-}
-
 export async function addRepo(repoPath, broadcast) {
   const validation = await validateRepoPath(repoPath);
   if (!validation.valid) return { error: validation.error };
   const resolved = validation.resolvedPath;
-  // Runs on every spawn (server.js awaits addRepo immediately before pick), which
-  // is what keeps the pool current against branches created since the last one.
-  await syncCocktailPool(resolved);
   if (config.repos.some(r => r.path === resolved)) {
     return { ok: true, path: resolved, slug: basename(resolved) };
   }
@@ -122,20 +95,58 @@ export function broadcastReposList(broadcast) {
 }
 
 // --- Worktree Management ---
-export async function createWorktree(repoPath, agentName, cocktail) {
+// Only a BRANCH collision is worth retrying under a different cocktail. The
+// worktree-dir collision (`fatal: '<path>' already exists`) also contains the
+// words "already exists" but no other name can fix it, so matching the looser
+// substring would walk the entire pool for nothing.
+const BRANCH_EXISTS_RE = /a branch named .* already exists/;
+
+// Ask git for a name rather than tracking which names are free.
+//
+// `worktree add -b` creates the ref atomically: it either succeeds, or it tells us
+// the branch is taken and leaves nothing behind (no partial worktree dir to clean
+// up — verified). So we walk candidates until one lands. That also settles
+// concurrent spawns for free: two agents opening with the same cocktail can't both
+// win, and the loser simply takes the next candidate instead of erroring.
+//
+// `customBranch` never retries — the user asked for that specific name, so a
+// collision is an error to report, not a cue to silently pick something else.
+export async function createWorktree(repoPath, agentName, customBranch) {
   const dirName = repoDirName(repoPath);
   const gitUser = await branchPrefix(repoPath);
-  const branchName = `${gitUser}/${cocktail}`;
   const worktreePath = join(WORKTREE_DIR, dirName, agentName);
   mkdirSync(join(WORKTREE_DIR, dirName), { recursive: true });
-  try {
-    await gitExec(['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName]);
-  } catch (err) {
-    const msg = err.stderr || err.message || '';
-    if (msg.includes('already exists')) return { error: `Branch "${branchName}" already in use — choose a different agent name` };
-    return { error: `Failed to create worktree: ${msg}` };
+
+  const attempt = async (cocktail) => {
+    const branchName = `${gitUser}/${cocktail}`;
+    try {
+      await gitExec(['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName]);
+      return { worktreePath, branchName, cocktail };
+    } catch (err) {
+      const msg = err.stderr || err.message || '';
+      if (BRANCH_EXISTS_RE.test(msg)) return { branchTaken: true, branchName };
+      return { error: `Failed to create worktree: ${msg}` };
+    }
+  };
+
+  if (customBranch) {
+    const result = await attempt(customBranch);
+    if (result.branchTaken) {
+      return { error: `Branch "${result.branchName}" already in use — choose a different agent name` };
+    }
+    return result;
   }
-  return { worktreePath, branchName };
+
+  // Bounded so a repo that somehow rejects everything fails loudly instead of
+  // spawning git in a loop. 100 tries is ~5 full passes over the cocktail list.
+  let tries = 0;
+  for (const cocktail of cocktailPool.candidates(repoPath)) {
+    if (++tries > 100) break;
+    const result = await attempt(cocktail);
+    if (result.branchTaken) { cocktailPool.reject(repoPath, cocktail); continue; }
+    return result;
+  }
+  return { error: 'Could not find a free branch name after 100 attempts' };
 }
 
 export async function removeWorktree(session) {
@@ -238,17 +249,6 @@ export async function scanForOrphanedWorktrees(broadcast) {
         };
         orphans.set(orphanId, orphan);
         codenamePool.addUsed(agentDir);
-        // Claim the cocktail too — an orphan still holds its branch, and this
-        // path previously reserved only the codename (config.js does both when
-        // loading orphans from disk).
-        //
-        // The `includes('/')` guard matches config.js and, critically, the
-        // release site in ws.js: recycle() only fires for slash-bearing names, so
-        // claiming a bare one ('fizz' from a manual checkout, or 'HEAD' when
-        // detached) would reserve a name nothing ever hands back.
-        if (branchName && branchName.includes('/')) {
-          cocktailPool.markTaken(repoPath, branchName.split("/").pop());
-        }
         console.log(`Discovered orphaned worktree: ${agentDir} in ${repoPath}`);
       }
     }

@@ -2,7 +2,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import {
-  config, setConfig, orphans, codenamePool, cocktailPool,
+  config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
 
@@ -21,9 +21,6 @@ export function loadConfig() {
     for (const o of config.orphans) {
       orphans.set(o.id, o);
       codenamePool.addUsed(o.name);
-      if (o.branchName && o.branchName.includes('/')) {
-        cocktailPool.markTaken(o.repoPath, o.branchName.split("/").pop());
-      }
     }
   } catch (err) {
     console.warn('Config corrupted, starting with empty config:', err.message);
@@ -89,9 +86,6 @@ export function recoverCrashedSessions(broadcast) {
     };
     orphans.set(orphanId, orphan);
     codenamePool.addUsed(s.name);
-    if (s.branchName && s.branchName.includes('/')) {
-      cocktailPool.markTaken(s.repoPath, s.branchName.split("/").pop());
-    }
     console.log(`Recovered crashed session: ${s.name} in ${s.repoPath}`);
   }
   config.activeSessions = [];

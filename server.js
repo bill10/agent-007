@@ -20,7 +20,7 @@ import { mkdirSync } from 'fs';
 
 import {
   PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
-  codenamePool, cocktailPool, colorCycler, nextSessionId,
+  codenamePool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
@@ -57,33 +57,16 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
     if (result.error) { codenamePool.recycle(agentName); return { error: result.error }; }
     resolvedRepoPath = result.path;
     repoSlug = result.slug;
-    // A custom name is reserved like a picked one so all three release sites can
-    // treat pool entries the same way (see the recycle calls below and in
-    // killSession); guarding two of them on !customBranch made ownership depend on
-    // how the name was chosen.
-    //
-    // This is bookkeeping, not a correctness guard. `worktree add -b` is what
-    // actually prevents a duplicate branch — a loser gets "already exists" and the
-    // spawn fails cleanly. Reserving only helps the narrow case where a custom
-    // name happens to BE a cocktail and a concurrent spawn would otherwise pick
-    // it; two spawns naming the same custom branch still both reach git, since
-    // nothing consults the reservation on this path.
-    if (customBranch) {
-      cocktail = customBranch;
-      cocktailPool.addUsed(resolvedRepoPath, cocktail);
-    } else {
-      cocktail = cocktailPool.pick(resolvedRepoPath);
-    }
-    const wtResult = await createWorktree(resolvedRepoPath, agentName, cocktail);
+    // createWorktree picks the name by trying it against git, so it reports back
+    // which cocktail actually landed. Nothing to reserve or release here.
+    const wtResult = await createWorktree(resolvedRepoPath, agentName, customBranch);
     if (wtResult.error) {
       codenamePool.recycle(agentName);
-      // Unconditional now that custom names are reserved too — matching the
-      // release in killSession, so all three sites agree on who owns an entry.
-      cocktailPool.recycle(resolvedRepoPath, cocktail);
       return { error: wtResult.error };
     }
     worktreePath = wtResult.worktreePath;
     branchName = wtResult.branchName;
+    cocktail = wtResult.cocktail;
   }
 
   const result = createSessionFromConfig({
@@ -94,7 +77,6 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
 
   if (result.error) {
     codenamePool.recycle(agentName);
-    if (resolvedRepoPath && cocktail) cocktailPool.recycle(resolvedRepoPath, cocktail);
     // Spawn failed after the worktree was created — remove it and its branch
     // so a bad command doesn't leak a worktree + branch on disk.
     if (worktreePath && resolvedRepoPath) {
@@ -144,7 +126,6 @@ async function killSession(sessionId) {
     broadcast({ type: 'notification', level: 'info', message: `${session.name} orphaned — worktree kept (${reason} changes)` });
   } else {
     codenamePool.recycle(session.name);
-    if (session.repoPath && session.cocktail) cocktailPool.recycle(session.repoPath, session.cocktail);
   }
   sessions.delete(sessionId);
 }
