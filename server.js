@@ -20,7 +20,7 @@ import { mkdirSync } from 'fs';
 
 import {
   PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
-  codenamePool, cocktailPool, colorCycler, nextSessionId,
+  codenamePool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
@@ -57,15 +57,16 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
     if (result.error) { codenamePool.recycle(agentName); return { error: result.error }; }
     resolvedRepoPath = result.path;
     repoSlug = result.slug;
-    cocktail = customBranch || cocktailPool.pick(resolvedRepoPath);
-    const wtResult = await createWorktree(resolvedRepoPath, agentName, cocktail);
+    // createWorktree picks the name by trying it against git, so it reports back
+    // which cocktail actually landed. Nothing to reserve or release here.
+    const wtResult = await createWorktree(resolvedRepoPath, agentName, customBranch);
     if (wtResult.error) {
       codenamePool.recycle(agentName);
-      if (!customBranch) cocktailPool.recycle(resolvedRepoPath, cocktail);
       return { error: wtResult.error };
     }
     worktreePath = wtResult.worktreePath;
     branchName = wtResult.branchName;
+    cocktail = wtResult.cocktail;
   }
 
   const result = createSessionFromConfig({
@@ -76,7 +77,6 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
 
   if (result.error) {
     codenamePool.recycle(agentName);
-    if (resolvedRepoPath && cocktail && !customBranch) cocktailPool.recycle(resolvedRepoPath, cocktail);
     // Spawn failed after the worktree was created — remove it and its branch
     // so a bad command doesn't leak a worktree + branch on disk.
     if (worktreePath && resolvedRepoPath) {
@@ -126,7 +126,6 @@ async function killSession(sessionId) {
     broadcast({ type: 'notification', level: 'info', message: `${session.name} orphaned — worktree kept (${reason} changes)` });
   } else {
     codenamePool.recycle(session.name);
-    if (session.repoPath && session.cocktail) cocktailPool.recycle(session.repoPath, session.cocktail);
   }
   sessions.delete(sessionId);
 }

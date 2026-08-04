@@ -66,7 +66,9 @@ export const RING_BUFFER_MAX = 5000;
 export const GIT_AUTO_TIMEOUT = 5000;
 export const GIT_USER_TIMEOUT = 30000;
 export const CONFIG_DIR = join(homedir(), '.agent-007');
-export const WORKTREE_DIR = join(CONFIG_DIR, 'worktrees');
+// Overridable so tests never create worktrees in the developer's live
+// ~/.agent-007/worktrees (mirrors AGENT007_USERS_PATH, which test/setup.js uses).
+export const WORKTREE_DIR = process.env.AGENT007_WORKTREE_DIR || join(CONFIG_DIR, 'worktrees');
 export const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 // --- Mutable state ---

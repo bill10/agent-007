@@ -153,48 +153,85 @@ describe('createCodenamePool', () => {
 // --- createCocktailPool ---
 
 describe('createCocktailPool', () => {
-  it('should return a cocktail from the pool', () => {
+  const take = (pool, repo, n) => {
+    const out = [];
+    for (const c of pool.candidates(repo)) { out.push(c); if (out.length === n) break; }
+    return out;
+  };
+
+  it('should offer every name once before repeating', () => {
+    const pool = createCocktailPool(['vesper', 'martini', 'gimlet']);
+    const first3 = take(pool, '/repo/a', 3);
+    expect(new Set(first3)).toEqual(new Set(['vesper', 'martini', 'gimlet']));
+  });
+
+  it('should prefix later rounds once the plain names run out', () => {
+    const pool = createCocktailPool(['vesper']);
+    expect(take(pool, '/repo/a', 4)).toEqual(['vesper', '2nd-vesper', '3rd-vesper', '4th-vesper']);
+  });
+
+  it('should order candidates randomly so concurrent spawns rarely collide', () => {
+    const pool = createCocktailPool(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+    const runs = new Set();
+    for (let i = 0; i < 40; i++) runs.add(take(pool, `/repo/${i}`, 8).join(','));
+    expect(runs.size).toBeGreaterThan(1);
+  });
+
+  // reject is a hint, not a ledger: rejected names sink to the back of the round
+  // so the next spawn tries them last. They are never dropped, because the branch
+  // behind a rejection can be deleted at any time.
+  it('should try rejected names last, not never', () => {
     const pool = createCocktailPool(['vesper', 'martini']);
-    const name = pool.pick('/repo/a');
-    expect(['vesper', 'martini']).toContain(name);
+    pool.reject('/repo/a', 'vesper');
+    expect(take(pool, '/repo/a', 2)).toEqual(['martini', 'vesper']);
   });
 
-  it('should track cocktails per repo independently', () => {
-    const pool = createCocktailPool(['vesper']);
-    expect(pool.pick('/repo/a')).toBe('vesper');
-    expect(pool.pick('/repo/b')).toBe('vesper');
-  });
-
-  it('should not return a cocktail already used for the same repo', () => {
+  it('should keep rejections per repo', () => {
     const pool = createCocktailPool(['vesper', 'martini']);
-    const first = pool.pick('/repo/a');
-    const second = pool.pick('/repo/a');
-    expect(first).not.toBe(second);
+    pool.reject('/repo/a', 'vesper');
+    expect(take(pool, '/repo/b', 1).length).toBe(1);
+    const b = take(pool, '/repo/b', 2);
+    expect(new Set(b)).toEqual(new Set(['vesper', 'martini']));
   });
 
-  it('should use suffixed fallbacks after pool exhaustion', () => {
+  it('should stop after maxRounds', () => {
     const pool = createCocktailPool(['vesper']);
-    pool.pick('/repo/a'); // vesper
-    expect(pool.pick('/repo/a')).toBe('vesper-2');
+    expect([...pool.candidates('/repo/a', 2)]).toEqual(['vesper', '2nd-vesper']);
   });
 
-  it('should fall back to branch-{timestamp} when fully exhausted', () => {
-    const pool = createCocktailPool(['v']);
-    pool.pick('/r'); // v
-    for (let i = 2; i <= 99; i++) pool.pick('/r');
-    expect(pool.pick('/r')).toMatch(/^branch-\d+$/);
+  // Regression: the caller rejects each name as it fails, and a lazily-evaluated
+  // second partition re-collected those names inside the SAME round — so a walk
+  // burned its attempt budget re-testing names it had just proved were taken.
+  it('should never offer the same name twice in one round', () => {
+    const pool = createCocktailPool(['a', 'b', 'c', 'd']);
+    pool.reject('/repo/a', 'a');            // a pre-existing hint, as a real repo has
+    const seen = [];
+    for (const c of pool.candidates('/repo/a')) {
+      seen.push(c);
+      pool.reject('/repo/a', c);            // exactly what createWorktree does
+      if (seen.length === 4) break;
+    }
+    expect(new Set(seen).size).toBe(4);
+    expect(new Set(seen)).toEqual(new Set(['a', 'b', 'c', 'd']));
   });
 
-  it('should recycle a cocktail for reuse', () => {
+  // The first spawn for a repo used to bind a detached Set, so mid-walk rejections
+  // went to a different object and the bug above hid from every fresh-repo test.
+  it('should see mid-walk rejections on a repo it has never seen', () => {
+    const pool = createCocktailPool(['a', 'b', 'c']);
+    const seen = [];
+    for (const c of pool.candidates('/brand/new')) {
+      seen.push(c);
+      pool.reject('/brand/new', c);
+      if (seen.length === 3) break;
+    }
+    expect(new Set(seen).size).toBe(3);
+  });
+
+  it('should use correct ordinals past 20', () => {
     const pool = createCocktailPool(['vesper']);
-    pool.pick('/repo/a');
-    pool.recycle('/repo/a', 'vesper');
-    expect(pool.pick('/repo/a')).toBe('vesper');
-  });
-
-  it('should handle recycling from a repo with no prior usage', () => {
-    const pool = createCocktailPool(['vesper']);
-    pool.recycle('/unknown', 'vesper'); // should not throw
+    const all = [...pool.candidates('/repo/a', 23)];
+    expect(all.slice(19, 23)).toEqual(['20th-vesper', '21st-vesper', '22nd-vesper', '23rd-vesper']);
   });
 });
 

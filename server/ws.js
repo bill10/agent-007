@@ -4,7 +4,7 @@ import { existsSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { basename, join } from 'path';
 import {
   config, sessions, orphans, adoptingOrphans,
-  codenamePool, cocktailPool, colorCycler, nextSessionId,
+  codenamePool, colorCycler, nextSessionId,
   GIT_USER_TIMEOUT, isAllowedOrigin,
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
@@ -246,6 +246,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             if (!recreated) {
               ws.send(JSON.stringify({ type: 'spawn-error', error: 'Worktree directory no longer exists' }));
               adoptingOrphans.delete(msg.orphanId);
+              // Dropping the orphan record has to hand its codename back, or the
+              // name is burned for the life of the process — nothing else releases
+              // it. The branch needs no bookkeeping: git is asked directly at spawn
+              // time, so whether this branch still exists takes care of itself.
+              codenamePool.recycle(orphan.name);
               orphans.delete(msg.orphanId);
               syncOrphansToConfig(broadcast);
               broadcastOrphansList();
@@ -298,9 +303,6 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           }
           await deleteBranch(orphan.repoPath, orphan.branchName);
           codenamePool.recycle(orphan.name);
-          if (orphan.branchName && orphan.branchName.includes('/')) {
-            cocktailPool.recycle(orphan.repoPath, orphan.branchName.split('/').pop());
-          }
           orphans.delete(msg.orphanId);
           syncOrphansToConfig(broadcast);
           broadcastOrphansList();

@@ -6,3 +6,8 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 process.env.AGENT007_USERS_PATH = join(mkdtempSync(join(tmpdir(), 'a007-test-')), 'users.json');
+
+// Same idea for worktrees: createWorktree mkdirs and git-worktree-adds under
+// WORKTREE_DIR, which defaults to the developer's live ~/.agent-007/worktrees.
+// Without this a worktree test would litter (or collide with) a running server.
+process.env.AGENT007_WORKTREE_DIR = mkdtempSync(join(tmpdir(), 'a007-worktrees-'));
