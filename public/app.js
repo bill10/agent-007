@@ -16,7 +16,7 @@ import {
   handleRepoError as explorerHandleRepoError,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
-import { captureTokenFromUrl, authHeaders, showLogin, renderPresence } from './modules/auth.js';
+import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
 setOnSessionChanged(() => {
@@ -176,7 +176,7 @@ async function fetchDirectory(path) {
     }
     const data = await resp.json();
     if (!resp.ok) {
-      list.innerHTML = `<div class="dir-browser-error">${data.error || 'Failed to browse'}</div>`;
+      list.innerHTML = `<div class="dir-browser-error">${escapeHtml(data.error || 'Failed to browse')}</div>`;
       return;
     }
     dirBrowserCurrentPath = data.path;
@@ -187,7 +187,7 @@ async function fetchDirectory(path) {
     selectBtn.textContent = data.isGitRepo ? 'Select This Directory' : 'Select (not a git repo)';
     renderDirList(data);
   } catch (err) {
-    list.innerHTML = `<div class="dir-browser-error">Network error: ${err.message}</div>`;
+    list.innerHTML = `<div class="dir-browser-error">Network error: ${escapeHtml(err.message)}</div>`;
   }
 }
 
@@ -295,7 +295,7 @@ function updateRepoDropdown() {
     if (filter && !path.toLowerCase().includes(filter) && !repo.slug.toLowerCase().includes(filter)) continue;
     const item = document.createElement('div');
     item.className = 'repo-dropdown-item';
-    item.innerHTML = `<span class="repo-dropdown-slug">${repo.slug}</span><span class="repo-dropdown-path">${path}</span>`;
+    item.innerHTML = `<span class="repo-dropdown-slug">${escapeHtml(repo.slug)}</span><span class="repo-dropdown-path">${escapeHtml(path)}</span>`;
     item.onmousedown = (e) => {
       e.preventDefault();
       repoInput.value = path;

@@ -97,6 +97,17 @@ describe('createWorktree finds a free branch by trying', () => {
     expect(r.cocktail).toBeUndefined();
   });
 
+  // Concurrent spawns are the case the retry design is supposed to settle for
+  // free. Losers must each land on their own name, not error out.
+  it('gives concurrent spawns into one repo distinct names', async () => {
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => spawn()),
+    );
+    for (const r of results) expect(r.error).toBeUndefined();
+    expect(new Set(results.map(r => r.cocktail)).size).toBe(6);
+    expect(new Set(results.map(r => r.branchName)).size).toBe(6);
+  });
+
   // A worktree-path collision says "already exists" too, but no other cocktail
   // can fix it — retrying would walk the whole pool for nothing.
   it('does not retry a worktree-path collision', async () => {

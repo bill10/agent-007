@@ -18,8 +18,13 @@ import { parseGitStatus, buildFileTree, repoDirName } from '../lib/helpers.js';
 export function gitExec(args, opts = {}) {
   const timeout = opts.timeout || GIT_AUTO_TIMEOUT;
   const cwd = opts.cwd;
+  // LC_ALL=C so stderr stays English. createWorktree decides whether to retry by
+  // matching git's message, and distro git ships translated message catalogs — a
+  // non-English operator would otherwise turn every branch collision into a hard
+  // spawn failure.
+  const env = { ...process.env, LC_ALL: 'C', LANGUAGE: '' };
   return new Promise((resolve, reject) => {
-    execFileCb('git', args, { timeout, maxBuffer: 1024 * 1024, cwd }, (err, stdout, stderr) => {
+    execFileCb('git', args, { timeout, maxBuffer: 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;
         reject(err);
@@ -99,7 +104,11 @@ export function broadcastReposList(broadcast) {
 // worktree-dir collision (`fatal: '<path>' already exists`) also contains the
 // words "already exists" but no other name can fix it, so matching the looser
 // substring would walk the entire pool for nothing.
-const BRANCH_EXISTS_RE = /a branch named .* already exists/;
+//
+// Two messages, because git checks the branch then locks the ref: the common one
+// comes from the existence check, and the second from losing the lock race after
+// passing that check. Both mean the same thing — the name is taken, try another.
+const BRANCH_EXISTS_RE = /a branch named .* already exists|cannot lock ref '[^']*': reference already exists/;
 
 // Ask git for a name rather than tracking which names are free.
 //
@@ -138,15 +147,18 @@ export async function createWorktree(repoPath, agentName, customBranch) {
   }
 
   // Bounded so a repo that somehow rejects everything fails loudly instead of
-  // spawning git in a loop. 100 tries is ~5 full passes over the cocktail list.
+  // spawning git in a loop. Either bound can end the walk, so report what actually
+  // happened rather than assuming we spent the whole budget.
+  const MAX_TRIES = 100;
   let tries = 0;
   for (const cocktail of cocktailPool.candidates(repoPath)) {
-    if (++tries > 100) break;
+    if (tries >= MAX_TRIES) break;
+    tries++;
     const result = await attempt(cocktail);
     if (result.branchTaken) { cocktailPool.reject(repoPath, cocktail); continue; }
     return result;
   }
-  return { error: 'Could not find a free branch name after 100 attempts' };
+  return { error: `Could not find a free branch name after ${tries} attempts` };
 }
 
 export async function removeWorktree(session) {

@@ -198,6 +198,41 @@ describe('createCocktailPool', () => {
     const pool = createCocktailPool(['vesper']);
     expect([...pool.candidates('/repo/a', 2)]).toEqual(['vesper', '2nd-vesper']);
   });
+
+  // Regression: the caller rejects each name as it fails, and a lazily-evaluated
+  // second partition re-collected those names inside the SAME round — so a walk
+  // burned its attempt budget re-testing names it had just proved were taken.
+  it('should never offer the same name twice in one round', () => {
+    const pool = createCocktailPool(['a', 'b', 'c', 'd']);
+    pool.reject('/repo/a', 'a');            // a pre-existing hint, as a real repo has
+    const seen = [];
+    for (const c of pool.candidates('/repo/a')) {
+      seen.push(c);
+      pool.reject('/repo/a', c);            // exactly what createWorktree does
+      if (seen.length === 4) break;
+    }
+    expect(new Set(seen).size).toBe(4);
+    expect(new Set(seen)).toEqual(new Set(['a', 'b', 'c', 'd']));
+  });
+
+  // The first spawn for a repo used to bind a detached Set, so mid-walk rejections
+  // went to a different object and the bug above hid from every fresh-repo test.
+  it('should see mid-walk rejections on a repo it has never seen', () => {
+    const pool = createCocktailPool(['a', 'b', 'c']);
+    const seen = [];
+    for (const c of pool.candidates('/brand/new')) {
+      seen.push(c);
+      pool.reject('/brand/new', c);
+      if (seen.length === 3) break;
+    }
+    expect(new Set(seen).size).toBe(3);
+  });
+
+  it('should use correct ordinals past 20', () => {
+    const pool = createCocktailPool(['vesper']);
+    const all = [...pool.candidates('/repo/a', 23)];
+    expect(all.slice(19, 23)).toEqual(['20th-vesper', '21st-vesper', '22nd-vesper', '23rd-vesper']);
+  });
 });
 
 // --- stripAnsiComplete ---
