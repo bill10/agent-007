@@ -18,7 +18,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 - The microphone is deliberately bounded so it can never stay hot unnoticed:
   it stops after ~1 minute without delivered speech, always after 5 minutes,
   when you switch or close agents, when an agent's shell ends, and when the
-  browser tab is hidden — each with an on-screen notice explaining the stop.
+  browser tab is hidden — each stop except the hidden-tab one flashes an
+  on-screen notice explaining why (a hidden tab can't show one; that stop is
+  announced to screen readers).
 - Screen-reader support for dictation: the mic button announces its
   pressed state and voice start/stop/errors are read out via a live region.
 

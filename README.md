@@ -152,6 +152,8 @@ public/
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared agent state
     shortcuts.js   Keyboard shortcuts
+    voice.js       Voice input (Web Speech API dictation)
+    auth.js        Login tokens, presence, HTML escaping
 lib/
   helpers.js       State detection, git parsing, codename/cocktail pools
 ```
