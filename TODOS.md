@@ -32,6 +32,14 @@
 - **Depends on:** Stable (non-beta) node-pty release, npm account setup
 - **Context:** Deferred from v0.1.0 open-source launch per outside voice review (2026-04-06). The current `node-pty ^1.2.0-beta.12` has inconsistent prebuilds, and the server has no CLI argument parsing. Ship clone-and-run first, npm publish when CLI UX is ready.
 
+## Don't auto-switch tabs on teammates' spawns
+- **What:** `handleSessionCreated` calls `switchToSession` unconditionally, so in a multi-user deployment a teammate spawning an agent steals every viewer's active tab. Only auto-switch to sessions this client spawned (or when no session is active).
+- **Why:** Tab-stealing interrupts whatever the viewer was doing; with voice input it also stops an in-flight dictation (a notice now flashes, but the interruption remains).
+- **Effort:** S (human: ~2 hours / CC: ~5 min)
+- **Priority:** P2
+- **Depends on:** Nothing
+- **Context:** Flagged by the red-team pass during the voice-input review (2026-08-24, v0.2.0.0). Pre-existing behavior, out of scope for the voice branch; the voice-side symptom was mitigated with a "Voice input stopped — switched agents" notice.
+
 ## Collaborative mode
 
 ## Token rotation / expiry + non-URL WS auth
