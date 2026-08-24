@@ -108,6 +108,9 @@
     <div class="terminal-panel" id="terminal-panel">
       <div class="panel-header terminal-header">
         <span class="topbar-agent-info" id="topbar-agent-info"></span>
+        <button class="theme-toggle" id="btn-voice" title="Voice input (Cmd+D)">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/></svg>
+        </button>
         <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
           <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 14 14" style="display:none"><path d="M12 8.5A5.5 5.5 0 1 1 5.5 2 4 4 0 0 0 12 8.5z" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
           <svg id="theme-icon-sun" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.8 2.8l1.4 1.4M9.8 9.8l1.4 1.4M11.2 2.8l-1.4 1.4M4.2 9.8l-1.4 1.4" stroke="currentColor" stroke-width="1.2"/></svg>
@@ -118,6 +121,7 @@
         <div class="terminal-empty" id="terminal-empty">
           <p>No agent selected</p>
         </div>
+        <div class="voice-indicator" id="voice-indicator" style="display:none"></div>
       </div>
     </div>
   </div>

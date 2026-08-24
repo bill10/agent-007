@@ -60,6 +60,11 @@ the browser's `Origin` is the tailnet hostname you may still need
 `ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net`. This is the most secure option: no
 extra port is open and traffic is encrypted end to end.
 
+> **Voice input needs this HTTPS setup.** Browsers only grant microphone access
+> in a secure context (HTTPS or localhost), so the in-app voice input (mic
+> button / `Cmd+D`) works over `tailscale serve` but not over the plain
+> `http://...:7007` bind above.
+
 ### SSH into the host too
 
 Enable **Tailscale SSH** and reach the mini with `ssh you@mac-mini` — key-free and

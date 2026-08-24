@@ -2,6 +2,7 @@
 import { agents } from './state.js';
 import { switchToSession } from './terminal.js';
 import { toggleExplorer } from './explorer.js';
+import { toggleVoice } from './voice.js';
 
 export function setupShortcuts() {
   document.addEventListener('keydown', (e) => {
@@ -29,6 +30,13 @@ export function setupShortcuts() {
     if (e.key === 'n') {
       e.preventDefault();
       document.getElementById('btn-new-agent').click();
+      return;
+    }
+
+    // Cmd+D: toggle voice input
+    if (e.key === 'd') {
+      e.preventDefault();
+      toggleVoice();
       return;
     }
   });

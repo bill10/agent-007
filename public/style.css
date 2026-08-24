@@ -157,6 +157,40 @@ body {
 }
 .theme-toggle:hover { color: var(--text); border-color: var(--text-dim); }
 
+/* Voice input */
+#btn-voice.listening {
+  color: var(--state-disconnected);
+  border-color: var(--state-disconnected);
+  animation: mic-pulse 1.6s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.voice-indicator {
+  position: absolute;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  padding: 5px 14px;
+  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 10;
+  align-items: center;
+  pointer-events: none;
+}
+.voice-indicator.error {
+  color: var(--state-disconnected);
+  border-color: var(--state-disconnected);
+}
+
 /* Spawn form */
 .spawn-form {
   position: absolute;

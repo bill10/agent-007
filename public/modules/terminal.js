@@ -112,7 +112,7 @@ export async function handleSessionCreated(msg) {
 
   // Custom key handler for global shortcuts
   term.attachCustomKeyEventHandler((event) => {
-    if (event.metaKey && ['1','2','3','4','5','6','7','8','9','e','n'].includes(event.key)) {
+    if (event.metaKey && ['1','2','3','4','5','6','7','8','9','e','n','d'].includes(event.key)) {
       return false;
     }
     return true;
