@@ -40,6 +40,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
+- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry
 
 ## Code Style
 

@@ -26,6 +26,11 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Changed
 
+- Global keyboard shortcuts (`Cmd+1..9`, `Cmd+E`, `Cmd+N`, and the new
+  `Cmd+D`) now fire only on exact Cmd chords: combos with Ctrl or Alt also
+  held, and held-key repeats, no longer trigger them. The page and the
+  terminal now share one shortcut list, so no chord is blocked in the
+  terminal but dead on the page.
 - The docs now spell out the voice privacy trade-off: Chrome and Edge process
   speech on vendor servers, so dictated content leaves the machine even inside
   a tailnet — don't dictate secrets. They also note that transcripts arrive as

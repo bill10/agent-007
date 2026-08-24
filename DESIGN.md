@@ -63,6 +63,7 @@ Two themes: dark (default) and light. Gold accent in both. Persisted to localSto
 --state-message:      #e0853a    /* orange: agent needs attention */
 --state-idle:         #4a4e58    /* gray: no activity */
 --state-disconnected: #c44040    /* red: process exited */
+--state-recording:    #c44040    /* red: voice input mic is live (same red as disconnected) */
 ```
 
 ### Terminal ANSI Colors (dark theme — GitHub dark palette)
@@ -112,7 +113,7 @@ Three-panel layout with per-panel headers:
 - **Dividers:** Gradient top (matches header bg) + border below. Gold on hover.
 - **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E
 - **Office:** Centered "+ New Agent" button
-- **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle
+- **Terminal:** "Repo:" label + repo name + branch icon + branch name + header icon buttons (voice input mic + theme toggle)
 - **Terminal tabs:** Draggable for reordering, order persisted to localStorage
 - Panel widths persisted to localStorage
 - Below 900px: explorer auto-hidden
@@ -159,6 +160,18 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 - **Particles:** 5 ambient dust motes
 
 ## Interactive Behaviors
+
+### Header icon buttons
+- Shared `.icon-btn` primitive (formerly `.theme-toggle`) in the terminal
+  header's `.header-actions` group: voice input mic + theme toggle
+
+### Voice input
+- Mic button pulses `--state-recording` red while listening (`mic-pulse`)
+- Transcript pill floats top-center over the terminal so it never covers the
+  prompt line being dictated into
+- The pill's pulsing dot means "recording" — hidden on notice/error variants
+  (the mic is off there; a red dot would be an inverted privacy signal)
+- Screen-reader announcements go to a visually-hidden `.sr-only` live region
 
 ### Theme toggle
 - Sun/moon SVG icons in terminal panel header
