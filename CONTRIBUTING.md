@@ -39,12 +39,15 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
+- `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
+- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry
 
 ## Code Style
 
 - **Vanilla JS.** No TypeScript, no framework, no build step. This is intentional.
 - **ES modules.** All files use `import`/`export`, not `require`.
 - **No external linter.** Keep it readable. Match the style of surrounding code.
+- **Design system.** Colors, naming pools, and UI conventions live in [DESIGN.md](DESIGN.md).
 
 ## Architecture
 

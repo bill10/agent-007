@@ -2,6 +2,8 @@
 import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml, safeColor } from './auth.js';
+import { isGlobalShortcut } from './shortcuts.js';
+import { stopVoice } from './voice.js';
 
 function waitForXterm() {
   return new Promise((resolve) => {
@@ -112,7 +114,7 @@ export async function handleSessionCreated(msg) {
 
   // Custom key handler for global shortcuts
   term.attachCustomKeyEventHandler((event) => {
-    if (event.metaKey && ['1','2','3','4','5','6','7','8','9','e','n'].includes(event.key)) {
+    if (isGlobalShortcut(event)) {
       return false;
     }
     return true;
@@ -187,6 +189,9 @@ export function handleSpawnError(msg) {
 export function handleSessionEnded(msg) {
   const agent = agents.get(msg.sessionId);
   if (!agent) return;
+  // The server drops input to an exited session — keeping the mic hot here
+  // would transcribe speech into a dead pty forever.
+  if (msg.sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent ended' });
   agent.state = 'DISCONNECTED';
   updateTabs();
   updateStatusBar();
@@ -194,6 +199,9 @@ export function handleSessionEnded(msg) {
 }
 
 export function switchToSession(sessionId) {
+  // Dictation targets the active session — don't let speech begun for one
+  // agent land in another's shell after a tab switch (or auto-switch on kill).
+  if (sessionId !== activeSessionId) stopVoice({ notice: 'Voice input stopped — switched agents' });
   if (activeSessionId && agents.has(activeSessionId)) {
     agents.get(activeSessionId).termEl.style.display = 'none';
   }
@@ -226,6 +234,9 @@ export function removeSession(sessionId) {
   if (agent.repoPath && agent.state !== 'DISCONNECTED') {
     if (!confirm(`Close ${agent.name}? Unsaved work will be kept as an orphan.`)) return;
   }
+  // Closing the last session never reaches switchToSession, so its stopVoice
+  // guard would be bypassed and the mic would stay hot over the empty state.
+  if (sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent closed' });
   if (agent.state !== 'DISCONNECTED') {
     send({ type: 'kill', sessionId });
   }

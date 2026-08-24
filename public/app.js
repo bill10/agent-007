@@ -16,6 +16,7 @@ import {
   handleRepoError as explorerHandleRepoError,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
+import { setupVoice } from './modules/voice.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -508,6 +509,7 @@ async function init() {
   setupShortcuts();
   setupResize();
   setupUpload();
+  setupVoice();
   startAnimationLoop();
   connect(onMessage);
   renderOffice();
