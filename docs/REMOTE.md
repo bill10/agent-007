@@ -63,7 +63,10 @@ extra port is open and traffic is encrypted end to end.
 > **Voice input needs this HTTPS setup.** Browsers only grant microphone access
 > in a secure context (HTTPS or localhost), so the in-app voice input (mic
 > button / `Cmd+D`) works over `tailscale serve` but not over the plain
-> `http://...:7007` bind above.
+> `http://...:7007` bind above. One boundary caveat: Web Speech recognition in
+> Chrome/Edge streams the microphone audio to Google/Microsoft servers for
+> transcription (Safari may process on-device), so dictated content leaves the
+> tailnet even though the app's own traffic doesn't — don't dictate secrets.
 
 ### SSH into the host too
 

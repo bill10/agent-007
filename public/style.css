@@ -18,6 +18,7 @@
   --state-message: #e0853a;
   --state-idle: #4a4e58;
   --state-disconnected: #c44040;
+  --state-recording: #c44040;
 }
 
 /* Theme: Light */
@@ -38,6 +39,7 @@
   --state-message: #cf6e1e;
   --state-idle: #8b949e;
   --state-disconnected: #cf222e;
+  --state-recording: #cf222e;
 }
 
 /* Focus visibility — keyboard users get a visible ring */
@@ -139,8 +141,13 @@ body {
   font-size: 12px;
 }
 
-/* Theme toggle */
-.theme-toggle {
+/* Round header icon buttons (theme toggle, voice input) */
+.header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.icon-btn {
   background: none;
   border: 1px solid var(--border);
   color: var(--text-dim);
@@ -155,21 +162,22 @@ body {
   transition: color 0.15s, border-color 0.15s;
   padding: 0;
 }
-.theme-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+.icon-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
 /* Voice input */
 #btn-voice.listening {
-  color: var(--state-disconnected);
-  border-color: var(--state-disconnected);
+  color: var(--state-recording);
+  border-color: var(--state-recording);
   animation: mic-pulse 1.6s ease-in-out infinite;
 }
 @keyframes mic-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
+/* Top-anchored so it never covers the prompt line being dictated into */
 .voice-indicator {
   position: absolute;
-  bottom: 10px;
+  top: 10px;
   left: 50%;
   transform: translateX(-50%);
   max-width: 80%;
@@ -179,16 +187,40 @@ body {
   border: 1px solid var(--border);
   color: var(--text);
   font-size: 12px;
+  z-index: 10;
+  align-items: center;
+  gap: 7px;
+  pointer-events: none;
+}
+.voice-indicator-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--state-recording);
+  animation: mic-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+.voice-indicator-text {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  z-index: 10;
-  align-items: center;
-  pointer-events: none;
 }
 .voice-indicator.error {
   color: var(--state-disconnected);
   border-color: var(--state-disconnected);
+}
+/* The dot means "recording" — never show it on post-stop notices or errors */
+.voice-indicator.error .voice-indicator-dot,
+.voice-indicator.notice .voice-indicator-dot { display: none; }
+
+/* Visually-hidden live region for screen-reader announcements */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 /* Spawn form */
