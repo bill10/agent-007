@@ -5,6 +5,35 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.2.1.0] - 2026-08-24
+
+### Changed
+
+- The voice-input mic is now a floating button at the terminal's bottom-right,
+  next to the prompt line — no more hunting for it in the header. The live
+  transcript pill docks right above the mic and slides out of it when you
+  click, so the reaction appears exactly where you clicked, without ever
+  covering the terminal's last row (where your dictated keystrokes echo).
+- Clicking the mic for the first time now asks for microphone permission
+  *before* recording starts. Previously the permission prompt raced the
+  recognizer: by the time you clicked "Allow", the mic had silently shut off
+  and your speech went nowhere. The red recording signals now turn on only
+  once the mic is truly live — while the permission prompt is open you see a
+  dot-less "Requesting microphone…" notice instead.
+- Repeat dictation starts faster: the microphone permission is acquired once
+  per visit instead of on every mic click (and re-requested automatically if
+  you revoke it mid-session).
+- Better error messages: a mic held by another app, missing hardware, or a
+  policy block each get their own guidance instead of a generic "access
+  denied".
+- Starting or stopping dictation now returns keyboard focus to the
+  terminal, so the Enter that sends your prompt lands in the terminal even
+  when you used Cmd+D from elsewhere in the app.
+- The multiplayer presence dots moved just above the mic, keeping the
+  bottom-right corner clear for the new button in logged-in sessions.
+- The new voice animations (pill slide-in, recording pulse) are explicitly
+  disabled under the system reduce-motion preference.
+
 ## [0.2.0.0] - 2026-08-24
 
 ### Added
