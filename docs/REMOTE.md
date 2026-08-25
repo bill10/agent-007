@@ -67,6 +67,9 @@ extra port is open and traffic is encrypted end to end.
 > Chrome/Edge streams the microphone audio to Google/Microsoft servers for
 > transcription (Safari may process on-device), so dictated content leaves the
 > tailnet even though the app's own traffic doesn't — don't dictate secrets.
+> Also note the microphone permission is granted per origin: the tailnet
+> hostname prompts separately from localhost, and a denial there sticks until
+> you reset it in the browser's site settings for that origin.
 
 ### SSH into the host too
 

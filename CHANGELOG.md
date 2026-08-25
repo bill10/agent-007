@@ -26,12 +26,13 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 - Better error messages: a mic held by another app, missing hardware, or a
   policy block each get their own guidance instead of a generic "access
   denied".
-- Starting or stopping dictation now always returns keyboard focus to the
+- Starting or stopping dictation now returns keyboard focus to the
   terminal, so the Enter that sends your prompt lands in the terminal even
   when you used Cmd+D from elsewhere in the app.
-- The multiplayer presence dots moved just above the mic — they used to
-  overlap it (and could steal its clicks) in logged-in sessions.
-- Animations respect the system reduce-motion preference.
+- The multiplayer presence dots moved just above the mic, keeping the
+  bottom-right corner clear for the new button in logged-in sessions.
+- The new voice animations (pill slide-in, recording pulse) are explicitly
+  disabled under the system reduce-motion preference.
 
 ## [0.2.0.0] - 2026-08-24
 
