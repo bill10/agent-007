@@ -182,13 +182,13 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-/* Top-anchored so it never covers the prompt line being dictated into */
+/* Anchored beside the mic so the reaction appears where the user clicked;
+   grows leftward from the mic, vertically centered with it. */
 .voice-indicator {
   position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: 80%;
+  right: 60px;
+  bottom: 16px;
+  max-width: calc(100% - 92px);
   padding: 5px 14px;
   border-radius: 14px;
   background: var(--bg-panel);
@@ -199,6 +199,11 @@ body {
   align-items: center;
   gap: 7px;
   pointer-events: none;
+  animation: pill-in 0.15s ease-out;
+}
+@keyframes pill-in {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: none; }
 }
 .voice-indicator-dot {
   width: 7px;

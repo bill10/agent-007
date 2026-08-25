@@ -170,8 +170,9 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
   34px, shadowed, clears the xterm scrollbar) so it sits next to the prompt
   line being dictated into
 - Mic button pulses `--state-recording` red while listening (`mic-pulse`)
-- Transcript pill floats top-center over the terminal so it never covers the
-  prompt line being dictated into
+- Transcript pill sits beside the mic (right-anchored, vertically centered
+  with it, growing leftward) so the reaction appears where the user clicked;
+  it slides in from the mic (`pill-in`) on show
 - The pill's pulsing dot means "recording" — hidden on notice/error variants
   (the mic is off there; a red dot would be an inverted privacy signal)
 - Screen-reader announcements go to a visually-hidden `.sr-only` live region
