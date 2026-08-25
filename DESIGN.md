@@ -113,7 +113,7 @@ Three-panel layout with per-panel headers:
 - **Dividers:** Gradient top (matches header bg) + border below. Gold on hover.
 - **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E
 - **Office:** Centered "+ New Agent" button
-- **Terminal:** "Repo:" label + repo name + branch icon + branch name + header icon buttons (voice input mic + theme toggle)
+- **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle in the header; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
 - **Terminal tabs:** Draggable for reordering, order persisted to localStorage
 - Panel widths persisted to localStorage
 - Below 900px: explorer auto-hidden
@@ -161,11 +161,14 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 
 ## Interactive Behaviors
 
-### Header icon buttons
-- Shared `.icon-btn` primitive (formerly `.theme-toggle`) in the terminal
-  header's `.header-actions` group: voice input mic + theme toggle
+### Icon buttons
+- Shared `.icon-btn` primitive (formerly `.theme-toggle`): theme toggle in the
+  terminal header; the voice mic reuses it with the `.voice-fab` overlay class
 
 ### Voice input
+- Mic button floats bottom-right of the terminal viewport (`.voice-fab`,
+  34px, shadowed, clears the xterm scrollbar) so it sits next to the prompt
+  line being dictated into
 - Mic button pulses `--state-recording` red while listening (`mic-pulse`)
 - Transcript pill floats top-center over the terminal so it never covers the
   prompt line being dictated into

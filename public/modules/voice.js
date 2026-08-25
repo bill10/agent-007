@@ -29,6 +29,9 @@ let recognition = null;
 let silentRestarts = 0;
 let sessionStart = 0;
 let flashTimer = null;
+// Bumped on every toggle-on; async permission callbacks compare against it so
+// a stop → quick re-toggle can't leave two recognition sessions running.
+let voiceGen = 0;
 
 function recognitionCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -176,6 +179,7 @@ function startRecognition() {
     const { finals, interim } = collectResults(event.results, event.resultIndex);
     for (const text of finals) {
       if (!deliverToActivePty(text)) {
+        console.warn('[voice] transcript could not be delivered to the active pty');
         stopVoice();
         showError('Voice input stopped — transcript could not be delivered');
         return;
@@ -189,6 +193,7 @@ function startRecognition() {
 
   rec.onerror = (event) => {
     if (recognition !== rec) return;
+    console.warn('[voice] recognition error:', event.error);
     const message = recognitionErrorMessage(event.error);
     if (!message) return;
     stopVoice();
@@ -245,16 +250,33 @@ export function toggleVoice() {
   listening = true;
   silentRestarts = 0;
   sessionStart = Date.now();
+  const gen = ++voiceGen;
   const btn = micBtn();
   if (btn) { btn.classList.add('listening'); btn.setAttribute('aria-pressed', 'true'); }
-  showIndicator(LISTENING_LABEL, 'live');
+  showIndicator('Requesting microphone…', 'live');
   announce('Voice input started');
-  try {
-    startRecognition();
-  } catch {
+  // Acquire the mic permission FIRST, then start recognition. Starting
+  // recognition while the browser's permission prompt is still open makes it
+  // error with not-allowed immediately — so by the time the user clicks
+  // "Allow", the mic is already off and their speech goes nowhere.
+  navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+    stream.getTracks().forEach((t) => t.stop());
+    if (!listening || gen !== voiceGen) return;
+    showIndicator(LISTENING_LABEL, 'live');
+    try {
+      startRecognition();
+    } catch {
+      stopVoice();
+      showError('Could not start voice input');
+    }
+  }).catch((err) => {
+    console.warn('[voice] microphone unavailable:', err && err.name);
+    if (gen !== voiceGen) return;
     stopVoice();
-    showError('Could not start voice input');
-  }
+    showError(err && err.name === 'NotFoundError'
+      ? 'No microphone found'
+      : 'Microphone access denied — allow it in your browser settings, then click the mic again');
+  });
 }
 
 // Stop dictation. opts.notice flashes an explanation when the stop wasn't
