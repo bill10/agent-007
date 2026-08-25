@@ -5,7 +5,7 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
-## [0.2.1.0] - 2026-08-25
+## [0.2.1.0] - 2026-08-24
 
 ### Changed
 
