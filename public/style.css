@@ -160,15 +160,25 @@ body {
 .icon-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
 /* Voice input */
+/* Fab geometry is the single source for the pill's placement below AND the
+   presence pill's stacking (presence is a body-level fixed element, so these
+   live on :root to reach it). right clears xterm's scrollbar on
+   classic-scrollbar platforms too (4px container padding + ~16px track). */
+:root {
+  --voice-fab-right: 20px;
+  --voice-fab-bottom: 12px;
+  --voice-fab-size: 34px;
+  /* fab top edge + pill row (~26px) + 2 gaps of 8px */
+  --voice-column-top: calc(var(--voice-fab-bottom) + var(--voice-fab-size) + 42px);
+}
 /* Floating mic, anchored next to the prompt line at the terminal's bottom.
-   right offset clears xterm's scrollbar; opaque bg so terminal text under it
-   stays legible. */
+   Opaque bg so it reads as a control, not terminal text. */
 .voice-fab {
   position: absolute;
-  right: 18px;
-  bottom: 12px;
-  width: 34px;
-  height: 34px;
+  right: var(--voice-fab-right);
+  bottom: var(--voice-fab-bottom);
+  width: var(--voice-fab-size);
+  height: var(--voice-fab-size);
   background: var(--bg-panel);
   z-index: 10;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -182,13 +192,14 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
-/* Anchored beside the mic so the reaction appears where the user clicked;
-   grows leftward from the mic, vertically centered with it. */
+/* Anchored to the mic so the reaction appears where the user clicked, but
+   stacked one row ABOVE the fab: the terminal's last row is where dictated
+   keystrokes echo — the pill must never hide that feedback. Grows leftward. */
 .voice-indicator {
   position: absolute;
-  right: 60px;
-  bottom: 16px;
-  max-width: calc(100% - 92px);
+  right: var(--voice-fab-right);
+  bottom: calc(var(--voice-fab-bottom) + var(--voice-fab-size) + 8px);
+  max-width: calc(100% - 2 * var(--voice-fab-right));
   padding: 5px 14px;
   border-radius: 14px;
   background: var(--bg-panel);
@@ -202,8 +213,13 @@ body {
   animation: pill-in 0.15s ease-out;
 }
 @keyframes pill-in {
-  from { opacity: 0; transform: translateX(8px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-indicator,
+  .voice-indicator-dot,
+  #btn-voice.listening { animation: none; }
 }
 .voice-indicator-dot {
   width: 7px;
@@ -1134,7 +1150,13 @@ body {
 
 /* --- Presence pill (phase 1) --- */
 .presence {
-  position: fixed; bottom: 10px; right: 14px; z-index: 500;
+  /* Stacked above the voice pill/fab column (geometry derived from the
+     --voice-fab-* props on :root) — at bottom-right it sat directly on the
+     mic (z 500 > 10) and ate its clicks. */
+  position: fixed;
+  bottom: var(--voice-column-top);
+  right: var(--voice-fab-right);
+  z-index: 500;
   display: flex; gap: 4px;
 }
 .presence-dot {

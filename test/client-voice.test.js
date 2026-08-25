@@ -7,6 +7,7 @@ import { agents, setActiveSession, setSelf } from '../public/modules/state.js';
 import {
   normalizeTranscript, deliverToActivePty,
   collectResults, interimTail, recognitionErrorMessage, onEndAction,
+  mediaErrorMessage,
 } from '../public/modules/voice.js';
 
 describe('normalizeTranscript (voice input)', () => {
@@ -75,6 +76,28 @@ describe('recognitionErrorMessage (error code → user message)', () => {
 
   it('falls back to a generic message naming the code', () => {
     expect(recognitionErrorMessage('network')).toBe('Voice input error: network');
+  });
+});
+
+describe('mediaErrorMessage (getUserMedia rejection → guidance)', () => {
+  it('maps missing hardware to "no microphone"', () => {
+    expect(mediaErrorMessage('NotFoundError')).toBe('No microphone found');
+    expect(mediaErrorMessage('DevicesNotFoundError')).toBe('No microphone found');
+  });
+
+  it('maps a busy device to "in use", not a permission complaint', () => {
+    expect(mediaErrorMessage('NotReadableError')).toMatch(/in use by another app/);
+    expect(mediaErrorMessage('TrackStartError')).toMatch(/in use by another app/);
+  });
+
+  it('maps transient and policy failures away from the settings advice', () => {
+    expect(mediaErrorMessage('AbortError')).toMatch(/try again/);
+    expect(mediaErrorMessage('SecurityError')).toMatch(/policy/);
+  });
+
+  it('treats true denials — including nameless rejections — as denial', () => {
+    expect(mediaErrorMessage('NotAllowedError')).toMatch(/access denied/);
+    expect(mediaErrorMessage(undefined)).toMatch(/access denied/);
   });
 });
 

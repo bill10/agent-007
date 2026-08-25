@@ -170,9 +170,18 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
   34px, shadowed, clears the xterm scrollbar) so it sits next to the prompt
   line being dictated into
 - Mic button pulses `--state-recording` red while listening (`mic-pulse`)
-- Transcript pill sits beside the mic (right-anchored, vertically centered
-  with it, growing leftward) so the reaction appears where the user clicked;
-  it slides in from the mic (`pill-in`) on show
+- Transcript pill is anchored to the mic (right-aligned with the fab, one
+  row ABOVE it, growing leftward) so the reaction appears where the user
+  clicked without ever covering the terminal's last row — that row is where
+  dictated keystrokes echo; it slides up from the mic (`pill-in`) on show
+- Fab/pill/presence geometry all derive from `--voice-fab-*` custom
+  properties on `:root`; the presence pill is stacked above the voice column
+  (`bottom: var(--voice-column-top)`) so it can never sit on the mic and eat
+  its clicks, and resizing the fab moves the whole column together
+- The recording signals (button pulse, live dot, screen-reader "started")
+  turn on only after `getUserMedia` grants — the requesting phase uses the
+  dot-less notice variant
+- `prefers-reduced-motion: reduce` disables the pulse and slide animations
 - The pill's pulsing dot means "recording" — hidden on notice/error variants
   (the mic is off there; a red dot would be an inverted privacy signal)
 - Screen-reader announcements go to a visually-hidden `.sr-only` live region
