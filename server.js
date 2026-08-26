@@ -14,7 +14,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join, basename } from 'path';
 import { mkdirSync } from 'fs';
 
@@ -181,7 +181,9 @@ function gracefulShutdown() {
 export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession };
 
 // Auto-start when run directly
-const isDirectRun = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
+// Compare as URLs: pathToFileURL applies the same percent-encoding as
+// import.meta.url, so paths with spaces or other special characters match.
+const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
   startup();
   process.on('SIGINT', gracefulShutdown);
