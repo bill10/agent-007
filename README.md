@@ -137,6 +137,7 @@ server.js          Entry point + orchestrators (createSession, killSession)
 server/
   state.js         Shared mutable state (sessions, orphans, pools, config)
   config.js        Config persistence (load, save, crash recovery)
+  direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)

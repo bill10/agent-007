@@ -4,7 +4,7 @@ Contributions are welcome! This project is intentionally simple: vanilla JS, no 
 
 ## Prerequisites
 
-- **Node.js 18+**
+- **Node.js 20.12+**
 - **Git**
 - **C++ build tools** (required by `node-pty`):
   - macOS: `xcode-select --install`
@@ -40,7 +40,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
-- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry
+- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`)
 
 ## Code Style
 
@@ -56,6 +56,7 @@ server.js          Entry point + orchestrators
 server/
   state.js         Shared mutable state
   config.js        Config persistence
+  direct-run.js    Entry-point detection (npm start guard)
   git.js           Git operations
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
