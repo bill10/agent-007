@@ -42,6 +42,10 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
 - Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`)
 
+> **Windows note:** `test/server.test.js` currently fails to load under vitest on
+> Windows (node-pty's native addon; see TODOS.md). It runs green in CI (ubuntu),
+> and the other suites pass locally on Windows.
+
 ## Code Style
 
 - **Vanilla JS.** No TypeScript, no framework, no build step. This is intentional.
@@ -61,6 +65,8 @@ server/
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
   http.js          HTTP routes
+  auth.js          Login tokens and ownership
+bin/adduser.js     Create a login user (npm run adduser)
 lib/helpers.js     Pure functions (tested)
 public/            Frontend (vanilla JS, no build)
 ```

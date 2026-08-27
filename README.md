@@ -142,6 +142,9 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
   http.js          HTTP routes (/api/browse, origin check middleware)
+  auth.js          Login tokens, user accounts, per-agent ownership checks
+bin/
+  adduser.js       Create a login user (`npm run adduser`)
 public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
