@@ -16,9 +16,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 - The server also starts correctly when launched through a symlinked or
   junction path (macOS `/tmp`-style links, relocated Windows folders) and via
   `node .`.
-- If the entry-point check ever misfires again, the server now prints a
-  clear "not auto-starting" message to stderr instead of exiting silently
-  with code 0.
+- If the entry-point check ever misfires again when `server.js` is launched
+  directly, the server now prints a clear "not auto-starting" message to
+  stderr instead of exiting silently with code 0.
 
 ## [0.2.1.0] - 2026-08-24
 
