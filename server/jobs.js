@@ -270,28 +270,186 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   return dispatched;
 }
 
+// Reconnect a re-adopted orphan to the job it was working on.
+//
+// A server restart clears every job's agentSessionId, because those sessions
+// are gone. Re-adopting the orphan brings the agent back, but nothing tied it
+// to its card: the job stayed "agent gone" while the agent was demonstrably
+// alive and working, it never counted toward the per-repo cap again (so the
+// board would dispatch a replacement alongside it), and when its PR appeared
+// the board could not retire it or release its worktree.
+//
+// The branch is the link. It is created per job, never reused while it exists,
+// and survives the restart on both the orphan record and the job — the one
+// identifier that outlives the session.
+export function relinkSessionToJob(session, broadcast) {
+  if (!session || !session.branchName) return null;
+  const job = allJobs().find(j =>
+    j.branchName === session.branchName
+    && j.repoPath === session.repoPath
+    && j.state === 'in-progress'
+    && !j.agentSessionId,   // never steal a job that already has a live agent
+  );
+  if (!job) return null;
+  job.agentSessionId = session.id;
+  job.agentName = session.name;
+  job.lastError = null;
+  job.lastErrorAt = null;
+  job.prCheckError = null;
+  job.prCheckErrorAt = null;
+  session.jobId = job.id;   // so the PR path can retire it like any board agent
+  persist(broadcast);
+  return job;
+}
+
 // --- PR watching ---
+
+// --- gh plumbing ---
+
+// One `gh` invocation. `token` picks the account; undefined means "whatever gh
+// is signed in as". GITHUB_TOKEN is dropped when we override, since it outranks
+// GH_TOKEN and would silently win.
+function runGh(args, { cwd, token, timeout = 15_000 } = {}) {
+  const env = { ...process.env };
+  if (token) {
+    env.GH_TOKEN = token;
+    delete env.GITHUB_TOKEN;
+  }
+  return new Promise((resolve, reject) => {
+    execFile('gh', args, { cwd, env, timeout, maxBuffer: 1024 * 1024 },
+      (err, out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(out)));
+  });
+}
+
+// Every account gh is signed in to, active one first.
+async function ghAccounts() {
+  try {
+    const parsed = JSON.parse(await runGh(['auth', 'status', '--json', 'hosts'], { timeout: 10_000 }));
+    const found = [];
+    for (const entries of Object.values(parsed.hosts || {})) {
+      for (const entry of entries || []) {
+        if (entry && entry.state === 'success' && entry.login) {
+          found.push({ login: entry.login, active: !!entry.active });
+        }
+      }
+    }
+    found.sort((a, b) => Number(b.active) - Number(a.active));
+    return found.map(a => a.login);
+  } catch (_) {
+    // Older gh has no --json on auth status; fall back to the text form.
+    try {
+      const text = await runGh(['auth', 'status'], { timeout: 10_000 });
+      return [...text.matchAll(/account\s+(\S+)/g)].map(m => m[1]);
+    } catch (_) { return []; }
+  }
+}
+
+async function ghToken(login) {
+  try {
+    const token = (await runGh(['auth', 'token', '-u', login], { timeout: 10_000 })).trim();
+    return token || null;
+  } catch (_) { return null; }
+}
+
+// Which account last answered for a repo, so the steady state stays one gh call
+// instead of a walk. Memory only; a stale guess costs one retry.
+const ghAccountForRepo = new Map();
+
+async function prListOnce(repoPath, branchName, token) {
+  try {
+    const stdout = await runGh(
+      ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
+      { cwd: repoPath, token },
+    );
+    return { pr: parsePrList(stdout) };
+  } catch (err) {
+    // First line only: gh errors are one useful line plus usage noise.
+    const detail = String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
+    return { error: detail || 'gh pr list failed' };
+  }
+}
 
 // `gh pr list` against the repo, filtered to the job's branch. Runs in the main
 // repo (not the worktree) so it still works after the worktree is removed.
-export async function findPrForBranch(repoPath, branchName) {
-  if (!repoPath || !branchName || !existsSync(repoPath)) return null;
+//
+// Tries EVERY signed-in gh account before giving up. One machine can hold
+// several, and a private repo is usually visible to exactly one of them — this
+// app routinely manages repos owned by different accounts, so the signed-in
+// account failing says nothing about whether the PR exists. Observed:
+// `Could not resolve to a Repository` from the active account while another
+// account on the same machine could see the repo perfectly well.
+//
+// Returns { pr } on a successful query — pr null meaning "no PR yet" — or
+// { pr: null, error } only when EVERY account failed. An earlier version
+// collapsed both into null, so a repo the board could never see looked exactly
+// like a branch with no PR, and its jobs sat in progress forever unexplained.
+//
+// The three collaborators are injectable for the same reason createSession and
+// killSession are: otherwise the account walk — ordering, dedup, remembering,
+// error aggregation — is only reachable by talking to real GitHub accounts.
+export async function findPrForBranch(repoPath, branchName, {
+  listAccounts = ghAccounts,
+  tokenFor = ghToken,
+  prList = prListOnce,
+} = {}) {
+  if (!repoPath || !branchName || !existsSync(repoPath)) return { pr: null };
   try {
     const stdout = await gitExec(['-C', repoPath, 'rev-parse', '--git-dir']);
-    if (!stdout) return null;
-  } catch { return null; }
-  try {
-    const stdout = await new Promise((resolve, reject) => {
-      execFile('gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
-        { cwd: repoPath, timeout: 15_000, maxBuffer: 1024 * 1024 },
-        (err, out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(out)));
-    });
-    return parsePrList(stdout);
-  } catch (err) {
-    // gh missing, not authenticated, or no GitHub remote. Not an error worth
-    // spamming: the board falls back to the manual "Move to review" button.
-    return null;
+    if (!stdout) return { pr: null };
+  } catch { return { pr: null }; }
+
+  // Label for a lookup that uses no explicit token — whatever gh picks itself.
+  const AMBIENT = 'signed-in account';
+  const tried = [];
+  const failures = [];
+
+  const attempt = async (label, token) => {
+    if (tried.includes(label)) return null;
+    tried.push(label);
+    const result = await prList(repoPath, branchName, token);
+    // Detail only — the account list in the final message names who was tried,
+    // and the errors are almost always identical across accounts anyway.
+    if (result.error) { failures.push(result.error); return null; }
+    return result;
+  };
+
+  // 1. The account that answered for this repo last time.
+  const remembered = ghAccountForRepo.get(repoPath);
+  if (remembered) {
+    const token = await tokenFor(remembered);
+    if (token) {
+      const hit = await attempt(remembered, token);
+      if (hit) return hit;
+    }
   }
+
+  // 2. Every account gh knows about, active first, each with its own token.
+  //
+  // Named accounts rather than "whatever gh is signed in as" so the walk is
+  // unambiguous: an earlier version tried the ambient account first and then
+  // skipped accounts[0] to avoid repeating it, which quietly assumed the first
+  // entry was the account ambient had used. With more than one host configured
+  // that assumption can skip the only account able to see the repo.
+  const accounts = await listAccounts();
+  for (const login of accounts) {
+    const token = await tokenFor(login);
+    if (!token) continue;
+    const hit = await attempt(login, token);
+    if (hit) { ghAccountForRepo.set(repoPath, login); return hit; }
+  }
+
+  // 3. Last resort: no explicit token. Covers a token supplied through the
+  //    environment, an enterprise host, and older gh versions whose auth status
+  //    this cannot enumerate.
+  const ambient = await attempt(AMBIENT, undefined);
+  if (ambient) { ghAccountForRepo.delete(repoPath); return ambient; }
+
+  ghAccountForRepo.delete(repoPath);
+  const plural = tried.length === 1 ? '' : 's';
+  return {
+    pr: null,
+    error: `${failures[0] || 'gh pr list failed'} (tried ${tried.length} account${plural}: ${tried.join(', ')})`,
+  };
 }
 
 // `findPr` is injected for the same reason createSession and killSession are:
@@ -302,6 +460,7 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
   const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName);
   if (inProgress.length === 0) return [];
   const moved = [];
+  let noted = false;   // a PR-check failure was recorded on some card
   for (const job of inProgress) {
     // Capture what we are asking about: findPr is a network call, and a
     // requeue or delete during it would otherwise let us apply a PR result to
@@ -309,9 +468,44 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     // killing an agent that belongs to a different attempt.
     const askedBranch = job.branchName;
     const askedSessionId = job.agentSessionId;
-    const pr = await findPr(job.repoPath, askedBranch);
-    if (!pr) continue;
+    const { pr, error } = await findPr(job.repoPath, askedBranch);
+
+    // Re-validate before touching the job at all. findPr is a network call and
+    // WebSocket handlers run during it, so the job may have been deleted,
+    // requeued or moved while we waited — writing either a result OR an error
+    // onto it then lands on a job that has moved on, or on a detached object.
     if (!allJobs().includes(job) || job.state !== 'in-progress' || job.branchName !== askedBranch) continue;
+
+    if (error) {
+      // Say so on the card. Without this the job looks like an agent that went
+      // quiet, and the user has no way to learn the board simply cannot see
+      // this repo's pull requests. Only written when the message changes, so a
+      // persistent failure does not rewrite config.json every five minutes.
+      // Its own field, not lastError. A job can already be carrying a restart
+      // note naming where its work is, and the two are both true at once: the
+      // agent is gone AND the board cannot see this repo's pull requests.
+      // Sharing one field meant either clobbering that note or suppressing this
+      // one. Written only when the text changes, so a permanent failure does
+      // not rewrite config.json every five minutes.
+      const message = `Cannot check for a pull request here — ${error}. This job stays put until you move it by hand.`;
+      if (job.prCheckError !== message) {
+        job.prCheckError = message;
+        job.prCheckErrorAt = new Date().toISOString();
+        noted = true;
+      }
+      continue;
+    }
+
+    // The query worked, so a previous "cannot check" note is wrong — clear it
+    // even when there is still no PR, or a repo that regained access would keep
+    // claiming it was unreachable until a PR happened to appear.
+    if (job.prCheckError) {
+      job.prCheckError = null;
+      job.prCheckErrorAt = null;
+      noted = true;
+    }
+
+    if (!pr) continue;
     job.state = 'review';
     job.prUrl = pr.url;
     job.prNumber = pr.number;
@@ -346,7 +540,7 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
       });
     }
   }
-  if (moved.length > 0) persist(broadcast);
+  if (moved.length > 0 || noted) persist(broadcast);
   return moved;
 }
 
