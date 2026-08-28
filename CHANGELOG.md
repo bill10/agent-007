@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.9.0] - 2026-08-28
+
+### Changed
+
+- The couch nooks along the office wall are gone. In their place stand three job
+  boards: whiteboards on A-frame easels, out on the floor rather than hung on the
+  wall, each one with paper job posts pinned to it under a marker-written heading.
+  The boards cap themselves to the wall section they stand in, so they never drift
+  under a window, and they step aside entirely on a panel too narrow to hold one.
+  The potted plants now draw behind the boards, which is the right way round: the
+  plants sit against the wall, the easels stand in front of them.
+
 ## [0.3.8.0] - 2026-08-28
 
 ### Added
