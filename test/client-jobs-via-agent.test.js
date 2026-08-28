@@ -29,6 +29,13 @@ const BOARD_HTML = `
       <div class="job-form" id="job-form" style="display:none">
         <input type="text" id="job-title">
         <select id="job-repo"></select>
+        <select id="job-type">
+          <option value="one-time">One-time</option>
+          <option value="scheduled">Scheduled</option>
+        </select>
+        <div id="job-schedule-field" style="display:none">
+          <input type="text" id="job-schedule">
+        </div>
         <textarea id="job-detail"></textarea>
         <button id="btn-job-save"></button>
         <button id="btn-job-cancel"></button>

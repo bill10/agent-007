@@ -5,6 +5,7 @@ import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
+import { isScheduled, scheduledRunReset } from '../lib/jobs.js';
 
 export function loadConfig() {
   try {
@@ -40,6 +41,20 @@ export function loadConfig() {
       // just the in-flight ones: a review card kept its link forever.
       job.agentSessionId = null;
       if (job.state !== 'in-progress') continue;
+      // A scheduled run cannot be resumed and has no PR to wait for, so it is
+      // re-armed here and now rather than left in-progress hoping the watcher
+      // will resolve it: the card goes back to To do with its next run time,
+      // and the board simply runs it again then. The branch is still named, in
+      // case that run did leave something worth recovering.
+      if (isScheduled(job)) {
+        const branch = job.branchName;
+        Object.assign(job, scheduledRunReset(job));
+        if (branch) {
+          job.lastError = `Server restarted mid-run — that run's work is on ${branch} (recover the worktree from the orphans list if you need it).`;
+          job.lastErrorAt = new Date().toISOString();
+        }
+        continue;
+      }
       // agentName is history, not a live link — "Phantom did this work" stays
       // true across a restart, and it is the credit the card exists to show.
       if (!job.branchName) {

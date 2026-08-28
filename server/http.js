@@ -122,6 +122,8 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
       title: body.title,
       detail: body.detail,
       repo: body.repo || body.repoPath,
+      type: body.type,
+      schedule: body.schedule,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),
     }, broadcast);

@@ -20,8 +20,10 @@ import {
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
   branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
-  MAX_TITLE_LEN, MAX_DETAIL_LEN,
+  MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
+  isScheduledRunOver, scheduledRunReset,
 } from '../lib/jobs.js';
+import { nextCronIso } from '../lib/cron.js';
 
 // --- Board settings ---
 
@@ -59,6 +61,9 @@ export function jobsPayload() {
     const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
     return {
       ...job,
+      // Resolved rather than raw: cards written before scheduled jobs existed
+      // carry no type at all, and the client should not have to know that.
+      type: jobType(job),
       status: deriveJobStatus(job, session),
       agentState: session ? session.state : null,
       agentAlive: !!(session && !session.exited),
@@ -99,8 +104,8 @@ function clearPrCheckError(job) {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent }, broadcast) {
-  const result = createJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   allJobs().push(result.job);
   persist(broadcast);
@@ -148,7 +153,7 @@ export function resolveRepoRef(ref) {
 // Not ownership-gated, matching the WebSocket `job-create` handler: the board is
 // shared workspace state, and postedBy/postedByAgent are attribution rather than
 // access control.
-export function postJobForAgent({ title, detail, repo, session, user }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, type, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -161,6 +166,11 @@ export function postJobForAgent({ title, detail, repo, session, user }, broadcas
     title: typeof title === 'string' ? title : '',
     detail: typeof detail === 'string' ? detail : '',
     repoPath: resolved.path,
+    // A schedule alone makes it a scheduled job — createJob owns that rule, and
+    // the cron validation with it, so a bad expression comes back as a message
+    // the calling agent can act on rather than a card that never fires.
+    type: typeof type === 'string' ? type : undefined,
+    schedule: typeof schedule === 'string' ? schedule : '',
     postedBy: user ? user.id : null,
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
@@ -194,6 +204,23 @@ export function updateJob(jobId, fields, broadcast) {
   // The repo is only editable while the job is still unassigned — once an agent
   // is working in a worktree, repointing the card would misattribute the work.
   if (fields.repoPath && job.state === 'todo') job.repoPath = fields.repoPath;
+  // Type and schedule move together: "scheduled with no cron" and "one-time
+  // carrying a cron" are both incoherent, so they are resolved as a pair and
+  // rejected as a pair. Nothing is written until the pair validates, or a bad
+  // cron would half-apply — the type switched, the schedule refused.
+  if (fields.type !== undefined || fields.schedule !== undefined) {
+    const resolved = resolveJobType({
+      type: fields.type !== undefined ? fields.type : jobType(job),
+      schedule: fields.schedule !== undefined ? fields.schedule : job.schedule,
+    });
+    if (resolved.error) return { error: resolved.error };
+    job.type = resolved.type;
+    job.schedule = resolved.schedule;
+    // Recompute rather than keep: the old due time belongs to the old cron.
+    // Only for a card sitting in To do — a run in flight sets its own next time
+    // when it finishes, and writing one now would be overwritten there anyway.
+    job.nextRunAt = resolved.schedule && job.state === 'todo' ? nextCronIso(resolved.schedule) : null;
+  }
   persist(broadcast);
   return { job };
 }
@@ -275,6 +302,10 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   const retiringSessionId = state === 'in-progress' ? null : job.agentSessionId;
   job.state = state;
   if (state === 'todo') {
+    // A scheduled card returning to To do is re-armed, not blanked: it keeps its
+    // schedule and gets the next due time. Without this a manual requeue would
+    // leave nextRunAt in the past and the card would fire again immediately.
+    if (isScheduled(job)) job.nextRunAt = job.schedule ? nextCronIso(job.schedule) : null;
     job.agentSessionId = null;
     job.agentName = null;
     job.startedAt = null;
@@ -435,6 +466,13 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.agentSessionId = session.id;
     job.agentName = session.name;
     job.startedAt = new Date().toISOString();
+    if (isScheduled(job)) {
+      // Counted at dispatch, not at completion: the run happened whether or not
+      // the agent got anywhere, and a card that keeps failing should still show
+      // that it has been trying.
+      job.runCount = (Number(job.runCount) || 0) + 1;
+      job.lastRunAt = job.startedAt;
+    }
     job.branchName = session.branchName;
     job.worktreePath = session.worktreePath;
     job.lastError = null;
@@ -763,7 +801,10 @@ async function retireAgentForJob(job, askedBranch, askedSessionId, killSession) 
 // and cannot be substituted from outside, so the PR-to-review transition would
 // otherwise only be testable by talking to GitHub.
 export async function checkPullRequests(broadcast, { killSession, findPr = findPrForBranch } = {}) {
-  const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName);
+  // One-time jobs only. A scheduled card is not trying to produce a pull
+  // request, and moving it to Review on the strength of one would take it out of
+  // rotation permanently — the column it cycles through is To do, not Review.
+  const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName && !isScheduled(j));
   if (inProgress.length === 0) return [];
   const moved = [];
   let noted = false;   // a PR-check failure was recorded on some card
@@ -923,11 +964,65 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   return finished;
 }
 
+// --- Scheduled runs ---
+
+// Close out scheduled runs that are over and re-arm their cards.
+//
+// This is the scheduled counterpart of checkPullRequests: the point in the scan
+// where finished work is retired and its slot released. It runs FIRST, so a run
+// that ended since the last tick frees its repo slot in time for the same scan
+// to dispatch whatever was waiting behind it.
+//
+// Killing the agent is not optional housekeeping. It is what keeps the per-repo
+// cap meaningful — in-progress cards and live board agents stay the same set —
+// and it is what releases the worktree. removeWorktree still protects the work:
+// uncommitted or unpushed changes become an orphan rather than being deleted,
+// so a scheduled run that did produce something does not lose it.
+export async function finishScheduledRuns(broadcast, { killSession } = {}) {
+  const running = allJobs().filter(j => isScheduled(j) && j.state === 'in-progress');
+  if (running.length === 0) return [];
+  const finished = [];
+  for (const job of running) {
+    const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
+    if (!isScheduledRunOver(job, session)) continue;
+
+    // Capture before the await, and re-check after it, for the same reason
+    // checkPullRequests does: killSession is slow (it removes a worktree) and
+    // WebSocket handlers run during it, so the card may have been deleted,
+    // moved or requeued by hand in the meantime.
+    const askedSessionId = job.agentSessionId;
+    const agentName = job.agentName;
+    if (session && !session.exited && killSession) {
+      try {
+        await killSession(askedSessionId);
+      } catch (err) {
+        // The run is over either way — the agent going unclosed is a leaked
+        // worktree, not a reason to strand the card in In progress forever.
+        console.error(`Failed to close agent for scheduled job "${job.title}":`, err.message);
+      }
+    }
+    if (!allJobs().includes(job) || job.state !== 'in-progress' || job.agentSessionId !== askedSessionId) continue;
+
+    Object.assign(job, scheduledRunReset(job));
+    finished.push(job);
+    if (broadcast) {
+      broadcast({
+        type: 'notification', level: 'info',
+        message: `Scheduled job "${job.title}" finished its run`
+          + (agentName ? ` · ${agentName} closed` : '')
+          + (job.nextRunAt ? ` · next ${new Date(job.nextRunAt).toLocaleString()}` : ''),
+      });
+    }
+  }
+  if (finished.length > 0) persist(broadcast);
+  return finished;
+}
+
 // --- Scan ---
 
-// One scan = check for PRs, then dispatch. Both entry points (the interval
-// timer and the "Run now" button) go through here, behind a single in-flight
-// flag.
+// One scan = close out finished scheduled runs, check for PRs, then dispatch.
+// Both entry points (the interval timer and the "Run now" button) go through
+// here, behind a single in-flight flag.
 //
 // The guard is not decorative. dispatchOnce reads job.state to pick candidates,
 // then awaits createSession, and only sets state = 'in-progress' after that
@@ -947,6 +1042,7 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
+    await finishScheduledRuns(broadcast, { killSession });
     await checkPullRequests(broadcast, { killSession, findPr });
     await checkMergedPullRequests(broadcast, { killSession, findMerged });
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
