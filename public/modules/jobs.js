@@ -2,6 +2,11 @@
 // (To do / In progress / Review), an archive of finished jobs behind a toolbar
 // toggle, and drives the dispatcher settings.
 //
+// Two kinds of card share those columns. A one-time job crosses them once and
+// stops in Review. A scheduled job cycles To do -> In progress -> To do on its
+// cron schedule, so it lives in To do between runs with its next run time on it
+// and never reaches Review.
+//
 // Card *state* comes from the server (durable, persisted). The "needs you"
 // badge is computed here from the live agent map, because it describes a PTY
 // as it is right now — a value the server persisted would be stale the moment
@@ -46,6 +51,36 @@ function relativeTime(iso) {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+// relativeTime only looks backwards. A scheduled card's whole point is the run
+// that has not happened yet, so it needs the other direction too.
+function untilTime(iso) {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  const secs = Math.round((then - Date.now()) / 1000);
+  // Due, but the board only acts on a scan — saying "0s" would imply a
+  // precision the dispatcher does not have.
+  if (secs <= 0) return 'due';
+  if (secs < 60) return 'in <1m';
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `in ${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `in ${hours}h`;
+  return `in ${Math.round(hours / 24)}d`;
+}
+
+// The absolute time as well, in the browser's locale, because "in 14h" alone
+// does not tell you whether that lands at a sensible hour.
+function clockTime(iso) {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return '';
+  return new Date(then).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function isScheduled(job) {
+  return job.type === 'scheduled';
+}
+
 function repoSlug(repoPath) {
   const repo = repos.get(repoPath);
   if (repo) return repo.slug;
@@ -70,6 +105,17 @@ const STATUS_TEXT = {
   'stalled': 'quiet — may need you',
   'gone': 'agent gone',
 };
+
+// "Quiet" means two different things depending on the card. On a one-time job it
+// is a warning — the agent may be waiting on you and its PR never appeared. On a
+// scheduled run it is the completion signal itself: the board reads that same
+// quiet as "done" and closes the run on its next scan, so telling the user they
+// might be needed would be the opposite of true.
+function statusText(job, status) {
+  if (isScheduled(job) && status === 'stalled') return 'run finished — closing';
+  if (isScheduled(job) && status === 'gone') return 'run finished';
+  return STATUS_TEXT[status] || status;
+}
 
 // --- Rendering ---
 
@@ -179,6 +225,16 @@ function renderCard(job) {
   const title = document.createElement('div');
   title.className = 'job-card-title';
   title.textContent = job.title;
+  if (isScheduled(job)) {
+    // A chip rather than a whole second column: a scheduled card is still an
+    // ordinary card in the same queue, and splitting the board would hide it
+    // from the glance that the three columns exist to give.
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = 'scheduled';
+    chip.title = 'Runs again on its schedule instead of finishing in Review';
+    title.appendChild(chip);
+  }
   card.appendChild(title);
 
   const meta = document.createElement('div');
@@ -193,6 +249,30 @@ function renderCard(job) {
   ].filter(Boolean).join(' · ');
   meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
+
+  if (isScheduled(job)) {
+    const sched = document.createElement('div');
+    sched.className = 'job-card-schedule';
+    const bits = [`<span class="job-card-cron">${escapeHtml(job.schedule || '')}</span>`];
+    // While a run is in flight nextRunAt still points at the run that is
+    // happening, so showing it would read as a second run being due. The next
+    // one is only decided when this one finishes.
+    if (job.state === 'in-progress') {
+      bits.push('<span class="job-card-next">running now</span>');
+    } else if (job.nextRunAt) {
+      bits.push(`<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
+    } else {
+      // nextCronIso returned nothing: a valid expression that matches no date
+      // that will ever come round, such as 30 February.
+      bits.push('<span class="job-card-next">never fires again</span>');
+    }
+    // Coerced, not trusted: this lands in innerHTML, and job records come from
+    // config.json, which a person can edit by hand.
+    const runs = Number(job.runCount) || 0;
+    if (runs) bits.push(`<span class="job-card-runs">· ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
+    sched.innerHTML = bits.join(' ');
+    card.appendChild(sched);
+  }
 
   if (job.detail) {
     const detail = document.createElement('div');
@@ -219,7 +299,7 @@ function renderCard(job) {
   if (status) {
     const badge = document.createElement('button');
     badge.className = `job-card-status job-status-${status}`;
-    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml(STATUS_TEXT[status] || status)}`;
+    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml(statusText(job, status))}`;
     const canJump = !!liveAgentId;
     badge.title = canJump
       ? `Open ${job.agentName}'s terminal`
@@ -321,7 +401,16 @@ function renderCardActions(job) {
   if (job.state === 'todo') {
     actions.appendChild(mk('Edit', 'Edit this job', () => openForm(job.id)));
   }
-  if (job.state === 'in-progress') {
+  if (job.state === 'in-progress' && isScheduled(job)) {
+    // No "→ Review" here: a scheduled card has no finished state to move to.
+    // Its only manual control is ending the run early, which is the same move
+    // the board makes for it when the agent goes quiet.
+    actions.appendChild(mk('End run', 'End this run now and re-arm the schedule. The agent is closed and its worktree released; uncommitted or unpushed work is kept as an orphan.', () => {
+      if (confirm(`End this run of "${job.title}"?\n\n${job.agentName || 'The agent'} is closed and its worktree released. The card returns to To do and runs again at its next scheduled time. Any uncommitted or unpushed work is kept as an orphan.`)) {
+        send({ type: 'job-move', jobId: job.id, state: 'todo' });
+      }
+    }));
+  } else if (job.state === 'in-progress') {
     actions.appendChild(mk('→ Review', 'Mark as ready for review (use when the PR was opened outside the board)', () => send({ type: 'job-move', jobId: job.id, state: 'review' })));
     actions.appendChild(mk('← To do', 'Requeue this job and close its agent. Uncommitted or unpushed work is kept as an orphan.', () => {
       if (confirm(`Return "${job.title}" to To do?\n\n${job.agentName || 'The agent'} is closed and its worktree released, then the board dispatches a fresh agent for this job. Any uncommitted or unpushed work is kept as an orphan.`)) {
@@ -376,6 +465,26 @@ function renderToolbar() {
 
 // --- Form ---
 
+// The cron box only means anything for a scheduled job, so it is hidden rather
+// than left sitting there inert next to a one-time card.
+function syncScheduleField() {
+  const scheduled = document.getElementById('job-type').value === 'scheduled';
+  document.getElementById('job-schedule-field').style.display = scheduled ? 'flex' : 'none';
+}
+
+// A shape check only — five whitespace-separated fields, or a known @shorthand.
+// The real parser is lib/cron.js on the server, and it stays the authority; this
+// exists so the commonest typo (too few fields) is caught while the form is
+// still open and the user's text is still in it, rather than coming back as a
+// toast after the form has closed.
+const CRON_MACROS = ['@yearly', '@annually', '@monthly', '@weekly', '@daily', '@midnight', '@hourly'];
+
+function looksLikeCron(text) {
+  const raw = text.trim();
+  if (raw.startsWith('@')) return CRON_MACROS.includes(raw.toLowerCase());
+  return raw.split(/\s+/).length === 5;
+}
+
 function openForm(jobId) {
   // The agent spawn form is an overlay anchored below the 36px header strip,
   // and it sizes to its own content rather than covering the viewport, so the
@@ -399,6 +508,8 @@ function openForm(jobId) {
   const titleEl = document.getElementById('job-title');
   const detailEl = document.getElementById('job-detail');
   const repoEl = document.getElementById('job-repo');
+  const typeEl = document.getElementById('job-type');
+  const scheduleEl = document.getElementById('job-schedule');
   const saveBtn = document.getElementById('btn-job-save');
 
   repoEl.innerHTML = '';
@@ -419,6 +530,9 @@ function openForm(jobId) {
   titleEl.value = job ? job.title : '';
   detailEl.value = job ? job.detail : '';
   if (job) repoEl.value = job.repoPath;
+  typeEl.value = job && isScheduled(job) ? 'scheduled' : 'one-time';
+  scheduleEl.value = job && job.schedule ? job.schedule : '';
+  syncScheduleField();
   saveBtn.textContent = job ? 'Save' : 'Post job';
   clearFormError();
   form.style.display = 'flex';
@@ -446,10 +560,17 @@ function saveForm() {
   const title = document.getElementById('job-title').value.trim();
   const detail = document.getElementById('job-detail').value;
   const repoPath = document.getElementById('job-repo').value;
+  const jobType = document.getElementById('job-type').value;
+  const schedule = document.getElementById('job-schedule').value.trim();
   if (!title) return showFormError('Give the job a title.');
   if (!repoPath) return showFormError('Add a repository in the explorer first — a job needs one to run in.');
-  if (editingJobId) send({ type: 'job-update', jobId: editingJobId, title, detail, repoPath });
-  else send({ type: 'job-create', title, detail, repoPath });
+  if (jobType === 'scheduled' && !schedule) return showFormError('A scheduled job needs a cron schedule, for example "0 9 * * 1-5".');
+  if (jobType === 'scheduled' && !looksLikeCron(schedule)) {
+    return showFormError('That does not look like a cron schedule — five fields (minute hour day month weekday), or @daily / @hourly / @weekly.');
+  }
+  const fields = { title, detail, repoPath, jobType, schedule };
+  if (editingJobId) send({ type: 'job-update', jobId: editingJobId, ...fields });
+  else send({ type: 'job-create', ...fields });
   closeForm();
 }
 
@@ -509,6 +630,11 @@ export function setupJobBoard() {
   document.getElementById('btn-job-cancel').onclick = closeForm;
   document.getElementById('btn-job-save').onclick = saveForm;
   document.getElementById('job-title').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveForm(); }
+    if (e.key === 'Escape') closeForm();
+  });
+  document.getElementById('job-type').onchange = syncScheduleField;
+  document.getElementById('job-schedule').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); saveForm(); }
     if (e.key === 'Escape') closeForm();
   });

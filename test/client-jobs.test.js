@@ -29,6 +29,13 @@ const BOARD_HTML = `
       <div class="job-form" id="job-form" style="display:none">
         <input type="text" id="job-title">
         <select id="job-repo"></select>
+        <select id="job-type">
+          <option value="one-time">One-time</option>
+          <option value="scheduled">Scheduled</option>
+        </select>
+        <div id="job-schedule-field" style="display:none">
+          <input type="text" id="job-schedule">
+        </div>
         <textarea id="job-detail"></textarea>
         <button id="btn-job-save"></button>
         <button id="btn-job-cancel"></button>
@@ -294,6 +301,7 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
+      jobType: 'one-time', schedule: '',
     });
   });
 
@@ -639,5 +647,159 @@ describe('a finished card still shows its record', () => {
   it('renders no agent row at all when neither is known', () => {
     handleJobsList({ jobs: [JOB({ state: 'todo', agentName: null, branchName: null })], settings: {} });
     expect(document.querySelector('.job-card-agent')).toBeNull();
+  });
+});
+
+// --- Scheduled jobs ---
+
+const SCHEDULED = (over = {}) => JOB({
+  id: 'job-sched', title: 'Daily digest', type: 'scheduled', schedule: '0 9 * * 1-5',
+  nextRunAt: new Date(Date.now() + 2 * 3600_000).toISOString(),
+  runCount: 0, lastRunAt: null,
+  ...over,
+});
+
+describe('scheduled cards', () => {
+  it('marks the card and shows the cron with when it next fires', () => {
+    handleJobsList({ jobs: [SCHEDULED()], settings: {} });
+    const card = cards()[0];
+    expect(card.querySelector('.job-card-type').textContent).toBe('scheduled');
+    expect(card.querySelector('.job-card-cron').textContent).toBe('0 9 * * 1-5');
+    expect(card.querySelector('.job-card-next').textContent).toMatch(/next .*·.*in 2h/);
+  });
+
+  it('says "running now" instead of a next run while a run is in flight', () => {
+    // nextRunAt still points at the run that IS happening, so showing it would
+    // read as a second run already being due.
+    handleJobsList({
+      jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper', nextRunAt: new Date(Date.now() - 1000).toISOString() })],
+      settings: {},
+    });
+    expect(document.querySelector('.job-card-next').textContent).toBe('running now');
+  });
+
+  it('says so when the schedule will never come round again', () => {
+    handleJobsList({ jobs: [SCHEDULED({ schedule: '0 0 30 2 *', nextRunAt: null })], settings: {} });
+    expect(document.querySelector('.job-card-next').textContent).toMatch(/never fires again/);
+  });
+
+  it('shows the run count once it has run', () => {
+    handleJobsList({ jobs: [SCHEDULED({ runCount: 3, lastRunAt: new Date(Date.now() - 3600_000).toISOString() })], settings: {} });
+    expect(document.querySelector('.job-card-runs').textContent).toMatch(/ran 3.*last 1h ago/);
+  });
+
+  it('leaves a one-time card with no schedule row and no chip', () => {
+    handleJobsList({ jobs: [JOB({ type: 'one-time' })], settings: {} });
+    expect(document.querySelector('.job-card-schedule')).toBeNull();
+    expect(document.querySelector('.job-card-type')).toBeNull();
+  });
+
+  it('offers "End run" rather than "→ Review", which a scheduled card never reaches', () => {
+    handleJobsList({
+      jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })],
+      settings: {},
+    });
+    const labels = [...document.querySelectorAll('.job-card-btn')].map(b => b.textContent);
+    expect(labels).toContain('End run');
+    expect(labels).not.toContain('→ Review');
+    expect(labels).not.toContain('← To do');
+  });
+});
+
+describe('the job form and schedules', () => {
+  const type = () => document.getElementById('job-type');
+  const schedule = () => document.getElementById('job-schedule');
+  const field = () => document.getElementById('job-schedule-field');
+
+  it('hides the cron box until the job is a scheduled one', () => {
+    document.getElementById('btn-new-job').click();
+    expect(field().style.display).toBe('none');
+    type().value = 'scheduled';
+    type().dispatchEvent(new Event('change'));
+    expect(field().style.display).toBe('flex');
+  });
+
+  it('posts the type and the schedule together', () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Daily digest';
+    type().value = 'scheduled';
+    type().dispatchEvent(new Event('change'));
+    schedule().value = '0 9 * * 1-5';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'job-create', title: 'Daily digest', jobType: 'scheduled', schedule: '0 9 * * 1-5',
+    }));
+  });
+
+  it('catches an obviously wrong cron while the form is still open', () => {
+    // The server's parser is the authority; this only saves the user from
+    // losing their text to a toast on the commonest typo.
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Daily digest';
+    type().value = 'scheduled';
+    schedule().value = 'every friday';
+    document.getElementById('btn-job-save').click();
+    expect(send).not.toHaveBeenCalled();
+    expect(document.getElementById('job-form-error').textContent).toMatch(/cron schedule/i);
+  });
+
+  it('accepts the @shorthands', () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Hourly check';
+    type().value = 'scheduled';
+    schedule().value = '@hourly';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ jobType: 'scheduled', schedule: '@hourly' }));
+  });
+
+  it('insists on a schedule for a scheduled job', () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Daily digest';
+    type().value = 'scheduled';
+    document.getElementById('btn-job-save').click();
+    expect(send).not.toHaveBeenCalled();
+    expect(document.getElementById('job-form-error').textContent).toMatch(/needs a cron schedule/i);
+  });
+
+  it('opens an existing scheduled card with its own values, cron box already showing', () => {
+    handleJobsList({ jobs: [SCHEDULED()], settings: {} });
+    document.querySelector('.job-card-btn').click();   // Edit
+    expect(type().value).toBe('scheduled');
+    expect(schedule().value).toBe('0 9 * * 1-5');
+    expect(field().style.display).toBe('flex');
+  });
+
+  it('resets the form back to one-time for the next new job', () => {
+    handleJobsList({ jobs: [SCHEDULED()], settings: {} });
+    document.querySelector('.job-card-btn').click();   // Edit the scheduled card
+    document.getElementById('btn-job-cancel').click();
+    document.getElementById('btn-new-job').click();
+    expect(type().value).toBe('one-time');
+    expect(schedule().value).toBe('');
+    expect(field().style.display).toBe('none');
+  });
+});
+
+describe('what "quiet" means on a scheduled card', () => {
+  const quietAgent = { state: 'WAITING', lastOutputAt: Date.now() - 4 * 60 * 1000 };
+
+  it('reads as the run finishing, not as a warning that you may be needed', () => {
+    // The board reads that same quiet as "done" and closes the run on its next
+    // scan, so "may need you" would be the opposite of true.
+    agents.set('s1', quietAgent);
+    handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
+    expect(document.querySelector('.job-card-status').textContent).toMatch(/run finished/);
+  });
+
+  it('still says "needs you" when the run is actually asking a question', () => {
+    agents.set('s1', { state: 'MESSAGE', lastOutputAt: Date.now() });
+    handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
+    expect(document.querySelector('.job-card-status').textContent).toMatch(/needs you/);
+  });
+
+  it('leaves the warning in place on a one-time card', () => {
+    agents.set('s1', quietAgent);
+    handleJobsList({ jobs: [JOB({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
+    expect(document.querySelector('.job-card-status').textContent).toMatch(/may need you/);
   });
 });

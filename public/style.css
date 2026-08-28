@@ -1359,6 +1359,17 @@ body {
   background: transparent;
   border: 1px solid var(--border);
 }
+/* Type and schedule sit on one line: they are a single decision, and a cron
+   box stacked under its own label would take a third of the form. */
+.job-form-row { display: flex; gap: 8px; align-items: flex-start; }
+.job-form-row > label { flex: 0 0 auto; }
+.job-form-schedule { flex: 1 1 auto; min-width: 0; }
+.job-form-hint {
+  font-size: 9px;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+}
 .job-form-error { font-size: 11px; color: var(--state-disconnected); }
 
 /* --- Columns --- */
@@ -1485,6 +1496,35 @@ body {
 /* Posted by an agent rather than typed into the form. Accent-tinted so a board
    full of cards still shows at a glance which ones a machine queued. */
 .job-card-via { color: var(--accent); opacity: 0.85; }
+
+/* Scheduled cards. The chip rides in the title line and the schedule gets its
+   own row, so the cron text never competes with the title for the same space. */
+.job-card-type {
+  margin-left: 6px;
+  padding: 1px 5px;
+  font-size: 8px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  opacity: 0.75;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+.job-card-schedule {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+/* The page is already set in a mono stack, so cron text needs no font of its
+   own — just enough contrast to read as the machine-readable bit. */
+.job-card-cron { color: var(--text-muted); }
+.job-card-next { color: var(--accent); opacity: 0.85; }
+.job-card-runs { opacity: 0.8; }
 
 .job-card-detail {
   font-size: 10px;
