@@ -581,6 +581,51 @@ describe('when the PR check itself fails', () => {
     expect(allJobs()[0].lastErrorAt).toBe(firstStamp);
   });
 
+  it('clears the note as soon as the check works again, PR or not', async () => {
+    // The failure the previous version had: it only cleared on a PR being
+    // found, so a repo that regained access kept claiming it was unreachable
+    // until a PR happened to appear.
+    addJob({ title: 'access restored', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, { findPr: failing('gh: not authenticated') });
+    expect(allJobs()[0].lastError).toBeTruthy();
+
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
+    const job = allJobs()[0];
+    expect(job.state).toBe('in-progress');   // still no PR, correctly
+    expect(job.lastError).toBeNull();        // but no longer claiming it cannot look
+  });
+
+  it('leaves a restart note alone when the check works', async () => {
+    // A restart note names where the work is. It stays true whether or not the
+    // PR check succeeds, so only the PR-check note may be cleared.
+    addJob({ title: 'restarted', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.lastError = 'Server restarted — agent lost. Work is on bill/x.';
+
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
+    expect(allJobs()[0].lastError).toMatch(/Server restarted/);
+  });
+
+  it('does not write an error onto a job that moved on during the lookup', async () => {
+    // findPr is a network call; WebSocket handlers run during it.
+    addJob({ title: 'requeued mid-check', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => {
+        job.state = 'todo';
+        job.branchName = null;
+        job.agentSessionId = null;
+        return { pr: null, error: 'gh: not authenticated' };
+      },
+    });
+    expect(job.state).toBe('todo');
+    expect(job.lastError).toBeNull();
+  });
+
   it('clears the note once the check succeeds', async () => {
     addJob({ title: 'recovers', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);

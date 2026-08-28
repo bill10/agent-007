@@ -300,6 +300,12 @@ export function relinkSessionToJob(session, broadcast) {
   return job;
 }
 
+// Prefix of the note checkPullRequests leaves when the query itself failed.
+// Used to clear ONLY that note on a later success — a job can also be carrying
+// a restart note ("agent lost, work is on <branch>"), which stays true and
+// useful whether or not the PR check works.
+const PR_CHECK_FAILED = 'Cannot check for a pull request in this repo';
+
 // --- PR watching ---
 
 // `gh pr list` against the repo, filtered to the job's branch. Runs in the main
@@ -355,12 +361,18 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     const askedSessionId = job.agentSessionId;
     const { pr, error } = await findPr(job.repoPath, askedBranch);
 
+    // Re-validate before touching the job at all. findPr is a network call and
+    // WebSocket handlers run during it, so the job may have been deleted,
+    // requeued or moved while we waited — writing either a result OR an error
+    // onto it then lands on a job that has moved on, or on a detached object.
+    if (!allJobs().includes(job) || job.state !== 'in-progress' || job.branchName !== askedBranch) continue;
+
     if (error) {
       // Say so on the card. Without this the job looks like an agent that went
       // quiet, and the user has no way to learn the board simply cannot see
       // this repo's pull requests. Only written when the message changes, so a
       // persistent failure does not rewrite config.json every five minutes.
-      const message = `Cannot check for a pull request in this repo — ${error}. The job stays here until you move it by hand.`;
+      const message = `${PR_CHECK_FAILED} — ${error}. The job stays here until you move it by hand.`;
       if (job.lastError !== message) {
         job.lastError = message;
         job.lastErrorAt = new Date().toISOString();
@@ -368,8 +380,18 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
       }
       continue;
     }
+
+    // The query worked, so a previous "cannot check" note is now wrong — clear
+    // it even when there is still no PR, or a repo that regained access would
+    // keep claiming it was unreachable until a PR happened to appear. Only that
+    // note: a restart note names where the work is and stays true regardless.
+    if (typeof job.lastError === 'string' && job.lastError.startsWith(PR_CHECK_FAILED)) {
+      job.lastError = null;
+      job.lastErrorAt = null;
+      noted = true;
+    }
+
     if (!pr) continue;
-    if (!allJobs().includes(job) || job.state !== 'in-progress' || job.branchName !== askedBranch) continue;
     job.state = 'review';
     job.prUrl = pr.url;
     job.prNumber = pr.number;
