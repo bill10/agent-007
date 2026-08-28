@@ -219,7 +219,7 @@ function renderCardActions(job) {
     actions.appendChild(mk('← In progress', 'Send back to In progress', () => send({ type: 'job-move', jobId: job.id, state: 'in-progress' })));
   }
   actions.appendChild(mk('Delete', 'Delete this job from the board', () => {
-    if (confirm(`Delete "${job.title}"?\n\nThis removes the card only. Any agent or branch it created is left alone.`)) {
+    if (confirm(`Delete "${job.title}"?\n\n${job.agentSessionId ? 'Its agent is closed and the worktree released. Uncommitted or unpushed work is kept as an orphan.' : 'This removes the card.'}`)) {
       send({ type: 'job-delete', jobId: job.id });
     }
   }, 'danger'));

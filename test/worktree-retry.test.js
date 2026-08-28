@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createWorktree, gitExec } from '../server/git.js';
 import { COCKTAILS } from '../lib/helpers.js';
 import { mkdtempSync, rmSync, existsSync, readdirSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 
@@ -116,5 +117,25 @@ describe('createWorktree finds a free branch by trying', () => {
     const again = await createWorktree(repo, 'agent1', undefined);  // same agent name
     expect(again.error).toMatch(/Failed to create worktree/);
     expect(again.error).not.toMatch(/already in use/);
+  });
+});
+
+describe('branch prefix fallback', () => {
+  it('falls back to "agent" when user.name is set to the empty string', async () => {
+    // `git config user.name` exits 0 with empty output in that case, so it
+    // never reaches branchPrefix's catch. An empty prefix makes every branch
+    // `/<name>`, which git rejects outright.
+    const repo = mkdtempSync(join(tmpdir(), 'a007-emptyuser-'));
+    execFileSync('git', ['init', '-q', repo]);
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 'x@x']);
+    // Commit under a real name first — git refuses to commit with an empty
+    // ident — then blank it, which is the state that reaches branchPrefix.
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'temp']);
+    execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init']);
+    execFileSync('git', ['-C', repo, 'config', 'user.name', '']);
+
+    const result = await createWorktree(repo, 'Viper');
+    expect(result.error).toBeUndefined();
+    expect(result.branchName.startsWith('agent/')).toBe(true);
   });
 });

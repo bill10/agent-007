@@ -182,7 +182,7 @@ describe('board mutations', () => {
 
   it('reports a missing job rather than throwing', async () => {
     expect((await moveJob('nope', 'review', noopBroadcast)).error).toMatch(/not found/i);
-    expect(deleteJob('nope', noopBroadcast).error).toMatch(/not found/i);
+    expect((await deleteJob('nope', noopBroadcast)).error).toMatch(/not found/i);
   });
 
   it('clamps the cap and interval to sane bounds', () => {
@@ -417,11 +417,129 @@ describe('requeueing a job retires its agent', () => {
     expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
   });
 
-  it('does not try to kill anything when moving to review', async () => {
+  it('also retires the agent on a manual move to review', async () => {
+    // Same hole as the requeue, via the other button: countInFlightByRepo stops
+    // counting a job the moment it leaves in-progress, so an agent left running
+    // here keeps a worktree and a PTY while the board dispatches past the cap.
     addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const sid = allJobs()[0].agentSessionId;
     const killed = [];
-    await moveJob(allJobs()[0].id, 'review', noopBroadcast, { killSession: async (id) => killed.push(id) });
-    expect(killed).toEqual([]);
+    await moveJob(allJobs()[0].id, 'review', noopBroadcast, {
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+    });
+    expect(killed).toEqual([sid]);
+  });
+
+  it('keeps the cap honest when jobs are shunted to review by hand', async () => {
+    updateSettings({ maxPerRepo: 1 }, noopBroadcast);
+    for (let i = 0; i < 4; i++) addJob({ title: `J${i}`, repoPath: REPO }, noopBroadcast);
+    const create = fakeCreateSession([]);
+    const kill = async (id) => { sessions.delete(id); };
+    for (let i = 0; i < 4; i++) {
+      await dispatchOnce(create, noopBroadcast);
+      const running = allJobs().find(j => j.state === 'in-progress');
+      if (running) await moveJob(running.id, 'review', noopBroadcast, { killSession: kill });
+    }
+    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
+  });
+});
+
+// --- Regressions found by external review (gemini) ---
+
+describe('the job can change while a dispatch is in flight', () => {
+  beforeEach(resetBoard);
+
+  // createSession takes seconds; WebSocket handlers run during it. The scan
+  // guard serialises scans against each other, not against the user.
+  function createDuring(mutate, calls = []) {
+    const inner = fakeCreateSession(calls);
+    return async (...args) => {
+      const result = await inner(...args);
+      mutate();                      // the user acts while the spawn completes
+      return result;
+    };
+  }
+
+  it('does not claim a job that was deleted mid-dispatch, and kills the agent', async () => {
+    addJob({ title: 'gone', repoPath: REPO }, noopBroadcast);
+    const jobId = allJobs()[0].id;
+    const killed = [];
+    const create = createDuring(() => { allJobs().length = 0; });
+
+    await dispatchOnce(create, noopBroadcast, {
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+    });
+
+    // Without the re-check the agent runs on with no card pointing at it:
+    // invisible to the board, uncounted by the cap, never cleaned up.
+    expect(killed).toHaveLength(1);
+    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
+    expect(allJobs().find(j => j.id === jobId)).toBeUndefined();
+  });
+
+  it('does not overwrite a state the user changed mid-dispatch', async () => {
+    addJob({ title: 'requeued', repoPath: REPO }, noopBroadcast);
+    const job = allJobs()[0];
+    const create = createDuring(() => { job.state = 'review'; });
+
+    await dispatchOnce(create, noopBroadcast, { killSession: async (id) => sessions.delete(id) });
+    expect(job.state).toBe('review');       // not clobbered back to in-progress
+    expect(job.agentSessionId).toBeNull();
+  });
+
+  it('does not apply a PR result to a job that moved on during the lookup', async () => {
+    addJob({ title: 'racy', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+
+    const killed = [];
+    const findPr = async () => {
+      // The user requeues while the gh lookup is in flight.
+      job.state = 'todo';
+      job.branchName = null;
+      job.agentSessionId = null;
+      return { url: 'u', number: 1 };
+    };
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
+
+    expect(job.state).toBe('todo');   // the user's action stands
+    expect(killed).toEqual([]);       // and no unrelated agent was killed
+  });
+});
+
+describe('deleting a job', () => {
+  beforeEach(resetBoard);
+
+  it('retires its agent instead of leaking it', async () => {
+    addJob({ title: 'delete me', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const sid = allJobs()[0].agentSessionId;
+    const killed = [];
+    await deleteJob(allJobs()[0].id, noopBroadcast, { killSession: async (id) => { killed.push(id); sessions.delete(id); } });
+    expect(killed).toEqual([sid]);
+    expect(allJobs()).toHaveLength(0);
+  });
+});
+
+describe('moveJob guards', () => {
+  beforeEach(resetBoard);
+
+  it('refuses to strand a never-dispatched job in in-progress', async () => {
+    // Nothing could ever move it out again: the dispatcher only looks at todo,
+    // the PR watcher only at jobs with a branch.
+    addJob({ title: 'never started', repoPath: REPO }, noopBroadcast);
+    const r = await moveJob(allJobs()[0].id, 'in-progress', noopBroadcast);
+    expect(r.error).toMatch(/never been dispatched/i);
+    expect(allJobs()[0].state).toBe('todo');
+  });
+
+  it('still allows review -> in-progress for a dispatched job', async () => {
+    addJob({ title: 'real', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await moveJob(allJobs()[0].id, 'review', noopBroadcast);
+    const r = await moveJob(allJobs()[0].id, 'in-progress', noopBroadcast);
+    expect(r.error).toBeUndefined();
+    expect(allJobs()[0].state).toBe('in-progress');
   });
 });

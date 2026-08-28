@@ -360,7 +360,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           break;
         }
         case 'job-delete': {
-          const result = deleteJob(msg.jobId, broadcast);
+          const result = await deleteJob(msg.jobId, broadcast, { killSession });
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }

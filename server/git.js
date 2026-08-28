@@ -62,7 +62,13 @@ export async function validateRepoPath(repoPath) {
 // Falls back to `agent` when the repo has no user.name configured.
 async function branchPrefix(repoPath) {
   try {
-    return (await gitExec(['-C', repoPath, 'config', 'user.name'])).trim().toLowerCase().replace(/\s+/g, '-');
+    const name = (await gitExec(['-C', repoPath, 'config', 'user.name'])).trim().toLowerCase().replace(/\s+/g, '-');
+    // An UNSET user.name exits non-zero and lands in the catch, but one set to
+    // the empty string exits 0 with empty output. Without this the prefix is
+    // '', every candidate becomes `/vesper`, and git rejects all of them
+    // ("not a valid branch name") — so every spawn in that repo fails after
+    // walking the whole pool.
+    return name || 'agent';
   } catch (_) {
     return 'agent';
   }
@@ -110,6 +116,28 @@ export function broadcastReposList(broadcast) {
 // passing that check. Both mean the same thing — the name is taken, try another.
 const BRANCH_EXISTS_RE = /a branch named .* already exists|cannot lock ref '[^']*': reference already exists/;
 
+// Branch names that exist on the remote. Needed because a finished job deletes
+// its LOCAL branch but deliberately leaves the remote one alone — that is the
+// open PR. So `worktree add -b` will happily hand out a name whose remote
+// counterpart still exists, and the new agent's first `git push -u` then fails
+// non-fast-forward (or, worse, force-pushes over someone's open PR).
+//
+// Best-effort: on a timeout, no remote, or no network this returns null and the
+// caller falls back to local-only checking, which is what it did before.
+async function remoteBranchNames(repoPath) {
+  try {
+    const out = await gitExec(['-C', repoPath, 'ls-remote', '--heads', 'origin']);
+    const names = new Set();
+    for (const line of out.split('\n')) {
+      const match = line.match(/refs\/heads\/(.+)$/);
+      if (match) names.add(match[1].trim());
+    }
+    return names;
+  } catch {
+    return null;
+  }
+}
+
 // Ask git for a name rather than tracking which names are free.
 //
 // `worktree add -b` creates the ref atomically: it either succeeds, or it tells us
@@ -148,8 +176,11 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
     // branch, so a collision is something to report, not to silently rename.
     if (suffixOnCollision) {
       const MAX_SUFFIX = 50;
+      const remote = await remoteBranchNames(repoPath);
       for (let n = 1; n <= MAX_SUFFIX; n++) {
         const candidate = n === 1 ? customBranch : `${customBranch}-${n}`;
+        // Skip names already taken on the remote, not just locally.
+        if (remote && remote.has(`${gitUser}/${candidate}`)) continue;
         const result = await attempt(candidate);
         if (result.branchTaken) continue;
         return result;

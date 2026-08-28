@@ -95,12 +95,26 @@ export function updateJob(jobId, fields, broadcast) {
   return { job };
 }
 
-export function deleteJob(jobId, broadcast) {
+// Deleting a card retires its agent, for the same reason requeueing does:
+// otherwise the agent keeps running with nothing pointing at it, stops counting
+// toward the per-repo cap, and is never cleaned up. removeWorktree still
+// protects the work — dirty or unpushed changes become an orphan.
+export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   const jobs = allJobs();
   const idx = jobs.findIndex(j => j.id === jobId);
   if (idx === -1) return { error: 'Job not found' };
   const [removed] = jobs.splice(idx, 1);
   persist(broadcast);
+  if (removed.agentSessionId && killSession) {
+    const session = sessions.get(removed.agentSessionId);
+    if (session && !session.exited) {
+      try {
+        await killSession(removed.agentSessionId);
+      } catch (err) {
+        console.error(`Failed to close agent for deleted job "${removed.title}":`, err.message);
+      }
+    }
+  }
   return { job: removed };
 }
 
@@ -118,7 +132,20 @@ export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
-  const retiringSessionId = state === 'todo' ? job.agentSessionId : null;
+  // A job with no branch has never been dispatched, so nothing can move it out
+  // of in-progress again: the dispatcher only looks at todo, and the PR watcher
+  // only at jobs with a branch. Accepting the move would strand it forever.
+  if (state === 'in-progress' && !job.branchName) {
+    return { error: 'That job has never been dispatched — leave it in To do so the board can pick it up' };
+  }
+  // Any manual move OUT of in-progress retires the agent, not just the requeue.
+  // "→ Review" means the PR was opened outside the board, so the agent is as
+  // done as it would be on the automatic path. Leaving it running would break
+  // the invariant the cap depends on — in-progress jobs and live board agents
+  // being the same set — because countInFlightByRepo stops counting a job the
+  // moment it leaves in-progress. The agent would keep a worktree and a PTY
+  // while the board dispatched a replacement past the cap.
+  const retiringSessionId = (state === 'todo' || state === 'review') ? job.agentSessionId : null;
   job.state = state;
   if (state === 'todo') {
     job.agentSessionId = null;
@@ -180,7 +207,7 @@ function availableRepos() {
 // sessionPayload() here would close a cycle. Without it a board agent would run
 // invisibly — a PTY with no tab, which is precisely the thing the user must be
 // able to reach to answer a question.
-export async function dispatchOnce(createSession, broadcast, { onSessionCreated } = {}) {
+export async function dispatchOnce(createSession, broadcast, { onSessionCreated, killSession } = {}) {
   const settings = boardSettings();
   const candidates = selectDispatchableJobs(allJobs(), {
     maxPerRepo: settings.maxPerRepo,
@@ -210,6 +237,24 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated 
       continue;
     }
     const session = result.session;
+
+    // Re-validate before claiming the job. createSession takes seconds (addRepo
+    // + `git worktree add` + a PTY spawn) and WebSocket handlers run during it,
+    // so the job may have been deleted, requeued or moved while we waited.
+    // Writing state onto a job that is gone would leave the agent running with
+    // no card pointing at it: invisible to the board, uncounted by the cap, and
+    // never cleaned up. The scan guard does not cover this — it serialises
+    // scans against each other, not against the user.
+    const stillQueued = allJobs().includes(job) && job.state === 'todo';
+    if (!stillQueued) {
+      if (killSession) {
+        try { await killSession(session.id); } catch (err) {
+          console.error(`Failed to clean up agent for vanished job "${job.title}":`, err.message);
+        }
+      }
+      continue;
+    }
+
     if (onSessionCreated) onSessionCreated(session);
     job.state = 'in-progress';
     job.agentSessionId = session.id;
@@ -258,8 +303,15 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
   if (inProgress.length === 0) return [];
   const moved = [];
   for (const job of inProgress) {
-    const pr = await findPr(job.repoPath, job.branchName);
+    // Capture what we are asking about: findPr is a network call, and a
+    // requeue or delete during it would otherwise let us apply a PR result to
+    // a job that has since moved on — silently undoing the user's action, or
+    // killing an agent that belongs to a different attempt.
+    const askedBranch = job.branchName;
+    const askedSessionId = job.agentSessionId;
+    const pr = await findPr(job.repoPath, askedBranch);
     if (!pr) continue;
+    if (!allJobs().includes(job) || job.state !== 'in-progress' || job.branchName !== askedBranch) continue;
     job.state = 'review';
     job.prUrl = pr.url;
     job.prNumber = pr.number;
@@ -273,11 +325,11 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     // the whole record — agent name, branch, PR link — so nothing is lost by
     // the terminal going away, and the work itself is on the remote.
     let closed = false;
-    if (killSession && job.agentSessionId) {
-      const session = sessions.get(job.agentSessionId);
+    if (killSession && askedSessionId && askedSessionId === job.agentSessionId) {
+      const session = sessions.get(askedSessionId);
       if (session && !session.exited) {
         try {
-          await killSession(job.agentSessionId);
+          await killSession(askedSessionId);
           closed = true;
         } catch (err) {
           // A failed cleanup must not strand the card in In progress: the PR
@@ -320,7 +372,7 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   scanInFlight = true;
   try {
     await checkPullRequests(broadcast, { killSession });
-    await dispatchOnce(createSession, broadcast, { onSessionCreated });
+    await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
     return { skipped: false };
   } finally {
     scanInFlight = false;

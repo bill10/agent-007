@@ -256,3 +256,19 @@ describe('show / hide', () => {
     expect(document.getElementById('job-board').style.display).toBe('none');
   });
 });
+
+describe('PR link safety', () => {
+  it('renders an https PR link', () => {
+    handleJobsList({ jobs: [JOB({ state: 'review', prUrl: 'https://gh/o/r/pull/3', prNumber: 3 })], settings: {} });
+    expect(document.querySelector('.job-card-pr').getAttribute('href')).toBe('https://gh/o/r/pull/3');
+  });
+
+  it('refuses a non-http scheme rather than putting it in an href', () => {
+    // job.prUrl comes from `gh pr list`, but a javascript: href executes on
+    // click — cheap guard on a value that crosses a trust boundary.
+    for (const bad of ['javascript:alert(1)', 'data:text/html,<script>1</script>', 'file:///etc/passwd']) {
+      handleJobsList({ jobs: [JOB({ id: 'x', state: 'review', prUrl: bad, prNumber: 1 })], settings: {} });
+      expect(document.querySelector('.job-card-pr')).toBeNull();
+    }
+  });
+});
