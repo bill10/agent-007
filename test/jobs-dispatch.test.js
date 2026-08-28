@@ -857,3 +857,68 @@ describe('relink covers a job that already reached review', () => {
     expect(job.agentSessionId).toBe('session-99');
   });
 });
+
+// --- A finished card must say what it produced ---
+
+describe('review cards keep their record', () => {
+  beforeEach(resetBoard);
+
+  it('clears the restart note once the PR is found', async () => {
+    // The note says the board is still watching for this PR. Finding it makes
+    // the note false on its own card.
+    addJob({ title: 'restarted then shipped', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.lastError = 'Server restarted — agent lost. The board is still watching for its PR.';
+
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 102 } }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(102);
+    expect(job.lastError).toBeNull();
+  });
+
+  it('a manual move to review picks up the PR that already exists', async () => {
+    // Nothing else backfills it: the watcher only examines in-progress jobs, so
+    // the card would sit in Review with no link to what it produced.
+    addJob({ title: 'shipped elsewhere', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: { url: 'https://gh/o/r/pull/18', number: 18 } }),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(18);
+    expect(job.prUrl).toBe('https://gh/o/r/pull/18');
+  });
+
+  it('a manual move still works when there is no PR to find', async () => {
+    addJob({ title: 'no pr', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: null, error: 'gh: not authenticated' }),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBeNull();
+  });
+
+  it('does not re-look-up a PR the card already has', async () => {
+    addJob({ title: 'already linked', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.prNumber = 7;
+    let looked = false;
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => { looked = true; return { pr: null }; },
+    });
+    expect(looked).toBe(false);
+    expect(job.prNumber).toBe(7);
+  });
+});

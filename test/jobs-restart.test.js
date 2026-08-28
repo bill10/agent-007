@@ -36,8 +36,11 @@ describe('restart recovery for in-flight jobs', () => {
     expect(job.branchName).toBe('bill/add-thing');
     // The dead session link must go, or the cap would count a PTY that is gone.
     expect(job.agentSessionId).toBeNull();
-    expect(job.agentName).toBeNull();
-    expect(job.startedAt).toBe('2026-08-27T00:00:00Z');   // credit survives
+    // The NAME is history — "Viper did this work" stays true across a restart,
+    // and it is the credit the card exists to show. Only the session link,
+    // which cannot survive the process, is dropped.
+    expect(job.agentName).toBe('Viper');
+    expect(job.startedAt).toBe('2026-08-27T00:00:00Z');
     expect(job.lastError).toMatch(/bill\/add-thing/);
   });
 
@@ -69,5 +72,29 @@ describe('restart recovery for in-flight jobs', () => {
     writeFileSync(CONFIG_PATH, JSON.stringify({ version: 1, repos: [] }));
     loadConfig();
     expect(config.jobs).toEqual([]);
+  });
+});
+
+describe('stale agent links after a restart', () => {
+  it('clears the session link on a review job too, not just in-flight ones', () => {
+    // Session ids are only unique within a process generation, so a link kept
+    // on a finished card could resolve to an unrelated agent after a restart.
+    writeConfig([{
+      id: 'r1', title: 'shipped', repoPath: '/r', state: 'review',
+      agentSessionId: 'session-5', agentName: 'Shadow',
+      branchName: 'bill/x', prNumber: 20,
+    }]);
+    loadConfig();
+    const job = config.jobs[0];
+    expect(job.agentSessionId).toBeNull();
+    expect(job.agentName).toBe('Shadow');   // credit kept
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(20);
+  });
+
+  it('clears it on a todo job as well', () => {
+    writeConfig([{ id: 't1', title: 'queued', repoPath: '/r', state: 'todo', agentSessionId: 'session-2' }]);
+    loadConfig();
+    expect(config.jobs[0].agentSessionId).toBeNull();
   });
 });

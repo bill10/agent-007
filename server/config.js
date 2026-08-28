@@ -34,11 +34,17 @@ export function loadConfig() {
     //    there turns out to be no PR, the card shows "agent gone" and the user
     //    decides — requeue, or recover the branch from the orphans list.
     for (const job of config.jobs) {
-      if (job.state !== 'in-progress') continue;
+      // No session survives a restart, so no stored link can still be valid —
+      // and ids are only unique within a process generation, so a stale one can
+      // otherwise resolve to an unrelated agent. Cleared for EVERY job, not
+      // just the in-flight ones: a review card kept its link forever.
       job.agentSessionId = null;
-      job.agentName = null;
+      if (job.state !== 'in-progress') continue;
+      // agentName is history, not a live link — "Phantom did this work" stays
+      // true across a restart, and it is the credit the card exists to show.
       if (!job.branchName) {
         job.state = 'todo';
+        job.agentName = null;
         job.startedAt = null;
         continue;
       }

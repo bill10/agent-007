@@ -128,7 +128,7 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
 // same invariant the PR path relies on — in-progress jobs and live board agents
 // are the same set. removeWorktree still protects the work: uncommitted or
 // unpushed changes become an orphan rather than being deleted.
-export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
+export async function moveJob(jobId, state, broadcast, { killSession, findPr = findPrForBranch } = {}) {
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
@@ -158,6 +158,18 @@ export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
     job.reviewAt = null;
   }
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
+  // A manual move means "the PR was opened outside the board". Look it up, or
+  // the card sits in Review with no link to the thing it produced — nothing
+  // else backfills it, since the watcher only examines in-progress jobs.
+  if (state === 'review' && !job.prNumber && job.branchName) {
+    const { pr } = await findPr(job.repoPath, job.branchName);
+    if (pr) {
+      job.prUrl = pr.url;
+      job.prNumber = pr.number;
+      job.lastError = null;
+      job.lastErrorAt = null;
+    }
+  }
   // Persist and repaint before the kill so the card moves immediately; the kill
   // then emits its own session-ended and orphan notifications.
   persist(broadcast);
@@ -516,6 +528,10 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     job.prUrl = pr.url;
     job.prNumber = pr.number;
     job.reviewAt = new Date().toISOString();
+    // The restart note says the board is still watching for this PR. It just
+    // found it, so the note is now false on its own card.
+    job.lastError = null;
+    job.lastErrorAt = null;
     moved.push(job);
 
     // Always retire the agent. This is what keeps the per-repo cap meaningful:

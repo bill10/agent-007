@@ -272,3 +272,41 @@ describe('PR link safety', () => {
     }
   });
 });
+
+describe('a finished card still shows its record', () => {
+  it('shows the branch even when the agent name was lost', () => {
+    // A restart used to null agentName, and the branch was rendered inside the
+    // agent block — so the card came up with nothing on it but its title.
+    handleJobsList({
+      jobs: [JOB({ state: 'review', agentName: null, branchName: 'bill10/add-job-button', prUrl: 'https://gh/o/r/pull/18', prNumber: 18 })],
+      settings: {},
+    });
+    const card = document.querySelector('.job-card');
+    expect(card.querySelector('.job-card-branch').textContent).toBe('bill10/add-job-button');
+    expect(card.querySelector('.job-card-agent-name')).toBeNull();
+    expect(card.querySelector('.job-card-pr').textContent).toBe('PR #18');
+  });
+
+  it('shows the agent name when there is no branch', () => {
+    handleJobsList({ jobs: [JOB({ state: 'review', agentName: 'Phantom', branchName: null })], settings: {} });
+    const card = document.querySelector('.job-card');
+    expect(card.querySelector('.job-card-agent-name').textContent).toBe('Phantom');
+    expect(card.querySelector('.job-card-branch')).toBeNull();
+  });
+
+  it('shows both, with when it started', () => {
+    handleJobsList({
+      jobs: [JOB({ state: 'review', agentName: 'Phantom', branchName: 'bill10/x', startedAt: new Date().toISOString() })],
+      settings: {},
+    });
+    const row = document.querySelector('.job-card-agent');
+    expect(row.textContent).toMatch(/Phantom/);
+    expect(row.textContent).toMatch(/bill10\/x/);
+    expect(row.textContent).toMatch(/started/);
+  });
+
+  it('renders no agent row at all when neither is known', () => {
+    handleJobsList({ jobs: [JOB({ state: 'todo', agentName: null, branchName: null })], settings: {} });
+    expect(document.querySelector('.job-card-agent')).toBeNull();
+  });
+});
