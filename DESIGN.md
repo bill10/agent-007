@@ -24,6 +24,15 @@ Random assignment, recycled on agent death. User can override with custom name.
 Git username read from `git config user.name`, lowercased, spaces to hyphens.
 Falls back to `agent` if not configured. User can override with custom branch name.
 
+**Start point** — every agent branch starts from `origin/<base>`, fetched first,
+where `<base>` comes from the remote's own HEAD (falling back to `main`, then
+`master`). Not from HEAD of the main checkout: that silently started agents on a
+stale local base, or worse, on whatever unrelated branch the user had checked
+out, whose half-finished work then rode along in the agent's PR. Degrades
+cleanly — no network or no remote falls back to the local base branch, and a repo
+with neither falls back to HEAD. Overridable per spawn via Advanced -> "Start
+from" for the "branch off what I'm working on" case.
+
 ## Color System
 
 Two themes: dark (default) and light. Gold accent in both. Persisted to localStorage.

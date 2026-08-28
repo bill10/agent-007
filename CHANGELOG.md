@@ -5,6 +5,31 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.1.0] - 2026-08-28
+
+### Fixed
+
+- New agents now start from your repository's base branch as it exists on the
+  remote, freshly fetched, instead of from whatever you happen to have checked
+  out. Two things went wrong before. If your local `main` had fallen behind, the
+  agent quietly worked from superseded code and its pull request showed a diff
+  against a base it had never seen. Worse, if you were sitting on an unrelated
+  feature branch, the new agent inherited that branch's half-finished work,
+  which then rode along inside the agent's pull request. This matters most for
+  job board agents, which are dispatched while you are busy doing something
+  else, and your checkout is least likely to be on a clean base.
+- Agent 007 no longer waits on a git credential prompt that nobody can answer.
+  Any git command that needs credentials now fails immediately instead of
+  hanging.
+
+### Added
+
+- **Start from** (New Agent -> Advanced). Branch, tag or commit the agent's
+  branch starts from. Leave it blank for the repository's base branch on the
+  remote; set it to branch off work you have in progress. A value that does not
+  exist is reported by name rather than failing later with a confusing git
+  error.
+
 ## [0.3.0.0] - 2026-08-27
 
 ### Added

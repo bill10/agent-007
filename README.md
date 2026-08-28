@@ -51,6 +51,12 @@ Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ N
 
 Each agent runs in its own [git worktree](https://git-scm.com/docs/git-worktree), so multiple agents can work on the same repo without stepping on each other. The server manages PTY processes via [node-pty](https://github.com/nicknisi/node-pty) and communicates with the browser over WebSocket. The pixel office is rendered on an HTML canvas with a day/night cycle that follows your local time.
 
+Every agent's branch starts from your repository's base branch as it exists on
+the remote, fetched just before the worktree is created, so an agent never picks
+up a stale local base or whatever unrelated branch you happen to have checked
+out. Override it per agent with **Advanced -> Start from** when you want to
+branch off work in progress.
+
 The job board reuses that same machinery: a dispatched job is an ordinary agent, with a real terminal you can type into and take over at any point. Each job gets its own worktree and branch, so a job maps one-to-one onto a branch and a pull request. When the PR appears the board closes the agent and releases its worktree and local branch; the PR itself is untouched, and work that was never pushed is kept as an orphan rather than deleted.
 
 ```

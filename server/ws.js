@@ -159,7 +159,12 @@ export function setupWebSocket(wss, { createSession, killSession }) {
       try {
       switch (msg.type) {
         case 'spawn': {
-          const result = await createSession(msg.command || 'claude', msg.name, msg.repoPath || null, msg.branch || null, ws.user ? ws.user.id : null);
+          const result = await createSession(
+            msg.command || 'claude', msg.name, msg.repoPath || null, msg.branch || null,
+            ws.user ? ws.user.id : null,
+            // Optional: branch from somewhere other than the repo's base branch.
+            { startPoint: typeof msg.startPoint === 'string' && msg.startPoint.trim() ? msg.startPoint.trim() : null },
+          );
           if (result.error) {
             ws.send(JSON.stringify({ type: 'spawn-error', command: msg.command || 'claude', error: result.error }));
           } else if (result.session) {
