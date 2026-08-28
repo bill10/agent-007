@@ -237,6 +237,78 @@ Four rules keep the transition honest:
   an agent — a move into In progress, taking the work back up; every other one
   retires it.
 
+### One-time and scheduled cards
+
+Two kinds of card share those three columns.
+
+A **one-time** job is the original: dispatched once, it crosses the board and
+stops in Review when its pull request appears. A **scheduled** job is a standing
+card fired by a cron schedule; it cycles To do -> In progress -> To do and never
+reaches Review. Cards written before types existed carry no `type` at all, so
+every read goes through `jobType()` — a missing type is one-time, which is what
+those cards have always been.
+
+- **Same columns, not a fourth one.** A scheduled card between runs is queued
+  work like any other, and pulling it into its own column would take it out of
+  the glance the three columns exist to give. It is marked with a chip and a row
+  showing the cron, the next run, and how many times it has run.
+- **It cycles through To do, so the cap keeps working.** The invariant the
+  per-repo cap depends on is that in-progress cards and live board agents are
+  the same set. A scheduled run is an ordinary in-progress card with an ordinary
+  agent for as long as it lasts, so nothing about the cap, the dispatcher or
+  worktree cleanup had to learn a special case.
+- **The prompt drops the review/ship instruction.** A scheduled job need not be
+  code at all. Telling an agent that summarises yesterday's commits to run
+  `/review` and `/ship` would push it into inventing a change so it had something
+  to open a pull request with. The scheduled suffix says the opposite out loud —
+  do the work, do not open a PR unless the work calls for one, and finish by
+  writing what you found in the terminal. What it keeps is the part that is
+  still true: nobody is watching, so assume rather than ask.
+- **A run ends with its agent, not with a pull request.** There is no artefact
+  to watch for, so what is left is the agent: the run is over when it exits, or
+  when it has been parked at its prompt past the quiet window. MESSAGE is
+  excluded — that is the agent asking a question, and killing it would throw
+  away the answer it is waiting for, so such a run holds its slot and shows
+  "needs you" exactly as a one-time job does. `finishScheduledRuns` runs first
+  in each scan, so a run that ended frees its repo slot in time for the same
+  scan to dispatch what was queued behind it. Because a session gone entirely
+  also counts as over, this doubles as the recovery path after a restart.
+- **A run that leaves a dirty worktree orphans it, every time.** `removeWorktree`
+  keeps a worktree whose tree is dirty or whose commits are unpushed, which is
+  the right call for a one-time job — that is somebody's work. Recurrence
+  amplifies it: a scheduled job that reliably leaves a modified file orphans one
+  worktree per run, hourly. Deliberately not capped here. The orphan
+  notification fires on every run, so it is visible rather than silent, and the
+  fix belongs in the job (stop leaving files behind), not in a policy that
+  starts deleting work the rest of the app promises to keep. `git status
+  --porcelain` respects `.gitignore`, so build output in an ignored path does
+  not trigger it.
+- **The PR watcher skips scheduled cards.** A scheduled run that happens to open
+  a pull request must not be moved to Review — that would take the card out of
+  rotation permanently.
+- **The next run is measured from the end of the last one**, never stepped on
+  from the previous due time, so a run that overran its own interval schedules
+  the next one afterwards instead of coming due again the instant it lands. No
+  missed firing is ever replayed: a board that was stopped overnight owes
+  nothing in the morning.
+- **Cron granularity is bounded by the scan interval.** The dispatcher only acts
+  on a scan (five minutes by default, floor 30s), so `* * * * *` means "every
+  scan", not every minute. Times are the server's local time — the schedule is
+  written by the person sitting in front of the machine the agents run on.
+- **A five-field parser, not a dependency** (`lib/cron.js`). Ranges, lists,
+  steps, `7` for Sunday, and the `@hourly`/`@daily`/... shorthands, plus the one
+  genuinely surprising rule: when both day fields are restricted they are ORed.
+  `nextCronTime` walks whole months and days rather than minute by minute, and
+  gives up after four years — enough for 29 February, bounded for an expression
+  like `0 0 30 2 *` that parses fine and can never match. Such a card is stored
+  and says "never fires again" rather than being refused, because refusing it
+  would mean the parser having to know about calendars — and `isJobDue` treats
+  it as never due, since "no next run time" would otherwise read as "due now"
+  and fire the card on every scan. Local arithmetic is also how the walk moves,
+  so an hour that a daylight-saving transition skips simply does not fire that
+  day (what cron does), and a step that fails to advance ends the walk rather
+  than spinning.
+
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
   `--state-*` tokens rather than introducing a second vocabulary:
