@@ -217,13 +217,15 @@ Four rules keep the transition honest:
   To do or In progress clears it, because the next pull request on that job is a
   different one — keeping the old stamp would exclude the card from the sweep
   forever.
-- **The sweep never retires an agent.** Unlike the one-shot kill at the PR, this
-  runs every scan; an agent you re-adopted on a shipped branch to address review
-  comments is yours. A manual move to Done does retire it, because that is the
-  user saying the job is over — but Done -> Review does not, for the same reason
-  the sweep does not: putting a card back on the board is not closing a terminal.
-  The two moves that keep an agent are any move into In progress, and
-  Done -> Review; every other manual move retires it.
+- **The sweep never retires an agent it finds in Review.** Unlike the one-shot
+  kill at the PR, this runs every scan; an agent you re-adopted on a shipped
+  branch to address review comments is yours. Finishing from In progress is the
+  one exception, and barely one: that is a job leaving in-progress, which is
+  exactly what the per-repo cap counts. A manual move to Done retires it too,
+  because that is the user saying the job is over — but Done -> Review does not,
+  for the same reason the sweep does not: putting a card back on the board is not
+  closing a terminal. The two moves that keep an agent are any move into In
+  progress, and Done -> Review; every other manual move retires it.
 
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
@@ -276,12 +278,15 @@ A dispatched agent is an ordinary agent with one difference: its tab opens
 without taking focus (`spawnedBy: 'board'`), because an unattended dispatcher
 firing every five minutes would otherwise move the user's cursor mid-sentence.
 Its tab dot carries a faint outline to show where it came from, and the tab is
-disposed automatically when the agent is retired at its PR.
+disposed automatically when the agent is retired.
 
-Retirement happens ONLY at the moment a job transitions to Review, never as a
-recurring sweep over jobs already there. An agent you re-adopt on a shipped
-branch to address review comments is yours; a poll that killed it every five
-minutes would make Review permanently hostile to working on your own PR.
+Retirement happens when a job LEAVES In progress — to Review when its pull
+request appears, or straight to Done when that pull request opened and merged
+inside a single scan — and on a manual move to Done, which is the user saying
+the job is over. It never happens as a recurring sweep over jobs already in
+Review. An agent you re-adopt on a shipped branch to address review comments is
+yours; a poll that killed it every five minutes would make Review permanently
+hostile to working on your own PR.
 
 ### Agent-posted jobs
 An agent you are talking to can put a card on the board when you ask it to, so

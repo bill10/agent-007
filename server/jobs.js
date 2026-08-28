@@ -723,10 +723,12 @@ export async function findMergedPrForBranch(repoPath, branchName, {
 // branch finds it: created per job, not reused while it exists, durable across
 // restarts.
 //
-// Called ONLY at the moment a job leaves in-progress, never as a recurring
-// sweep. An agent you re-adopt on a shipped branch to address review comments is
-// yours; a poll that killed it every five minutes would make Review permanently
-// hostile to working on your own PR.
+// Called ONLY at the moment a job leaves in-progress — to Review when its PR
+// appears, or straight to Done when the merge sweep catches a PR that opened and
+// merged inside one scan — never over jobs already in Review. An agent you
+// re-adopt on a shipped branch to address review comments is yours; a poll that
+// killed it every five minutes would make Review permanently hostile to working
+// on your own PR.
 //
 // Returns whether it actually closed something. A failure is logged and
 // swallowed: the work has shipped either way, so a cleanup that did not work
