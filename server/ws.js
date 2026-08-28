@@ -12,6 +12,10 @@ import { saveActiveSession, syncOrphansToConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree } from '../lib/helpers.js';
+import {
+  addJob, updateJob, deleteJob, moveJob, updateSettings,
+  jobsPayload, broadcastJobs, dispatchOnce, checkPullRequests,
+} from './jobs.js';
 
 // --- Client tracking ---
 const clients = new Set();
@@ -41,6 +45,8 @@ export function sessionPayload(session) {
     ownerId: session.ownerId || null,
     ownerName: owner ? owner.displayName : null,
     ownerColor: owner ? owner.color : null,
+    spawnedBy: session.spawnedBy || 'user',
+    jobId: session.jobId || null,
   };
 }
 
@@ -133,6 +139,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
     }
 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
+    ws.send(JSON.stringify(jobsPayload()));
 
     broadcastPresence();
 
@@ -330,6 +337,51 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           const relativePath = `.uploads/${finalName}`;
           if (!session.exited) session.pty.write(relativePath);
           ws.send(JSON.stringify({ type: 'upload-complete', sessionId: msg.sessionId, path: relativePath, filename: finalName }));
+          break;
+        }
+
+        // --- Job board ---
+        // Deliberately not ownership-gated, matching add-repo/remove-repo: the
+        // board is shared workspace state, not a per-user resource. postedBy is
+        // recorded for attribution, not access control. (Auth here is identity,
+        // not a sandbox — see the note at the top of server/auth.js.)
+        case 'job-create': {
+          const result = addJob({
+            title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
+            postedBy: ws.user ? ws.user.id : null,
+            postedByName: ws.user ? ws.user.displayName : null,
+          }, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        case 'job-update': {
+          const result = updateJob(msg.jobId, { title: msg.title, detail: msg.detail, repoPath: msg.repoPath }, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        case 'job-delete': {
+          const result = deleteJob(msg.jobId, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        case 'job-move': {
+          const result = moveJob(msg.jobId, msg.state, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        case 'job-settings': {
+          updateSettings({
+            running: msg.running, maxPerRepo: msg.maxPerRepo,
+            intervalMs: msg.intervalMs, permissionMode: msg.permissionMode,
+          }, broadcast);
+          break;
+        }
+        // "Run now" — the same tick the timer fires, on demand, so the user
+        // never has to wait out the interval to see the board act.
+        case 'job-dispatch-now': {
+          await checkPullRequests(broadcast);
+          await dispatchOnce(createSession, broadcast, { onSessionCreated: (s) => broadcast(sessionPayload(s)) });
+          broadcastJobs(broadcast);
           break;
         }
       }

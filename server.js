@@ -8,6 +8,7 @@
 //   server/config.js Config persistence (load, save, crash recovery)
 //   server/git.js    Git operations (worktree, file tree, diff)
 //   server/pty.js    PTY lifecycle (spawn, handlers, state detection)
+//   server/jobs.js   Job board (persistence, dispatcher loop, PR watching)
 //   server/ws.js     WebSocket (message routing, broadcast, origin check)
 //   server/http.js   HTTP routes (/api/browse, origin check middleware)
 
@@ -27,6 +28,7 @@ import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphane
 import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
+import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans } from './server/state.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +42,7 @@ setupRoutes(app, join(__dirname, 'public'));
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.
 
-async function createSession(command, name, repoPath, customBranch, ownerId) {
+async function createSession(command, name, repoPath, customBranch, ownerId, meta = {}) {
   const sessionId = nextSessionId();
   const agentName = name || codenamePool.pick();
   if (name) codenamePool.addUsed(name);
@@ -73,6 +75,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId) {
     sessionId, name: agentName, color, command,
     repoPath: resolvedRepoPath, worktreePath, branchName,
     repoSlug, cocktail, ownerId: ownerId || null,
+    spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
   }, broadcast);
 
   if (result.error) {
@@ -140,6 +143,12 @@ async function startup() {
   mkdirSync(WORKTREE_DIR, { recursive: true });
   await pruneWorktrees();
   await scanForOrphanedWorktrees(broadcast);
+  // The loop always runs; each tick is a no-op while settings.running is false.
+  // Keeping one timer alive (instead of creating/destroying it on toggle) means
+  // the Start button only has to flip a boolean, and a config restored with
+  // running:true resumes dispatching without any extra wiring.
+  startDispatcher(createSession, broadcast, { onSessionCreated: (s) => broadcast(sessionPayload(s)) });
+  if (boardSettings().running) console.log('  Job board dispatcher: running');
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
     const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
@@ -156,6 +165,7 @@ async function startup() {
 // Wait for PTY processes to exit with 3s timeout, then force kill.
 function gracefulShutdown() {
   console.log('\nShutting down...');
+  stopDispatcher();
   const killPromises = [];
   for (const [, session] of sessions) {
     clearInterval(session.stateCheckInterval);

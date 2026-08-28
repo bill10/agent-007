@@ -9,7 +9,7 @@ import {
 export function loadConfig() {
   try {
     if (!existsSync(CONFIG_PATH)) {
-      setConfig({ version: 1, repos: [], orphans: [], activeSessions: [] });
+      setConfig({ version: 1, repos: [], orphans: [], activeSessions: [], jobs: [], jobBoard: null });
       return;
     }
     const data = JSON.parse(readFileSync(CONFIG_PATH, 'utf8'));
@@ -18,13 +18,34 @@ export function loadConfig() {
     if (!Array.isArray(config.repos)) config.repos = [];
     if (!Array.isArray(config.orphans)) config.orphans = [];
     if (!Array.isArray(config.activeSessions)) config.activeSessions = [];
+    if (!Array.isArray(config.jobs)) config.jobs = [];
+    // Jobs outlive the server, sessions do not. Any job left mid-flight by a
+    // shutdown has an agentSessionId pointing at a PTY that no longer exists,
+    // so clear the link and send it back to To do — the dispatcher will pick it
+    // up again. The worktree it was using survives as an orphan, recoverable
+    // from the explorer exactly like any other interrupted agent.
+    for (const job of config.jobs) {
+      if (job.state === 'in-progress') {
+        job.state = 'todo';
+        job.agentSessionId = null;
+        job.agentName = null;
+        job.startedAt = null;
+        // Keep branchName/worktreePath: they point at real work now sitting in
+        // an orphaned worktree. Surfacing it on the card via the existing error
+        // line is the difference between recovering that branch and losing it.
+        if (job.branchName) {
+          job.lastError = `Server restarted — agent lost. Previous work is on ${job.branchName} (recover it from the orphans list).`;
+          job.lastErrorAt = new Date().toISOString();
+        }
+      }
+    }
     for (const o of config.orphans) {
       orphans.set(o.id, o);
       codenamePool.addUsed(o.name);
     }
   } catch (err) {
     console.warn('Config corrupted, starting with empty config:', err.message);
-    setConfig({ version: 1, repos: [], orphans: [], activeSessions: [] });
+    setConfig({ version: 1, repos: [], orphans: [], activeSessions: [], jobs: [], jobBoard: null });
   }
 }
 
