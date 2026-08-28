@@ -172,11 +172,17 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     // retired. The card just goes without its link, as it did before.
     try {
       const { pr } = await findPr(job.repoPath, job.branchName);
-      if (pr) {
+      // Re-check before writing: findPr is a network call, and a concurrent
+      // requeue during it would otherwise leave a To do card carrying PR links
+      // for an attempt that no longer exists.
+      if (pr && job.state === 'review' && allJobs().includes(job)) {
         job.prUrl = pr.url;
         job.prNumber = pr.number;
         job.lastError = null;
         job.lastErrorAt = null;
+        // The PR is in hand, so any earlier "cannot check" note is obsolete.
+        job.prCheckError = null;
+        job.prCheckErrorAt = null;
       }
     } catch (err) {
       console.error(`PR lookup failed while moving "${job.title}" to review:`, err.message);

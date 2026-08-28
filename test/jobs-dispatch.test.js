@@ -1012,3 +1012,40 @@ describe('requeueing clears every per-attempt field', () => {
     expect(job.prNumber).toBeNull();
   });
 });
+
+describe('a manual move that races a requeue', () => {
+  beforeEach(resetBoard);
+
+  it('does not leave PR links on a card that went back to To do', async () => {
+    // findPr is a network call; a requeue during it would otherwise resume and
+    // write prUrl/prNumber onto a job that is now todo.
+    addJob({ title: 'raced', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => {
+        job.state = 'todo';          // the user requeues mid-lookup
+        return { pr: { url: 'u', number: 55 } };
+      },
+    });
+    expect(job.state).toBe('todo');
+    expect(job.prNumber).toBeNull();
+    expect(job.prUrl).toBeNull();
+  });
+
+  it('clears a stale PR-check note when the manual move finds the PR', async () => {
+    addJob({ title: 'had a failure', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.prCheckError = 'Cannot check for a pull request here — gh: not authenticated.';
+
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: { url: 'u', number: 18 } }),
+    });
+    expect(job.prNumber).toBe(18);
+    expect(job.prCheckError).toBeNull();
+  });
+});
