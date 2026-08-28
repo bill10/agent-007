@@ -19,6 +19,12 @@ function repoWithRemote() {
   writeFileSync(join(repo, 'README.md'), 'base');
   execFileSync('git', ['-C', repo, 'add', '-A']);
   execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'base']);
+  // Name the branch explicitly rather than inheriting init.defaultBranch. CI
+  // runners still default to `master`, so hard-coding `main` in the push made
+  // this fail with "src refspec main does not match any" everywhere but a
+  // machine configured like the author's. `branch -M` works on every git
+  // version, unlike `init -b`.
+  execFileSync('git', ['-C', repo, 'branch', '-M', 'main']);
   execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
   return { root, repo };
 }
