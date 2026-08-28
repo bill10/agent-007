@@ -146,3 +146,76 @@ describe('resolveBaseBranch', () => {
     expect(await resolveBaseBranch(repo)).toBeNull();
   });
 });
+
+describe('the pre-spawn fetch cannot hang a spawn', () => {
+  it('fails fast against an unreachable remote instead of prompting', async () => {
+    // A private remote with no cached credentials must not park git on a
+    // credential prompt nobody can answer. GIT_TERMINAL_PROMPT=0 in gitExec
+    // makes it error immediately; the spawn then falls back to local refs.
+    const root = mkdtempSync(join(tmpdir(), 'a007-sp-unreachable-'));
+    const repo = join(root, 'repo');
+    execFileSync('git', ['init', '-q', repo]);
+    git(repo, 'config', 'user.name', 'bill10');
+    git(repo, 'config', 'user.email', 'b@b');
+    git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(repo, 'branch', '-M', 'main');
+    git(repo, 'remote', 'add', 'origin', 'https://127.0.0.1:1/nope/nope.git');
+
+    const started = Date.now();
+    const result = await createWorktree(repo, 'Spectre');
+    const elapsed = Date.now() - started;
+
+    // The spawn still succeeds, on the local base branch.
+    expect(result.error).toBeUndefined();
+    expect(result.startPoint).toBe('main');
+    expect(existsSync(result.worktreePath)).toBe(true);
+    // And it did not sit on the full fetch timeout waiting for a prompt.
+    expect(elapsed).toBeLessThan(10000);
+  });
+});
+
+describe('the "Start from" value is untrusted input', () => {
+  function plainRepo() {
+    const root = mkdtempSync(join(tmpdir(), 'a007-sp-untrusted-'));
+    const repo = join(root, 'repo');
+    execFileSync('git', ['init', '-q', repo]);
+    git(repo, 'config', 'user.name', 'bill10');
+    git(repo, 'config', 'user.email', 'b@b');
+    git(repo, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(repo, 'branch', '-M', 'main');
+    return repo;
+  }
+
+  it('refuses a value that git would parse as an option', async () => {
+    // `worktree add <path> -b <name> --detach` consumes the value as a FLAG,
+    // not a commit-ish, and a `--` delimiter does not protect this position.
+    // A git ref name cannot begin with a dash, so rejecting costs nothing.
+    const repo = plainRepo();
+    for (const bad of ['--detach', '--force', '-b', '--orphan']) {
+      const result = await createWorktree(repo, 'Cobra', null, { startPoint: bad });
+      expect(result.error).toMatch(/cannot start with/i);
+      expect(result.branchName).toBeUndefined();
+    }
+  });
+
+  it('refuses a start point that does not exist, naming what was asked for', async () => {
+    const repo = plainRepo();
+    const result = await createWorktree(repo, 'Mirage', null, { startPoint: 'no-such-branch' });
+    expect(result.error).toMatch(/no-such-branch/);
+    expect(result.error).toMatch(/not found/i);
+  });
+
+  it('accepts a tag or a raw commit sha, not just a branch', async () => {
+    const repo = plainRepo();
+    git(repo, 'tag', 'v1.0');
+    const sha = git(repo, 'rev-parse', 'HEAD').trim();
+
+    const byTag = await createWorktree(repo, 'Dagger', null, { startPoint: 'v1.0' });
+    expect(byTag.error).toBeUndefined();
+    expect(byTag.startPoint).toBe('v1.0');
+
+    const bySha = await createWorktree(repo, 'Falcon', null, { startPoint: sha });
+    expect(bySha.error).toBeUndefined();
+    expect(bySha.startPoint).toBe(sha);
+  });
+});

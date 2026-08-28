@@ -98,10 +98,14 @@ function setupSpawnForm() {
     }
     startBtn.disabled = true;
     startBtn.textContent = 'Creating...';
+    // Generous, because spawning now fetches the repo before branching so the
+    // agent starts from the current remote base. Must stay above the server's
+    // FETCH_TIMEOUT (server/git.js) plus the worktree add and the PTY spawn, or
+    // a slow network makes this report a timeout for a spawn that then succeeds.
     spawnTimeout = setTimeout(() => {
       resetSpawnForm();
-      showSpawnError('Spawn timed out — server did not reply within 10 seconds. Check server logs.');
-    }, 10000);
+      showSpawnError('Spawn timed out — server did not reply within 30 seconds. Check server logs.');
+    }, 30000);
   }
 
   function resetSpawnForm() {
