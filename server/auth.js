@@ -18,6 +18,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { sessions } from './state.js';
 
 export const USERS_PATH = process.env.AGENT007_USERS_PATH
   || join(homedir(), '.agent-007', 'users.json');
@@ -105,16 +106,59 @@ export function resolveToken(token) {
   return null;
 }
 
+// Just the Authorization header. Split out because agent tokens accept ONLY
+// this form (see resolveAgentToken's caller) — a ?token= URL lands in
+// reverse-proxy and access logs, and nothing legitimately puts an agent token
+// in a URL, so there is no reason to let the newer credential go there.
+export function tokenFromAuthHeader(req) {
+  const auth = req.headers?.authorization;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return null;
+}
+
 // Pull a bearer token from an Express request: Authorization header first,
 // then a ?token= query param (needed for the WebSocket handshake, where the
 // browser can't set headers).
 export function tokenFromRequest(req) {
-  const auth = req.headers?.authorization;
-  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  const header = tokenFromAuthHeader(req);
+  if (header) return header;
   try {
     const url = new URL(req.url, 'http://localhost');
     const q = url.searchParams.get('token');
     if (q) return q;
   } catch {}
+  return null;
+}
+
+// --- Agent session tokens (job board: agent-posted jobs) ---
+//
+// Every agent terminal is handed a one-off bearer token in its environment
+// (AGENT007_TOKEN, see server/pty.js) so the `agent-007-job` CLI can post a
+// card to the board on the agent's behalf. The token is minted per session,
+// lives only in memory on the session object, and is worthless the moment that
+// PTY exits — nothing is written to disk and nothing survives a restart.
+//
+// It is deliberately NOT a user credential: it identifies one live agent, and
+// the routes that accept it say so explicitly (see requireAuth/requireUser in
+// server/http.js). That matters because the agent's environment is readable by
+// anything running in its terminal — which is already a shell on this machine,
+// so the token grants nothing that process could not otherwise do, and it must
+// stay that way.
+export function mintAgentToken() {
+  return 'a007a_' + randomBytes(32).toString('base64url');
+}
+
+// Resolve a token to the live session that owns it. Sessions are few, so a scan
+// is cheaper than a second index that has to be invalidated on every exit —
+// and an exited session's token stops resolving without any cleanup step.
+export function resolveAgentToken(token) {
+  if (!token) return null;
+  const presented = Buffer.from(String(token), 'utf8');
+  for (const session of sessions.values()) {
+    if (session.exited || !session.agentToken) continue;
+    const stored = Buffer.from(session.agentToken, 'utf8');
+    if (stored.length !== presented.length) continue;
+    if (timingSafeEqual(stored, presented)) return session;
+  }
   return null;
 }

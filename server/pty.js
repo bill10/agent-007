@@ -4,6 +4,8 @@ import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
 import { RING_BUFFER_MAX } from './state.js';
+import { mintAgentToken } from './auth.js';
+import { agentEnv } from './agent-env.js';
 import { broadcastJobs } from './jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
@@ -47,6 +49,9 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  */
 export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId }, broadcast) {
   const { file, args } = parseCommand(command);
+  // Minted before the spawn so it can go into the child's environment, and
+  // parked on the session below so resolveAgentToken can find its way back.
+  const agentToken = mintAgentToken();
 
   let ptyProcess;
   try {
@@ -55,7 +60,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
       cols: 120,
       rows: 30,
       cwd: worktreePath || homedir(),
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: agentEnv({ sessionId, name, repoPath, worktreePath, branchName, agentToken }),
     });
   } catch (err) {
     return { error: `Failed to start "${command}". Is the command installed?` };
@@ -76,6 +81,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     recentStrippedLines: [],
     isTUI: isTUI ?? /^(claude|aider)\b/.test(command),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
+    agentToken,                 // bearer for this agent's own /api/jobs calls; memory-only
     // Provenance. 'board' sessions are opened by the job dispatcher: the client
     // uses this to add the tab WITHOUT stealing focus, since an unattended
     // dispatcher would otherwise yank the user's cursor away every few minutes.
