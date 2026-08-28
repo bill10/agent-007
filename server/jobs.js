@@ -128,7 +128,7 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
 // same invariant the PR path relies on — in-progress jobs and live board agents
 // are the same set. removeWorktree still protects the work: uncommitted or
 // unpushed changes become an orphan rather than being deleted.
-export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
+export async function moveJob(jobId, state, broadcast, { killSession, findPr = findPrForBranch } = {}) {
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
@@ -156,8 +156,38 @@ export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
     job.prUrl = null;
     job.prNumber = null;
     job.reviewAt = null;
+    // Also the PR-check note: it describes an attempt that no longer exists, so
+    // carrying it onto a fresh To do card would report a failure against work
+    // that has not been tried yet.
+    job.prCheckError = null;
+    job.prCheckErrorAt = null;
   }
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
+  // A manual move means "the PR was opened outside the board". Look it up, or
+  // the card sits in Review with no link to the thing it produced — nothing
+  // else backfills it, since the watcher only examines in-progress jobs.
+  if (state === 'review' && !job.prNumber && job.branchName) {
+    // Best-effort: a lookup that fails must not abandon the move half-applied,
+    // with the state changed in memory but never persisted and the agent never
+    // retired. The card just goes without its link, as it did before.
+    try {
+      const { pr } = await findPr(job.repoPath, job.branchName);
+      // Re-check before writing: findPr is a network call, and a concurrent
+      // requeue during it would otherwise leave a To do card carrying PR links
+      // for an attempt that no longer exists.
+      if (pr && job.state === 'review' && allJobs().includes(job)) {
+        job.prUrl = pr.url;
+        job.prNumber = pr.number;
+        job.lastError = null;
+        job.lastErrorAt = null;
+        // The PR is in hand, so any earlier "cannot check" note is obsolete.
+        job.prCheckError = null;
+        job.prCheckErrorAt = null;
+      }
+    } catch (err) {
+      console.error(`PR lookup failed while moving "${job.title}" to review:`, err.message);
+    }
+  }
   // Persist and repaint before the kill so the card moves immediately; the kill
   // then emits its own session-ended and orphan notifications.
   persist(broadcast);
@@ -166,9 +196,21 @@ export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
     if (session && !session.exited) {
       try {
         await killSession(retiringSessionId);
+        // Only after it succeeded: a failed kill leaves the agent running, and
+        // the card must keep pointing at it rather than become unreachable.
+        if (job.agentSessionId === retiringSessionId) {
+          job.agentSessionId = null;
+          persist(broadcast);
+        }
       } catch (err) {
         console.error(`Failed to close agent for job "${job.title}":`, err.message);
       }
+    } else if (job.agentSessionId === retiringSessionId) {
+      // Nothing to kill — the session already went. Drop the link anyway, or
+      // the card keeps a dead id, which is how a stale link outlived a restart
+      // and resolved to an unrelated agent in the next process generation.
+      job.agentSessionId = null;
+      persist(broadcast);
     }
   }
   return { job };
@@ -516,6 +558,10 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     job.prUrl = pr.url;
     job.prNumber = pr.number;
     job.reviewAt = new Date().toISOString();
+    // The restart note says the board is still watching for this PR. It just
+    // found it, so the note is now false on its own card.
+    job.lastError = null;
+    job.lastErrorAt = null;
     moved.push(job);
 
     // Always retire the agent. This is what keeps the per-repo cap meaningful:

@@ -129,13 +129,18 @@ function renderCard(job) {
     card.appendChild(detail);
   }
 
-  // Who is working on it and since when (requirement 3).
-  if (job.agentName) {
+  // Who worked on it, and where the work is (requirement 3). Rendered whenever
+  // EITHER is known: the branch is a fact about the job, not about the agent,
+  // and gating it on the name left a finished card showing nothing at all once
+  // the name was lost.
+  if (job.agentName || job.branchName || job.startedAt) {
     const agentEl = document.createElement('div');
     agentEl.className = 'job-card-agent';
-    const branch = job.branchName ? `<span class="job-card-branch">${escapeHtml(job.branchName)}</span>` : '';
-    const since = job.startedAt ? ` · started ${relativeTime(job.startedAt)}` : '';
-    agentEl.innerHTML = `<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>${branch}<span class="job-card-since">${since}</span>`;
+    const parts = [];
+    if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
+    if (job.branchName) parts.push(`<span class="job-card-branch">${escapeHtml(job.branchName)}</span>`);
+    if (job.startedAt) parts.push(`<span class="job-card-since">· started ${relativeTime(job.startedAt)}</span>`);
+    agentEl.innerHTML = parts.join(' ');
     card.appendChild(agentEl);
   }
 

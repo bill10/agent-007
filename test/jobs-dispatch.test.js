@@ -857,3 +857,195 @@ describe('relink covers a job that already reached review', () => {
     expect(job.agentSessionId).toBe('session-99');
   });
 });
+
+// --- A finished card must say what it produced ---
+
+describe('review cards keep their record', () => {
+  beforeEach(resetBoard);
+
+  it('clears the restart note once the PR is found', async () => {
+    // The note says the board is still watching for this PR. Finding it makes
+    // the note false on its own card.
+    addJob({ title: 'restarted then shipped', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.lastError = 'Server restarted — agent lost. The board is still watching for its PR.';
+
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 102 } }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(102);
+    expect(job.lastError).toBeNull();
+  });
+
+  it('a manual move to review picks up the PR that already exists', async () => {
+    // Nothing else backfills it: the watcher only examines in-progress jobs, so
+    // the card would sit in Review with no link to what it produced.
+    addJob({ title: 'shipped elsewhere', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: { url: 'https://gh/o/r/pull/18', number: 18 } }),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(18);
+    expect(job.prUrl).toBe('https://gh/o/r/pull/18');
+  });
+
+  it('a manual move still works when there is no PR to find', async () => {
+    addJob({ title: 'no pr', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: null, error: 'gh: not authenticated' }),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBeNull();
+  });
+
+  it('does not re-look-up a PR the card already has', async () => {
+    addJob({ title: 'already linked', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.prNumber = 7;
+    let looked = false;
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => { looked = true; return { pr: null }; },
+    });
+    expect(looked).toBe(false);
+    expect(job.prNumber).toBe(7);
+  });
+});
+
+describe('a manual move survives a bad PR lookup', () => {
+  beforeEach(resetBoard);
+
+  it('still moves and still retires the agent when the lookup throws', async () => {
+    // The lookup runs before persist and before the kill; a throw there would
+    // leave the job changed in memory, never saved, agent never retired.
+    addJob({ title: 'lookup explodes', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    const killed = [];
+
+    const result = await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+      findPr: async () => { throw new Error('network down'); },
+    });
+    expect(result.error).toBeUndefined();
+    expect(job.state).toBe('review');
+    expect(killed).toEqual([sid]);
+    expect(job.prNumber).toBeNull();      // no link, as before
+  });
+
+  it('clears the agent link once the agent is actually gone', async () => {
+    addJob({ title: 'linked then retired', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: null }),
+    });
+    expect(job.agentSessionId).toBeNull();
+  });
+
+  it('keeps the link when the kill fails, so the agent stays reachable', async () => {
+    addJob({ title: 'stubborn agent', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async () => { throw new Error('worktree busy'); },
+      findPr: async () => ({ pr: null }),
+    });
+    expect(job.agentSessionId).toBe(sid);
+  });
+});
+
+describe('moving to review when the agent is already gone', () => {
+  beforeEach(resetBoard);
+
+  it('drops the dead link rather than leaving a stale id on the card', async () => {
+    // A stale id is how a finished card outlived a restart and then resolved to
+    // an unrelated agent in the next process generation.
+    addJob({ title: 'agent already exited', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    sessions.get(job.agentSessionId).exited = true;
+
+    const killed = [];
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => killed.push(id),
+      findPr: async () => ({ pr: null }),
+    });
+    expect(killed).toEqual([]);              // nothing to kill
+    expect(job.agentSessionId).toBeNull();   // but the link still goes
+  });
+});
+
+describe('requeueing clears every per-attempt field', () => {
+  beforeEach(resetBoard);
+
+  it('drops the PR-check note along with the branch and PR', async () => {
+    // The note describes an attempt that no longer exists; carrying it onto a
+    // fresh To do card reports a failure against work not yet tried.
+    addJob({ title: 'unreachable repo', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: null, error: 'Could not resolve to a Repository' }),
+    });
+    const job = allJobs()[0];
+    expect(job.prCheckError).toBeTruthy();
+
+    await moveJob(job.id, 'todo', noopBroadcast, { killSession: async (id) => sessions.delete(id) });
+    expect(job.state).toBe('todo');
+    expect(job.prCheckError).toBeNull();
+    expect(job.prCheckErrorAt).toBeNull();
+    expect(job.branchName).toBeNull();
+    expect(job.prNumber).toBeNull();
+  });
+});
+
+describe('a manual move that races a requeue', () => {
+  beforeEach(resetBoard);
+
+  it('does not leave PR links on a card that went back to To do', async () => {
+    // findPr is a network call; a requeue during it would otherwise resume and
+    // write prUrl/prNumber onto a job that is now todo.
+    addJob({ title: 'raced', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => {
+        job.state = 'todo';          // the user requeues mid-lookup
+        return { pr: { url: 'u', number: 55 } };
+      },
+    });
+    expect(job.state).toBe('todo');
+    expect(job.prNumber).toBeNull();
+    expect(job.prUrl).toBeNull();
+  });
+
+  it('clears a stale PR-check note when the manual move finds the PR', async () => {
+    addJob({ title: 'had a failure', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.prCheckError = 'Cannot check for a pull request here — gh: not authenticated.';
+
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: { url: 'u', number: 18 } }),
+    });
+    expect(job.prNumber).toBe(18);
+    expect(job.prCheckError).toBeNull();
+  });
+});
