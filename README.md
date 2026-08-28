@@ -36,7 +36,7 @@ npm install
 npm start
 ```
 
-Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ New Agent**, pick a repo, and hit Start.
+Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ Agent**, pick a repo, and hit Start. **+ Job** posts work to the job board instead.
 
 ## Keyboard Shortcuts
 

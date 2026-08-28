@@ -2,16 +2,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
-// terminal.js pulls in xterm; the board only needs switchToSession from it, and
-// stubbing it also proves the board does not depend on the real module loading.
+// terminal.js pulls in xterm; the board only needs switchToSession and
+// updateTabs from it, and stubbing it also proves the board does not depend on
+// the real module loading.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
 import { send } from '../public/modules/ws.js';
 import { switchToSession } from '../public/modules/terminal.js';
 import { agents, jobs, repos, setActiveSession } from '../public/modules/state.js';
-import { handleJobsList, showJobBoard, hideJobBoard, renderBoard, setupJobBoard } from '../public/modules/jobs.js';
+import { handleJobsList, showJobBoard, hideJobBoard, renderBoard, setupJobBoard, openJobForm, closeJobForm } from '../public/modules/jobs.js';
 
 const BOARD_HTML = `
+  <button id="btn-new-job-shortcut"></button>
+  <div class="spawn-form" id="spawn-form" style="display:none"></div>
   <div id="terminal-viewport">
     <div id="terminal-empty"></div>
     <div class="job-board" id="job-board" style="display:none">
@@ -254,6 +257,64 @@ describe('show / hide', () => {
 
     hideJobBoard();
     expect(document.getElementById('job-board').style.display).toBe('none');
+  });
+
+  it('brings the board up before opening the form from the top bar', () => {
+    hideJobBoard();
+    // app.js wires this hook to updateTabs(). The pinned board tab has to
+    // repaint as active, or the form appears under a tab strip still
+    // highlighting the agent the user was looking at.
+    const repaintTabs = vi.fn();
+    window._onBoardVisibilityChanged = repaintTabs;
+    try {
+      document.getElementById('btn-new-job-shortcut').click();
+      expect(document.getElementById('job-board').style.display).toBe('flex');
+      expect(document.getElementById('job-form').style.display).toBe('flex');
+      expect(repaintTabs).toHaveBeenCalled();
+    } finally {
+      delete window._onBoardVisibilityChanged;
+    }
+  });
+
+  it('dismisses the agent spawn overlay before focusing the job title', () => {
+    // The spawn form covers everything below the 36px header strip but leaves
+    // the header buttons clickable. Opening the job form underneath it would
+    // focus a title input the user cannot see, and eat what they typed next.
+    const spawn = document.getElementById('spawn-form');
+    spawn.style.display = 'flex';
+    openJobForm();
+    expect(spawn.style.display).toBe('none');
+    expect(document.activeElement.id).toBe('job-title');
+  });
+
+  it('dismisses the spawn overlay from the board\'s own buttons too', () => {
+    // The overlay sizes to its content instead of covering the viewport, so
+    // the board's toolbar and cards stay clickable underneath it. Every door
+    // into the form has to clear it, not just the top-bar shortcut.
+    handleJobsList({ jobs: [JOB()], settings: {} });
+    const spawn = document.getElementById('spawn-form');
+
+    spawn.style.display = 'flex';
+    document.getElementById('btn-new-job').click();
+    expect(spawn.style.display).toBe('none');
+
+    spawn.style.display = 'flex';
+    const edit = [...document.querySelectorAll('.job-card button')]
+      .find((b) => b.textContent === 'Edit');
+    edit.click();
+    expect(spawn.style.display).toBe('none');
+  });
+
+  it('opens the form even on a page with no spawn overlay', () => {
+    document.getElementById('spawn-form').remove();
+    expect(() => openJobForm()).not.toThrow();
+    expect(document.getElementById('job-form').style.display).toBe('flex');
+  });
+
+  it('closeJobForm dismisses the form so the spawn overlay cannot hide it', () => {
+    openJobForm();
+    closeJobForm();
+    expect(document.getElementById('job-form').style.display).toBe('none');
   });
 });
 

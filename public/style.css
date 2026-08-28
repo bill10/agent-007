@@ -97,17 +97,20 @@ body {
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
+  /* Two buttons now share this header, and it can be dragged down to 160px.
+     Without nowrap the labels wrap and get clipped by the 36px header. */
+  white-space: nowrap;
   transition: color 0.15s;
 }
 .topbar-btn:hover { color: var(--accent); }
 /* Primary action — give it button chrome so it reads as a CTA, not a label. */
-#btn-new-agent {
+#btn-new-agent, #btn-new-job-shortcut {
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-#btn-new-agent:hover {
+#btn-new-agent:hover, #btn-new-job-shortcut:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
