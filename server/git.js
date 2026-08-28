@@ -3,7 +3,7 @@
 import { execFile as execFileCb } from 'child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { mkdirSync } from 'fs';
-import { basename, join, sep } from 'path';
+import { basename, isAbsolute, join, sep } from 'path';
 import { realpathSync } from 'fs';
 import { createHash } from 'crypto';
 import {
@@ -42,7 +42,12 @@ export function gitExec(args, opts = {}) {
 // --- Path Validation ---
 export async function validateRepoPath(repoPath) {
   if (!repoPath || typeof repoPath !== 'string') return { valid: false, error: 'Path is required' };
-  if (!repoPath.startsWith('/')) return { valid: false, error: 'Path must be absolute' };
+  // isAbsolute rather than a leading-slash test: an absolute Windows path is
+  // `C:\repo` or `\\server\share`, neither of which starts with a slash, so the
+  // old check rejected every path on Windows. The point of the guard is to stop
+  // a relative path resolving against the server's own cwd, which isAbsolute
+  // enforces on both platforms.
+  if (!isAbsolute(repoPath)) return { valid: false, error: 'Path must be absolute' };
   if (!existsSync(repoPath)) return { valid: false, error: 'Directory does not exist' };
   let resolvedPath;
   try { resolvedPath = realpathSync(repoPath); } catch { return { valid: false, error: 'Cannot resolve path' }; }
