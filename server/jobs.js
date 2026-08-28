@@ -29,6 +29,13 @@ function defaultSettings() {
     maxPerRepo: MAX_AGENTS_PER_REPO,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
+    // Close a board agent once its PR is open. Its job is done, and under
+    // unattended dispatch nothing else ever reaps it: the per-repo cap only
+    // counts in-progress jobs, so the board keeps spawning while finished
+    // agents accumulate as live PTYs, worktrees and branches.
+    // killSession -> removeWorktree deletes the worktree and the local branch
+    // (the branch is fully pushed by then); the PR is untouched.
+    closeOnReview: true,
   };
 }
 
@@ -133,6 +140,7 @@ export function updateSettings(fields, broadcast, { onRunningChange } = {}) {
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
   if (typeof fields.permissionMode === 'string') settings.permissionMode = fields.permissionMode;
+  if (typeof fields.closeOnReview === 'boolean') settings.closeOnReview = fields.closeOnReview;
   persist(broadcast);
   if (settings.running !== wasRunning && onRunningChange) onRunningChange(settings.running);
   return { settings };
@@ -224,19 +232,48 @@ export async function findPrForBranch(repoPath, branchName) {
   }
 }
 
-export async function checkPullRequests(broadcast) {
+// `findPr` is injected for the same reason createSession and killSession are:
+// an internal call to findPrForBranch is bound directly by the module system
+// and cannot be substituted from outside, so the PR-to-review transition would
+// otherwise only be testable by talking to GitHub.
+export async function checkPullRequests(broadcast, { killSession, findPr = findPrForBranch } = {}) {
   const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName);
   if (inProgress.length === 0) return [];
+  const settings = boardSettings();
   const moved = [];
   for (const job of inProgress) {
-    const pr = await findPrForBranch(job.repoPath, job.branchName);
+    const pr = await findPr(job.repoPath, job.branchName);
     if (!pr) continue;
     job.state = 'review';
     job.prUrl = pr.url;
     job.prNumber = pr.number;
     job.reviewAt = new Date().toISOString();
     moved.push(job);
-    if (broadcast) broadcast({ type: 'notification', level: 'info', message: `Job "${job.title}" moved to Review — PR #${pr.number}` });
+
+    // Retire the agent. The card keeps the whole record — agent name, branch,
+    // PR link — so nothing is lost by the terminal going away, and the work
+    // itself is on the remote.
+    let closed = false;
+    if (settings.closeOnReview && killSession && job.agentSessionId) {
+      const session = sessions.get(job.agentSessionId);
+      if (session && !session.exited) {
+        try {
+          await killSession(job.agentSessionId);
+          closed = true;
+        } catch (err) {
+          // A failed cleanup must not strand the card in In progress: the PR
+          // is open either way, so the job is genuinely ready for review.
+          console.error(`Failed to close agent for job "${job.title}":`, err.message);
+        }
+      }
+    }
+    if (broadcast) {
+      broadcast({
+        type: 'notification', level: 'info',
+        message: `Job "${job.title}" moved to Review — PR #${pr.number}`
+          + (closed ? ` · ${job.agentName} closed, worktree released` : ''),
+      });
+    }
   }
   if (moved.length > 0) persist(broadcast);
   return moved;
@@ -248,12 +285,12 @@ let dispatchTimer = null;
 
 // Self-rescheduling rather than setInterval so a slow git/gh pass can never
 // overlap the next tick (same reasoning as startTreeScanLoop in git.js).
-export function startDispatcher(createSession, broadcast, { onSessionCreated } = {}) {
+export function startDispatcher(createSession, broadcast, { onSessionCreated, killSession } = {}) {
   stopDispatcher();
   const tick = async () => {
     try {
       if (boardSettings().running) {
-        await checkPullRequests(broadcast);
+        await checkPullRequests(broadcast, { killSession });
         await dispatchOnce(createSession, broadcast, { onSessionCreated });
       }
     } catch (err) {

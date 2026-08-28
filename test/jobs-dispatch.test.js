@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload } from '../server/jobs.js';
+import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
@@ -203,5 +203,87 @@ describe('board mutations', () => {
     expect(payload.jobs[0].agentAlive).toBe(true);
     // The stored record stays clean — status is a view of a live PTY.
     expect(allJobs()[0].status).toBeUndefined();
+  });
+});
+
+// --- Closing the agent once its PR is open ---
+
+describe('checkPullRequests closing the agent', () => {
+  beforeEach(resetBoard);
+
+  // Stub the gh lookup: these tests are about what happens once a PR is found,
+  // not about talking to GitHub.
+  const withPr = (pr) => async () => pr;
+
+  async function dispatched() {
+    addJob({ title: 'shipped', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    return allJobs()[0];
+  }
+
+  it('moves the job to review and records the PR', async () => {
+    const job = await dispatched();
+    const findPr = withPr({ url: 'https://gh/o/r/pull/5', number: 5, isDraft: false });
+    const killed = [];
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
+
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(5);
+    expect(job.prUrl).toBe('https://gh/o/r/pull/5');
+    expect(Date.parse(job.reviewAt)).not.toBeNaN();
+  });
+
+  it('closes the agent by default', async () => {
+    const job = await dispatched();
+    const findPr = withPr({ url: 'u', number: 1 });
+    const killed = [];
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
+    expect(killed).toEqual([job.agentSessionId]);
+  });
+
+  it('leaves the agent running when closeOnReview is off', async () => {
+    await dispatched();
+    updateSettings({ closeOnReview: false }, noopBroadcast);
+    const findPr = withPr({ url: 'u', number: 1 });
+    const killed = [];
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
+    expect(killed).toEqual([]);
+    expect(allJobs()[0].state).toBe('review');   // still moves, just keeps the agent
+  });
+
+  it('still moves the job to review if closing the agent throws', async () => {
+    // The PR is open either way — a cleanup failure must not strand the card.
+    await dispatched();
+    const findPr = withPr({ url: 'u', number: 2 });
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async () => { throw new Error('worktree busy'); } });
+    expect(allJobs()[0].state).toBe('review');
+  });
+
+  it('keeps the credit on the card after the agent is gone', async () => {
+    // Requirement 3: who worked on it, and since when — a review card must
+    // still answer that once its agent has been retired.
+    const job = await dispatched();
+    const agentName = job.agentName, branch = job.branchName, started = job.startedAt;
+    const findPr = withPr({ url: 'u', number: 3 });
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => sessions.delete(id) });
+    expect(job.agentName).toBe(agentName);
+    expect(job.branchName).toBe(branch);
+    expect(job.startedAt).toBe(started);
+  });
+
+  it('frees the slot for the next queued job', async () => {
+    addJob({ title: 'first', repoPath: REPO }, noopBroadcast);
+    addJob({ title: 'second', repoPath: REPO }, noopBroadcast);
+    updateSettings({ maxPerRepo: 1 }, noopBroadcast);
+    const create = fakeCreateSession([]);
+    await dispatchOnce(create, noopBroadcast);
+    expect(allJobs()[1].state).toBe('todo');    // capped out
+
+    const findPr = withPr({ url: 'u', number: 4 });
+    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => sessions.delete(id) });
+
+    await dispatchOnce(create, noopBroadcast);
+    expect(allJobs()[0].state).toBe('review');
+    expect(allJobs()[1].state).toBe('in-progress');
   });
 });

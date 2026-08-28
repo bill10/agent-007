@@ -379,7 +379,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         // "Run now" — the same tick the timer fires, on demand, so the user
         // never has to wait out the interval to see the board act.
         case 'job-dispatch-now': {
-          await checkPullRequests(broadcast);
+          await checkPullRequests(broadcast, { killSession });
           await dispatchOnce(createSession, broadcast, { onSessionCreated: (s) => broadcast(sessionPayload(s)) });
           broadcastJobs(broadcast);
           break;

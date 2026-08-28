@@ -206,6 +206,41 @@ export function handleSessionEnded(msg) {
   // would transcribe speech into a dead pty forever.
   if (msg.sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent ended' });
   agent.state = 'DISCONNECTED';
+
+  // A board agent retired after opening its PR takes its tab with it. Under
+  // unattended dispatch these arrive steadily, and a row of dead tabs is pure
+  // clutter — the job card still carries the agent name, branch and PR link.
+  // Agents you spawned yourself keep their tab, as before, so you can read the
+  // output and close it when you're ready.
+  if (agent.spawnedBy === 'board' && agent.jobId) {
+    disposeAgent(msg.sessionId);
+    return;
+  }
+
+  updateTabs();
+  updateStatusBar();
+  if (onSessionChanged) onSessionChanged();
+}
+
+// Tear down a session's terminal locally. Unlike removeSession() this sends no
+// 'kill' — the process is already gone; this only reclaims the client's UI.
+function disposeAgent(sessionId) {
+  const agent = agents.get(sessionId);
+  if (!agent) return;
+  agent.term.dispose();
+  agent.termEl.remove();
+  agents.delete(sessionId);
+  if (activeSessionId === sessionId) {
+    setActiveSession(null);
+    const remaining = [...agents.keys()];
+    if (remaining.length > 0) {
+      switchToSession(remaining[remaining.length - 1]);
+    } else {
+      // Nothing left to show. The board is the sensible landing spot: it is
+      // what dispatched this agent and it explains where the work went.
+      showJobBoard();
+    }
+  }
   updateTabs();
   updateStatusBar();
   if (onSessionChanged) onSessionChanged();

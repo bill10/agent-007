@@ -172,7 +172,27 @@ export async function removeWorktree(session) {
       const status = await gitExec(['-C', session.worktreePath, 'status', '--porcelain']);
       if (status.trim()) reason = 'uncommitted';
     } catch { reason = 'uncommitted'; }
+    // Fully pushed to its upstream? Then nothing is at risk locally — the
+    // commits are on the remote. This is exactly the state right after
+    // `gh pr create`, so a finished job's worktree and local branch can be
+    // removed even though the branch is not merged into the base branch. The
+    // pull request is unaffected: it references the remote branch, not this
+    // worktree. Without this check the base-branch test below calls every
+    // PR-ready branch "unpushed" and orphans it, which would leave one stale
+    // worktree per completed job.
+    let fullyPushed = false;
     if (!reason) {
+      try {
+        const local = (await gitExec(['-C', session.worktreePath, 'rev-parse', 'HEAD'])).trim();
+        const upstream = (await gitExec(['-C', session.worktreePath, 'rev-parse', '@{u}'])).trim();
+        fullyPushed = !!local && local === upstream;
+      } catch {
+        // No upstream configured, or the remote ref is unknown locally: treat
+        // as not pushed and fall through to the conservative base-branch check.
+        fullyPushed = false;
+      }
+    }
+    if (!reason && !fullyPushed) {
       let baseBranch = 'main';
       try {
         const ref = await gitExec(['-C', session.repoPath, 'symbolic-ref', 'refs/remotes/origin/HEAD']);

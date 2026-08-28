@@ -1538,3 +1538,19 @@ body {
   .job-status-needs-input .job-status-dot { animation: none; }
   .job-card-actions { transition: none; }
 }
+
+.job-close-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.job-close-label input { accent-color: var(--accent); cursor: pointer; }
+
+.job-card-retired {
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.8;
+}

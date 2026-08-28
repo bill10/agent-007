@@ -147,7 +147,10 @@ async function startup() {
   // Keeping one timer alive (instead of creating/destroying it on toggle) means
   // the Start button only has to flip a boolean, and a config restored with
   // running:true resumes dispatching without any extra wiring.
-  startDispatcher(createSession, broadcast, { onSessionCreated: (s) => broadcast(sessionPayload(s)) });
+  startDispatcher(createSession, broadcast, {
+    onSessionCreated: (s) => broadcast(sessionPayload(s)),
+    killSession,
+  });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
