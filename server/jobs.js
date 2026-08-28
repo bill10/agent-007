@@ -295,16 +295,12 @@ export function relinkSessionToJob(session, broadcast) {
   job.agentName = session.name;
   job.lastError = null;
   job.lastErrorAt = null;
+  job.prCheckError = null;
+  job.prCheckErrorAt = null;
   session.jobId = job.id;   // so the PR path can retire it like any board agent
   persist(broadcast);
   return job;
 }
-
-// Prefix of the note checkPullRequests leaves when the query itself failed.
-// Used to clear ONLY that note on a later success — a job can also be carrying
-// a restart note ("agent lost, work is on <branch>"), which stays true and
-// useful whether or not the PR check works.
-const PR_CHECK_FAILED = 'Cannot check for a pull request in this repo';
 
 // --- PR watching ---
 
@@ -485,26 +481,27 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
       // quiet, and the user has no way to learn the board simply cannot see
       // this repo's pull requests. Only written when the message changes, so a
       // persistent failure does not rewrite config.json every five minutes.
-      const message = `${PR_CHECK_FAILED} — ${error}. The job stays here until you move it by hand.`;
-      // Never overwrite a note that came from somewhere else. A restart note
-      // names where the work is; a dispatch failure names why it never started.
-      // Both matter more than this, and a background poll must not erase them.
-      const canWrite = !job.lastError || job.lastError.startsWith(PR_CHECK_FAILED);
-      if (canWrite && job.lastError !== message) {
-        job.lastError = message;
-        job.lastErrorAt = new Date().toISOString();
+      // Its own field, not lastError. A job can already be carrying a restart
+      // note naming where its work is, and the two are both true at once: the
+      // agent is gone AND the board cannot see this repo's pull requests.
+      // Sharing one field meant either clobbering that note or suppressing this
+      // one. Written only when the text changes, so a permanent failure does
+      // not rewrite config.json every five minutes.
+      const message = `Cannot check for a pull request here — ${error}. This job stays put until you move it by hand.`;
+      if (job.prCheckError !== message) {
+        job.prCheckError = message;
+        job.prCheckErrorAt = new Date().toISOString();
         noted = true;
       }
       continue;
     }
 
-    // The query worked, so a previous "cannot check" note is now wrong — clear
-    // it even when there is still no PR, or a repo that regained access would
-    // keep claiming it was unreachable until a PR happened to appear. Only that
-    // note: a restart note names where the work is and stays true regardless.
-    if (typeof job.lastError === 'string' && job.lastError.startsWith(PR_CHECK_FAILED)) {
-      job.lastError = null;
-      job.lastErrorAt = null;
+    // The query worked, so a previous "cannot check" note is wrong — clear it
+    // even when there is still no PR, or a repo that regained access would keep
+    // claiming it was unreachable until a PR happened to appear.
+    if (job.prCheckError) {
+      job.prCheckError = null;
+      job.prCheckErrorAt = null;
       noted = true;
     }
 
@@ -513,9 +510,6 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     job.prUrl = pr.url;
     job.prNumber = pr.number;
     job.reviewAt = new Date().toISOString();
-    // A successful check clears any stale "cannot check" note.
-    job.lastError = null;
-    job.lastErrorAt = null;
     moved.push(job);
 
     // Always retire the agent. This is what keeps the per-repo cap meaningful:

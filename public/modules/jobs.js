@@ -184,6 +184,16 @@ function renderCard(job) {
     card.appendChild(err);
   }
 
+  // Shown alongside lastError, never instead of it: "the agent is gone" and
+  // "the board cannot see this repo's pull requests" are both worth knowing,
+  // and together they explain why a card is stuck.
+  if (job.prCheckError) {
+    const err = document.createElement('div');
+    err.className = 'job-card-error';
+    err.textContent = job.prCheckError;
+    card.appendChild(err);
+  }
+
   card.appendChild(renderCardActions(job));
   return card;
 }

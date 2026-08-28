@@ -565,8 +565,8 @@ describe('when the PR check itself fails', () => {
 
     const job = allJobs()[0];
     expect(job.state).toBe('in-progress');          // it cannot advance, correctly
-    expect(job.lastError).toMatch(/Cannot check for a pull request/i);
-    expect(job.lastError).toMatch(/Could not resolve to a Repository/);
+    expect(job.prCheckError).toMatch(/Cannot check for a pull request/i);
+    expect(job.prCheckError).toMatch(/Could not resolve to a Repository/);
   });
 
   it('does not rewrite the job while the same failure repeats', async () => {
@@ -576,9 +576,9 @@ describe('when the PR check itself fails', () => {
     const findPr = failing('gh: not authenticated');
 
     await checkPullRequests(noopBroadcast, { findPr });
-    const firstStamp = allJobs()[0].lastErrorAt;
+    const firstStamp = allJobs()[0].prCheckErrorAt;
     await checkPullRequests(noopBroadcast, { findPr });
-    expect(allJobs()[0].lastErrorAt).toBe(firstStamp);
+    expect(allJobs()[0].prCheckErrorAt).toBe(firstStamp);
   });
 
   it('clears the note as soon as the check works again, PR or not', async () => {
@@ -588,12 +588,12 @@ describe('when the PR check itself fails', () => {
     addJob({ title: 'access restored', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     await checkPullRequests(noopBroadcast, { findPr: failing('gh: not authenticated') });
-    expect(allJobs()[0].lastError).toBeTruthy();
+    expect(allJobs()[0].prCheckError).toBeTruthy();
 
     await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
     const job = allJobs()[0];
     expect(job.state).toBe('in-progress');   // still no PR, correctly
-    expect(job.lastError).toBeNull();        // but no longer claiming it cannot look
+    expect(job.prCheckError).toBeNull();     // but no longer claiming it cannot look
   });
 
   it('leaves a restart note alone when the check works', async () => {
@@ -623,14 +623,14 @@ describe('when the PR check itself fails', () => {
       },
     });
     expect(job.state).toBe('todo');
-    expect(job.lastError).toBeNull();
+    expect(job.prCheckError).toBeNull();
   });
 
   it('clears the note once the check succeeds', async () => {
     addJob({ title: 'recovers', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     await checkPullRequests(noopBroadcast, { findPr: failing('gh: not authenticated') });
-    expect(allJobs()[0].lastError).toBeTruthy();
+    expect(allJobs()[0].prCheckError).toBeTruthy();
 
     await checkPullRequests(noopBroadcast, {
       findPr: async () => ({ pr: { url: 'u', number: 4 } }),
@@ -638,7 +638,7 @@ describe('when the PR check itself fails', () => {
     });
     const job = allJobs()[0];
     expect(job.state).toBe('review');
-    expect(job.lastError).toBeNull();
+    expect(job.prCheckError).toBeNull();
   });
 
   it('an empty result is still just "no PR yet", not an error', async () => {
@@ -718,12 +718,13 @@ describe('relinkSessionToJob', () => {
   });
 });
 
-describe('a PR-check failure never destroys another note', () => {
+describe('a PR-check failure and another note coexist', () => {
   beforeEach(resetBoard);
 
-  it('leaves a restart note in place rather than overwriting it', async () => {
-    // A restart note names where the work is. A background poll failing must
-    // not erase it — that note is the only pointer to an orphaned worktree.
+  it('keeps the restart note AND records why the check cannot run', async () => {
+    // Both are true at once: the agent is gone, and the board cannot see this
+    // repo's pull requests. Sharing one field meant clobbering one or hiding
+    // the other, so they get their own fields.
     addJob({ title: 'restarted', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
@@ -733,14 +734,18 @@ describe('a PR-check failure never destroys another note', () => {
       findPr: async () => ({ pr: null, error: 'gh: not authenticated' }),
     });
     expect(allJobs()[0].lastError).toMatch(/Server restarted/);
+    expect(allJobs()[0].prCheckError).toMatch(/Cannot check for a pull request/);
   });
 
-  it('still records the failure when there is no other note', async () => {
-    addJob({ title: 'clean slate', repoPath: REPO }, noopBroadcast);
+  it('clearing the PR-check note leaves the other one alone', async () => {
+    addJob({ title: 'both', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
-    await checkPullRequests(noopBroadcast, {
-      findPr: async () => ({ pr: null, error: 'gh: not authenticated' }),
-    });
-    expect(allJobs()[0].lastError).toMatch(/Cannot check for a pull request/);
+    const job = allJobs()[0];
+    job.lastError = 'Server restarted — agent lost. Work is on bill/x.';
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null, error: 'gh: boom' }) });
+
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
+    expect(allJobs()[0].prCheckError).toBeNull();
+    expect(allJobs()[0].lastError).toMatch(/Server restarted/);
   });
 });
