@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.1.1] - 2026-08-28
+
+### Fixed
+
+- Job board agents no longer stop one step short of opening their pull request.
+  An agent would finish the work, review it, fix what the review found, and then
+  end its turn announcing that shipping was next — leaving the job parked at a
+  prompt with everything uncommitted, because nothing was there to tell it to
+  carry on. The instructions a dispatched agent receives now rule that stopping
+  point out explicitly, while still leaving it free to stop for a question it
+  genuinely cannot answer or a failure it cannot get past.
+
 ## [0.3.1.0] - 2026-08-28
 
 ### Fixed
