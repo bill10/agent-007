@@ -5,6 +5,24 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.7.0] - 2026-08-28
+
+### Added
+
+- **"+ Job" in the top bar.** Posting a job no longer starts with hunting for
+  the Jobs tab. The button sits in the office header and does the whole trip in
+  one click: it brings the board up, switches the panel to it, and opens the new
+  job form with the title field already focused. The spawn button beside it is
+  now labelled "+ Agent", so the two read as the pair of things you can start.
+
+### Fixed
+
+- Opening the job form while the agent spawn form was up no longer swallows what
+  you type. The spawn form covers the panels but not the header strip, so both
+  header buttons stay clickable underneath it. Either button now closes the
+  other's form first, instead of leaving a focused text field hidden behind the
+  overlay.
+
 ## [0.3.6.0] - 2026-08-28
 
 ### Fixed
