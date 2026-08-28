@@ -20,6 +20,11 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 - Agents are identified in a way that cannot be reused between runs. Previously a
   finished card could point at a slot number that a completely different agent
   later occupied, so it reported an agent alive that had nothing to do with it.
+- Sending a job back to To do now clears the note explaining why its pull request
+  could not be checked, so a fresh card no longer reports a failure against work
+  that has not been attempted yet.
+- Moving a card to Review by hand no longer attaches a pull request to it if you
+  send the job back to To do while the lookup is still running.
 
 ## [0.3.5.0] - 2026-08-28
 

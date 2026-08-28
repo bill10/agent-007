@@ -175,7 +175,9 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 ## Job Board
 
 Three columns in the terminal panel: To do, In progress, Review. Card state is
-durable (persisted in `config.json`); everything about a live agent is derived.
+durable (persisted in `config.json`). What a live agent is *doing* is derived;
+what the board could not do — a PR check that failed — is stored, because it is
+a fact about the board, not about a PTY.
 
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
@@ -188,12 +190,37 @@ durable (persisted in `config.json`); everything about a live agent is derived.
   - `agent gone` -> `--state-disconnected` (session ended)
 - Clicking the pill switches to that agent's terminal.
 - Card actions are hidden until hover/focus-within, so a full board stays scannable.
+- Two error lines can appear, and they are independent. `lastError` carries what
+  happened to the job (a dispatch failure, or "agent lost" after a restart);
+  `prCheckError` carries why the board cannot check for the pull request at all.
+  Both can be true at once — the agent is gone AND this repo is invisible to the
+  signed-in `gh` account — so neither may silence the other.
+- The agent line renders whichever of agent name, branch and start time are
+  known. The branch is a fact about the job, not about the agent: gating it on
+  the name left a finished card showing nothing once the name was lost.
 
 ### Derived, never stored
 "Needs you" describes a PTY as it is right now. It is computed on both sides --
 the server derives it per broadcast, the client recomputes from its own agent map
 on every state change -- and never persisted, since a stored copy would be stale
-the moment the server restarted.
+the moment the server restarted. The same reasoning is why `prCheckError` IS
+stored: it describes the board's own ability to reach GitHub, which outlives any
+session and is not re-derivable from one.
+
+### Identity across restarts
+No session survives a restart, so every job's `agentSessionId` is cleared on
+load. Session ids also carry a per-process prefix: the counter alone restarts at
+zero while job records outlive the process, so a stored `session-5` would
+otherwise resolve to whatever `session-5` is in the next generation — an
+unrelated agent on a different branch.
+
+`agentName` is kept. It is history, not a live link: "Phantom did this work"
+stays true across a restart, and it is the credit the card exists to show.
+
+The BRANCH is the durable identity. It is created per job, not reused while it
+exists, and survives on both the orphan record and the job — so it is what
+reconnects a re-adopted agent to its card, and what finds the agent to retire
+when the stored link is gone.
 
 ### Board-spawned agents
 A dispatched agent is an ordinary agent with one difference: its tab opens
@@ -201,6 +228,11 @@ without taking focus (`spawnedBy: 'board'`), because an unattended dispatcher
 firing every five minutes would otherwise move the user's cursor mid-sentence.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired at its PR.
+
+Retirement happens ONLY at the moment a job transitions to Review, never as a
+recurring sweep over jobs already there. An agent you re-adopt on a shipped
+branch to address review comments is yours; a poll that killed it every five
+minutes would make Review permanently hostile to working on your own PR.
 
 ### Branch naming
 Board branches are named from the job title rather than a cocktail:
