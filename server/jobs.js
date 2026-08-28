@@ -10,6 +10,8 @@
 
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { basename, dirname, join, resolve } from 'path';
 import { config, sessions } from './state.js';
 import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
@@ -73,10 +75,42 @@ function persist(broadcast) {
   broadcastJobs(broadcast);
 }
 
+// --- Repo references ---
+
+// The board UI picks a repo from a dropdown of exact paths; an agent posting
+// over HTTP types whatever it knows — "~/code/app", a relative path, or just
+// the folder name. Resolve all of those against the configured repos, and
+// refuse anything that doesn't match rather than queueing a job into a repo the
+// dispatcher will silently skip forever.
+export function resolveRepoRef(ref) {
+  const repos = Array.isArray(config.repos) ? config.repos : [];
+  const known = repos.map(r => r.path);
+  if (repos.length === 0) return { error: 'No repositories are configured in Agent 007 — add one in the explorer first' };
+  const raw = String(ref || '').trim();
+  if (!raw) return { error: `Which repository? Pass --repo with one of: ${known.map(p => basename(p)).join(', ')}` };
+  const expanded = raw.startsWith('~/') ? resolve(homedir(), raw.slice(2)) : raw;
+  const abs = resolve(expanded);
+  const byPath = known.find(p => p === raw || p === abs);
+  if (byPath) return { path: byPath };
+  // Folder name, case-insensitively. Ambiguity is possible (two repos with the
+  // same basename), so say so instead of guessing.
+  const lower = raw.toLowerCase();
+  const byName = known.filter(p => basename(p).toLowerCase() === lower);
+  if (byName.length === 1) return { path: byName[0] };
+  if (byName.length > 1) {
+    // Enough to tell them apart (the parent folder), not the absolute path:
+    // every other branch here reports basenames only, and this reply goes to
+    // whatever called /api/jobs.
+    const hints = byName.map(p => join(basename(dirname(p)), basename(p)));
+    return { error: `"${raw}" matches more than one repository (${hints.join(', ')}) — pass the full path` };
+  }
+  return { error: `Unknown repository "${raw}" — known repositories: ${known.map(p => basename(p)).join(', ')}` };
+}
+
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, postedBy, postedByName }, broadcast) {
-  const result = createJob({ title, detail, repoPath, postedBy, postedByName });
+export function addJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent }, broadcast) {
+  const result = createJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   allJobs().push(result.job);
   persist(broadcast);

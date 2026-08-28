@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { basename, join } from 'path';
+import { homedir } from 'os';
 import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, runScan, relinkSessionToJob } from '../server/jobs.js';
+import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, runScan, relinkSessionToJob, resolveRepoRef } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
@@ -1047,5 +1048,41 @@ describe('a manual move that races a requeue', () => {
     });
     expect(job.prNumber).toBe(18);
     expect(job.prCheckError).toBeNull();
+  });
+});
+
+// --- resolveRepoRef ---
+// An agent posting a job types whatever it knows for --repo; the board's own
+// form only ever sends an exact path.
+
+describe('resolveRepoRef', () => {
+  beforeEach(resetBoard);
+
+  it('accepts an exact path and a folder name', () => {
+    expect(resolveRepoRef(REPO).path).toBe(REPO);
+    expect(resolveRepoRef(basename(REPO)).path).toBe(REPO);
+    expect(resolveRepoRef(`  ${basename(REPO2).toUpperCase()}  `).path).toBe(REPO2);
+  });
+
+  it('expands a leading ~/ against the home directory', () => {
+    config.repos = [{ path: join(homedir(), 'code', 'app') }];
+    expect(resolveRepoRef('~/code/app').path).toBe(join(homedir(), 'code', 'app'));
+  });
+
+  it('refuses to guess between two repos with the same folder name', () => {
+    config.repos = [{ path: '/home/someone/a/app' }, { path: '/home/someone/b/app' }];
+    const { error } = resolveRepoRef('app');
+    expect(error).toMatch(/more than one/i);
+    // Enough to tell them apart, without handing the caller the home path.
+    expect(error).toContain('a/app');
+    expect(error).toContain('b/app');
+    expect(error).not.toContain('/home/someone');
+  });
+
+  it('names the repos it does know when the reference misses or is absent', () => {
+    expect(resolveRepoRef('/not/a/repo').error).toContain(basename(REPO));
+    expect(resolveRepoRef('').error).toMatch(/which repository/i);
+    config.repos = [];
+    expect(resolveRepoRef(REPO).error).toMatch(/no repositories/i);
   });
 });

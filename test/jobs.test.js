@@ -36,6 +36,17 @@ describe('createJob', () => {
     expect(j.startedAt).toBeNull();
   });
 
+  it('records the agent that posted it, alongside the person it belongs to', () => {
+    const { job: j } = createJob({
+      title: 'Fix the flaky test', repoPath: REPO_A,
+      postedBy: 'u_1', postedByName: 'Bill', postedByAgent: 'Mirage',
+    });
+    // Two separate facts: whose work it is, and which agent typed the card.
+    expect(j.postedByName).toBe('Bill');
+    expect(j.postedByAgent).toBe('Mirage');
+    expect(createJob({ title: 't', repoPath: REPO_A }).job.postedByAgent).toBeNull();
+  });
+
   it('rejects a job with no title or no repo', () => {
     expect(createJob({ title: '   ', repoPath: REPO_A }).error).toMatch(/title/i);
     expect(createJob({ title: 'x', repoPath: '' }).error).toMatch(/repos/i);
