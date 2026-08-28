@@ -115,6 +115,10 @@ Three-panel layout with per-panel headers:
 - **Office:** Centered "+ New Agent" button
 - **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle in the header; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
 - **Terminal tabs:** Draggable for reordering, order persisted to localStorage
+- **Jobs tab:** Pinned first in the tab bar, not draggable and not closable. Shows
+  an orange count badge when any in-progress job needs the user. Selecting it swaps
+  the terminal viewport for the board; selecting any agent tab swaps back to that
+  terminal, so `activeSessionId` is deliberately left untouched while the board shows
 - Panel widths persisted to localStorage
 - Below 900px: explorer auto-hidden
 
@@ -158,6 +162,44 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 - **Seating:** Three U-shaped nooks with couches and armchairs
 - **Plants:** Potted plants under windows
 - **Particles:** 5 ambient dust motes
+
+## Job Board
+
+Three columns in the terminal panel: To do, In progress, Review. Card state is
+durable (persisted in `config.json`); everything about a live agent is derived.
+
+### Card states and colors
+- Left border and status pill follow the agent's live state, reusing the shared
+  `--state-*` tokens rather than introducing a second vocabulary:
+  - `running` -> `--state-working` (agent is producing output)
+  - `needs you` -> `--state-message` (agent is at a prompt or dialog; the dot
+    pulses, and only this one pulses -- a merely quiet card must not compete for
+    attention with one that is actually blocking)
+  - `quiet -- may need you` -> `--state-idle` (parked at a prompt past the window)
+  - `agent gone` -> `--state-disconnected` (session ended)
+- Clicking the pill switches to that agent's terminal.
+- Card actions are hidden until hover/focus-within, so a full board stays scannable.
+
+### Derived, never stored
+"Needs you" describes a PTY as it is right now. It is computed on both sides --
+the server derives it per broadcast, the client recomputes from its own agent map
+on every state change -- and never persisted, since a stored copy would be stale
+the moment the server restarted.
+
+### Board-spawned agents
+A dispatched agent is an ordinary agent with one difference: its tab opens
+without taking focus (`spawnedBy: 'board'`), because an unattended dispatcher
+firing every five minutes would otherwise move the user's cursor mid-sentence.
+Its tab dot carries a faint outline to show where it came from, and the tab is
+disposed automatically when the agent is retired at its PR.
+
+### Branch naming
+Board branches are named from the job title rather than a cocktail:
+`{git-username}/add-rate-limiting`. Slugged to `[a-z0-9-]` and length-bounded,
+which side-steps every git ref rule at once instead of enumerating them. Two jobs
+may share a title, so collisions walk `-2`, `-3`; names taken on the remote count
+as collisions too, since a finished job leaves its remote branch alive (that is
+the open PR).
 
 ## Interactive Behaviors
 

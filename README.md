@@ -22,6 +22,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Multi-repo support** -- Add any number of repos. Spawn agents on different repos and manage them all from one place.
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see.
 - **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste (Cmd+V a screenshot), and draggable tabs for reordering.
+- **Job board** -- Queue work instead of babysitting it. A job has a title, details, and a repo; the board scans every 5 minutes, and for each queued job whose repo is under its agent cap it spawns a fresh agent on its own worktree and a branch named after the job, then watches for the pull request. Jobs move To do -> In progress -> Review on their own. An agent that stops to ask you something turns its card orange and puts a count on the Jobs tab; click it to land in that terminal, answer, and it carries on.
 - **Dark/light themes** -- Gold-accented dark theme and a Linear-inspired warm light theme. Toggles instantly, including terminal colors.
 - **Live sync** -- Branch names, file changes, line-level diff stats (+/-), and agent states update in real time across all panels.
 - **Voice input** -- Dictate prompts instead of typing. Click the mic button floating at the terminal's bottom-right (or `Cmd+D`), allow microphone access on first use, speak, and the transcript is typed into the active terminal; press Enter to send. Uses the browser's Web Speech API (Chrome, Edge, Safari; the recognition language follows your browser's locale) and needs HTTPS or localhost -- for remote access use `tailscale serve` (see `docs/REMOTE.md`). The mic is deliberately bounded: it stops after ~1 minute without delivered speech, always after 5 minutes, on switching or closing agents, when an agent's shell ends, and when the tab is hidden. Two things to know: most browsers process speech on vendor servers (Chrome/Edge send audio to Google/Microsoft; Safari may process on-device), so don't dictate secrets; and transcripts arrive as keystrokes, so a program waiting on a single key (a pager, a y/n prompt) reacts to speech like typing -- watch the prompt while dictating. OS-level dictation (macOS dictation, iOS keyboard mic, Windows `Win+H`) also types straight into the terminal and works in any browser.
@@ -50,12 +51,14 @@ Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ N
 
 Each agent runs in its own [git worktree](https://git-scm.com/docs/git-worktree), so multiple agents can work on the same repo without stepping on each other. The server manages PTY processes via [node-pty](https://github.com/nicknisi/node-pty) and communicates with the browser over WebSocket. The pixel office is rendered on an HTML canvas with a day/night cycle that follows your local time.
 
+The job board reuses that same machinery: a dispatched job is an ordinary agent, with a real terminal you can type into and take over at any point. Each job gets its own worktree and branch, so a job maps one-to-one onto a branch and a pull request. When the PR appears the board closes the agent and releases its worktree and local branch; the PR itself is untouched, and work that was never pushed is kept as an orphan rather than deleted.
+
 ```
 ┌─────────────┬──────────────┬────────────────────┐
-│  Explorer   │  Pixel       │  Terminal           │
-│  (repos,    │  Office      │  (xterm.js,         │
-│   files,    │  (canvas,    │   one per agent,    │
-│   diffs)    │   agents)    │   draggable tabs)   │
+│  Explorer   │  Pixel       │  Jobs + Terminals   │
+│  (repos,    │  Office      │  (job board tab,    │
+│   files,    │  (canvas,    │   xterm.js, one     │
+│   diffs)    │   agents)    │   tab per agent)    │
 └─────────────┴──────────────┴────────────────────┘
 ```
 
