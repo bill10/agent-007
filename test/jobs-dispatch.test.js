@@ -102,11 +102,13 @@ describe('dispatchOnce', () => {
 
     // At the cap: nothing new goes out.
     await dispatchOnce(create, noopBroadcast);
-    expect(allJobs().filter(j => j.state === 'in-progress')).toHaveLength(1);
+    expect(allJobs()[1].state).toBe('todo');
 
+    // In normal operation the agent is retired at the same moment the card
+    // moves, which is what keeps in-progress count == live agent count. A
+    // manual move is the user's own call.
     moveJob(allJobs()[0].id, 'review', noopBroadcast);
     await dispatchOnce(create, noopBroadcast);
-    expect(allJobs().filter(j => j.state === 'in-progress')).toHaveLength(1);
     expect(allJobs()[1].state).toBe('in-progress');
   });
 
@@ -241,16 +243,6 @@ describe('checkPullRequests closing the agent', () => {
     expect(killed).toEqual([job.agentSessionId]);
   });
 
-  it('leaves the agent running when closeOnReview is off', async () => {
-    await dispatched();
-    updateSettings({ closeOnReview: false }, noopBroadcast);
-    const findPr = withPr({ url: 'u', number: 1 });
-    const killed = [];
-    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
-    expect(killed).toEqual([]);
-    expect(allJobs()[0].state).toBe('review');   // still moves, just keeps the agent
-  });
-
   it('still moves the job to review if closing the agent throws', async () => {
     // The PR is open either way — a cleanup failure must not strand the card.
     await dispatched();
@@ -285,5 +277,35 @@ describe('checkPullRequests closing the agent', () => {
     await dispatchOnce(create, noopBroadcast);
     expect(allJobs()[0].state).toBe('review');
     expect(allJobs()[1].state).toBe('in-progress');
+  });
+});
+
+// --- Nothing accumulates, because every agent is retired at its PR ---
+
+describe('agents do not pile up across many jobs', () => {
+  beforeEach(resetBoard);
+
+  it('never runs more agents than the cap, and drains the whole queue', async () => {
+    // The cap counts in-progress jobs, which is only equal to the number of
+    // live agents because an agent is ALWAYS closed when its PR opens. This is
+    // the test that keeps those two facts tied together: if agents ever stopped
+    // being retired, they would accumulate here.
+    updateSettings({ maxPerRepo: 2 }, noopBroadcast);
+    for (let i = 0; i < 8; i++) addJob({ title: `J${i}`, repoPath: REPO }, noopBroadcast);
+
+    const create = fakeCreateSession([]);
+    const findPr = async () => ({ url: 'u', number: 1 });
+    const kill = async (id) => { sessions.delete(id); };
+
+    let peak = 0;
+    for (let cycle = 0; cycle < 6; cycle++) {
+      await dispatchOnce(create, noopBroadcast);
+      peak = Math.max(peak, [...sessions.values()].filter(s => !s.exited).length);
+      await checkPullRequests(noopBroadcast, { findPr, killSession: kill });
+    }
+
+    expect(peak).toBeLessThanOrEqual(2);
+    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
+    expect(allJobs().filter(j => j.state === 'review')).toHaveLength(8);
   });
 });

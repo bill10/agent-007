@@ -29,13 +29,6 @@ function defaultSettings() {
     maxPerRepo: MAX_AGENTS_PER_REPO,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
-    // Close a board agent once its PR is open. Its job is done, and under
-    // unattended dispatch nothing else ever reaps it: the per-repo cap only
-    // counts in-progress jobs, so the board keeps spawning while finished
-    // agents accumulate as live PTYs, worktrees and branches.
-    // killSession -> removeWorktree deletes the worktree and the local branch
-    // (the branch is fully pushed by then); the PR is untouched.
-    closeOnReview: true,
   };
 }
 
@@ -140,7 +133,6 @@ export function updateSettings(fields, broadcast, { onRunningChange } = {}) {
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
   if (typeof fields.permissionMode === 'string') settings.permissionMode = fields.permissionMode;
-  if (typeof fields.closeOnReview === 'boolean') settings.closeOnReview = fields.closeOnReview;
   persist(broadcast);
   if (settings.running !== wasRunning && onRunningChange) onRunningChange(settings.running);
   return { settings };
@@ -239,7 +231,6 @@ export async function findPrForBranch(repoPath, branchName) {
 export async function checkPullRequests(broadcast, { killSession, findPr = findPrForBranch } = {}) {
   const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName);
   if (inProgress.length === 0) return [];
-  const settings = boardSettings();
   const moved = [];
   for (const job of inProgress) {
     const pr = await findPr(job.repoPath, job.branchName);
@@ -253,8 +244,12 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     // Retire the agent. The card keeps the whole record — agent name, branch,
     // PR link — so nothing is lost by the terminal going away, and the work
     // itself is on the remote.
+    // Always retire the agent: its job is done, and this is what keeps the
+    // per-repo cap meaningful — in-progress jobs and live agents stay the same
+    // set, so nothing accumulates. killSession -> removeWorktree deletes the
+    // worktree and the local branch (fully pushed by then); the PR is untouched.
     let closed = false;
-    if (settings.closeOnReview && killSession && job.agentSessionId) {
+    if (killSession && job.agentSessionId) {
       const session = sessions.get(job.agentSessionId);
       if (session && !session.exited) {
         try {

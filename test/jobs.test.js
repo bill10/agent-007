@@ -68,14 +68,13 @@ describe('countInFlightByRepo', () => {
   });
 
   it('does not count a job whose agent has died', () => {
-    // Regression guard: a crashed agent must not hold a slot forever, because
-    // cards are never auto-reverted to To do. Without this the repo deadlocks.
+    // A crashed agent must not hold a slot forever, because cards are never
+    // auto-reverted to To do. Without this the repo deadlocks.
     const jobs = [
       { state: 'in-progress', repoPath: REPO_A, agentSessionId: 'dead' },
       { state: 'in-progress', repoPath: REPO_A, agentSessionId: 'alive' },
     ];
-    const counts = countInFlightByRepo(jobs, new Set(['alive']));
-    expect(counts.get(REPO_A)).toBe(1);
+    expect(countInFlightByRepo(jobs, new Set(['alive'])).get(REPO_A)).toBe(1);
   });
 });
 
@@ -138,6 +137,7 @@ describe('selectDispatchableJobs', () => {
     ];
     expect(selectDispatchableJobs(jobs, { maxPerRepo: 5 })).toEqual([]);
   });
+
 });
 
 // --- Prompt delivery ---

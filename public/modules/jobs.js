@@ -241,8 +241,6 @@ function renderToolbar() {
     : 'dispatcher stopped';
   status.classList.toggle('running', running);
   if (document.activeElement !== cap) cap.value = boardSettings.maxPerRepo;
-  const closeToggle = document.getElementById('job-close-on-review');
-  if (closeToggle) closeToggle.checked = boardSettings.closeOnReview !== false;
 }
 
 // --- Form ---
@@ -361,10 +359,6 @@ export function setupJobBoard() {
   document.getElementById('job-max-per-repo').onchange = (e) => {
     const value = parseInt(e.target.value, 10);
     if (Number.isFinite(value)) send({ type: 'job-settings', maxPerRepo: value });
-  };
-  const closeToggle = document.getElementById('job-close-on-review');
-  if (closeToggle) closeToggle.onchange = (e) => {
-    send({ type: 'job-settings', closeOnReview: e.target.checked });
   };
 
   // Relative timestamps and the "quiet" threshold both drift with the clock, so
