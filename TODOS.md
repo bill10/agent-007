@@ -36,7 +36,7 @@
 
 ## server.test.js fails to load under vitest on Windows
 - **What:** `test/server.test.js` fails at collection with `SyntaxError: Invalid or unexpected token` importing `../server.js` — vitest can't load node-pty's native `.node` binary through the `server.js → server/pty.js → node-pty` chain on Windows. Likely fix: externalize node-pty in `vitest.config.js` (`test.server.deps.external`) or mock `server/pty.js` in the suite.
-- **Why:** The server integration suite (auth handshake, WS behavior) never runs on Windows dev machines, so Windows contributors ship those paths untested locally. CI (ubuntu) still runs it green, so the gap is local-only.
+- **Why:** The server integration suite (auth handshake, WS behavior) never runs on Windows dev machines, so Windows contributors ship those paths untested locally. CI (ubuntu) still runs it green, so the gap is local-only. It also blocks any test that imports `server/pty.js` directly, so the Windows spawn guards (`isUsableCwd` rejection, the async CreateProcessW guard) can only be covered through `server/command-path.js`, never end to end.
 - **Effort:** S (human: ~1-2 hours / CC: ~15-30 min)
 - **Priority:** P0
 - **Depends on:** Nothing
