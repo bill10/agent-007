@@ -137,10 +137,14 @@ server.js          Entry point + orchestrators (createSession, killSession)
 server/
   state.js         Shared mutable state (sessions, orphans, pools, config)
   config.js        Config persistence (load, save, crash recovery)
+  direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
   http.js          HTTP routes (/api/browse, origin check middleware)
+  auth.js          Login tokens, user accounts, per-agent ownership checks
+bin/
+  adduser.js       Create a login user (`npm run adduser`)
 public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
