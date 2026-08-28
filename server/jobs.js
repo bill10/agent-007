@@ -284,12 +284,18 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
 // identifier that outlives the session.
 export function relinkSessionToJob(session, broadcast) {
   if (!session || !session.branchName) return null;
-  const job = allJobs().find(j =>
+  // in-progress OR review: a job can reach review while its link is null (the
+  // PR was found after a restart, so there was no session to retire), and the
+  // agent re-adopted afterwards still belongs to that card.
+  const matches = allJobs().filter(j =>
     j.branchName === session.branchName
     && j.repoPath === session.repoPath
-    && j.state === 'in-progress'
+    && (j.state === 'in-progress' || j.state === 'review')
     && !j.agentSessionId,   // never steal a job that already has a live agent
   );
+  // Prefer work still in flight: if an old review job and a new in-progress job
+  // share a branch, the agent belongs to the one that is not finished.
+  const job = matches.find(j => j.state === 'in-progress') || matches[0];
   if (!job) return null;
   job.agentSessionId = session.id;
   job.agentName = session.name;
@@ -518,12 +524,32 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     // local branch (fully pushed by then); the PR is untouched. The card keeps
     // the whole record — agent name, branch, PR link — so nothing is lost by
     // the terminal going away, and the work itself is on the remote.
+    // Retire the agent, resolving it by branch when the stored link is gone.
+    //
+    // A restart nulls every agentSessionId, so a job whose PR is discovered
+    // afterwards would reach review with nothing to retire, and its agent would
+    // hold a worktree for already-delivered work indefinitely. The branch finds
+    // it: created per job, not reused while it exists, durable across restarts.
+    //
+    // Deliberately only at the moment of transition, never as a recurring sweep
+    // over jobs already in review. An agent you re-adopt on a shipped branch to
+    // address review comments is yours; a poll that killed it every five minutes
+    // would make Review permanently hostile to working on your own PR.
     let closed = false;
-    if (killSession && askedSessionId && askedSessionId === job.agentSessionId) {
-      const session = sessions.get(askedSessionId);
+    if (killSession) {
+      const linked = askedSessionId && askedSessionId === job.agentSessionId
+        ? sessions.get(askedSessionId)
+        : null;
+      const session = linked || [...sessions.values()].find(candidate =>
+        candidate && !candidate.exited
+        && candidate.branchName === askedBranch
+        && candidate.repoPath === job.repoPath,
+      );
       if (session && !session.exited) {
         try {
-          await killSession(askedSessionId);
+          if (!job.agentName) job.agentName = session.name;
+          await killSession(session.id);
+          job.agentSessionId = null;   // only after the kill actually succeeded
           closed = true;
         } catch (err) {
           // A failed cleanup must not strand the card in In progress: the PR
