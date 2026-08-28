@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+
+// `agent-007-job` — post a card to the Agent 007 job board from inside an agent
+// terminal. This directory is prepended to every agent's PATH (see
+// server/pty.js), so the command exists for agents and nowhere else.
+//
+// Thin on purpose: parsing lives in lib/job-cli.js, validation and persistence
+// on the server. All this does is read argv/env/stdin and POST.
+
+import { parseArgs, endpointFromEnv, successLine, USAGE, CLI_NAME } from '../../lib/job-cli.js';
+
+function fail(message, code = 1) {
+  console.error(`${CLI_NAME}: ${message}`);
+  process.exit(code);
+}
+
+// Detail from a pipe, so an agent can hand over a long body without fighting
+// shell quoting. Never read when stdin is the terminal: that would hang. And
+// even off a TTY, bound the wait — an agent harness that hands its child an
+// idle pipe it never closes would otherwise hang the command forever, with the
+// job never posted and nothing on screen to explain why.
+const STDIN_WAIT_MS = 3000;
+
+async function readStdin() {
+  if (process.stdin.isTTY) return '';
+  const chunks = [];
+  // .catch is not optional: destroying the stream below rejects the in-flight
+  // iterator, and an unhandled rejection would kill the process after the job
+  // was already posted.
+  const read = (async () => {
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    return 'done';
+  })().catch(() => 'aborted');
+  const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), STDIN_WAIT_MS).unref());
+  if (await Promise.race([read, timeout]) === 'timeout') {
+    // Destroy, don't just stop reading: an open stdin is an active handle, so
+    // leaving it would hang the process at exit — the very hang this guards.
+    process.stdin.destroy();
+    console.error(`${CLI_NAME}: nothing arrived on stdin after ${STDIN_WAIT_MS}ms — posting without a detail. Use --detail to pass one directly.`);
+  }
+  return Buffer.concat(chunks).toString('utf8').trim();
+}
+
+const parsed = parseArgs(process.argv.slice(2));
+if (parsed.help) { console.log(USAGE); process.exit(0); }
+if (parsed.error) fail(`${parsed.error}\n\n${USAGE}`, 2);
+
+const endpoint = endpointFromEnv(process.env);
+if (endpoint.error) fail(endpoint.error);
+
+const detail = parsed.detail !== null ? parsed.detail : await readStdin();
+
+let res;
+try {
+  res = await fetch(endpoint.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(endpoint.token ? { Authorization: `Bearer ${endpoint.token}` } : {}),
+    },
+    body: JSON.stringify({ title: parsed.title, detail, repo: parsed.repo }),
+  });
+} catch (err) {
+  fail(`Could not reach the job board at ${endpoint.url} (${err.message}). Is Agent 007 still running?`);
+}
+
+let body = {};
+try { body = await res.json(); } catch {}
+
+if (!res.ok) fail(body.error || `Job board returned ${res.status}`);
+
+// Accepted, but the card did not come back: the response was truncated, or the
+// server died between committing the job and flushing the body. Dereferencing
+// body.job here would throw a stack trace at the agent, which reads as "it
+// failed" and invites a retry — posting the same work twice. Say what is
+// actually unknown instead.
+if (!body.job || typeof body.job.title !== 'string') {
+  fail(`the job board accepted the request but its reply could not be read (HTTP ${res.status}). Check the board before posting again — the card may already be there.`);
+}
+
+if (parsed.json) console.log(JSON.stringify(body.job, null, 2));
+else console.log(successLine(body.job, { repoName: body.repoName, dispatcherRunning: body.dispatcherRunning }));
