@@ -5,6 +5,25 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.4.0] - 2026-08-28
+
+### Fixed
+
+- The job board now tells you when it cannot check for a pull request, instead
+  of looking like the agent went quiet. If the `gh` account signed in on this
+  machine cannot see a repository — the wrong account for that organisation, a
+  renamed repo, no access — every job in it used to sit in progress forever with
+  its agent still running and its worktree still held, and the only clue was a
+  card reading "quiet, may need you", which points at the agent rather than at
+  the real cause. The card now names the reason and tells you to move the job by
+  hand. It clears itself as soon as the check works again.
+- Re-adopting an agent after a restart reconnects it to the job it was working
+  on. Before, the card kept saying its agent was gone while the agent was
+  visibly running, the job stopped counting toward the per-repo limit so the
+  board could start a second agent on the same work, and when the pull request
+  arrived the board could not close the agent or release its worktree. The two
+  are matched by branch name, which is the one thing that survives a restart.
+
 ## [0.3.1.1] - 2026-08-28
 
 ### Fixed
