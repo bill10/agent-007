@@ -179,6 +179,52 @@ durable (persisted in `config.json`). What a live agent is *doing* is derived;
 what the board could not do — a PR check that failed — is stored, because it is
 a fact about the board, not about a PTY.
 
+### The fourth state has no column
+
+A job whose PR has merged is `done`, and `done` is the one state with no
+column. A Review column that accumulates merged work stops meaning
+"needs your review" — the only column whose job is to hold a short list of
+things a human still has to look at becomes an archive nobody reads.
+
+The sweep covers In progress as well as Review: a PR can open and merge inside
+one scan interval, and `--state open` cannot see it afterwards, so a
+Review-only sweep would leave that card in In progress forever reading "agent
+gone" for work that had shipped. Finishing from In progress retires the agent
+(that is what the per-repo cap counts); finishing from Review does not.
+
+The job itself is kept, never deleted: it is the record of what an agent did and
+where the PR is. It is reached through **View finished jobs** in the toolbar,
+which swaps the columns for the archive rather than sitting beside them, so a
+list that only grows can never squeeze the live work.
+
+Four rules keep the transition honest:
+
+- **Only MERGED finishes a job.** A PR closed without merging left the work
+  undelivered, and someone still has to decide what to do about it — its card
+  stays on the board.
+- **Only THIS card's merge finishes it.** `gh pr list --head <branch>` matches
+  the head ref *name*, and that name outlives the branch: a merged PR stays in
+  the listing forever, and board branch names are reused once the branch is
+  deleted at retirement. So the sweep matches on the card's own PR number when
+  it has one, and otherwise only accepts a merge that happened after this
+  attempt started. Without that, a stale merge files a card away while its real
+  pull request is still open — and overwrites the card's PR number on the way
+  out, so the open one is no longer recorded anywhere.
+- **`prMergedAt` is written once, and cleared on the way back to work.** It is
+  what lets "← Review" put a finished job back: without it the merge sweep would
+  silently undo the move on the next scan five minutes later. A job finished by
+  hand has no `prMergedAt`, so a later merge can still be recorded. Moving to
+  To do or In progress clears it, because the next pull request on that job is a
+  different one — keeping the old stamp would exclude the card from the sweep
+  forever.
+- **The sweep never retires an agent.** Unlike the one-shot kill at the PR, this
+  runs every scan; an agent you re-adopted on a shipped branch to address review
+  comments is yours. A manual move to Done does retire it, because that is the
+  user saying the job is over — but Done -> Review does not, for the same reason
+  the sweep does not: putting a card back on the board is not closing a terminal.
+  The two moves that keep an agent are any move into In progress, and
+  Done -> Review; every other manual move retires it.
+
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
   `--state-*` tokens rather than introducing a second vocabulary:
