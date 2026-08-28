@@ -270,27 +270,70 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   return dispatched;
 }
 
+// Reconnect a re-adopted orphan to the job it was working on.
+//
+// A server restart clears every job's agentSessionId, because those sessions
+// are gone. Re-adopting the orphan brings the agent back, but nothing tied it
+// to its card: the job stayed "agent gone" while the agent was demonstrably
+// alive and working, it never counted toward the per-repo cap again (so the
+// board would dispatch a replacement alongside it), and when its PR appeared
+// the board could not retire it or release its worktree.
+//
+// The branch is the link. It is created per job, never reused while it exists,
+// and survives the restart on both the orphan record and the job — the one
+// identifier that outlives the session.
+export function relinkSessionToJob(session, broadcast) {
+  if (!session || !session.branchName) return null;
+  const job = allJobs().find(j =>
+    j.branchName === session.branchName
+    && j.repoPath === session.repoPath
+    && j.state === 'in-progress'
+    && !j.agentSessionId,   // never steal a job that already has a live agent
+  );
+  if (!job) return null;
+  job.agentSessionId = session.id;
+  job.agentName = session.name;
+  job.lastError = null;
+  job.lastErrorAt = null;
+  session.jobId = job.id;   // so the PR path can retire it like any board agent
+  persist(broadcast);
+  return job;
+}
+
 // --- PR watching ---
 
 // `gh pr list` against the repo, filtered to the job's branch. Runs in the main
 // repo (not the worktree) so it still works after the worktree is removed.
+//
+// Returns { pr } on a successful query — pr is null when the branch simply has
+// no open PR yet — or { pr: null, error } when the QUERY ITSELF failed.
+//
+// That distinction is the whole point. An earlier version caught everything and
+// returned null, so "no PR yet" and "this board can never see PRs in this repo"
+// were the same answer. A repo the `gh` account cannot resolve (wrong account
+// for the org, repo renamed, no access) then failed silently every five minutes
+// forever: its jobs sat in progress, their agents were never retired, and the
+// only visible symptom was a card reading "quiet — may need you", which points
+// at the agent rather than at the real cause. Observed with a repo that returned
+// `Could not resolve to a Repository` for the signed-in account while a
+// different account on the same machine could see it.
 export async function findPrForBranch(repoPath, branchName) {
-  if (!repoPath || !branchName || !existsSync(repoPath)) return null;
+  if (!repoPath || !branchName || !existsSync(repoPath)) return { pr: null };
   try {
     const stdout = await gitExec(['-C', repoPath, 'rev-parse', '--git-dir']);
-    if (!stdout) return null;
-  } catch { return null; }
+    if (!stdout) return { pr: null };
+  } catch { return { pr: null }; }
   try {
     const stdout = await new Promise((resolve, reject) => {
       execFile('gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
         { cwd: repoPath, timeout: 15_000, maxBuffer: 1024 * 1024 },
         (err, out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(out)));
     });
-    return parsePrList(stdout);
+    return { pr: parsePrList(stdout) };
   } catch (err) {
-    // gh missing, not authenticated, or no GitHub remote. Not an error worth
-    // spamming: the board falls back to the manual "Move to review" button.
-    return null;
+    // First line only: gh errors are usually one useful line plus usage noise.
+    const detail = String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
+    return { pr: null, error: detail || 'gh pr list failed' };
   }
 }
 
@@ -302,6 +345,7 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
   const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName);
   if (inProgress.length === 0) return [];
   const moved = [];
+  let noted = false;   // a PR-check failure was recorded on some card
   for (const job of inProgress) {
     // Capture what we are asking about: findPr is a network call, and a
     // requeue or delete during it would otherwise let us apply a PR result to
@@ -309,13 +353,30 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     // killing an agent that belongs to a different attempt.
     const askedBranch = job.branchName;
     const askedSessionId = job.agentSessionId;
-    const pr = await findPr(job.repoPath, askedBranch);
+    const { pr, error } = await findPr(job.repoPath, askedBranch);
+
+    if (error) {
+      // Say so on the card. Without this the job looks like an agent that went
+      // quiet, and the user has no way to learn the board simply cannot see
+      // this repo's pull requests. Only written when the message changes, so a
+      // persistent failure does not rewrite config.json every five minutes.
+      const message = `Cannot check for a pull request in this repo — ${error}. The job stays here until you move it by hand.`;
+      if (job.lastError !== message) {
+        job.lastError = message;
+        job.lastErrorAt = new Date().toISOString();
+        noted = true;
+      }
+      continue;
+    }
     if (!pr) continue;
     if (!allJobs().includes(job) || job.state !== 'in-progress' || job.branchName !== askedBranch) continue;
     job.state = 'review';
     job.prUrl = pr.url;
     job.prNumber = pr.number;
     job.reviewAt = new Date().toISOString();
+    // A successful check clears any stale "cannot check" note.
+    job.lastError = null;
+    job.lastErrorAt = null;
     moved.push(job);
 
     // Always retire the agent. This is what keeps the per-repo cap meaningful:
@@ -346,7 +407,7 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
       });
     }
   }
-  if (moved.length > 0) persist(broadcast);
+  if (moved.length > 0 || noted) persist(broadcast);
   return moved;
 }
 
