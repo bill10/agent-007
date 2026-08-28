@@ -5,6 +5,27 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.8.0] - 2026-08-28
+
+### Added
+
+- You can now ask an agent you are working with to put a job on the board. Say
+  "add that to the job board" and it posts the card itself, so noticing work no
+  longer means stopping to type it into the form. The board reaches every Claude
+  Code agent as an MCP tool, which is what makes it discoverable — the agent can
+  see the tool without being told it exists — and Claude Code still asks you to
+  approve the call, so nothing is filed behind your back. The card lands in To do
+  showing "via <agent>" beside whoever it belongs to, and runs in that terminal's
+  repo unless the agent names another.
+- `POST /api/jobs` does the same thing over plain HTTP, for agents that cannot
+  take a per-invocation MCP config.
+
+### Changed
+
+- Routes under `/api` now require a *user* token by default. The new agent
+  session token reaches only the two places that are meant for it; anything added
+  later is people-only unless it deliberately says otherwise.
+
 ## [0.3.7.0] - 2026-08-28
 
 ### Added

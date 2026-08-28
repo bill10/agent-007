@@ -118,7 +118,14 @@ function renderCard(job) {
 
   const meta = document.createElement('div');
   meta.className = 'job-card-meta';
-  const posted = job.postedByName ? `${escapeHtml(job.postedByName)} · ${relativeTime(job.postedAt)}` : relativeTime(job.postedAt);
+  // "Who posted it" is up to three facts: the person it belongs to, the agent
+  // that typed it (when one did — see the board's MCP tool), and when. Any of
+  // the first two can be absent, so filter rather than branch.
+  const posted = [
+    job.postedByName ? escapeHtml(job.postedByName) : null,
+    job.postedByAgent ? `<span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>` : null,
+    relativeTime(job.postedAt),
+  ].filter(Boolean).join(' · ');
   meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
 

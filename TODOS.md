@@ -34,6 +34,26 @@
   both before building. Until then the board surfaces the dialog as "needs you"
   so it takes one click, not a mystery.
 
+## Hand the board tool to non-Claude agents
+
+- **What:** `POST /api/jobs` accepts an agent session token and does everything
+  the MCP tool does, but nothing gives a Codex or Gemini agent that token, so
+  the door exists and no one can walk through it. Decide how those agents learn
+  it: an env var (the shape rejected for Claude agents, since every child
+  process inherits it), a `codex mcp add` / `gemini mcp add` written at spawn
+  into their persistent config plus a matching removal on exit, or accept that
+  this is Claude-only and say so in the README.
+- **Why:** The spawn command is user-configurable, so a user who runs `codex`
+  or `gemini` today gets no board tool and no explanation of why. Right now the
+  README implies the board is reachable from "every agent terminal".
+- **Effort:** S (human: ~2-3 h / CC: ~20 min)
+- **Priority:** P3
+- **Depends on:** Nothing.
+- **Context:** Verified during the MCP PR (2026-08-28): Gemini CLI has no
+  per-invocation MCP config flag, only `gemini mcp add` writing persistent
+  settings; Codex configures MCP through `~/.codex/config.toml`. Both would need
+  a write-then-clean-up dance that the per-session file for Claude avoids.
+
 ## Diff-between-agents for conflict files
 - **What:** When a conflict is detected (two agents modified the same file), clicking the warning icon shows both agents' diffs for that file side-by-side or sequentially.
 - **Why:** Makes conflict detection actionable instead of just a passive warning. Without this, users see "conflict" but can't easily compare what each agent did.

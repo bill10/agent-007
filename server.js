@@ -10,7 +10,7 @@
 //   server/pty.js    PTY lifecycle (spawn, handlers, state detection)
 //   server/jobs.js   Job board (persistence, dispatcher loop, PR watching)
 //   server/ws.js     WebSocket (message routing, broadcast, origin check)
-//   server/http.js   HTTP routes (/api/browse, origin check middleware)
+//   server/http.js   HTTP routes (/api/browse, /api/jobs, /mcp, origin + auth)
 
 import express from 'express';
 import { createServer } from 'http';
@@ -31,6 +31,7 @@ import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verify
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans } from './server/state.js';
+import { sweepMcpConfigs } from './server/agent-mcp.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -38,7 +39,10 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, verifyClient });
 
 // --- HTTP routes ---
-setupRoutes(app, join(__dirname, 'public'));
+// broadcast is injected for the same reason server/jobs.js takes it as an
+// argument: http.js must not import ws.js, and a job posted through the MCP
+// tool has to repaint every open board the moment it lands.
+setupRoutes(app, join(__dirname, 'public'), { broadcast });
 
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.
@@ -142,6 +146,14 @@ setupWebSocket(wss, { createSession, killSession });
 
 // --- Startup ---
 async function startup() {
+  // Agent MCP configs are removed when their PTY exits; a crash or a restart
+  // never runs that handler, so clear whatever the last run left behind.
+  //
+  // Inside startup(), NOT at module scope: importing server.js must not delete
+  // anything. test/server.test.js imports this file before it sets PORT, so a
+  // module-scope sweep would target the default port and wipe the configs of a
+  // real server running on 7007 while the suite ran.
+  sweepMcpConfigs();
   loadConfig();
   recoverCrashedSessions(broadcast);
   mkdirSync(WORKTREE_DIR, { recursive: true });

@@ -23,6 +23,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see.
 - **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste (Cmd+V a screenshot), and draggable tabs for reordering.
 - **Job board** -- Queue work instead of babysitting it. A job has a title, details, and a repo; the board scans every 5 minutes, and for each queued job whose repo is under its agent cap it spawns a fresh agent on its own worktree and a branch named after the job, then watches for the pull request. Jobs move To do -> In progress -> Review on their own. An agent that stops to ask you something turns its card orange and puts a count on the Jobs tab; click it to land in that terminal, answer, and it carries on.
+- **Ask an agent to post a job** -- Say "add that to the job board" to an agent you are already working with and it posts the card itself, so noticing work does not mean stopping to type it into the form. The board appears in every Claude Code agent as an MCP tool, so the agent can see it without being told it exists; Claude Code still asks you to approve the call, so a card is never filed behind your back. The card lands in To do showing "via <agent>", and runs in that terminal's repo unless the agent names another.
 - **Dark/light themes** -- Gold-accented dark theme and a Linear-inspired warm light theme. Toggles instantly, including terminal colors.
 - **Live sync** -- Branch names, file changes, line-level diff stats (+/-), and agent states update in real time across all panels.
 - **Voice input** -- Dictate prompts instead of typing. Click the mic button floating at the terminal's bottom-right (or `Cmd+D`), allow microphone access on first use, speak, and the transcript is typed into the active terminal; press Enter to send. Uses the browser's Web Speech API (Chrome, Edge, Safari; the recognition language follows your browser's locale) and needs HTTPS or localhost -- for remote access use `tailscale serve` (see `docs/REMOTE.md`). The mic is deliberately bounded: it stops after ~1 minute without delivered speech, always after 5 minutes, on switching or closing agents, when an agent's shell ends, and when the tab is hidden. Two things to know: most browsers process speech on vendor servers (Chrome/Edge send audio to Google/Microsoft; Safari may process on-device), so don't dictate secrets; and transcripts arrive as keystrokes, so a program waiting on a single key (a pager, a y/n prompt) reacts to speech like typing -- watch the prompt while dictating. OS-level dictation (macOS dictation, iOS keyboard mic, Windows `Win+H`) also types straight into the terminal and works in any browser.
@@ -150,8 +151,10 @@ server/
   git.js           Git operations (worktree, file tree, diff)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
-  http.js          HTTP routes (/api/browse, origin check middleware)
-  auth.js          Login tokens, user accounts, per-agent ownership checks
+  http.js          HTTP routes (/api/browse, /api/jobs, /mcp, origin + auth gates)
+  mcp.js           The board's MCP server (the post_job tool agents call)
+  agent-mcp.js     Per-session MCP config + the flags that point `claude` at it
+  auth.js          Login tokens, user accounts, agent session tokens
 bin/
   adduser.js       Create a login user (`npm run adduser`)
 public/
