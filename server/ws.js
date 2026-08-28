@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree } from '../lib/helpers.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings,
-  jobsPayload, broadcastJobs, runScan,
+  jobsPayload, broadcastJobs, runScan, relinkSessionToJob,
 } from './jobs.js';
 
 // --- Client tracking ---
@@ -291,6 +291,15 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           sessions.set(session.id, session);
           saveActiveSession(session, broadcast);
           startTreeScanLoop(session, broadcast);
+          // If this orphan was a job's agent, put them back together — matched
+          // on the branch, the only identifier that survives a restart.
+          const relinked = relinkSessionToJob(session, broadcast);
+          if (relinked) {
+            broadcast({
+              type: 'notification', level: 'info',
+              message: `${session.name} reconnected to job "${relinked.title}"`,
+            });
+          }
           adoptingOrphans.delete(msg.orphanId);
           orphans.delete(msg.orphanId);
           syncOrphansToConfig(broadcast);

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, runScan } from '../server/jobs.js';
+import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, runScan, relinkSessionToJob } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
@@ -215,7 +215,7 @@ describe('checkPullRequests closing the agent', () => {
 
   // Stub the gh lookup: these tests are about what happens once a PR is found,
   // not about talking to GitHub.
-  const withPr = (pr) => async () => pr;
+  const withPr = (pr) => async () => ({ pr });
 
   async function dispatched() {
     addJob({ title: 'shipped', repoPath: REPO }, noopBroadcast);
@@ -294,7 +294,7 @@ describe('agents do not pile up across many jobs', () => {
     for (let i = 0; i < 8; i++) addJob({ title: `J${i}`, repoPath: REPO }, noopBroadcast);
 
     const create = fakeCreateSession([]);
-    const findPr = async () => ({ url: 'u', number: 1 });
+    const findPr = async () => ({ pr: { url: 'u', number: 1 } });
     const kill = async (id) => { sessions.delete(id); };
 
     let peak = 0;
@@ -499,7 +499,7 @@ describe('the job can change while a dispatch is in flight', () => {
       job.state = 'todo';
       job.branchName = null;
       job.agentSessionId = null;
-      return { url: 'u', number: 1 };
+      return { pr: { url: 'u', number: 1 } };
     };
     await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
 
@@ -541,5 +541,134 @@ describe('moveJob guards', () => {
     const r = await moveJob(allJobs()[0].id, 'in-progress', noopBroadcast);
     expect(r.error).toBeUndefined();
     expect(allJobs()[0].state).toBe('in-progress');
+  });
+});
+
+// --- A PR check that cannot run must say so ---
+
+describe('when the PR check itself fails', () => {
+  beforeEach(resetBoard);
+
+  const failing = (msg) => async () => ({ pr: null, error: msg });
+
+  it('records the reason on the card instead of looking like a quiet agent', async () => {
+    // Observed live: `gh pr list` returned "Could not resolve to a Repository"
+    // because the signed-in account could not see that org. Every job in that
+    // repo stalled forever, and the only symptom was a card reading
+    // "quiet — may need you", which points at the agent, not the real cause.
+    addJob({ title: 'invisible repo', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+
+    await checkPullRequests(noopBroadcast, {
+      findPr: failing("Could not resolve to a Repository with the name 'org/repo'"),
+    });
+
+    const job = allJobs()[0];
+    expect(job.state).toBe('in-progress');          // it cannot advance, correctly
+    expect(job.lastError).toMatch(/Cannot check for a pull request/i);
+    expect(job.lastError).toMatch(/Could not resolve to a Repository/);
+  });
+
+  it('does not rewrite the job while the same failure repeats', async () => {
+    // A permanent failure recurs every five minutes; it must not churn config.
+    addJob({ title: 'repeat', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const findPr = failing('gh: not authenticated');
+
+    await checkPullRequests(noopBroadcast, { findPr });
+    const firstStamp = allJobs()[0].lastErrorAt;
+    await checkPullRequests(noopBroadcast, { findPr });
+    expect(allJobs()[0].lastErrorAt).toBe(firstStamp);
+  });
+
+  it('clears the note once the check succeeds', async () => {
+    addJob({ title: 'recovers', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, { findPr: failing('gh: not authenticated') });
+    expect(allJobs()[0].lastError).toBeTruthy();
+
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 4 } }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    const job = allJobs()[0];
+    expect(job.state).toBe('review');
+    expect(job.lastError).toBeNull();
+  });
+
+  it('an empty result is still just "no PR yet", not an error', async () => {
+    addJob({ title: 'not ready', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
+    const job = allJobs()[0];
+    expect(job.state).toBe('in-progress');
+    expect(job.lastError).toBeNull();
+  });
+});
+
+// --- Reconnecting a re-adopted agent to its job ---
+
+describe('relinkSessionToJob', () => {
+  beforeEach(resetBoard);
+
+  // What a restart leaves behind: the card keeps its branch, the session link is
+  // gone, and re-adopting the orphan produces a brand new session.
+  async function afterRestart() {
+    addJob({ title: 'interrupted', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const branch = job.branchName;
+    sessions.clear();
+    job.agentSessionId = null;
+    job.agentName = null;
+    job.lastError = 'Server restarted — agent lost.';
+    return { job, branch };
+  }
+
+  it('reconnects the agent to its card, matched on the branch', async () => {
+    const { job, branch } = await afterRestart();
+    const readopted = { id: 'session-99', name: 'Mirage', repoPath: REPO, branchName: branch, exited: false };
+    sessions.set(readopted.id, readopted);
+
+    const linked = relinkSessionToJob(readopted, noopBroadcast);
+    expect(linked).toBe(job);
+    expect(job.agentSessionId).toBe('session-99');
+    expect(job.agentName).toBe('Mirage');
+    expect(job.lastError).toBeNull();
+    // Tagged so the PR path can retire it like any other board agent.
+    expect(readopted.jobId).toBe(job.id);
+  });
+
+  it('makes the job count toward the cap again', async () => {
+    // Until it is relinked the job occupies no slot, so the board would happily
+    // dispatch a second agent for the same repo alongside the one that is back.
+    const { branch } = await afterRestart();
+    updateSettings({ maxPerRepo: 1 }, noopBroadcast);
+    addJob({ title: 'next up', repoPath: REPO }, noopBroadcast);
+
+    const readopted = { id: 'session-99', name: 'Mirage', repoPath: REPO, branchName: branch, exited: false };
+    sessions.set(readopted.id, readopted);
+    relinkSessionToJob(readopted, noopBroadcast);
+
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    expect(allJobs()[1].state).toBe('todo');   // capped by the reconnected agent
+  });
+
+  it('never steals a job that already has a live agent', async () => {
+    addJob({ title: 'busy', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const original = job.agentSessionId;
+
+    const impostor = { id: 'session-99', name: 'Other', repoPath: REPO, branchName: job.branchName, exited: false };
+    expect(relinkSessionToJob(impostor, noopBroadcast)).toBeNull();
+    expect(job.agentSessionId).toBe(original);
+  });
+
+  it('ignores a session whose branch matches no job, or a different repo', async () => {
+    const { branch } = await afterRestart();
+    expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO, branchName: 'unrelated' }, noopBroadcast)).toBeNull();
+    expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO2, branchName: branch }, noopBroadcast)).toBeNull();
+    expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO }, noopBroadcast)).toBeNull();
   });
 });
