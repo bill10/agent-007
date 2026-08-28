@@ -16,6 +16,7 @@ import { jobs, agents, repos, setActiveSession } from '../public/modules/state.j
 import { handleJobsList, showJobBoard, setupJobBoard } from '../public/modules/jobs.js';
 
 const BOARD_HTML = `
+  <button id="btn-new-job-shortcut"></button>
   <div id="terminal-viewport">
     <div id="terminal-empty"></div>
     <div class="job-board" id="job-board" style="display:none">
