@@ -1,5 +1,39 @@
 # TODOS
 
+## Back off the merge check on long-lived Review cards
+- **What:** Record a `lastMergeCheckAt` on each job and let `checkMergedPullRequests`
+  skip cards it checked recently — every scan for the first hour after `reviewAt`,
+  then hourly. Optionally memo "no account can see this repo" for the rest of a
+  scan so N jobs in one unreachable repo do not each walk every gh account.
+- **Why:** Unlike In progress, the Review set does not self-drain. A PR closed
+  without merging, or a card whose `prNumber` was superseded by a PR the board
+  never saw, is polled every five minutes for the life of the board. Each poll is
+  a `gh pr list` per signed-in account until one answers, and `runScan`'s
+  in-flight guard means dispatch waits behind the sweep. At tens of jobs this is
+  small; it just never stops.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Merge-to-Done sweep (v0.3.11.0)
+- **Context:** Raised by the performance specialist during /review (2026-08-28).
+  Deliberately not built with the sweep: a merged PR should leave the board
+  promptly, and backoff trades that promptness for subprocess count. The gh
+  account/token memo (`GH_AUTH_TTL_MS`) landed instead, which removes the
+  repeated `gh auth status` / `gh auth token` spawns without delaying anything.
+
+## Retention for finished jobs
+- **What:** Cap what the Finished jobs view renders (most recent N, with a way to
+  see the rest) and/or drop `done` jobs older than N days on load.
+- **Why:** Finished jobs are kept forever by design, and every one of them is
+  serialized into every `jobs-list` broadcast and rebuilt on each archive render.
+  Nothing prunes them and nothing paginates, so both costs grow for the life of
+  the install.
+- **Effort:** S (human: ~3 hours / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Finished jobs view (v0.3.11.0)
+- **Context:** Raised by the performance specialist during /review (2026-08-28).
+  Not built with the view because the request was to show ALL finished jobs, and
+  a silent cap contradicts that. Retention is a policy the user should choose.
+
 ## server.test.js fails to load under vitest on Windows
 - **What:** `test/server.test.js` fails at collection with `SyntaxError: Invalid or unexpected token` importing `../server.js` — vitest can't load node-pty's native `.node` binary through the `server.js → server/pty.js → node-pty` chain on Windows. Likely fix: externalize node-pty in `vitest.config.js` (`test.server.deps.external`) or mock `server/pty.js` in the suite.
 - **Why:** The server integration suite (auth handshake, WS behavior) never runs on Windows dev machines, so Windows contributors ship those paths untested locally. CI (ubuntu) still runs it green, so the gap is local-only.
