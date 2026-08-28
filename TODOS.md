@@ -34,6 +34,14 @@
   both before building. Until then the board surfaces the dialog as "needs you"
   so it takes one click, not a mystery.
 
+## server.test.js flakes when two vitest runs overlap
+- **What:** `test/server.test.js` binds hard-coded port 17007 in `beforeAll` with no retry or fallback, so a second `npm test` started while a previous run is still releasing the port fails the whole file with an unhandled bind error and 26 skipped tests. Fix: listen on port 0 and read the assigned port from `server.address()`, as `test/agent-jobs-api.test.js` does for its ephemeral servers.
+- **Why:** It looks exactly like a real regression — a red file with every test skipped — so it costs an investigation each time. Two overlapping runs happen routinely when a targeted run is followed straight away by a full one.
+- **Effort:** XS (human: ~15 min / CC: ~5 min)
+- **Priority:** P3
+- **Depends on:** Nothing
+- **Context:** Hit once during /ship on `bill10/create-todo-job-by-agent` (2026-08-28), then five consecutive clean full-suite runs confirmed it is not content-related. Pre-existing; the fixed port predates that branch.
+
 ## Diff-between-agents for conflict files
 - **What:** When a conflict is detected (two agents modified the same file), clicking the warning icon shows both agents' diffs for that file side-by-side or sequentially.
 - **Why:** Makes conflict detection actionable instead of just a passive warning. Without this, users see "conflict" but can't easily compare what each agent did.

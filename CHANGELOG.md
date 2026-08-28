@@ -5,6 +5,21 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.8.0] - 2026-08-28
+
+### Added
+
+- You can now ask an agent you are working with to put a job on the board.
+  Say "add that to the job board" and it posts the card itself, so noticing
+  work no longer means stopping to type it into the form yourself. The card
+  lands in To do, is dispatched like any other job, and shows "via <agent>" so
+  you can tell at a glance what a machine queued versus what you typed. Every
+  agent terminal gets the `agent-007-job` command on its PATH, so an agent that
+  has never heard of it finds it with `agent-007-job --help`. The job runs in
+  the repo that terminal is working in unless it names another with `--repo`.
+- Dispatched job agents are told the command exists, so an agent that spots
+  work outside its own job can queue it instead of quietly widening its scope.
+
 ## [0.3.7.0] - 2026-08-28
 
 ### Added
