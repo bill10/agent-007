@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.10.1] - 2026-08-28
+
+### Changed
+
+- **Dispatched agents now finish with /ship alone.** The job prompt used to end
+  with "run /review, fix, re-review, then /ship" — a hand-written description of
+  what /ship already does on its own. Its pre-landing step dispatches the same
+  specialist review army /review does (the two skills share the section file)
+  and runs the same auto-fix-and-loop cycle afterwards, so every dispatched job
+  paid for that army twice, and the first pass reviewed the pre-merge tree that
+  /ship's base merge was about to replace. The prompt now names /ship as the
+  single finishing step and no other skill: an agent arrives with no memory of
+  the rest, and naming one to forbid it is what puts it on the table.
+
 ## [0.3.10.0] - 2026-08-28
 
 ### Changed
