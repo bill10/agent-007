@@ -9,7 +9,7 @@
 import { agents, jobs, boardSettings, setBoardSettings, boardActive, setBoardActive, activeSessionId, repos } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml } from './auth.js';
-import { switchToSession, updateTabs } from './terminal.js';
+import { switchToSession } from './terminal.js';
 
 const COLUMNS = [
   { state: 'todo', label: 'To do' },
@@ -330,11 +330,12 @@ function saveForm() {
 // header buttons clickable underneath it: left up, it would hide this form
 // while openForm() focused its title input, swallowing everything the user
 // typed next. app.js closes this form on the way in the other direction.
+// The tab strip repaints itself: showJobBoard() fires the board-visibility
+// hook, which app.js wires to updateTabs().
 export function openJobForm() {
   const spawn = document.getElementById('spawn-form');
   if (spawn) spawn.style.display = 'none';
   showJobBoard();
-  updateTabs();
   openForm(null);
 }
 

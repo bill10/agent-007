@@ -5,10 +5,10 @@ vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 // terminal.js pulls in xterm; the board only needs switchToSession and
 // updateTabs from it, and stubbing it also proves the board does not depend on
 // the real module loading.
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), updateTabs: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
 import { send } from '../public/modules/ws.js';
-import { switchToSession, updateTabs } from '../public/modules/terminal.js';
+import { switchToSession } from '../public/modules/terminal.js';
 import { agents, jobs, repos, setActiveSession } from '../public/modules/state.js';
 import { handleJobsList, showJobBoard, hideJobBoard, renderBoard, setupJobBoard, openJobForm, closeJobForm } from '../public/modules/jobs.js';
 
@@ -261,12 +261,19 @@ describe('show / hide', () => {
 
   it('brings the board up before opening the form from the top bar', () => {
     hideJobBoard();
-    document.getElementById('btn-new-job-shortcut').click();
-    expect(document.getElementById('job-board').style.display).toBe('flex');
-    expect(document.getElementById('job-form').style.display).toBe('flex');
-    // The pinned board tab has to repaint as active, or the form appears under
-    // a tab strip still highlighting the agent the user was looking at.
-    expect(updateTabs).toHaveBeenCalled();
+    // app.js wires this hook to updateTabs(). The pinned board tab has to
+    // repaint as active, or the form appears under a tab strip still
+    // highlighting the agent the user was looking at.
+    const repaintTabs = vi.fn();
+    window._onBoardVisibilityChanged = repaintTabs;
+    try {
+      document.getElementById('btn-new-job-shortcut').click();
+      expect(document.getElementById('job-board').style.display).toBe('flex');
+      expect(document.getElementById('job-form').style.display).toBe('flex');
+      expect(repaintTabs).toHaveBeenCalled();
+    } finally {
+      delete window._onBoardVisibilityChanged;
+    }
   });
 
   it('dismisses the agent spawn overlay before focusing the job title', () => {
