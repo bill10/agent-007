@@ -8,14 +8,16 @@
 // `createSession` are passed in rather than imported, so this module never
 // forms a cycle with ws.js or server.js.
 
+import { execFile } from 'child_process';
 import { existsSync } from 'fs';
 import { config, sessions } from './state.js';
 import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
-  parsePrList, branchSlugFromTitle, JOB_STATES,
+  parsePrList, branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
+  MAX_TITLE_LEN, MAX_DETAIL_LEN,
 } from '../lib/jobs.js';
 
 // --- Board settings ---
@@ -84,8 +86,8 @@ export function addJob({ title, detail, repoPath, postedBy, postedByName }, broa
 export function updateJob(jobId, fields, broadcast) {
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
-  if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, 200);
-  if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, 20000);
+  if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, MAX_TITLE_LEN);
+  if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
   // The repo is only editable while the job is still unassigned — once an agent
   // is working in a worktree, repointing the card would misattribute the work.
   if (fields.repoPath && job.state === 'todo') job.repoPath = fields.repoPath;
@@ -102,14 +104,21 @@ export function deleteJob(jobId, broadcast) {
   return { job: removed };
 }
 
-// Manual move (drag, or the button on a card). Kept deliberately permissive:
-// automatic transitions can be wrong, so the user always has the last word.
-// Moving back to To do clears the agent link so the job can be dispatched
-// again — the old worktree is left alone, exactly as if you had closed the tab.
-export function moveJob(jobId, state, broadcast) {
+// Manual move (the buttons on a card). Kept deliberately permissive: automatic
+// transitions can be wrong, so the user always has the last word.
+//
+// Moving back to To do also RETIRES the job's agent. Unlinking it without
+// killing it left a running agent that no job pointed at: it no longer counted
+// toward the per-repo cap, so the board would dispatch a replacement alongside
+// it, and repeating the move walks straight past the cap. Retiring it keeps the
+// same invariant the PR path relies on — in-progress jobs and live board agents
+// are the same set. removeWorktree still protects the work: uncommitted or
+// unpushed changes become an orphan rather than being deleted.
+export async function moveJob(jobId, state, broadcast, { killSession } = {}) {
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
+  const retiringSessionId = state === 'todo' ? job.agentSessionId : null;
   job.state = state;
   if (state === 'todo') {
     job.agentSessionId = null;
@@ -122,19 +131,30 @@ export function moveJob(jobId, state, broadcast) {
     job.reviewAt = null;
   }
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
+  // Persist and repaint before the kill so the card moves immediately; the kill
+  // then emits its own session-ended and orphan notifications.
   persist(broadcast);
+  if (retiringSessionId && killSession) {
+    const session = sessions.get(retiringSessionId);
+    if (session && !session.exited) {
+      try {
+        await killSession(retiringSessionId);
+      } catch (err) {
+        console.error(`Failed to close agent for job "${job.title}":`, err.message);
+      }
+    }
+  }
   return { job };
 }
 
-export function updateSettings(fields, broadcast, { onRunningChange } = {}) {
+export function updateSettings(fields, broadcast) {
   const settings = boardSettings();
-  const wasRunning = settings.running;
   if (typeof fields.running === 'boolean') settings.running = fields.running;
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
-  if (typeof fields.permissionMode === 'string') settings.permissionMode = fields.permissionMode;
+  // Allowlisted: this value is interpolated into the agent's command line.
+  if (isValidPermissionMode(fields.permissionMode)) settings.permissionMode = fields.permissionMode;
   persist(broadcast);
-  if (settings.running !== wasRunning && onRunningChange) onRunningChange(settings.running);
   return { settings };
 }
 
@@ -216,7 +236,6 @@ export async function findPrForBranch(repoPath, branchName) {
     if (!stdout) return null;
   } catch { return null; }
   try {
-    const { execFile } = await import('child_process');
     const stdout = await new Promise((resolve, reject) => {
       execFile('gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
         { cwd: repoPath, timeout: 15_000, maxBuffer: 1024 * 1024 },
@@ -247,13 +266,12 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     job.reviewAt = new Date().toISOString();
     moved.push(job);
 
-    // Retire the agent. The card keeps the whole record — agent name, branch,
-    // PR link — so nothing is lost by the terminal going away, and the work
-    // itself is on the remote.
-    // Always retire the agent: its job is done, and this is what keeps the
-    // per-repo cap meaningful — in-progress jobs and live agents stay the same
-    // set, so nothing accumulates. killSession -> removeWorktree deletes the
-    // worktree and the local branch (fully pushed by then); the PR is untouched.
+    // Always retire the agent. This is what keeps the per-repo cap meaningful:
+    // in-progress jobs and live agents stay the same set, so nothing
+    // accumulates. killSession -> removeWorktree deletes the worktree and the
+    // local branch (fully pushed by then); the PR is untouched. The card keeps
+    // the whole record — agent name, branch, PR link — so nothing is lost by
+    // the terminal going away, and the work itself is on the remote.
     let closed = false;
     if (killSession && job.agentSessionId) {
       const session = sessions.get(job.agentSessionId);
@@ -280,6 +298,35 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
   return moved;
 }
 
+// --- Scan ---
+
+// One scan = check for PRs, then dispatch. Both entry points (the interval
+// timer and the "Run now" button) go through here, behind a single in-flight
+// flag.
+//
+// The guard is not decorative. dispatchOnce reads job.state to pick candidates,
+// then awaits createSession, and only sets state = 'in-progress' after that
+// await returns. Two overlapping scans therefore both see the same job as
+// 'todo' and both dispatch it: two agents, two worktrees, two branches for one
+// job, with job.agentSessionId keeping only the last — the other agent is
+// orphaned, invisible to the board, and never cleaned up. It also lets the
+// per-repo cap be exceeded, since both scans read the same in-flight count.
+// The window is wide (createSession does addRepo + `git worktree add` + a PTY
+// spawn) and trivially hit by clicking Run now while a tick is in flight.
+let scanInFlight = false;
+
+export async function runScan(createSession, broadcast, { onSessionCreated, killSession } = {}) {
+  if (scanInFlight) return { skipped: true };
+  scanInFlight = true;
+  try {
+    await checkPullRequests(broadcast, { killSession });
+    await dispatchOnce(createSession, broadcast, { onSessionCreated });
+    return { skipped: false };
+  } finally {
+    scanInFlight = false;
+  }
+}
+
 // --- Loop ---
 
 let dispatchTimer = null;
@@ -291,8 +338,7 @@ export function startDispatcher(createSession, broadcast, { onSessionCreated, ki
   const tick = async () => {
     try {
       if (boardSettings().running) {
-        await checkPullRequests(broadcast, { killSession });
-        await dispatchOnce(createSession, broadcast, { onSessionCreated });
+        await runScan(createSession, broadcast, { onSessionCreated, killSession });
       }
     } catch (err) {
       console.error('Job dispatcher tick failed:', err.message);
@@ -300,15 +346,11 @@ export function startDispatcher(createSession, broadcast, { onSessionCreated, ki
     dispatchTimer = setTimeout(tick, boardSettings().intervalMs);
   };
   // First tick soon after start so pressing Start feels responsive, rather than
-  // appearing to do nothing for three minutes.
+  // appearing to do nothing until the first full interval elapses.
   dispatchTimer = setTimeout(tick, 2000);
 }
 
 export function stopDispatcher() {
   clearTimeout(dispatchTimer);
   dispatchTimer = null;
-}
-
-export function dispatcherRunning() {
-  return dispatchTimer !== null;
 }

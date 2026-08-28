@@ -237,7 +237,11 @@ function disposeAgent(sessionId) {
       switchToSession(remaining[remaining.length - 1]);
     } else {
       // Nothing left to show. The board is the sensible landing spot: it is
-      // what dispatched this agent and it explains where the work went.
+      // what dispatched this agent and it explains where the work went. The
+      // office still needs its empty state though — removeSession() sets this
+      // too, and without it the office renders a room with no one in it and no
+      // explanation.
+      document.getElementById('office-empty').style.display = 'flex';
       showJobBoard();
     }
   }

@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree } from '../lib/helpers.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings,
-  jobsPayload, broadcastJobs, dispatchOnce, checkPullRequests,
+  jobsPayload, broadcastJobs, runScan,
 } from './jobs.js';
 
 // --- Client tracking ---
@@ -365,7 +365,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           break;
         }
         case 'job-move': {
-          const result = moveJob(msg.jobId, msg.state, broadcast);
+          const result = await moveJob(msg.jobId, msg.state, broadcast, { killSession });
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }
@@ -379,8 +379,13 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         // "Run now" — the same tick the timer fires, on demand, so the user
         // never has to wait out the interval to see the board act.
         case 'job-dispatch-now': {
-          await checkPullRequests(broadcast, { killSession });
-          await dispatchOnce(createSession, broadcast, { onSessionCreated: (s) => broadcast(sessionPayload(s)) });
+          const { skipped } = await runScan(createSession, broadcast, {
+            onSessionCreated: (s) => broadcast(sessionPayload(s)),
+            killSession,
+          });
+          if (skipped) {
+            ws.send(JSON.stringify({ type: 'notification', level: 'info', message: 'A scan is already running' }));
+          }
           broadcastJobs(broadcast);
           break;
         }

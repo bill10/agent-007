@@ -3,7 +3,7 @@ import {
   createJob, countInFlightByRepo, selectDispatchableJobs, branchSlugFromTitle,
   buildJobPrompt, buildJobCommand, deriveJobStatus, parsePrList,
   JOB_STATES, MAX_TITLE_LEN, STALLED_AFTER_MS, DEFAULT_PERMISSION_MODE,
-  MAX_BRANCH_SLUG_LEN, DISPATCH_INTERVAL_MS,
+  MAX_BRANCH_SLUG_LEN, DISPATCH_INTERVAL_MS, PERMISSION_MODES, isValidPermissionMode,
 } from '../lib/jobs.js';
 import { parseCommand, detectState } from '../lib/helpers.js';
 
@@ -348,5 +348,35 @@ describe('dispatch defaults', () => {
     expect(prompt).toContain('/review');
     expect(prompt).toContain('/ship');
     expect(prompt.indexOf('/review')).toBeLessThan(prompt.lastIndexOf('/ship'));
+  });
+});
+
+// --- Permission mode is argv, so it must be an allowlist ---
+
+describe('permission mode validation', () => {
+  it('accepts every mode claude actually supports', () => {
+    for (const mode of PERMISSION_MODES) expect(isValidPermissionMode(mode)).toBe(true);
+  });
+
+  it('rejects anything else', () => {
+    for (const bad of ['', null, undefined, 'AUTO', 'yolo', 42, {}]) {
+      expect(isValidPermissionMode(bad)).toBe(false);
+    }
+  });
+
+  it('cannot be used to smuggle extra flags onto the agent', () => {
+    // buildJobCommand interpolates this into a command string that parseCommand
+    // splits into argv. Unvalidated, "auto --dangerously-skip-permissions"
+    // becomes a second flag on every dispatched agent.
+    const cmd = buildJobCommand(job(), { permissionMode: 'auto --dangerously-skip-permissions' });
+    const parsed = parseCommand(cmd);
+    expect(parsed.args[1]).toBe(DEFAULT_PERMISSION_MODE);
+    expect(parsed.args).toHaveLength(3);
+    expect(cmd).not.toContain('dangerously');
+  });
+
+  it('falls back to the default rather than emitting an empty flag', () => {
+    const parsed = parseCommand(buildJobCommand(job(), { permissionMode: '' }));
+    expect(parsed.args[1]).toBe(DEFAULT_PERMISSION_MODE);
   });
 });

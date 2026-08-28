@@ -164,10 +164,13 @@ function renderCard(job) {
     card.appendChild(note);
   }
 
-  if (job.prUrl) {
+  // The URL comes from `gh pr list`, but it still ends up in an href, and a
+  // non-http scheme there (javascript:, data:) executes on click. Cheap guard.
+  const prHref = /^https?:\/\//i.test(String(job.prUrl || '')) ? job.prUrl : null;
+  if (prHref) {
     const pr = document.createElement('a');
     pr.className = 'job-card-pr';
-    pr.href = job.prUrl;
+    pr.href = prHref;
     pr.target = '_blank';
     pr.rel = 'noopener noreferrer';
     pr.textContent = job.prNumber ? `PR #${job.prNumber}` : 'View PR';
@@ -206,8 +209,8 @@ function renderCardActions(job) {
   }
   if (job.state === 'in-progress') {
     actions.appendChild(mk('→ Review', 'Mark as ready for review (use when the PR was opened outside the board)', () => send({ type: 'job-move', jobId: job.id, state: 'review' })));
-    actions.appendChild(mk('← To do', 'Return to To do. The agent keeps running and its worktree is untouched — close its tab separately if you want it gone.', () => {
-      if (confirm(`Return "${job.title}" to To do?\n\nThe agent keeps running and its branch is untouched; the board will dispatch a NEW agent for this job. Close the old tab yourself if you no longer want it.`)) {
+    actions.appendChild(mk('← To do', 'Requeue this job and close its agent. Uncommitted or unpushed work is kept as an orphan.', () => {
+      if (confirm(`Return "${job.title}" to To do?\n\n${job.agentName || 'The agent'} is closed and its worktree released, then the board dispatches a fresh agent for this job. Any uncommitted or unpushed work is kept as an orphan.`)) {
         send({ type: 'job-move', jobId: job.id, state: 'todo' });
       }
     }));

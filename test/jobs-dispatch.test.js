@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests } from '../server/jobs.js';
+import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, runScan } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
@@ -107,7 +107,7 @@ describe('dispatchOnce', () => {
     // In normal operation the agent is retired at the same moment the card
     // moves, which is what keeps in-progress count == live agent count. A
     // manual move is the user's own call.
-    moveJob(allJobs()[0].id, 'review', noopBroadcast);
+    await moveJob(allJobs()[0].id, 'review', noopBroadcast);
     await dispatchOnce(create, noopBroadcast);
     expect(allJobs()[1].state).toBe('in-progress');
   });
@@ -167,7 +167,7 @@ describe('board mutations', () => {
     addJob({ title: 'redo', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const id = allJobs()[0].id;
-    moveJob(id, 'todo', noopBroadcast);
+    await moveJob(id, 'todo', noopBroadcast);
     const job = allJobs()[0];
     expect(job.state).toBe('todo');
     expect(job.agentSessionId).toBeNull();
@@ -175,13 +175,13 @@ describe('board mutations', () => {
     expect(job.startedAt).toBeNull();
   });
 
-  it('rejects an unknown state', () => {
+  it('rejects an unknown state', async () => {
     addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
-    expect(moveJob(allJobs()[0].id, 'done', noopBroadcast).error).toMatch(/Unknown state/);
+    expect((await moveJob(allJobs()[0].id, 'done', noopBroadcast)).error).toMatch(/Unknown state/);
   });
 
-  it('reports a missing job rather than throwing', () => {
-    expect(moveJob('nope', 'review', noopBroadcast).error).toMatch(/not found/i);
+  it('reports a missing job rather than throwing', async () => {
+    expect((await moveJob('nope', 'review', noopBroadcast)).error).toMatch(/not found/i);
     expect(deleteJob('nope', noopBroadcast).error).toMatch(/not found/i);
   });
 
@@ -331,5 +331,97 @@ describe('branch naming on dispatch', () => {
     const calls = [];
     await dispatchOnce(fakeCreateSession(calls), noopBroadcast);
     expect(calls[0].command).toContain('--permission-mode auto');
+  });
+});
+
+// --- Regressions found by /review ---
+
+describe('concurrent scans', () => {
+  beforeEach(resetBoard);
+
+  it('never dispatches the same job twice when two scans overlap', async () => {
+    // The "Run now" button and the interval timer both scan. dispatchOnce reads
+    // job.state to pick candidates, awaits createSession, and only then sets
+    // state='in-progress' — so without a guard both scans see the same job as
+    // todo and spawn an agent for it: two worktrees, two branches, and one
+    // orphaned agent the board never cleans up.
+    addJob({ title: 'only once', repoPath: REPO }, noopBroadcast);
+    const calls = [];
+    const slowCreate = (() => {
+      const inner = fakeCreateSession(calls);
+      return async (...args) => {
+        await new Promise(r => setTimeout(r, 20));   // widen the window
+        return inner(...args);
+      };
+    })();
+
+    const [a, b] = await Promise.all([
+      runScan(slowCreate, noopBroadcast),
+      runScan(slowCreate, noopBroadcast),
+    ]);
+
+    expect(calls).toHaveLength(1);
+    expect([a.skipped, b.skipped].filter(Boolean)).toHaveLength(1);   // one bounced
+    expect(allJobs().filter(j => j.state === 'in-progress')).toHaveLength(1);
+  });
+
+  it('releases the guard so a later scan still runs', async () => {
+    addJob({ title: 'first', repoPath: REPO }, noopBroadcast);
+    const create = fakeCreateSession([]);
+    await runScan(create, noopBroadcast);
+    addJob({ title: 'second', repoPath: REPO }, noopBroadcast);
+    const r = await runScan(create, noopBroadcast);
+    expect(r.skipped).toBe(false);
+    expect(allJobs().filter(j => j.state === 'in-progress')).toHaveLength(2);
+  });
+
+  it('releases the guard even when a scan throws', async () => {
+    addJob({ title: 'boom', repoPath: REPO }, noopBroadcast);
+    const exploding = async () => { throw new Error('spawn exploded'); };
+    await expect(runScan(exploding, noopBroadcast)).rejects.toThrow('spawn exploded');
+    const r = await runScan(fakeCreateSession([]), noopBroadcast);
+    expect(r.skipped).toBe(false);
+  });
+});
+
+describe('requeueing a job retires its agent', () => {
+  beforeEach(resetBoard);
+
+  it('closes the running agent so it cannot escape the cap', async () => {
+    // Unlinking without killing left a live agent no job pointed at: it stopped
+    // counting toward the cap, so the board dispatched a replacement alongside
+    // it and repeating the move walked straight past the cap.
+    addJob({ title: 'redo me', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+
+    const killed = [];
+    await moveJob(job.id, 'todo', noopBroadcast, { killSession: async (id) => { killed.push(id); sessions.delete(id); } });
+
+    expect(killed).toEqual([sid]);
+    expect(job.state).toBe('todo');
+    expect(job.agentSessionId).toBeNull();
+  });
+
+  it('keeps the cap honest across repeated requeues', async () => {
+    updateSettings({ maxPerRepo: 1 }, noopBroadcast);
+    addJob({ title: 'flip flop', repoPath: REPO }, noopBroadcast);
+    const create = fakeCreateSession([]);
+    const kill = async (id) => { sessions.delete(id); };
+
+    for (let i = 0; i < 4; i++) {
+      await dispatchOnce(create, noopBroadcast);
+      await moveJob(allJobs()[0].id, 'todo', noopBroadcast, { killSession: kill });
+    }
+    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
+  });
+
+  it('does not try to kill anything when moving to review', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const killed = [];
+    await moveJob(allJobs()[0].id, 'review', noopBroadcast, { killSession: async (id) => killed.push(id) });
+    expect(killed).toEqual([]);
   });
 });
