@@ -40,7 +40,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
-- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`)
+- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), agent-posted jobs (`agent-env`, `job-cli`, `agent-jobs-api`, `agent-jobs-stdin-broadcast`), and the agent branch start point (`worktree-start-point`)
 
 > **Windows note:** `test/server.test.js` currently fails to load under vitest on
 > Windows (node-pty's native addon; see TODOS.md). It runs green in CI (ubuntu),
@@ -64,10 +64,15 @@ server/
   git.js           Git operations
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
-  http.js          HTTP routes
+  http.js          HTTP routes (including /api/jobs)
   auth.js          Login tokens and ownership
-bin/adduser.js     Create a login user (npm run adduser)
+  agent-env.js     Environment handed to every agent PTY (job CLI on PATH, token)
+bin/
+  adduser.js       Create a login user (npm run adduser)
+  agent-cli/agent-007-job  Post a job to the board from inside an agent terminal
 lib/helpers.js     Pure functions (tested)
+lib/jobs.js        Job schema, dispatch selection, PR parsing, status derivation
+lib/job-cli.js     `agent-007-job` argument/environment parsing
 public/            Frontend (vanilla JS, no build)
 ```
 
