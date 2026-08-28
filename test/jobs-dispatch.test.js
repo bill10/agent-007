@@ -237,10 +237,11 @@ describe('checkPullRequests closing the agent', () => {
 
   it('closes the agent by default', async () => {
     const job = await dispatched();
+    const sid = job.agentSessionId;   // captured before: the link is cleared on a successful kill
     const findPr = withPr({ url: 'u', number: 1 });
     const killed = [];
     await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
-    expect(killed).toEqual([job.agentSessionId]);
+    expect(killed).toEqual([sid]);
   });
 
   it('still moves the job to review if closing the agent throws', async () => {
@@ -747,5 +748,112 @@ describe('a PR-check failure and another note coexist', () => {
     await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
     expect(allJobs()[0].prCheckError).toBeNull();
     expect(allJobs()[0].lastError).toMatch(/Server restarted/);
+  });
+});
+
+// --- Agents left running after their job already shipped ---
+
+describe('retiring the agent when the link is missing', () => {
+  beforeEach(resetBoard);
+
+  // The live shape this fixes: a restart nulls agentSessionId, so the PR is
+  // found with nothing recorded to retire. Before, the agent kept running and
+  // holding a worktree for work that had already shipped.
+  async function unlinkedButRunning() {
+    addJob({ title: 'restarted then shipped', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const branch = job.branchName;
+    sessions.clear();
+    job.agentSessionId = null;
+    job.agentName = null;
+    const running = { id: 'session-99', name: 'Ghost', repoPath: REPO, branchName: branch, exited: false };
+    sessions.set(running.id, running);
+    return { job, running };
+  }
+
+  it('finds the agent by branch and retires it as the job moves to review', async () => {
+    const { job, running } = await unlinkedButRunning();
+    const killed = [];
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 42 } }),
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+    });
+    expect(killed).toEqual([running.id]);
+    expect(job.state).toBe('review');
+    expect(job.agentName).toBe('Ghost');      // credit recorded before it went
+    expect(job.agentSessionId).toBeNull();
+  });
+
+  it('does not touch a session on the same branch in a different repo', async () => {
+    const { running } = await unlinkedButRunning();
+    running.repoPath = REPO2;
+    const killed = [];
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 42 } }),
+      killSession: async (id) => killed.push(id),
+    });
+    expect(killed).toEqual([]);
+  });
+
+  it('keeps the link when the kill fails, so the agent stays reachable', async () => {
+    addJob({ title: 'stubborn', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 42 } }),
+      killSession: async () => { throw new Error('worktree busy'); },
+    });
+    expect(job.state).toBe('review');          // the PR is open either way
+    expect(job.agentSessionId).toBe(sid);      // not nulled into a zombie
+  });
+
+  it('never sweeps agents on jobs that are ALREADY in review', async () => {
+    // An agent re-adopted on a shipped branch to address review comments is the
+    // user's. A recurring sweep would kill it every five minutes.
+    const { job, running } = await unlinkedButRunning();
+    job.state = 'review';
+    job.prNumber = 42;
+    const killed = [];
+    await runScan(fakeCreateSession([]), noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 42 } }),
+      killSession: async (id) => killed.push(id),
+    });
+    expect(killed).toEqual([]);
+    expect(sessions.has(running.id)).toBe(true);
+  });
+});
+
+describe('relink covers a job that already reached review', () => {
+  beforeEach(resetBoard);
+
+  it('prefers a job still in progress over an older one already in review', async () => {
+    addJob({ title: 'old, shipped', repoPath: REPO }, noopBroadcast);
+    addJob({ title: 'new, running', repoPath: REPO }, noopBroadcast);
+    const [older, newer] = allJobs();
+    older.state = 'review';
+    older.branchName = 'bill/shared';
+    newer.state = 'in-progress';
+    newer.branchName = 'bill/shared';
+
+    const readopted = { id: 'session-99', name: 'Ghost', repoPath: REPO, branchName: 'bill/shared', exited: false };
+    expect(relinkSessionToJob(readopted, noopBroadcast)).toBe(newer);
+    expect(older.agentSessionId).toBeNull();
+  });
+
+  it('reconnects an agent whose job moved to review while it was gone', async () => {
+    addJob({ title: 'shipped during restart', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const branch = job.branchName;
+    sessions.clear();
+    job.agentSessionId = null;
+    job.agentName = null;
+    job.state = 'review';
+
+    const readopted = { id: 'session-99', name: 'Ghost', repoPath: REPO, branchName: branch, exited: false };
+    expect(relinkSessionToJob(readopted, noopBroadcast)).toBe(job);
+    expect(job.agentSessionId).toBe('session-99');
   });
 });

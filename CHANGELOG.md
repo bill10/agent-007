@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.5.0] - 2026-08-28
+
+### Fixed
+
+- An agent whose job reaches Review is now retired even when the board had lost
+  track of which agent it was. A restart clears that link, so a job whose pull
+  request turned up afterwards moved to Review with its agent still running,
+  holding a worktree for work that had already shipped. The branch identifies
+  the agent instead, since it outlives a restart.
+- Agents already sitting in Review are deliberately left alone. If you reopen an
+  agent on a branch whose pull request is already up, to deal with review
+  comments, it stays yours — the board only retires an agent at the moment the
+  job moves to Review, never afterwards.
+
 ## [0.3.4.0] - 2026-08-28
 
 ### Fixed
