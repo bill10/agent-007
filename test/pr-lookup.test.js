@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
@@ -8,7 +8,14 @@ import { findPrForBranch } from '../server/jobs.js';
 // findPrForBranch needs a real git repo to get past its guards; everything
 // about the ACCOUNT WALK is injected, so these never touch GitHub.
 let REPO, REPO2;
+// A token in the environment changes which account gh would pick, so the walk
+// must be exercised without one. CI runners commonly export GITHUB_TOKEN.
+const savedEnv = {};
 beforeEach(() => {
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN']) {
+    savedEnv[key] = process.env[key];
+    delete process.env[key];
+  }
   for (const set of [0, 1]) {
     const dir = mkdtempSync(join(tmpdir(), 'a007-prlookup-'));
     execFileSync('git', ['init', '-q', dir]);
@@ -16,6 +23,13 @@ beforeEach(() => {
     execFileSync('git', ['-C', dir, 'config', 'user.email', 'x@x']);
     execFileSync('git', ['-C', dir, 'commit', '-q', '--allow-empty', '-m', 'i']);
     if (set === 0) REPO = dir; else REPO2 = dir;
+  }
+});
+
+afterEach(() => {
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
   }
 });
 
@@ -47,7 +61,7 @@ describe('findPrForBranch across several gh accounts', () => {
     const gh = ghFake({ visible: 'active-acct' });
     const result = await findPrForBranch(REPO, 'feat/x', gh);
     expect(result.pr).toEqual(PR);
-    expect(gh.calls).toEqual(['active-acct']);   // no walk when the first one works
+    expect(gh.calls).toEqual(['active-acct']);   // active account first, no walk
   });
 
   it('falls through to another account when the signed-in one cannot see the repo', async () => {
@@ -91,23 +105,27 @@ describe('findPrForBranch across several gh accounts', () => {
     const result = await findPrForBranch(REPO, 'feat/x', gh);
     expect(result.pr).toBeNull();
     expect(result.error).toMatch(/Could not resolve to a Repository/);
-    // The ambient attempt IS the active account, so it is not tried again.
-    expect(result.error).toMatch(/tried 2 accounts/);
-    expect(gh.calls).toEqual(['active-acct', 'other-acct']);
+    // Named accounts first, then one last tokenless attempt.
+    expect(result.error).toMatch(/tried 3 accounts: active-acct, other-acct, signed-in account/);
     // Named by login, not "signed-in account" — the user needs to know which
     // credentials to fix.
-    expect(result.error).toMatch(/tried 2 accounts: active-acct, other-acct/);
-    expect(result.error).not.toMatch(/signed-in account/);
+    // Named accounts first, then one last tokenless attempt.
+    expect(result.error).toMatch(/tried 3 accounts: active-acct, other-acct, signed-in account/);
   });
 
-  it('does not retry the same account twice', async () => {
-    // The remembered account is also in the account list; it must not be
-    // attempted a second time on the walk.
+  it('never attempts the same NAMED account twice', async () => {
+    // The remembered account also appears in the account list; it must not get
+    // a second turn on the walk. The final tokenless attempt is deliberately
+    // separate — gh may resolve it to an account already tried, which is the
+    // accepted cost of also covering env tokens and enterprise hosts.
     await findPrForBranch(REPO, 'feat/x', ghFake({ visible: 'other-acct' }));
     const gh = ghFake({ visible: null });
     await findPrForBranch(REPO, 'feat/x', gh);
-    const counts = gh.calls.reduce((a, c) => (a[c] = (a[c] || 0) + 1, a), {});
-    for (const [who, n] of Object.entries(counts)) expect([who, n]).toEqual([who, 1]);
+
+    const named = gh.calls.slice(0, -1);   // drop the trailing tokenless attempt
+    expect(named).toEqual([...new Set(named)]);
+    expect(named).toContain('other-acct');
+    expect(named).toContain('active-acct');
   });
 
   it('skips an account whose token cannot be read', async () => {
@@ -126,7 +144,7 @@ describe('findPrForBranch across several gh accounts', () => {
     });
     expect(result).toEqual({ pr: null });
     expect(result.error).toBeUndefined();
-    expect(calls).toEqual(['ambient']);   // a successful query ends the walk
+    expect(calls).toEqual(['token-for-a']);   // a successful query ends the walk
   });
 
   it('does not shell out at all for a path that is not a repo', async () => {

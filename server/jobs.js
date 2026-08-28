@@ -402,7 +402,7 @@ export async function findPrForBranch(repoPath, branchName, {
     if (!stdout) return { pr: null };
   } catch { return { pr: null }; }
 
-  // Label for the "whatever gh is signed in as" attempt, before we know its name.
+  // Label for a lookup that uses no explicit token — whatever gh picks itself.
   const AMBIENT = 'signed-in account';
   const tried = [];
   const failures = [];
@@ -417,7 +417,7 @@ export async function findPrForBranch(repoPath, branchName, {
     return result;
   };
 
-  // The account that answered for this repo last time.
+  // 1. The account that answered for this repo last time.
   const remembered = ghAccountForRepo.get(repoPath);
   if (remembered) {
     const token = await tokenFor(remembered);
@@ -427,36 +427,32 @@ export async function findPrForBranch(repoPath, branchName, {
     }
   }
 
-  // Then whatever gh is signed in as — which also covers GH_TOKEN set in the
-  // environment, and enterprise setups the account list would not describe.
-  const ambient = await attempt(AMBIENT, undefined);
-  if (ambient) { ghAccountForRepo.delete(repoPath); return ambient; }
-
-  // Then every other account on the machine. The first entry is the ACTIVE
-  // account, which the ambient attempt above already was — unless a token in
-  // the environment overrode it, in which case ambient was something else and
-  // the active account still needs its turn.
-  const ambientWasActive = !process.env.GH_TOKEN && !process.env.GITHUB_TOKEN;
+  // 2. Every account gh knows about, active first, each with its own token.
+  //
+  // Named accounts rather than "whatever gh is signed in as" so the walk is
+  // unambiguous: an earlier version tried the ambient account first and then
+  // skipped accounts[0] to avoid repeating it, which quietly assumed the first
+  // entry was the account ambient had used. With more than one host configured
+  // that assumption can skip the only account able to see the repo.
   const accounts = await listAccounts();
-  for (const [index, login] of accounts.entries()) {
-    if (index === 0 && ambientWasActive) continue;
+  for (const login of accounts) {
     const token = await tokenFor(login);
     if (!token) continue;
     const hit = await attempt(login, token);
     if (hit) { ghAccountForRepo.set(repoPath, login); return hit; }
   }
 
+  // 3. Last resort: no explicit token. Covers a token supplied through the
+  //    environment, an enterprise host, and older gh versions whose auth status
+  //    this cannot enumerate.
+  const ambient = await attempt(AMBIENT, undefined);
+  if (ambient) { ghAccountForRepo.delete(repoPath); return ambient; }
+
   ghAccountForRepo.delete(repoPath);
-  // Name the ambient attempt by its actual login now that the list is known —
-  // "tried 2 accounts: bill10, bill-slung" tells the user which credentials to
-  // fix; "signed-in account" does not.
-  const named = tried.map(label => (
-    label === AMBIENT && ambientWasActive && accounts[0] ? accounts[0] : label
-  ));
-  const plural = named.length === 1 ? '' : 's';
+  const plural = tried.length === 1 ? '' : 's';
   return {
     pr: null,
-    error: `${failures[0] || 'gh pr list failed'} (tried ${named.length} account${plural}: ${named.join(', ')})`,
+    error: `${failures[0] || 'gh pr list failed'} (tried ${tried.length} account${plural}: ${tried.join(', ')})`,
   };
 }
 
@@ -490,7 +486,11 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
       // this repo's pull requests. Only written when the message changes, so a
       // persistent failure does not rewrite config.json every five minutes.
       const message = `${PR_CHECK_FAILED} — ${error}. The job stays here until you move it by hand.`;
-      if (job.lastError !== message) {
+      // Never overwrite a note that came from somewhere else. A restart note
+      // names where the work is; a dispatch failure names why it never started.
+      // Both matter more than this, and a background poll must not erase them.
+      const canWrite = !job.lastError || job.lastError.startsWith(PR_CHECK_FAILED);
+      if (canWrite && job.lastError !== message) {
         job.lastError = message;
         job.lastErrorAt = new Date().toISOString();
         noted = true;

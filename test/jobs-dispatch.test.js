@@ -717,3 +717,30 @@ describe('relinkSessionToJob', () => {
     expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO }, noopBroadcast)).toBeNull();
   });
 });
+
+describe('a PR-check failure never destroys another note', () => {
+  beforeEach(resetBoard);
+
+  it('leaves a restart note in place rather than overwriting it', async () => {
+    // A restart note names where the work is. A background poll failing must
+    // not erase it — that note is the only pointer to an orphaned worktree.
+    addJob({ title: 'restarted', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    job.lastError = 'Server restarted — agent lost. Work is on bill/x.';
+
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: null, error: 'gh: not authenticated' }),
+    });
+    expect(allJobs()[0].lastError).toMatch(/Server restarted/);
+  });
+
+  it('still records the failure when there is no other note', async () => {
+    addJob({ title: 'clean slate', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: null, error: 'gh: not authenticated' }),
+    });
+    expect(allJobs()[0].lastError).toMatch(/Cannot check for a pull request/);
+  });
+});
