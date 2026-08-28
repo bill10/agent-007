@@ -1,5 +1,13 @@
 # TODOS
 
+## server.test.js fails to load under vitest on Windows
+- **What:** `test/server.test.js` fails at collection with `SyntaxError: Invalid or unexpected token` importing `../server.js` — vitest can't load node-pty's native `.node` binary through the `server.js → server/pty.js → node-pty` chain on Windows. Likely fix: externalize node-pty in `vitest.config.js` (`test.server.deps.external`) or mock `server/pty.js` in the suite.
+- **Why:** The server integration suite (auth handshake, WS behavior) never runs on Windows dev machines, so Windows contributors ship those paths untested locally. CI (ubuntu) still runs it green, so the gap is local-only.
+- **Effort:** S (human: ~1-2 hours / CC: ~15-30 min)
+- **Priority:** P0
+- **Depends on:** Nothing
+- **Context:** Found by /ship test triage on `lawson-wong/daiquiri` (2026-08-26). Reproduces identically on unmodified `main` code in a fresh worktree, so it is pre-existing and environment-specific, not branch-caused.
+
 ## Diff-between-agents for conflict files
 - **What:** When a conflict is detected (two agents modified the same file), clicking the warning icon shows both agents' diffs for that file side-by-side or sequentially.
 - **Why:** Makes conflict detection actionable instead of just a passive warning. Without this, users see "conflict" but can't easily compare what each agent did.

@@ -5,6 +5,21 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.2.2.0] - 2026-08-27
+
+### Fixed
+
+- `npm start` now works when Agent 007 is installed in a folder whose path
+  contains a space (e.g. `C:\Users\you\Claude Code\agent-007`) or other
+  special characters. Previously the server built everything, decided it
+  wasn't the entry point, and exited silently with no error.
+- The server also starts correctly when launched through a symlinked or
+  junction path (macOS `/tmp`-style links, relocated Windows folders) and via
+  `node .`.
+- If the entry-point check ever misfires again when `server.js` is launched
+  directly, the server now prints a clear "not auto-starting" message to
+  stderr instead of exiting silently with code 0.
+
 ## [0.2.1.0] - 2026-08-24
 
 ### Changed

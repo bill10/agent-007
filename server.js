@@ -14,7 +14,8 @@
 import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
+import { isDirectRun } from './server/direct-run.js';
 import { dirname, join, basename } from 'path';
 import { mkdirSync } from 'fs';
 
@@ -181,9 +182,15 @@ function gracefulShutdown() {
 export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession };
 
 // Auto-start when run directly
-const isDirectRun = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
-if (isDirectRun) {
+if (isDirectRun(import.meta.url, process.argv[1])) {
   startup();
   process.on('SIGINT', gracefulShutdown);
   process.on('SIGTERM', gracefulShutdown);
+} else if (process.argv[1] && basename(process.argv[1]) === basename(fileURLToPath(import.meta.url))) {
+  // The launched file has this file's name but the URLs still differ — a
+  // path-resolution miss, not a deliberate import. Say so instead of exiting
+  // 0 with no output (the failure mode this guard has silently hit before).
+  console.error(
+    `server.js entry-point guard mismatch: ${pathToFileURL(process.argv[1]).href} vs ${import.meta.url} — not auto-starting.`
+  );
 }
