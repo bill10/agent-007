@@ -1,9 +1,10 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
-import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent } from './state.js';
+import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, jobs } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
 import { stopVoice } from './voice.js';
+import { showJobBoard, hideJobBoard } from './jobs.js';
 
 function waitForXterm() {
   return new Promise((resolve) => {
@@ -75,7 +76,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId } = msg;
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
@@ -135,6 +136,12 @@ export async function handleSessionCreated(msg) {
     removals: removals || 0,
     fileTree: null,
     conflicts: [],
+    spawnedBy: spawnedBy || 'user',
+    jobId: jobId || null,
+    // Local mirror of the server's lastOutputAt, maintained in handlePtyOutput.
+    // The job board uses it to tell "still working" from "parked at a prompt,
+    // probably waiting on a human" without any extra server traffic.
+    lastOutputAt: Date.now(),
   });
 
   if (fitAddon) {
@@ -153,7 +160,12 @@ export async function handleSessionCreated(msg) {
     send({ type: 'pty-input', sessionId, data });
   });
 
-  switchToSession(sessionId);
+  // A board-dispatched agent opens its tab quietly. The dispatcher fires
+  // unattended every few minutes, so auto-switching would yank the user out of
+  // whatever they were typing — the tab dot, the office character and the job
+  // card all still announce it, and clicking any of them jumps here.
+  const stealFocus = (spawnedBy || 'user') !== 'board' || !activeSessionId;
+  if (stealFocus) switchToSession(sessionId);
   updateTabs();
   updateStatusBar();
   document.getElementById('office-empty').style.display = 'none';
@@ -164,6 +176,7 @@ export function handlePtyOutput(msg) {
   const agent = agents.get(msg.sessionId);
   if (!agent) return;
   const bytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
+  agent.lastOutputAt = Date.now();
   agent.term.write(bytes);
 }
 
@@ -193,6 +206,45 @@ export function handleSessionEnded(msg) {
   // would transcribe speech into a dead pty forever.
   if (msg.sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent ended' });
   agent.state = 'DISCONNECTED';
+
+  // A board agent retired after opening its PR takes its tab with it. Under
+  // unattended dispatch these arrive steadily, and a row of dead tabs is pure
+  // clutter — the job card still carries the agent name, branch and PR link.
+  // Agents you spawned yourself keep their tab, as before, so you can read the
+  // output and close it when you're ready.
+  if (agent.spawnedBy === 'board' && agent.jobId) {
+    disposeAgent(msg.sessionId);
+    return;
+  }
+
+  updateTabs();
+  updateStatusBar();
+  if (onSessionChanged) onSessionChanged();
+}
+
+// Tear down a session's terminal locally. Unlike removeSession() this sends no
+// 'kill' — the process is already gone; this only reclaims the client's UI.
+function disposeAgent(sessionId) {
+  const agent = agents.get(sessionId);
+  if (!agent) return;
+  agent.term.dispose();
+  agent.termEl.remove();
+  agents.delete(sessionId);
+  if (activeSessionId === sessionId) {
+    setActiveSession(null);
+    const remaining = [...agents.keys()];
+    if (remaining.length > 0) {
+      switchToSession(remaining[remaining.length - 1]);
+    } else {
+      // Nothing left to show. The board is the sensible landing spot: it is
+      // what dispatched this agent and it explains where the work went. The
+      // office still needs its empty state though — removeSession() sets this
+      // too, and without it the office renders a room with no one in it and no
+      // explanation.
+      document.getElementById('office-empty').style.display = 'flex';
+      showJobBoard();
+    }
+  }
   updateTabs();
   updateStatusBar();
   if (onSessionChanged) onSessionChanged();
@@ -202,6 +254,7 @@ export function switchToSession(sessionId) {
   // Dictation targets the active session — don't let speech begun for one
   // agent land in another's shell after a tab switch (or auto-switch on kill).
   if (sessionId !== activeSessionId) stopVoice({ notice: 'Voice input stopped — switched agents' });
+  hideJobBoard();
   if (activeSessionId && agents.has(activeSessionId)) {
     agents.get(activeSessionId).termEl.style.display = 'none';
   }
@@ -261,6 +314,29 @@ export function removeSession(sessionId) {
 export function updateTabs() {
   const container = document.getElementById('terminal-tabs');
   container.innerHTML = '';
+
+  // Pinned board tab: always first, never draggable, never closable. It has no
+  // data-session-id, so the drag-reorder handler below skips it automatically.
+  const boardTab = document.createElement('div');
+  boardTab.className = `terminal-tab board-tab${boardActive ? ' active' : ''}`;
+  boardTab.title = 'Job board';
+  const attention = [...jobs.values()].filter((j) => {
+    if (j.state !== 'in-progress' || !j.agentSessionId) return false;
+    const a = agents.get(j.agentSessionId);
+    return !a || a.state === 'MESSAGE' || a.state === 'DISCONNECTED';
+  }).length;
+  boardTab.innerHTML = '<svg class="board-tab-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1.5" width="2.6" height="9"/><rect x="4.7" y="1.5" width="2.6" height="6"/><rect x="8.4" y="1.5" width="2.6" height="7.5"/></svg>';
+  boardTab.appendChild(document.createTextNode('Jobs'));
+  if (attention > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'board-tab-badge';
+    badge.textContent = String(attention);
+    badge.title = `${attention} job${attention === 1 ? '' : 's'} need attention`;
+    boardTab.appendChild(badge);
+  }
+  boardTab.onclick = () => { showJobBoard(); updateTabs(); };
+  container.appendChild(boardTab);
+
   for (const [sessionId, agent] of agents) {
     const tab = document.createElement('div');
     tab.className = `terminal-tab${sessionId === activeSessionId ? ' active' : ''}`;
@@ -309,6 +385,7 @@ export function updateTabs() {
     dot.className = 'dot';
     dot.style.background = stateColor(agent.state);
     tab.appendChild(dot);
+    if (agent.spawnedBy === 'board') tab.classList.add('board-spawned');
     tab.appendChild(document.createTextNode(agent.name));
     const close = document.createElement('span');
     close.className = 'close-btn';

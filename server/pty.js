@@ -4,6 +4,7 @@ import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
 import { RING_BUFFER_MAX } from './state.js';
+import { broadcastJobs } from './jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 const TRIVIAL_RE = /^[\s.·•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷─━▏▎▍▌▋▊▉█░▒▓⬡◐◑◒◓|\\\/\-*>]+$/;
@@ -44,7 +45,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId }, broadcast) {
   const { file, args } = parseCommand(command);
 
   let ptyProcess;
@@ -75,6 +76,11 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     recentStrippedLines: [],
     isTUI: isTUI ?? /^(claude|aider)\b/.test(command),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
+    // Provenance. 'board' sessions are opened by the job dispatcher: the client
+    // uses this to add the tab WITHOUT stealing focus, since an unattended
+    // dispatcher would otherwise yank the user's cursor away every few minutes.
+    spawnedBy: spawnedBy || 'user',
+    jobId: jobId || null,       // job this session was dispatched for, if any
     exited: false,
     stateCheckInterval: null,
     repoPath,
@@ -102,5 +108,13 @@ export function updateState(session, broadcast) {
   if (newState !== prevState) {
     session.state = newState;
     if (broadcast) broadcast({ type: 'state-change', sessionId: session.id, state: newState });
+    // A job card's "needs you" badge is derived from its agent's state, so the
+    // board has to be re-sent when that state moves. The browser recomputes the
+    // badge locally from state-change too, but the jobs-list `status` field
+    // would otherwise stay frozen at whatever it was when the job was
+    // dispatched — stale for any other consumer, and for a client that
+    // connects mid-flight. Only board sessions trigger this, and only on an
+    // actual transition, so it is a handful of messages per job.
+    if (session.jobId && broadcast) broadcastJobs(broadcast);
   }
 }

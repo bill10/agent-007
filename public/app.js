@@ -17,6 +17,7 @@ import {
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
 import { setupVoice } from './modules/voice.js';
+import { setupJobBoard, handleJobsList, renderBoard } from './modules/jobs.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -24,7 +25,14 @@ setOnSessionChanged(() => {
   closeDiffViewer();
   renderOffice();
   renderExplorer();
+  // Agent state drives the board's "needs you" badges, so they refresh on the
+  // same signal as the office and explorer.
+  renderBoard();
 });
+
+// The board tab's attention badge is derived from the job list, so a jobs-list
+// broadcast has to repaint the tab bar as well as the board itself.
+window._onBoardVisibilityChanged = () => updateTabs();
 
 // --- Spawn Form ---
 function setupSpawnForm() {
@@ -413,6 +421,7 @@ function onMessage(msg) {
     case 'file-diff': handleFileDiff(msg); break;
     case 'full-tree': handleFullTree(msg); break;
     case 'orphans-list': handleOrphansList(msg); break;
+    case 'jobs-list': handleJobsList(msg); break;
     case 'upload-complete': handleUploadComplete(msg); break;
     case 'notification': handleNotification(msg); break;
     case 'repo-error':
@@ -510,6 +519,7 @@ async function init() {
   setupResize();
   setupUpload();
   setupVoice();
+  setupJobBoard();
   startAnimationLoop();
   connect(onMessage);
   renderOffice();

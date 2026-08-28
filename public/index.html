@@ -118,6 +118,37 @@
         <div class="terminal-empty" id="terminal-empty">
           <p>No agent selected</p>
         </div>
+
+        <!-- Job board (shares the viewport with the terminals) -->
+        <div class="job-board" id="job-board" style="display:none">
+          <div class="job-board-toolbar">
+            <button class="job-new-btn" id="btn-new-job">+ New Job</button>
+            <span class="job-dispatcher">
+              <button class="job-run-toggle" id="btn-dispatcher-toggle">Start</button>
+              <button class="job-run-now" id="btn-dispatch-now" title="Scan the board now instead of waiting for the next interval">Run now</button>
+              <span class="job-dispatcher-status" id="job-dispatcher-status"></span>
+            </span>
+            <label class="job-cap-label" title="Maximum agents the board will run at once per repository">
+              max/repo
+              <input type="number" id="job-max-per-repo" min="1" max="10" step="1">
+            </label>
+          </div>
+
+          <div class="job-form" id="job-form" style="display:none">
+            <label>Title<input type="text" id="job-title" placeholder="What needs doing" spellcheck="false" maxlength="200"></label>
+            <label>Repository
+              <select id="job-repo"></select>
+            </label>
+            <label>Details<textarea id="job-detail" rows="5" placeholder="Everything the agent needs to know. It runs unattended, so be explicit about scope and acceptance criteria."></textarea></label>
+            <div class="job-form-actions">
+              <button id="btn-job-save">Post job</button>
+              <button id="btn-job-cancel" class="secondary">Cancel</button>
+            </div>
+            <div class="job-form-error" id="job-form-error" style="display:none"></div>
+          </div>
+
+          <div class="job-columns" id="job-columns"></div>
+        </div>
         <div class="voice-indicator" id="voice-indicator" aria-hidden="true" style="display:none">
           <span class="voice-indicator-dot"></span><span class="voice-indicator-text"></span>
         </div>

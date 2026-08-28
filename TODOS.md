@@ -8,6 +8,32 @@
 - **Depends on:** Nothing
 - **Context:** Found by /ship test triage on `lawson-wong/daiquiri` (2026-08-26). Reproduces identically on unmodified `main` code in a fresh worktree, so it is pre-existing and environment-specific, not branch-caused.
 
+## Pre-seed workspace trust for board-dispatched agents
+
+- **What:** Before the job board spawns an agent, write `hasTrustDialogAccepted`
+  for the new worktree path into `~/.claude.json` so the agent starts working
+  immediately instead of stopping at Claude Code's workspace-trust prompt.
+- **Why:** Every board agent gets a brand-new worktree, and Claude Code shows
+  the trust dialog the first time it runs in any directory, so every dispatched
+  job currently needs one human click before it starts. That is the single
+  thing standing between the board and genuinely unattended dispatch. Verified
+  against claude 2.1.250: `--permission-mode acceptEdits`, `bypassPermissions`
+  and `--dangerously-skip-permissions` all still show it; per `claude --help`
+  it is skipped only in non-interactive `-p` mode, which defeats the point of
+  having a terminal you can take over.
+- **Effort:** S (human: ~2 hours / CC: ~10 min), most of it verification.
+- **Priority:** P2
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Deliberately not built with the board (2026-08-27). It writes a
+  file outside the app that Claude Code rewrites constantly, so the read-modify-write
+  races; and pre-granting trust on the user's behalf is their call, not the
+  app's. If built, it should be an opt-in board setting, default off. Note that
+  pre-seeding was never verified to work — a test using a throwaway `HOME` was
+  invalid (the control case also passed, so claude was not really starting), and
+  whether trust is inherited from a parent directory is also unverified. Settle
+  both before building. Until then the board surfaces the dialog as "needs you"
+  so it takes one click, not a mystery.
+
 ## Diff-between-agents for conflict files
 - **What:** When a conflict is detected (two agents modified the same file), clicking the warning icon shows both agents' diffs for that file side-by-side or sequentially.
 - **Why:** Makes conflict detection actionable instead of just a passive warning. Without this, users see "conflict" but can't easily compare what each agent did.

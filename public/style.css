@@ -1177,3 +1177,370 @@ body {
 }
 /* Subtle cue that the active terminal is view-only. */
 .terminal-panel.readonly .terminal-viewport { opacity: 0.92; }
+
+/* ============================================================
+   Job Board
+   Shares the terminal viewport with the xterm containers; the
+   pinned "Jobs" tab swaps between them.
+   ============================================================ */
+
+.terminal-tab.board-tab {
+  gap: 6px;
+  color: var(--text-muted);
+  /* Visually pinned: a hairline separates it from the agent tabs, which are
+     draggable and closable while this one is neither. */
+  border-right: 1px solid var(--border);
+}
+.terminal-tab.board-tab .board-tab-icon { opacity: 0.75; flex-shrink: 0; }
+.terminal-tab.board-tab.active { color: var(--accent); }
+.terminal-tab.board-tab.active .board-tab-icon { opacity: 1; }
+
+.board-tab-badge {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--state-message);
+  color: #0b0c0e;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+}
+
+/* An agent the board created, not you. Subtle — it is still an ordinary agent
+   you can type into; the marker only explains where it came from. */
+.terminal-tab.board-spawned .dot {
+  box-shadow: 0 0 0 1px var(--bg-tabs), 0 0 0 2px var(--text-dim);
+}
+
+.job-board {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  overflow: hidden;
+  z-index: 5;
+}
+
+/* --- Toolbar --- */
+
+.job-board-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.job-new-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.job-new-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.job-dispatcher { display: flex; align-items: center; gap: 8px; }
+
+.job-run-toggle,
+.job-run-now {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.job-run-toggle:hover,
+.job-run-now:hover { border-color: var(--accent); color: var(--accent); }
+.job-run-toggle.running { color: var(--state-waiting); border-color: var(--state-waiting); }
+
+.job-dispatcher-status { font-size: 10px; color: var(--text-dim); }
+.job-dispatcher-status.running { color: var(--state-waiting); }
+
+.job-cap-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.job-cap-label input {
+  width: 44px;
+  padding: 3px 5px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* --- New / edit form --- */
+
+.job-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.job-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.job-form input[type="text"],
+.job-form select,
+.job-form textarea {
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.job-form textarea { resize: vertical; line-height: 1.5; }
+.job-form input:focus,
+.job-form select:focus,
+.job-form textarea:focus { outline: none; border-color: var(--accent); }
+
+.job-form-actions { display: flex; gap: 8px; }
+.job-form-actions button {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--bg-dark);
+  background: var(--accent);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.job-form-actions button.secondary {
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+.job-form-error { font-size: 11px; color: var(--state-disconnected); }
+
+/* --- Columns --- */
+
+.job-columns {
+  display: flex;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  background: var(--border);
+}
+
+.job-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-panel);
+}
+
+.job-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-tabs);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.job-column-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.job-column-count { font-size: 10px; color: var(--text-dim); }
+
+.job-cards {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.job-column-empty {
+  padding: 12px 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* --- Cards --- */
+
+.job-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--border);
+  border-radius: 3px;
+}
+.job-card.status-running { border-left-color: var(--state-working); }
+.job-card.status-needs-input { border-left-color: var(--state-message); }
+.job-card.status-stalled { border-left-color: var(--state-idle); }
+.job-card.status-gone { border-left-color: var(--state-disconnected); }
+
+.job-card-title {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.job-card-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.job-card-repo { color: var(--text-muted); }
+
+.job-card-detail {
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.45;
+  /* Cards stay scannable: the full text lives in the agent's prompt, this is
+     only a reminder of what the job was. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.job-card-agent {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  font-size: 9px;
+  color: var(--text-dim);
+}
+.job-card-agent-name { color: var(--text-muted); font-weight: 600; }
+.job-card-branch { color: var(--text-dim); opacity: 0.85; }
+
+.job-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 2px 7px;
+  font-size: 9px;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+.job-card-status:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.job-card-status:disabled { cursor: default; opacity: 0.65; }
+.job-status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.job-status-running { color: var(--state-working); border-color: var(--state-working); }
+.job-status-needs-input { color: var(--state-message); border-color: var(--state-message); }
+.job-status-stalled { color: var(--text-dim); }
+.job-status-gone { color: var(--state-disconnected); border-color: var(--state-disconnected); }
+
+/* Only the "needs you" badge pulses. A card that is merely quiet should not
+   compete for attention with one that is actually blocking on the user. */
+.job-status-needs-input .job-status-dot { animation: job-pulse 1.8s ease-in-out infinite; }
+@keyframes job-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.job-card-pr {
+  align-self: flex-start;
+  font-size: 10px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.job-card-pr:hover { text-decoration: underline; }
+
+.job-card-error {
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--state-disconnected);
+  word-break: break-word;
+}
+
+.job-card-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.job-card:hover .job-card-actions,
+.job-card:focus-within .job-card-actions { opacity: 1; }
+
+.job-card-btn {
+  padding: 2px 6px;
+  font-size: 9px;
+  font-family: inherit;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.job-card-btn:hover { color: var(--accent); border-color: var(--accent); }
+.job-card-btn.danger:hover { color: var(--state-disconnected); border-color: var(--state-disconnected); }
+
+/* Narrow panels: stack the columns instead of crushing them to unreadable
+   widths (the terminal panel is resizable down to 300px). */
+@media (max-width: 700px) {
+  .job-columns { flex-direction: column; overflow-y: auto; }
+  .job-column { min-height: 140px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-status-needs-input .job-status-dot { animation: none; }
+  .job-card-actions { transition: none; }
+}
+
+.job-card-retired {
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.8;
+}
