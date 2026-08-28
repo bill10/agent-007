@@ -64,6 +64,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     // which cocktail actually landed. Nothing to reserve or release here.
     const wtResult = await createWorktree(resolvedRepoPath, agentName, customBranch, {
       suffixOnCollision: !!meta.branchSuffixOnCollision,
+      startPoint: meta.startPoint || null,
     });
     if (wtResult.error) {
       codenamePool.recycle(agentName);

@@ -40,6 +40,7 @@ function setupSpawnForm() {
   const cmdInput = document.getElementById('spawn-command');
   const nameInput = document.getElementById('spawn-name');
   const branchInput = document.getElementById('spawn-branch');
+  const startPointInput = document.getElementById('spawn-start-point');
   const repoInput = document.getElementById('spawn-repo');
   const repoDropdown = document.getElementById('repo-dropdown');
   const advancedToggle = document.getElementById('spawn-advanced-toggle');
@@ -65,6 +66,7 @@ function setupSpawnForm() {
     form.style.display = 'flex';
     nameInput.value = '';
     branchInput.value = '';
+    startPointInput.value = '';
     cmdInput.value = 'claude';
     advancedSection.style.display = 'none';
     advancedToggle.innerHTML = 'Advanced &#x25B6;';
@@ -86,8 +88,10 @@ function setupSpawnForm() {
     const name = nameInput.value.trim() || undefined;
     const branch = branchInput.value.trim() || undefined;
     const repoPath = repoInput.value.trim() || undefined;
+    // Blank means the repo's base branch on the remote, freshly fetched.
+    const startPoint = startPointInput.value.trim() || undefined;
     clearSpawnError();
-    const ok = send({ type: 'spawn', command, name, branch, repoPath });
+    const ok = send({ type: 'spawn', command, name, branch, repoPath, startPoint });
     if (!ok) {
       showSpawnError('Not connected to server — refresh the page and try again.');
       return;
@@ -124,6 +128,7 @@ function setupSpawnForm() {
   cmdInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSpawn(); });
   nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSpawn(); });
   branchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSpawn(); });
+  startPointInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSpawn(); });
   repoInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doSpawn();
     if (e.key === 'Escape') repoDropdown.style.display = 'none';

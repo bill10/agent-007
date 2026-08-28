@@ -58,6 +58,67 @@ export async function validateRepoPath(repoPath) {
 
 // --- Repo Management ---
 
+// How long to wait for the pre-spawn fetch. Longer than GIT_AUTO_TIMEOUT because
+// this one talks to the network, but bounded: a slow or unreachable remote must
+// delay a spawn, never block it. On timeout we fall back to local refs.
+const FETCH_TIMEOUT = 15000;
+
+// The repo's base branch, by name (no `origin/` prefix). Asks the remote's own
+// HEAD first, so a repo whose default is `develop` or `trunk` is handled without
+// a hardcoded list; falls back to the two common names, then null.
+export async function resolveBaseBranch(repoPath) {
+  try {
+    const ref = await gitExec(['-C', repoPath, 'symbolic-ref', 'refs/remotes/origin/HEAD']);
+    const name = ref.trim().replace('refs/remotes/origin/', '');
+    if (name) return name;
+  } catch (_) {}
+  for (const candidate of ['main', 'master']) {
+    try {
+      await gitExec(['-C', repoPath, 'rev-parse', '--verify', candidate]);
+      return candidate;
+    } catch (_) {}
+  }
+  return null;
+}
+
+// What a new agent's branch should start FROM.
+//
+// `worktree add -b <name>` with no start-point uses HEAD of the main checkout —
+// whatever the user happens to have checked out there. That is wrong twice over:
+// a local base branch that has fallen behind silently starts the agent on
+// superseded code, and a user sitting on an unrelated feature branch hands the
+// agent that branch's half-finished work, which then rides along in its PR.
+//
+// So: refresh the remote refs, then branch from `origin/<base>` — what a person
+// does by hand with `git fetch && git checkout -b feature origin/main`.
+//
+// Every step degrades instead of failing. No network, no remote, or a repo that
+// has never been pushed falls back to the local base branch, and a repo with
+// neither falls back to null, which means "use HEAD" — the old behaviour, which
+// is still correct for a brand-new repo with a single branch.
+async function resolveStartPoint(repoPath, explicit) {
+  // An explicitly requested start-point is the user's call; don't second-guess
+  // it, and don't spend a fetch on it.
+  if (explicit) return explicit;
+
+  try {
+    await gitExec(['-C', repoPath, 'fetch', 'origin', '--quiet'], { timeout: FETCH_TIMEOUT });
+  } catch (_) {
+    // Offline, no remote, or auth prompt suppressed. Local refs may be stale,
+    // which is still better than HEAD of an unrelated branch.
+  }
+
+  const base = await resolveBaseBranch(repoPath);
+  if (!base) return null;
+  for (const ref of [`origin/${base}`, base]) {
+    try {
+      await gitExec(['-C', repoPath, 'rev-parse', '--verify', ref]);
+      return ref;
+    } catch (_) {}
+  }
+  return null;
+}
+
 // The `${gitUser}` half of every branch this app creates, e.g. `bill/vesper`.
 // Falls back to `agent` when the repo has no user.name configured.
 async function branchPrefix(repoPath) {
@@ -148,17 +209,22 @@ async function remoteBranchNames(repoPath) {
 //
 // `customBranch` never retries — the user asked for that specific name, so a
 // collision is an error to report, not a cue to silently pick something else.
-export async function createWorktree(repoPath, agentName, customBranch, { suffixOnCollision = false } = {}) {
+export async function createWorktree(repoPath, agentName, customBranch, { suffixOnCollision = false, startPoint = null } = {}) {
   const dirName = repoDirName(repoPath);
   const gitUser = await branchPrefix(repoPath);
   const worktreePath = join(WORKTREE_DIR, dirName, agentName);
   mkdirSync(join(WORKTREE_DIR, dirName), { recursive: true });
 
+  // Resolved once: the fetch inside it must not run per candidate name.
+  const start = await resolveStartPoint(repoPath, startPoint);
+
   const attempt = async (cocktail) => {
     const branchName = `${gitUser}/${cocktail}`;
+    const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName];
+    if (start) args.push(start);
     try {
-      await gitExec(['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName]);
-      return { worktreePath, branchName, cocktail };
+      await gitExec(args);
+      return { worktreePath, branchName, cocktail, startPoint: start };
     } catch (err) {
       const msg = err.stderr || err.message || '';
       if (BRANCH_EXISTS_RE.test(msg)) return { branchTaken: true, branchName };
@@ -241,15 +307,7 @@ export async function removeWorktree(session) {
       }
     }
     if (!reason && !fullyPushed) {
-      let baseBranch = 'main';
-      try {
-        const ref = await gitExec(['-C', session.repoPath, 'symbolic-ref', 'refs/remotes/origin/HEAD']);
-        baseBranch = ref.trim().replace('refs/remotes/origin/', '');
-      } catch {
-        try { await gitExec(['-C', session.repoPath, 'rev-parse', '--verify', 'main']); baseBranch = 'main'; } catch {
-          try { await gitExec(['-C', session.repoPath, 'rev-parse', '--verify', 'master']); baseBranch = 'master'; } catch { baseBranch = null; }
-        }
-      }
+      const baseBranch = await resolveBaseBranch(session.repoPath);
       if (baseBranch) {
         try {
           const log = await gitExec(['-C', session.repoPath, 'log', `${baseBranch}..${session.branchName}`, '--oneline']);
