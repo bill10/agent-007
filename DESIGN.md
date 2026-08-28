@@ -107,7 +107,7 @@ Three-panel layout with per-panel headers:
 
 ```
 ┌─────────────┬──────────────┬────────────────────────┐
-│ Agent🍸007  │ + New Agent  │ Repo: 007bot  ⚡ main ☀│
+│ Agent🍸007  │ + Agent + Job│ Repo: 007bot  ⚡ main ☀│
 │ REPOS [+↻<] │              │                        │
 ├─────────────┼──────────────┼────────────────────────┤
 │             │              │ [tab1] [tab2] [tab3]   │
@@ -121,7 +121,7 @@ Three-panel layout with per-panel headers:
 - **Panel headers:** All use `--bg-dark` background for visual continuity
 - **Dividers:** Gradient top (matches header bg) + border below. Gold on hover.
 - **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E
-- **Office:** Centered "+ New Agent" button
+- **Office:** Centered "+ Agent" and "+ Job" buttons
 - **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle in the header; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
 - **Terminal tabs:** Draggable for reordering, order persisted to localStorage
 - **Jobs tab:** Pinned first in the tab bar, not draggable and not closable. Shows
