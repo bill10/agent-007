@@ -160,6 +160,91 @@ describe('live status badge', () => {
     expect(switchToSession).toHaveBeenCalledWith('s1');
   });
 
+  it('opens the agent tab when the card itself is clicked', () => {
+    const card = inProgress('WORKING');
+    expect(card.classList.contains('job-card-live')).toBe(true);
+    card.click();
+    expect(switchToSession).toHaveBeenCalledWith('s1');
+  });
+
+  it('leaves the keyboard path to the badge rather than nesting a role=button', () => {
+    // The card holds buttons and a link; role="button" would hide them from
+    // assistive tech, and the badge inside is already a real focusable button.
+    const card = inProgress('WORKING');
+    expect(card.getAttribute('role')).toBeNull();
+    expect(card.hasAttribute('tabindex')).toBe(false);
+    expect(card.querySelector('.job-card-status').disabled).toBe(false);
+  });
+
+  it('does not jump when the PR link on a live card is clicked', () => {
+    // The action buttons stopPropagation themselves; the PR anchor does not, so
+    // the card handler is the only thing keeping a PR click from also jumping.
+    agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({
+      jobs: [JOB({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper', prUrl: 'https://gh/o/r/pull/4', prNumber: 4 })],
+      settings: {},
+    });
+    const link = cards()[0].querySelector('.job-card-pr');
+    link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(switchToSession).not.toHaveBeenCalled();
+  });
+
+  it('still jumps when the stale selection is somewhere else on the page', () => {
+    // Guarding on any non-empty selection would make every card unclickable
+    // after the user selected text in a terminal.
+    const card = inProgress('WORKING');
+    const elsewhere = document.createElement('p');
+    elsewhere.textContent = 'selected in another pane';
+    document.body.appendChild(elsewhere);
+    const range = document.createRange();
+    range.selectNodeContents(elsewhere);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    card.click();
+    expect(switchToSession).toHaveBeenCalledWith('s1');
+    sel.removeAllRanges();
+  });
+
+  it('does not jump when the click only ended a text selection on the card', () => {
+    const card = inProgress('WORKING');
+    const range = document.createRange();
+    range.selectNodeContents(card.querySelector('.job-card-detail'));
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    card.click();
+    expect(switchToSession).not.toHaveBeenCalled();
+    sel.removeAllRanges();
+  });
+
+  it('leaves the card inert when its agent is gone', () => {
+    handleJobsList({ jobs: [JOB({ state: 'in-progress', agentSessionId: 'missing', agentName: 'Ghost' })], settings: {} });
+    const card = cards()[0];
+    expect(card.classList.contains('job-card-live')).toBe(false);
+    card.click();
+    expect(switchToSession).not.toHaveBeenCalled();
+  });
+
+  it('does not jump when a card action button is clicked', () => {
+    const card = inProgress('WORKING');
+    window.confirm = vi.fn(() => false);
+    [...card.querySelectorAll('.job-card-btn')].find(b => b.textContent === 'Delete').click();
+    expect(switchToSession).not.toHaveBeenCalled();
+  });
+
+  it('does not make todo or review cards clickable', () => {
+    agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({
+      jobs: [
+        JOB({ id: 'j1', state: 'todo', agentSessionId: 's1', agentName: 'Viper' }),
+        JOB({ id: 'j2', state: 'review', agentSessionId: 's1', agentName: 'Viper' }),
+      ],
+      settings: {},
+    });
+    expect(document.querySelectorAll('.job-card-live')).toHaveLength(0);
+  });
+
   it('shows no badge on todo or review cards', () => {
     handleJobsList({ jobs: [JOB({ state: 'todo' }), JOB({ id: 'j2', state: 'review' })], settings: {} });
     expect(document.querySelectorAll('.job-card-status')).toHaveLength(0);

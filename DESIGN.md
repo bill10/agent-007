@@ -188,7 +188,10 @@ a fact about the board, not about a PTY.
     attention with one that is actually blocking)
   - `quiet -- may need you` -> `--state-idle` (parked at a prompt past the window)
   - `agent gone` -> `--state-disconnected` (session ended)
-- Clicking the pill switches to that agent's terminal.
+- Clicking anywhere on an in-progress card switches to that agent's terminal;
+  the status pill does the same, and stays the keyboard path since the card
+  itself is not a tab stop. Card buttons, the PR link, and a click that ends
+  a text selection on the card are all excluded.
 - Card actions are hidden until hover/focus-within, so a full board stays scannable.
 - Two error lines can appear, and they are independent. `lastError` carries what
   happened to the job (a dispatch failure, or "agent lost" after a restart);
