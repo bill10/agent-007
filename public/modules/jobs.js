@@ -96,7 +96,11 @@ export function renderBoard() {
     if (list.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'job-column-empty';
-      empty.textContent = col.state === 'todo' ? 'No jobs queued' : '—';
+      // The To do column is where the CLI lands cards, so its empty state is
+      // the one place the feature can be discovered without reading the README.
+      empty.textContent = col.state === 'todo'
+        ? 'No jobs queued — post one, or ask an agent to run agent-007-job'
+        : '—';
       cards.appendChild(empty);
     }
     for (const job of list) cards.appendChild(renderCard(job));
@@ -118,7 +122,13 @@ function renderCard(job) {
 
   const meta = document.createElement('div');
   meta.className = 'job-card-meta';
-  const posted = job.postedByName ? `${escapeHtml(job.postedByName)} · ${relativeTime(job.postedAt)}` : relativeTime(job.postedAt);
+  // "who posted it" is up to three facts: the person it belongs to, the agent
+  // that typed it (when one did — see the agent-007-job CLI), and when.
+  const posted = [
+    job.postedByName ? escapeHtml(job.postedByName) : null,
+    job.postedByAgent ? `<span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>` : null,
+    relativeTime(job.postedAt),
+  ].filter(Boolean).join(' · ');
   meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
 

@@ -103,6 +103,30 @@ describe('board rendering', () => {
     expect(card.querySelector('.job-card-branch').textContent).toBe('bill/vesper');
   });
 
+  it('marks a card an agent posted, and leaves a hand-typed one unmarked', () => {
+    handleJobsList({ jobs: [JOB({ postedByAgent: 'Mirage' })], settings: {} });
+    const posted = cards()[0].querySelector('.job-card-posted');
+    // Both facts: whose work it is, and that an agent typed the card.
+    expect(posted.textContent).toContain('Bill');
+    expect(cards()[0].querySelector('.job-card-via').textContent).toBe('via Mirage');
+
+    handleJobsList({ jobs: [JOB({ postedByAgent: null })], settings: {} });
+    expect(cards()[0].querySelector('.job-card-via')).toBeNull();
+  });
+
+  it('escapes an agent name rather than letting it into the DOM as markup', () => {
+    handleJobsList({ jobs: [JOB({ postedByAgent: '<img src=x onerror=1>' })], settings: {} });
+    const via = cards()[0].querySelector('.job-card-via');
+    expect(via.querySelector('img')).toBeNull();
+    expect(via.textContent).toContain('<img');
+  });
+
+  it('points at the CLI from the empty To do column', () => {
+    handleJobsList({ jobs: [], settings: {} });
+    const empty = document.querySelector('.job-column[data-state="todo"] .job-column-empty');
+    expect(empty.textContent).toContain('agent-007-job');
+  });
+
   it('links the PR on a review card', () => {
     handleJobsList({ jobs: [JOB({ state: 'review', prUrl: 'https://gh/o/r/pull/12', prNumber: 12 })], settings: {} });
     const link = cards()[0].querySelector('.job-card-pr');
