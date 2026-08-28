@@ -133,7 +133,7 @@ function renderCard(job) {
   // EITHER is known: the branch is a fact about the job, not about the agent,
   // and gating it on the name left a finished card showing nothing at all once
   // the name was lost.
-  if (job.agentName || job.branchName) {
+  if (job.agentName || job.branchName || job.startedAt) {
     const agentEl = document.createElement('div');
     agentEl.className = 'job-card-agent';
     const parts = [];

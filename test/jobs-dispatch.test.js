@@ -922,3 +922,49 @@ describe('review cards keep their record', () => {
     expect(job.prNumber).toBe(7);
   });
 });
+
+describe('a manual move survives a bad PR lookup', () => {
+  beforeEach(resetBoard);
+
+  it('still moves and still retires the agent when the lookup throws', async () => {
+    // The lookup runs before persist and before the kill; a throw there would
+    // leave the job changed in memory, never saved, agent never retired.
+    addJob({ title: 'lookup explodes', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    const killed = [];
+
+    const result = await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+      findPr: async () => { throw new Error('network down'); },
+    });
+    expect(result.error).toBeUndefined();
+    expect(job.state).toBe('review');
+    expect(killed).toEqual([sid]);
+    expect(job.prNumber).toBeNull();      // no link, as before
+  });
+
+  it('clears the agent link once the agent is actually gone', async () => {
+    addJob({ title: 'linked then retired', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => sessions.delete(id),
+      findPr: async () => ({ pr: null }),
+    });
+    expect(job.agentSessionId).toBeNull();
+  });
+
+  it('keeps the link when the kill fails, so the agent stays reachable', async () => {
+    addJob({ title: 'stubborn agent', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async () => { throw new Error('worktree busy'); },
+      findPr: async () => ({ pr: null }),
+    });
+    expect(job.agentSessionId).toBe(sid);
+  });
+});

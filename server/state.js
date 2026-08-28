@@ -85,7 +85,9 @@ export let sessionCounter = 0;
 // resolve to whatever `session-5` happens to be now — an unrelated agent on a
 // different branch. Observed: a review card reporting its agent alive when that
 // id belonged to someone else's job entirely.
-const SESSION_ID_PREFIX = `session-${Date.now().toString(36)}`;
+// pid as well as the clock: two processes can start in the same millisecond
+// (parallel test runners, a restart racing a supervisor).
+const SESSION_ID_PREFIX = `session-${Date.now().toString(36)}${process.pid.toString(36)}`;
 export function nextSessionId() { return `${SESSION_ID_PREFIX}-${++sessionCounter}`; }
 
 export const orphans = new Map();

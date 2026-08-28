@@ -162,12 +162,19 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // the card sits in Review with no link to the thing it produced — nothing
   // else backfills it, since the watcher only examines in-progress jobs.
   if (state === 'review' && !job.prNumber && job.branchName) {
-    const { pr } = await findPr(job.repoPath, job.branchName);
-    if (pr) {
-      job.prUrl = pr.url;
-      job.prNumber = pr.number;
-      job.lastError = null;
-      job.lastErrorAt = null;
+    // Best-effort: a lookup that fails must not abandon the move half-applied,
+    // with the state changed in memory but never persisted and the agent never
+    // retired. The card just goes without its link, as it did before.
+    try {
+      const { pr } = await findPr(job.repoPath, job.branchName);
+      if (pr) {
+        job.prUrl = pr.url;
+        job.prNumber = pr.number;
+        job.lastError = null;
+        job.lastErrorAt = null;
+      }
+    } catch (err) {
+      console.error(`PR lookup failed while moving "${job.title}" to review:`, err.message);
     }
   }
   // Persist and repaint before the kill so the card moves immediately; the kill
@@ -178,6 +185,12 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     if (session && !session.exited) {
       try {
         await killSession(retiringSessionId);
+        // Only after it succeeded: a failed kill leaves the agent running, and
+        // the card must keep pointing at it rather than become unreachable.
+        if (job.agentSessionId === retiringSessionId) {
+          job.agentSessionId = null;
+          persist(broadcast);
+        }
       } catch (err) {
         console.error(`Failed to close agent for job "${job.title}":`, err.message);
       }
