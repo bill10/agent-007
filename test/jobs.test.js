@@ -343,11 +343,25 @@ describe('dispatch defaults', () => {
     expect(DEFAULT_PERMISSION_MODE).toBe('auto');
   });
 
-  it('tells the agent to review, fix, re-review, then ship', () => {
+  it('sends the agent to /ship when the work is finished', () => {
     const prompt = buildJobPrompt({ title: 'T', detail: 'D' });
-    expect(prompt).toContain('/review');
-    expect(prompt).toContain('/ship');
-    expect(prompt.indexOf('/review')).toBeLessThan(prompt.lastIndexOf('/ship'));
+    expect(prompt).toMatch(/when the work is finished, run \/ship/i);
+  });
+
+  it('forecloses running anything ahead of /ship', () => {
+    // /ship already merges the base branch, tests, reviews and fix-loops. A
+    // pass run before it repeats that work on a tree that is about to change.
+    const prompt = buildJobPrompt({ title: 'T' });
+    expect(prompt).toMatch(/nothing else needs running first/i);
+  });
+
+  it('names no skill but /ship', () => {
+    // A dispatched agent arrives with no memory of the other skills. Naming
+    // one — even to forbid it — is what puts it on the table, so the prompt
+    // mentions /ship and nothing else.
+    const prompt = buildJobPrompt({ title: 'T' });
+    const skills = prompt.match(/\/[a-z][a-z-]*/g) || [];
+    expect([...new Set(skills)]).toEqual(['/ship']);
   });
 
   it('forbids ending the turn before the PR exists', () => {
