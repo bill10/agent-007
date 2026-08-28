@@ -3,7 +3,7 @@ import { mkdtempSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { findPrForBranch } from '../server/jobs.js';
+import { findPrForBranch, findMergedPrForBranch } from '../server/jobs.js';
 
 // findPrForBranch needs a real git repo to get past its guards; everything
 // about the ACCOUNT WALK is injected, so these never touch GitHub.
@@ -152,6 +152,55 @@ describe('findPrForBranch across several gh accounts', () => {
     const gh = { listAccounts: async () => ['a'], tokenFor: async () => 't', prList: async () => { calls.push(1); return { pr: PR }; } };
     expect(await findPrForBranch('/no/such/path', 'feat/x', gh)).toEqual({ pr: null });
     expect(await findPrForBranch(REPO, '', gh)).toEqual({ pr: null });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// The merged lookup shares the account walk, so it inherits every case above.
+// These pin the parts that are its own: that it walks at all, that it keeps the
+// discriminated return (no PR yet vs nobody can see the repo), and that its
+// failure message names the query it ran.
+describe('findMergedPrForBranch', () => {
+  const MERGED = { url: 'https://gh/o/r/pull/7', number: 7, mergedAt: '2026-08-28T10:00:00Z' };
+
+  it('walks the accounts and returns the merged PR', async () => {
+    const calls = [];
+    const result = await findMergedPrForBranch(REPO, 'feat/x', {
+      listAccounts: async () => ['active-acct', 'other-acct'],
+      tokenFor: async (login) => `token-for-${login}`,
+      prList: async (_r, _b, token) => {
+        const who = String(token).replace('token-for-', '');
+        calls.push(who);
+        return who === 'other-acct' ? { pr: MERGED } : { error: 'Could not resolve to a Repository' };
+      },
+    });
+    expect(result.pr).toEqual(MERGED);
+    expect(calls).toEqual(['active-acct', 'other-acct']);
+  });
+
+  it('treats "not merged" as an answer, not a failure', async () => {
+    const result = await findMergedPrForBranch(REPO, 'feat/x', {
+      listAccounts: async () => ['a'],
+      tokenFor: async () => 't',
+      prList: async () => ({ pr: null }),
+    });
+    expect(result).toEqual({ pr: null });
+    expect(result.error).toBeUndefined();
+  });
+
+  it('names the merged query when every account fails', async () => {
+    // Otherwise a merge-check failure is textually identical to an open-PR
+    // check failure, and the card cannot say which question went unanswered.
+    const result = await findMergedPrForBranch(REPO, 'feat/x', ghFake({ visible: null }));
+    expect(result.pr).toBeNull();
+    expect(result.error).toMatch(/tried 3 accounts/);
+  });
+
+  it('does not shell out at all for a path that is not a repo', async () => {
+    const calls = [];
+    const gh = { listAccounts: async () => ['a'], tokenFor: async () => 't', prList: async () => { calls.push(1); return { pr: MERGED }; } };
+    expect(await findMergedPrForBranch('/no/such/path', 'feat/x', gh)).toEqual({ pr: null });
+    expect(await findMergedPrForBranch(REPO, '', gh)).toEqual({ pr: null });
     expect(calls).toHaveLength(0);
   });
 });

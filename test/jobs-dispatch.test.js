@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, runScan, relinkSessionToJob } from '../server/jobs.js';
+import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
@@ -177,7 +177,7 @@ describe('board mutations', () => {
 
   it('rejects an unknown state', async () => {
     addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
-    expect((await moveJob(allJobs()[0].id, 'done', noopBroadcast)).error).toMatch(/Unknown state/);
+    expect((await moveJob(allJobs()[0].id, 'archived', noopBroadcast)).error).toMatch(/Unknown state/);
   });
 
   it('reports a missing job rather than throwing', async () => {
@@ -278,6 +278,366 @@ describe('checkPullRequests closing the agent', () => {
     await dispatchOnce(create, noopBroadcast);
     expect(allJobs()[0].state).toBe('review');
     expect(allJobs()[1].state).toBe('in-progress');
+  });
+});
+
+// --- Review -> Done, once the PR merges ---
+
+describe('checkMergedPullRequests', () => {
+  beforeEach(resetBoard);
+
+  const merged = (pr) => async () => ({ pr });
+
+  // A job sitting in Review with a branch and an open PR, agent already gone —
+  // exactly the state the automatic path leaves behind.
+  async function inReview() {
+    addJob({ title: 'landed', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'https://gh/o/r/pull/5', number: 5 } }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    return allJobs()[0];
+  }
+
+  it('takes a merged job off the board and records when it merged', async () => {
+    const job = await inReview();
+    const finished = await checkMergedPullRequests(noopBroadcast, {
+      findMerged: merged({ url: 'https://gh/o/r/pull/5', number: 5, mergedAt: '2026-08-28T10:00:00Z' }),
+    });
+    expect(finished).toHaveLength(1);
+    expect(job.state).toBe('done');
+    expect(job.prMergedAt).toBe('2026-08-28T10:00:00Z');
+    expect(Date.parse(job.doneAt)).not.toBeNaN();
+    // The record survives: the card is the only place the PR link lives.
+    expect(job.prUrl).toBe('https://gh/o/r/pull/5');
+    expect(job.prNumber).toBe(5);
+  });
+
+  it('leaves a job in review while its PR is still open', async () => {
+    const job = await inReview();
+    await checkMergedPullRequests(noopBroadcast, { findMerged: merged(null) });
+    expect(job.state).toBe('review');
+    expect(job.prMergedAt).toBeNull();
+  });
+
+  it('never asks about a job that has not been dispatched', async () => {
+    addJob({ title: 'queued', repoPath: REPO }, noopBroadcast);
+    const asked = [];
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async (_r, b) => { asked.push(b); return { pr: null }; },
+    });
+    expect(asked).toHaveLength(0);
+    expect(allJobs()[0].state).toBe('todo');
+  });
+
+  it('finishes an in-progress job whose PR opened and merged between two scans', async () => {
+    // `gh pr list --state open` cannot see a merged PR, so checkPullRequests
+    // finds nothing and leaves the card in progress. A Review-only sweep would
+    // never look at it again: the card would sit there reading "agent gone"
+    // forever for work that had actually shipped.
+    addJob({ title: 'shipped and landed', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }) });
+    expect(job.state).toBe('in-progress');
+
+    const killed = [];
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: merged({ url: 'https://gh/o/r/pull/4', number: 4, mergedAt: new Date().toISOString() }),
+      killSession: async (id) => killed.push(id),
+    });
+    expect(job.state).toBe('done');
+    expect(job.prNumber).toBe(4);
+    // Leaving in-progress is what the cap counts, so this agent has to go.
+    expect(killed).toEqual([sid]);
+    expect(Date.parse(job.reviewAt)).not.toBeNaN();
+  });
+
+  it('asks about this card\'s PR by number once it has one', async () => {
+    const job = await inReview();
+    let asked = null;
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async (_r, _b, opts) => { asked = opts; return { pr: null }; },
+    });
+    expect(asked.prNumber).toBe(5);
+    expect(asked.mergedAfter).toBe(job.reviewAt);
+  });
+
+  it('falls back to "merged after this attempt started" when there is no PR of record', async () => {
+    // A card moved to Review by hand has no prNumber, so the only thing that
+    // separates its merge from a previous job's on the same branch name is when
+    // the merge happened.
+    addJob({ title: 'by hand', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast);
+    let asked = null;
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async (_r, _b, opts) => { asked = opts; return { pr: null }; },
+    });
+    expect(asked.prNumber).toBeNull();
+    expect(asked.mergedAfter).toBe(job.reviewAt);
+  });
+
+  it('does not undo a finished job the user put back on the board', async () => {
+    // Without the prMergedAt guard, "← Review" would be silently reversed by
+    // the next scan five minutes later, and the button would be useless.
+    const job = await inReview();
+    const findMerged = merged({ url: 'u', number: 5, mergedAt: '2026-08-28T10:00:00Z' });
+    await checkMergedPullRequests(noopBroadcast, { findMerged });
+    expect(job.state).toBe('done');
+
+    await moveJob(job.id, 'review', noopBroadcast);
+    expect(job.state).toBe('review');
+    expect(job.doneAt).toBeNull();
+
+    await checkMergedPullRequests(noopBroadcast, { findMerged });
+    expect(job.state).toBe('review');
+  });
+
+  it('leaves the agent alone — a re-adopted agent may be working the review', async () => {
+    // This runs every scan, unlike the one-shot retirement at the PR. Killing
+    // here would make Review permanently hostile to working on your own PR.
+    const job = await inReview();
+    job.agentSessionId = 'session-99';
+    sessions.set('session-99', { id: 'session-99', exited: false, branchName: job.branchName, repoPath: REPO });
+    await checkMergedPullRequests(noopBroadcast, { findMerged: merged({ url: 'u', number: 5 }) });
+    expect(job.state).toBe('done');
+    expect(sessions.get('session-99').exited).toBe(false);
+  });
+
+  it('says so on the card when it cannot check, and clears the note once it can', async () => {
+    const job = await inReview();
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: null, error: 'Could not resolve to a Repository' }),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prCheckError).toMatch(/Could not resolve to a Repository/);
+
+    await checkMergedPullRequests(noopBroadcast, { findMerged: merged(null) });
+    expect(job.prCheckError).toBeNull();
+  });
+
+  it('does not apply a merge to a job that moved while the lookup was in flight', async () => {
+    const job = await inReview();
+    const findMerged = async () => {
+      await moveJob(job.id, 'in-progress', noopBroadcast);
+      return { pr: { url: 'u', number: 5, mergedAt: '2026-08-28T10:00:00Z' } };
+    };
+    await checkMergedPullRequests(noopBroadcast, { findMerged });
+    expect(job.state).toBe('in-progress');
+    expect(job.prMergedAt).toBeNull();
+  });
+
+  it('does not re-stamp the note while the same failure repeats', async () => {
+    // A permanent failure recurs every scan; it must not churn config.json.
+    const job = await inReview();
+    const failing = async () => ({ pr: null, error: 'gh: not authenticated' });
+    await checkMergedPullRequests(noopBroadcast, { findMerged: failing });
+    const firstStamp = job.prCheckErrorAt;
+    await checkMergedPullRequests(noopBroadcast, { findMerged: failing });
+    expect(job.prCheckErrorAt).toBe(firstStamp);
+  });
+
+  it('stamps prMergedAt even when the merged PR reports no mergedAt', async () => {
+    // parseMergedPr accepts a PR carrying only state:MERGED, so this shape is
+    // reachable — and prMergedAt is the flag that stops the sweep re-finishing
+    // a job, so a null landing there would break "← Review" silently.
+    const job = await inReview();
+    await checkMergedPullRequests(noopBroadcast, { findMerged: merged({ url: 'u', number: 5, mergedAt: null }) });
+    expect(Date.parse(job.prMergedAt)).not.toBeNaN();
+
+    await moveJob(job.id, 'review', noopBroadcast);
+    await checkMergedPullRequests(noopBroadcast, { findMerged: merged({ url: 'u', number: 5, mergedAt: null }) });
+    expect(job.state).toBe('review');
+  });
+
+  it('never asks about a review job that has no branch', async () => {
+    // A job moved to Review by hand from To do has no branch to query.
+    addJob({ title: 'branchless', repoPath: REPO }, noopBroadcast);
+    const job = allJobs()[0];
+    job.state = 'review';
+    const asked = [];
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async (_r, b) => { asked.push(b); return { pr: null }; },
+    });
+    expect(asked).toHaveLength(0);
+    expect(job.state).toBe('review');
+  });
+
+  it('does not resurrect a job deleted while the lookup was in flight', async () => {
+    const job = await inReview();
+    const findMerged = async () => {
+      await deleteJob(job.id, noopBroadcast);
+      return { pr: { url: 'u', number: 5, mergedAt: '2026-08-28T10:00:00Z' } };
+    };
+    const finished = await checkMergedPullRequests(noopBroadcast, { findMerged });
+    expect(allJobs()).toHaveLength(0);
+    expect(finished).toHaveLength(0);
+  });
+
+  it('does not apply a merge found for a branch the job no longer has', async () => {
+    const job = await inReview();
+    const findMerged = async () => {
+      job.branchName = 'bill/something-else';
+      return { pr: { url: 'u', number: 5, mergedAt: '2026-08-28T10:00:00Z' } };
+    };
+    await checkMergedPullRequests(noopBroadcast, { findMerged });
+    expect(job.state).toBe('review');
+    expect(job.prMergedAt).toBeNull();
+  });
+
+  it('finishes a job that opens and merges within one scan', async () => {
+    // This is why the sweeps run in this order: PRs found, then merges swept.
+    // Reversed, such a job would sit in Review for a whole extra interval.
+    addJob({ title: 'fast', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await runScan(fakeCreateSession([]), noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'https://gh/o/r/pull/9', number: 9 } }),
+      findMerged: merged({ url: 'https://gh/o/r/pull/9', number: 9, mergedAt: '2026-08-28T10:00:00Z' }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    expect(job.state).toBe('done');
+    expect(job.prNumber).toBe(9);
+  });
+
+  it('runs as part of a scan, so a merged PR finishes its job unattended', async () => {
+    const job = await inReview();
+    await runScan(fakeCreateSession([]), noopBroadcast, {
+      findPr: async () => ({ pr: null }),
+      findMerged: merged({ url: 'u', number: 5, mergedAt: '2026-08-28T10:00:00Z' }),
+    });
+    expect(job.state).toBe('done');
+  });
+});
+
+// --- Finishing a job by hand ---
+
+describe('moving a job to done', () => {
+  beforeEach(resetBoard);
+
+  it('stamps doneAt and retires any agent still attached', async () => {
+    addJob({ title: 'finish me', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    const killed = [];
+    await moveJob(job.id, 'done', noopBroadcast, { killSession: async (id) => killed.push(id) });
+    expect(job.state).toBe('done');
+    expect(Date.parse(job.doneAt)).not.toBeNaN();
+    expect(killed).toEqual([sid]);
+  });
+
+  it('does not kill a re-adopted agent when a finished card goes back to Review', async () => {
+    // The sweep files a card away without touching an agent someone re-adopted
+    // on that branch for review comments. The button that undoes the sweep must
+    // not kill it either — otherwise "put this back on the board" silently
+    // closes the terminal the user is working in.
+    addJob({ title: 'still working', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 1 } }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    // A fresh agent is re-adopted onto the shipped branch.
+    job.agentSessionId = 'session-readopted';
+    sessions.set('session-readopted', { id: 'session-readopted', exited: false, branchName: job.branchName, repoPath: REPO });
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 1, mergedAt: '2026-08-28T10:00:00Z' } }),
+    });
+    expect(job.state).toBe('done');
+
+    const killed = [];
+    await moveJob(job.id, 'review', noopBroadcast, { killSession: async (id) => killed.push(id) });
+    expect(job.state).toBe('review');
+    expect(killed).toEqual([]);
+  });
+
+  it('still retires the agent when a finished card is requeued', async () => {
+    // Requeueing means start over, so the agent and its worktree do go.
+    addJob({ title: 'start over', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    await moveJob(job.id, 'done', noopBroadcast);
+    job.agentSessionId = sid;   // the manual Done above already retired it
+    const killed = [];
+    await moveJob(job.id, 'todo', noopBroadcast, { killSession: async (id) => killed.push(id) });
+    expect(killed).toEqual([sid]);
+  });
+
+  it('leaves prMergedAt null, so a later merge can still be seen', async () => {
+    // Finishing by hand is not a claim about GitHub. If the PR does merge
+    // afterwards, the sweep is still allowed to record it.
+    addJob({ title: 'by hand', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(job.prMergedAt).toBeNull();
+    await moveJob(job.id, 'review', noopBroadcast);
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 8, mergedAt: '2026-08-28T11:00:00Z' } }),
+    });
+    expect(job.state).toBe('done');
+    expect(job.prMergedAt).toBe('2026-08-28T11:00:00Z');
+  });
+
+  it('lets a job that goes back to In progress be finished by its NEXT pull request', async () => {
+    // Done -> Review -> In progress -> a new PR. Keeping the old prMergedAt
+    // through that walk would exclude the job from the merge sweep forever, so
+    // its new PR could never take the card off the board again.
+    addJob({ title: 'second attempt', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: { url: 'u', number: 1 } }),
+      killSession: async (id) => sessions.delete(id),
+    });
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 1, mergedAt: '2026-08-28T10:00:00Z' } }),
+    });
+    expect(job.state).toBe('done');
+
+    await moveJob(job.id, 'review', noopBroadcast);
+    await moveJob(job.id, 'in-progress', noopBroadcast);
+    expect(job.prMergedAt).toBeNull();
+
+    await moveJob(job.id, 'review', noopBroadcast);
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u2', number: 2, mergedAt: '2026-08-29T10:00:00Z' } }),
+    });
+    expect(job.state).toBe('done');
+    expect(job.prNumber).toBe(2);
+  });
+
+  it('clears the "cannot check" note when the user moves the card by hand', async () => {
+    // The note ends with "move it by hand" — following it must not leave the
+    // card in the archive still carrying the instruction.
+    addJob({ title: 'unreachable', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: null, error: 'Could not resolve to a Repository' }),
+    });
+    expect(job.prCheckError).toBeTruthy();
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(job.prCheckError).toBeNull();
+    expect(job.prCheckErrorAt).toBeNull();
+  });
+
+  it('requeueing a finished job wipes the finish, not just the state', async () => {
+    addJob({ title: 'redo', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'done', noopBroadcast);
+    await moveJob(job.id, 'todo', noopBroadcast);
+    expect(job.state).toBe('todo');
+    expect(job.doneAt).toBeNull();
+    expect(job.prMergedAt).toBeNull();
   });
 });
 

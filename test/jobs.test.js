@@ -4,6 +4,7 @@ import {
   buildJobPrompt, buildJobCommand, deriveJobStatus, parsePrList,
   JOB_STATES, MAX_TITLE_LEN, STALLED_AFTER_MS, DEFAULT_PERMISSION_MODE,
   MAX_BRANCH_SLUG_LEN, DISPATCH_INTERVAL_MS, PERMISSION_MODES, isValidPermissionMode,
+  parseMergedPr, openPrListArgs, mergedPrListArgs,
 } from '../lib/jobs.js';
 import { parseCommand, detectState } from '../lib/helpers.js';
 
@@ -34,6 +35,9 @@ describe('createJob', () => {
     expect(j.agentSessionId).toBeNull();
     expect(j.agentName).toBeNull();
     expect(j.startedAt).toBeNull();
+    // Nor finished.
+    expect(j.prMergedAt).toBeNull();
+    expect(j.doneAt).toBeNull();
   });
 
   it('rejects a job with no title or no repo', () => {
@@ -244,9 +248,104 @@ describe('parsePrList', () => {
   });
 });
 
+describe('parseMergedPr', () => {
+  it('returns the merged PR with when it merged', () => {
+    const out = JSON.stringify([
+      { number: 42, url: 'https://github.com/o/r/pull/42', state: 'MERGED', mergedAt: '2026-08-28T10:00:00Z' },
+    ]);
+    expect(parseMergedPr(out)).toEqual({
+      url: 'https://github.com/o/r/pull/42', number: 42, mergedAt: '2026-08-28T10:00:00Z',
+    });
+  });
+
+  it('does NOT treat a PR closed without merging as merged', () => {
+    // The whole point of the field check: nothing landed, so somebody still has
+    // to decide what happens to the work. Its card must stay on the board.
+    const out = JSON.stringify([{ number: 9, url: 'u', state: 'CLOSED', mergedAt: null }]);
+    expect(parseMergedPr(out)).toBeNull();
+  });
+
+  it('accepts a merged PR that reports only one of state or mergedAt', () => {
+    expect(parseMergedPr(JSON.stringify([{ number: 1, url: 'a', state: 'MERGED' }])).number).toBe(1);
+    expect(parseMergedPr(JSON.stringify([{ number: 2, url: 'b', mergedAt: '2026-01-01T00:00:00Z' }])).number).toBe(2);
+  });
+
+  it('returns null for no PRs, malformed JSON, or a non-array', () => {
+    expect(parseMergedPr('[]')).toBeNull();
+    expect(parseMergedPr('not json')).toBeNull();
+    expect(parseMergedPr('{"a":1}')).toBeNull();
+    expect(parseMergedPr('')).toBeNull();
+  });
+
+  // --- Which merge belongs to THIS card ---
+  //
+  // `gh pr list --head` matches the head ref NAME, and that name outlives the
+  // branch: a merged PR stays in the listing forever, and board branch names are
+  // reused once their branch is deleted. Without these checks a stale merge
+  // files away a card whose real PR is still open, taking its number with it.
+
+  const TWO_PRS = JSON.stringify([
+    { number: 1, url: 'https://gh/o/r/pull/1', state: 'MERGED', mergedAt: '2026-08-01T10:00:00Z' },
+    { number: 2, url: 'https://gh/o/r/pull/2', state: 'MERGED', mergedAt: '2026-08-28T10:00:00Z' },
+  ]);
+
+  it('returns the card\'s own PR, not just the first merge on the branch', () => {
+    expect(parseMergedPr(TWO_PRS, { number: 2 }).number).toBe(2);
+    expect(parseMergedPr(TWO_PRS, { number: 1 }).number).toBe(1);
+  });
+
+  it('refuses a merge on the branch that is not the card\'s PR', () => {
+    // The card is waiting on #7; #1 merging says nothing about it.
+    const out = JSON.stringify([{ number: 1, url: 'u', state: 'MERGED', mergedAt: '2026-08-01T10:00:00Z' }]);
+    expect(parseMergedPr(out, { number: 7 })).toBeNull();
+  });
+
+  it('with no PR of record, ignores a merge older than this attempt', () => {
+    // The branch name was reused: that merge belongs to whatever had it before.
+    expect(parseMergedPr(TWO_PRS, { mergedAfter: '2026-08-20T00:00:00Z' }).number).toBe(2);
+    expect(parseMergedPr(TWO_PRS, { mergedAfter: '2026-09-01T00:00:00Z' })).toBeNull();
+  });
+
+  it('with no PR of record, refuses a merge it cannot place in time', () => {
+    // Rejecting leaves the card on the board, which is the safe direction.
+    const out = JSON.stringify([{ number: 3, url: 'u', state: 'MERGED' }]);
+    expect(parseMergedPr(out, { mergedAfter: '2026-08-01T00:00:00Z' })).toBeNull();
+    // With nothing to compare against, it is accepted.
+    expect(parseMergedPr(out).number).toBe(3);
+    expect(parseMergedPr(out, { mergedAfter: 'not a date' }).number).toBe(3);
+  });
+
+  it('never lets a closed PR through either matcher', () => {
+    const out = JSON.stringify([{ number: 9, url: 'u', state: 'CLOSED', mergedAt: null }]);
+    expect(parseMergedPr(out, { number: 9 })).toBeNull();
+    expect(parseMergedPr(out, { mergedAfter: '2020-01-01T00:00:00Z' })).toBeNull();
+  });
+});
+
 describe('JOB_STATES', () => {
-  it('is exactly the three board columns, in order', () => {
-    expect(JOB_STATES).toEqual(['todo', 'in-progress', 'review']);
+  it('is the three board columns plus done, in workflow order', () => {
+    expect(JOB_STATES).toEqual(['todo', 'in-progress', 'review', 'done']);
+  });
+});
+
+describe('gh pr list queries', () => {
+  // These pin the one flag that decides whether a card stays on the board.
+  it('asks for OPEN pull requests on the branch, with the fields parsePrList reads', () => {
+    expect(openPrListArgs('bill/x')).toEqual(
+      ['pr', 'list', '--head', 'bill/x', '--state', 'open', '--json', 'number,url,state,isDraft']);
+  });
+
+  it('asks for MERGED pull requests on the branch, with the fields parseMergedPr reads', () => {
+    // --state merged, never closed: a PR closed without merging must not take
+    // its card off the board.
+    expect(mergedPrListArgs('bill/x')).toEqual(
+      ['pr', 'list', '--head', 'bill/x', '--state', 'merged', '--json', 'number,url,state,mergedAt']);
+  });
+
+  it('requests every field its parser reads', () => {
+    const fields = (args) => args[args.indexOf('--json') + 1].split(',');
+    expect(fields(openPrListArgs('b'))).toEqual(expect.arrayContaining(['number', 'url', 'state', 'isDraft']));
+    expect(fields(mergedPrListArgs('b'))).toEqual(expect.arrayContaining(['number', 'url', 'state', 'mergedAt']));
   });
 });
 
