@@ -5,6 +5,48 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.0.0] - 2026-08-27
+
+### Added
+
+- **Job board.** A new "Jobs" tab in the terminal panel holds a queue of work
+  across three columns: To do, In progress, and Review. A job has a title, a
+  free-text detail, the repo it belongs to, who posted it and when, and once it
+  starts, which agent is working on it and since when.
+- **Automatic dispatch.** Start the dispatcher and every five minutes the board
+  takes the oldest queued job whose repo is under its agent cap (2 by default,
+  adjustable per board) and puts a fresh agent on it: a new worktree, a branch
+  named after the job title, and the job text handed to `claude` in auto mode.
+  The agent is told to run /review, fix, re-review, then /ship, and the board
+  watches for the pull request that /ship opens.
+- **A job that needs you says so.** When a dispatched agent stops to ask
+  something, its card turns orange with a "needs you" badge and the Jobs tab
+  shows a count. Click the badge to land in that agent's terminal, answer, and
+  it carries on. A card that has gone quiet for a few minutes is flagged too,
+  since an agent that finished without opening a PR looks the same as one that
+  is still thinking.
+- Dispatched agents open their tab quietly instead of stealing focus, so the
+  dispatcher firing while you are mid-sentence no longer moves your cursor.
+- When a job's PR appears, the board moves the card to Review, closes the
+  agent, and releases its worktree and local branch. The pull request is
+  untouched. The card keeps the agent name, branch and PR link.
+
+### Fixed
+
+- Agent 007 now notices when an agent is sitting on one of Claude Code's own
+  dialogs, including the workspace-trust prompt that greets every agent started
+  in a fresh worktree. Previously such an agent showed as merely waiting, which
+  for a Claude agent is indistinguishable from idle, so it could sit unanswered
+  indefinitely.
+- Closing an agent whose branch is fully pushed now removes its worktree and
+  local branch instead of keeping them as an orphan. Work that is uncommitted,
+  or committed but never pushed, is still preserved exactly as before. The old
+  check treated "not merged into main" as "unpushed", so every branch with an
+  open pull request was kept forever.
+- A repository whose `user.name` is set to an empty string no longer fails
+  every agent spawn. Git reports success with no output in that case, so the
+  fallback never fired and every branch name came out invalid.
+
 ## [0.2.2.0] - 2026-08-27
 
 ### Fixed
