@@ -130,6 +130,7 @@
               <button class="job-run-now" id="btn-dispatch-now" title="Scan the board now instead of waiting for the next interval">Run now</button>
               <span class="job-dispatcher-status" id="job-dispatcher-status"></span>
             </span>
+            <button class="job-finished-btn" id="btn-finished-jobs" aria-pressed="false" title="Jobs whose pull request has merged. They leave the board but are kept here.">View finished jobs</button>
             <label class="job-cap-label" title="Maximum agents the board will run at once per repository">
               max/repo
               <input type="number" id="job-max-per-repo" min="1" max="10" step="1">
@@ -150,6 +151,15 @@
           </div>
 
           <div class="job-columns" id="job-columns"></div>
+
+          <!-- Finished jobs — shown instead of the columns, never beside them -->
+          <div class="job-finished" id="job-finished" style="display:none">
+            <div class="job-finished-header">
+              <span class="job-finished-label">Finished</span>
+              <span class="job-finished-count" id="job-finished-count"></span>
+            </div>
+            <div class="job-cards" id="job-finished-cards"></div>
+          </div>
         </div>
         <div class="voice-indicator" id="voice-indicator" aria-hidden="true" style="display:none">
           <span class="voice-indicator-dot"></span><span class="voice-indicator-text"></span>

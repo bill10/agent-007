@@ -24,6 +24,7 @@ const BOARD_HTML = `
         <button id="btn-dispatch-now"></button>
         <span id="job-dispatcher-status"></span>
         <input type="number" id="job-max-per-repo">
+        <button id="btn-finished-jobs"></button>
       </div>
       <div class="job-form" id="job-form" style="display:none">
         <input type="text" id="job-title">
@@ -34,6 +35,10 @@ const BOARD_HTML = `
         <div id="job-form-error" style="display:none"></div>
       </div>
       <div class="job-columns" id="job-columns"></div>
+      <div class="job-finished" id="job-finished" style="display:none">
+        <span id="job-finished-count"></span>
+        <div class="job-cards" id="job-finished-cards"></div>
+      </div>
     </div>
   </div>`;
 
@@ -43,6 +48,7 @@ const JOB = (over = {}) => ({
   postedByName: 'Bill', postedAt: new Date().toISOString(),
   agentSessionId: null, agentName: null, startedAt: null,
   branchName: null, prUrl: null, prNumber: null, lastError: null,
+  prMergedAt: null, doneAt: null,
   ...over,
 });
 
@@ -416,6 +422,162 @@ describe('PR link safety', () => {
       handleJobsList({ jobs: [JOB({ id: 'x', state: 'review', prUrl: bad, prNumber: 1 })], settings: {} });
       expect(document.querySelector('.job-card-pr')).toBeNull();
     }
+  });
+});
+
+
+// --- Finished jobs ---
+
+describe('finished jobs', () => {
+  const finishedJob = (over = {}) => JOB({
+    id: 'done-1', state: 'done', title: 'Shipped thing',
+    branchName: 'bill/shipped', prUrl: 'https://gh/o/r/pull/12', prNumber: 12,
+    reviewAt: '2026-08-28T09:00:00Z',
+    prMergedAt: '2026-08-28T10:00:00Z', doneAt: '2026-08-28T10:00:01Z',
+    ...over,
+  });
+
+  function finishedCards() {
+    return [...document.querySelectorAll('#job-finished-cards .job-card')];
+  }
+
+  it('keeps a merged job off the board entirely', () => {
+    // The point of the whole change: Review means "needs your review", so a
+    // finished card must not be sitting in it.
+    handleJobsList({ jobs: [finishedJob(), JOB({ id: 'r', state: 'review' })], settings: {} });
+    expect(columnCards('review')).toHaveLength(1);
+    expect(cards().map(c => c.dataset.jobId)).not.toContain('done-1');
+  });
+
+  it('counts the finished jobs on the toolbar button', () => {
+    handleJobsList({ jobs: [finishedJob(), finishedJob({ id: 'done-2' })], settings: {} });
+    expect(document.getElementById('btn-finished-jobs').textContent).toBe('View finished jobs (2)');
+  });
+
+  it('drops the count when there is nothing finished', () => {
+    handleJobsList({ jobs: [JOB()], settings: {} });
+    expect(document.getElementById('btn-finished-jobs').textContent).toBe('View finished jobs');
+  });
+
+  it('swaps the columns for the finished list, and back again', () => {
+    handleJobsList({ jobs: [finishedJob(), JOB()], settings: {} });
+    const columns = document.getElementById('job-columns');
+    const panel = document.getElementById('job-finished');
+    expect(panel.style.display).toBe('none');
+
+    document.getElementById('btn-finished-jobs').click();
+    expect(panel.style.display).toBe('flex');
+    expect(columns.style.display).toBe('none');   // never both at once
+    expect(finishedCards()).toHaveLength(1);
+    expect(document.getElementById('btn-finished-jobs').textContent).toMatch(/Back to board/);
+
+    document.getElementById('btn-finished-jobs').click();
+    expect(panel.style.display).toBe('none');
+    expect(columns.style.display).not.toBe('none');
+    expect(columnCards('todo')).toHaveLength(1);
+  });
+
+  it('shows when the PR merged, and keeps the link to it', () => {
+    handleJobsList({ jobs: [finishedJob()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    const card = finishedCards()[0];
+    expect(card.querySelector('.job-card-finished').textContent).toMatch(/^merged /);
+    expect(card.querySelector('.job-card-pr').getAttribute('href')).toBe('https://gh/o/r/pull/12');
+  });
+
+  it('says "finished" rather than "merged" for a job filed away by hand', () => {
+    handleJobsList({ jobs: [finishedJob({ prMergedAt: null })], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    expect(finishedCards()[0].querySelector('.job-card-finished').textContent).toMatch(/^finished /);
+  });
+
+  it('lists the most recently finished first', () => {
+    handleJobsList({
+      jobs: [
+        finishedJob({ id: 'old', doneAt: '2026-08-01T10:00:00Z' }),
+        finishedJob({ id: 'new', doneAt: '2026-08-27T10:00:00Z' }),
+      ],
+      settings: {},
+    });
+    document.getElementById('btn-finished-jobs').click();
+    expect(finishedCards().map(c => c.dataset.jobId)).toEqual(['new', 'old']);
+  });
+
+  it('explains the empty archive rather than showing a blank pane', () => {
+    handleJobsList({ jobs: [JOB()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    expect(document.querySelector('#job-finished-cards .job-column-empty').textContent).toMatch(/No finished jobs/);
+  });
+
+  it('puts a finished job back on the board', () => {
+    handleJobsList({ jobs: [finishedJob()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    const restore = [...finishedCards()[0].querySelectorAll('.job-card-btn')]
+      .find(b => b.textContent.includes('Review'));
+    restore.click();
+    expect(send).toHaveBeenCalledWith({ type: 'job-move', jobId: 'done-1', state: 'review' });
+  });
+
+  it('offers Done on a review card, for a merge the board cannot see', () => {
+    handleJobsList({ jobs: [JOB({ id: 'r', state: 'review' })], settings: {} });
+    const doneBtn = [...cards()[0].querySelectorAll('.job-card-btn')]
+      .find(b => b.textContent.includes('Done'));
+    doneBtn.click();
+    expect(send).toHaveBeenCalledWith({ type: 'job-move', jobId: 'r', state: 'done' });
+  });
+
+  it('stays in the archive when the server broadcasts a new job list', () => {
+    // The live path: the server rebroadcasts on every scan, so renderBoard runs
+    // with the archive already open. Repainting the columns underneath would
+    // kick the user out mid-read.
+    handleJobsList({ jobs: [finishedJob()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+
+    handleJobsList({ jobs: [finishedJob(), finishedJob({ id: 'done-2', doneAt: '2026-08-29T10:00:00Z' }), JOB()], settings: {} });
+    expect(document.getElementById('job-finished').style.display).toBe('flex');
+    expect(document.getElementById('job-columns').style.display).toBe('none');
+    expect(finishedCards().map(c => c.dataset.jobId)).toEqual(['done-2', 'done-1']);
+  });
+
+  it('returns to the columns when a new job is posted from the archive', () => {
+    // The new card lands in To do, which the archive is covering — posting from
+    // here would otherwise look like nothing happened.
+    handleJobsList({ jobs: [finishedJob()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    document.getElementById('btn-new-job').click();
+    expect(document.getElementById('job-finished').style.display).toBe('none');
+  });
+
+  it('keeps the toggle tooltip and aria-pressed in step with its label', () => {
+    handleJobsList({ jobs: [finishedJob()], settings: {} });
+    const btn = document.getElementById('btn-finished-jobs');
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    const boardTitle = btn.title;
+
+    btn.click();
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    expect(btn.title).not.toBe(boardTitle);
+    expect(btn.title).toMatch(/columns/);
+  });
+
+  it('falls back to the columns when the archive markup is missing', () => {
+    // A page cached from before the upgrade has the old markup and the new
+    // module; hiding the columns for an archive that has no container would
+    // leave a blank board.
+    handleJobsList({ jobs: [finishedJob(), JOB()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    document.getElementById('job-finished').remove();
+    renderBoard();
+    expect(document.getElementById('job-columns').style.display).not.toBe('none');
+    expect(columnCards('todo')).toHaveLength(1);
+  });
+
+  it('reopens on the board after the tab is left and returned to', () => {
+    handleJobsList({ jobs: [finishedJob()], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    hideJobBoard();
+    showJobBoard();
+    expect(document.getElementById('job-finished').style.display).toBe('none');
   });
 });
 
