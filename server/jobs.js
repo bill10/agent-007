@@ -194,6 +194,12 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
       } catch (err) {
         console.error(`Failed to close agent for job "${job.title}":`, err.message);
       }
+    } else if (job.agentSessionId === retiringSessionId) {
+      // Nothing to kill — the session already went. Drop the link anyway, or
+      // the card keeps a dead id, which is how a stale link outlived a restart
+      // and resolved to an unrelated agent in the next process generation.
+      job.agentSessionId = null;
+      persist(broadcast);
     }
   }
   return { job };

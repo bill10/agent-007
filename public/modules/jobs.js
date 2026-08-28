@@ -139,7 +139,7 @@ function renderCard(job) {
     const parts = [];
     if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
     if (job.branchName) parts.push(`<span class="job-card-branch">${escapeHtml(job.branchName)}</span>`);
-    if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
+    if (job.startedAt) parts.push(`<span class="job-card-since">· started ${relativeTime(job.startedAt)}</span>`);
     agentEl.innerHTML = parts.join(' ');
     card.appendChild(agentEl);
   }

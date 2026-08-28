@@ -968,3 +968,24 @@ describe('a manual move survives a bad PR lookup', () => {
     expect(job.agentSessionId).toBe(sid);
   });
 });
+
+describe('moving to review when the agent is already gone', () => {
+  beforeEach(resetBoard);
+
+  it('drops the dead link rather than leaving a stale id on the card', async () => {
+    // A stale id is how a finished card outlived a restart and then resolved to
+    // an unrelated agent in the next process generation.
+    addJob({ title: 'agent already exited', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    sessions.get(job.agentSessionId).exited = true;
+
+    const killed = [];
+    await moveJob(job.id, 'review', noopBroadcast, {
+      killSession: async (id) => killed.push(id),
+      findPr: async () => ({ pr: null }),
+    });
+    expect(killed).toEqual([]);              // nothing to kill
+    expect(job.agentSessionId).toBeNull();   // but the link still goes
+  });
+});
