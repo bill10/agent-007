@@ -133,6 +133,23 @@ describe('the handshake over HTTP', () => {
     expect(await res.text()).toBe('');
   });
 
+  it('rejects an oversized body as JSON with a 413', async () => {
+    // A detail longer than the cap is the realistic way to hit this — an agent
+    // piping a whole log file into the tool. Express's default handler would
+    // answer an API client with an HTML error page.
+    const res = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AGENT_TOKEN}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'post_job', arguments: { title: 'x', detail: 'y'.repeat(200_000) } },
+      }),
+    });
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toMatch(/too large/i);
+    expect(allJobs()).toHaveLength(0);
+  });
+
   it('answers a malformed body as JSON, not as an HTML error page', async () => {
     const res = await fetch(`${baseUrl}/mcp`, {
       method: 'POST',
