@@ -9,6 +9,13 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Fixed
 
+- The job board tries every GitHub account you are signed in to before deciding
+  it cannot find a pull request. If you keep more than one account on a machine
+  — one for your own repositories, another for an organisation's — a private
+  repo is usually visible to exactly one of them, so the signed-in account
+  failing said nothing about whether the pull request existed. Jobs in the
+  "wrong" repository could never complete. The account that answers is
+  remembered per repository, so the usual case stays a single lookup.
 - The job board now tells you when it cannot check for a pull request, instead
   of looking like the agent went quiet. If the `gh` account signed in on this
   machine cannot see a repository — the wrong account for that organisation, a

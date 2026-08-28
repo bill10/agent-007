@@ -308,39 +308,156 @@ const PR_CHECK_FAILED = 'Cannot check for a pull request in this repo';
 
 // --- PR watching ---
 
+// --- gh plumbing ---
+
+// One `gh` invocation. `token` picks the account; undefined means "whatever gh
+// is signed in as". GITHUB_TOKEN is dropped when we override, since it outranks
+// GH_TOKEN and would silently win.
+function runGh(args, { cwd, token, timeout = 15_000 } = {}) {
+  const env = { ...process.env };
+  if (token) {
+    env.GH_TOKEN = token;
+    delete env.GITHUB_TOKEN;
+  }
+  return new Promise((resolve, reject) => {
+    execFile('gh', args, { cwd, env, timeout, maxBuffer: 1024 * 1024 },
+      (err, out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(out)));
+  });
+}
+
+// Every account gh is signed in to, active one first.
+async function ghAccounts() {
+  try {
+    const parsed = JSON.parse(await runGh(['auth', 'status', '--json', 'hosts'], { timeout: 10_000 }));
+    const found = [];
+    for (const entries of Object.values(parsed.hosts || {})) {
+      for (const entry of entries || []) {
+        if (entry && entry.state === 'success' && entry.login) {
+          found.push({ login: entry.login, active: !!entry.active });
+        }
+      }
+    }
+    found.sort((a, b) => Number(b.active) - Number(a.active));
+    return found.map(a => a.login);
+  } catch (_) {
+    // Older gh has no --json on auth status; fall back to the text form.
+    try {
+      const text = await runGh(['auth', 'status'], { timeout: 10_000 });
+      return [...text.matchAll(/account\s+(\S+)/g)].map(m => m[1]);
+    } catch (_) { return []; }
+  }
+}
+
+async function ghToken(login) {
+  try {
+    const token = (await runGh(['auth', 'token', '-u', login], { timeout: 10_000 })).trim();
+    return token || null;
+  } catch (_) { return null; }
+}
+
+// Which account last answered for a repo, so the steady state stays one gh call
+// instead of a walk. Memory only; a stale guess costs one retry.
+const ghAccountForRepo = new Map();
+
+async function prListOnce(repoPath, branchName, token) {
+  try {
+    const stdout = await runGh(
+      ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
+      { cwd: repoPath, token },
+    );
+    return { pr: parsePrList(stdout) };
+  } catch (err) {
+    // First line only: gh errors are one useful line plus usage noise.
+    const detail = String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
+    return { error: detail || 'gh pr list failed' };
+  }
+}
+
 // `gh pr list` against the repo, filtered to the job's branch. Runs in the main
 // repo (not the worktree) so it still works after the worktree is removed.
 //
-// Returns { pr } on a successful query — pr is null when the branch simply has
-// no open PR yet — or { pr: null, error } when the QUERY ITSELF failed.
+// Tries EVERY signed-in gh account before giving up. One machine can hold
+// several, and a private repo is usually visible to exactly one of them — this
+// app routinely manages repos owned by different accounts, so the signed-in
+// account failing says nothing about whether the PR exists. Observed:
+// `Could not resolve to a Repository` from the active account while another
+// account on the same machine could see the repo perfectly well.
 //
-// That distinction is the whole point. An earlier version caught everything and
-// returned null, so "no PR yet" and "this board can never see PRs in this repo"
-// were the same answer. A repo the `gh` account cannot resolve (wrong account
-// for the org, repo renamed, no access) then failed silently every five minutes
-// forever: its jobs sat in progress, their agents were never retired, and the
-// only visible symptom was a card reading "quiet — may need you", which points
-// at the agent rather than at the real cause. Observed with a repo that returned
-// `Could not resolve to a Repository` for the signed-in account while a
-// different account on the same machine could see it.
-export async function findPrForBranch(repoPath, branchName) {
+// Returns { pr } on a successful query — pr null meaning "no PR yet" — or
+// { pr: null, error } only when EVERY account failed. An earlier version
+// collapsed both into null, so a repo the board could never see looked exactly
+// like a branch with no PR, and its jobs sat in progress forever unexplained.
+//
+// The three collaborators are injectable for the same reason createSession and
+// killSession are: otherwise the account walk — ordering, dedup, remembering,
+// error aggregation — is only reachable by talking to real GitHub accounts.
+export async function findPrForBranch(repoPath, branchName, {
+  listAccounts = ghAccounts,
+  tokenFor = ghToken,
+  prList = prListOnce,
+} = {}) {
   if (!repoPath || !branchName || !existsSync(repoPath)) return { pr: null };
   try {
     const stdout = await gitExec(['-C', repoPath, 'rev-parse', '--git-dir']);
     if (!stdout) return { pr: null };
   } catch { return { pr: null }; }
-  try {
-    const stdout = await new Promise((resolve, reject) => {
-      execFile('gh', ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
-        { cwd: repoPath, timeout: 15_000, maxBuffer: 1024 * 1024 },
-        (err, out, stderr) => (err ? reject(Object.assign(err, { stderr })) : resolve(out)));
-    });
-    return { pr: parsePrList(stdout) };
-  } catch (err) {
-    // First line only: gh errors are usually one useful line plus usage noise.
-    const detail = String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
-    return { pr: null, error: detail || 'gh pr list failed' };
+
+  // Label for the "whatever gh is signed in as" attempt, before we know its name.
+  const AMBIENT = 'signed-in account';
+  const tried = [];
+  const failures = [];
+
+  const attempt = async (label, token) => {
+    if (tried.includes(label)) return null;
+    tried.push(label);
+    const result = await prList(repoPath, branchName, token);
+    // Detail only — the account list in the final message names who was tried,
+    // and the errors are almost always identical across accounts anyway.
+    if (result.error) { failures.push(result.error); return null; }
+    return result;
+  };
+
+  // The account that answered for this repo last time.
+  const remembered = ghAccountForRepo.get(repoPath);
+  if (remembered) {
+    const token = await tokenFor(remembered);
+    if (token) {
+      const hit = await attempt(remembered, token);
+      if (hit) return hit;
+    }
   }
+
+  // Then whatever gh is signed in as — which also covers GH_TOKEN set in the
+  // environment, and enterprise setups the account list would not describe.
+  const ambient = await attempt(AMBIENT, undefined);
+  if (ambient) { ghAccountForRepo.delete(repoPath); return ambient; }
+
+  // Then every other account on the machine. The first entry is the ACTIVE
+  // account, which the ambient attempt above already was — unless a token in
+  // the environment overrode it, in which case ambient was something else and
+  // the active account still needs its turn.
+  const ambientWasActive = !process.env.GH_TOKEN && !process.env.GITHUB_TOKEN;
+  const accounts = await listAccounts();
+  for (const [index, login] of accounts.entries()) {
+    if (index === 0 && ambientWasActive) continue;
+    const token = await tokenFor(login);
+    if (!token) continue;
+    const hit = await attempt(login, token);
+    if (hit) { ghAccountForRepo.set(repoPath, login); return hit; }
+  }
+
+  ghAccountForRepo.delete(repoPath);
+  // Name the ambient attempt by its actual login now that the list is known —
+  // "tried 2 accounts: bill10, bill-slung" tells the user which credentials to
+  // fix; "signed-in account" does not.
+  const named = tried.map(label => (
+    label === AMBIENT && ambientWasActive && accounts[0] ? accounts[0] : label
+  ));
+  const plural = named.length === 1 ? '' : 's';
+  return {
+    pr: null,
+    error: `${failures[0] || 'gh pr list failed'} (tried ${named.length} account${plural}: ${named.join(', ')})`,
+  };
 }
 
 // `findPr` is injected for the same reason createSession and killSession are:
