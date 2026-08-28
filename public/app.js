@@ -17,7 +17,7 @@ import {
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
 import { setupVoice } from './modules/voice.js';
-import { setupJobBoard, handleJobsList, renderBoard } from './modules/jobs.js';
+import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -62,7 +62,11 @@ function setupSpawnForm() {
     errorEl.style.display = 'none';
   }
 
+  // Both header buttons sit in the top 36px strip, above this overlay's 40px
+  // offset, so they stay clickable while it is open. Each one dismisses the
+  // other's form; openJobForm() handles the reverse direction.
   document.getElementById('btn-new-agent').onclick = () => {
+    closeJobForm();
     form.style.display = 'flex';
     nameInput.value = '';
     branchInput.value = '';

@@ -9,7 +9,7 @@
 import { agents, jobs, boardSettings, setBoardSettings, boardActive, setBoardActive, activeSessionId, repos } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml } from './auth.js';
-import { switchToSession } from './terminal.js';
+import { switchToSession, updateTabs } from './terminal.js';
 
 const COLUMNS = [
   { state: 'todo', label: 'To do' },
@@ -323,6 +323,25 @@ function saveForm() {
   closeForm();
 }
 
+// Opening the form from outside the board — the top bar's "+ Job" button.
+// Two things have to happen before the form is any use. The board may not be
+// the visible tab, so bring it up first. And the agent spawn form is an
+// app-wide overlay anchored below the 40px header strip, which leaves both
+// header buttons clickable underneath it: left up, it would hide this form
+// while openForm() focused its title input, swallowing everything the user
+// typed next. app.js closes this form on the way in the other direction.
+export function openJobForm() {
+  const spawn = document.getElementById('spawn-form');
+  if (spawn) spawn.style.display = 'none';
+  showJobBoard();
+  updateTabs();
+  openForm(null);
+}
+
+export function closeJobForm() {
+  closeForm();
+}
+
 // --- Show / hide ---
 
 export function showJobBoard() {
@@ -356,6 +375,7 @@ export function handleJobsList(msg) {
 
 export function setupJobBoard() {
   document.getElementById('btn-new-job').onclick = () => openForm(null);
+  document.getElementById('btn-new-job-shortcut').onclick = openJobForm;
   document.getElementById('btn-job-cancel').onclick = closeForm;
   document.getElementById('btn-job-save').onclick = saveForm;
   document.getElementById('job-title').addEventListener('keydown', (e) => {
