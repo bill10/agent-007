@@ -40,7 +40,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
-- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`)
+- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), and the board's MCP tool (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`)
 
 > **Windows note:** `test/server.test.js` currently fails to load under vitest on
 > Windows (node-pty's native addon; see TODOS.md). It runs green in CI (ubuntu),
@@ -64,8 +64,10 @@ server/
   git.js           Git operations
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
-  http.js          HTTP routes
-  auth.js          Login tokens and ownership
+  http.js          HTTP routes and the user/agent auth gates
+  mcp.js           The board's MCP server (the post_job tool)
+  agent-mcp.js     Per-session MCP config for spawned agents
+  auth.js          Login tokens, ownership, agent session tokens
 bin/adduser.js     Create a login user (npm run adduser)
 lib/helpers.js     Pure functions (tested)
 public/            Frontend (vanilla JS, no build)

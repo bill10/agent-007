@@ -10,6 +10,8 @@
 
 import { execFile } from 'child_process';
 import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { basename, dirname, join, resolve } from 'path';
 import { config, sessions } from './state.js';
 import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
@@ -75,12 +77,91 @@ function persist(broadcast) {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, postedBy, postedByName }, broadcast) {
-  const result = createJob({ title, detail, repoPath, postedBy, postedByName });
+export function addJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent }, broadcast) {
+  const result = createJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   allJobs().push(result.job);
   persist(broadcast);
   return { job: result.job };
+}
+
+// --- Repo references ---
+
+// The board's own form picks a repo from a dropdown of exact paths. An agent
+// calling the MCP tool types whatever it knows — "~/code/app", a relative path,
+// or just the folder name. Resolve all of those against the configured repos,
+// and refuse anything that doesn't match rather than queueing a job into a repo
+// the dispatcher will silently skip forever.
+export function resolveRepoRef(ref) {
+  const repos = Array.isArray(config.repos) ? config.repos : [];
+  const known = repos.map(r => r.path);
+  if (repos.length === 0) return { error: 'No repositories are configured in Agent 007 — add one in the explorer first' };
+  const raw = String(ref || '').trim();
+  if (!raw) return { error: `Which repository? Pass repo with one of: ${known.map(p => basename(p)).join(', ')}` };
+  const expanded = raw.startsWith('~/') ? resolve(homedir(), raw.slice(2)) : raw;
+  const abs = resolve(expanded);
+  const byPath = known.find(p => p === raw || p === abs);
+  if (byPath) return { path: byPath };
+  // Folder name, case-insensitively. Ambiguity is possible (two repos sharing a
+  // basename), so say so instead of guessing.
+  const lower = raw.toLowerCase();
+  const byName = known.filter(p => basename(p).toLowerCase() === lower);
+  if (byName.length === 1) return { path: byName[0] };
+  if (byName.length > 1) {
+    // Enough to tell them apart (the parent folder), not the absolute path:
+    // every other branch here reports basenames only, and this reply goes out
+    // to whatever called the tool.
+    const hints = byName.map(p => join(basename(dirname(p)), basename(p)));
+    return { error: `"${raw}" matches more than one repository (${hints.join(', ')}) — pass the full path` };
+  }
+  return { error: `Unknown repository "${raw}" — known repositories: ${known.map(p => basename(p)).join(', ')}` };
+}
+
+// --- Posting on an agent's behalf ---
+//
+// The one place a card gets created for an agent, shared by the MCP tool and by
+// POST /api/jobs. Both doors must resolve the repo, attribute the card and
+// report dispatcher state identically; a second copy of this would drift.
+//
+// Not ownership-gated, matching the WebSocket `job-create` handler: the board is
+// shared workspace state, and postedBy/postedByAgent are attribution rather than
+// access control.
+export function postJobForAgent({ title, detail, repo, session, user }, broadcast) {
+  // The repo the calling agent is working in is the overwhelmingly likely
+  // answer, so an agent only names one when it means a different repo.
+  const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
+  if (resolved.error) return { error: resolved.error };
+
+  const result = addJob({
+    // Typed explicitly: this comes off the wire, and a non-string would be
+    // stringified into the card ("[object Object]") rather than rejected.
+    // createJob still owns the length and emptiness rules.
+    title: typeof title === 'string' ? title : '',
+    detail: typeof detail === 'string' ? detail : '',
+    repoPath: resolved.path,
+    postedBy: user ? user.id : null,
+    postedByName: user ? user.displayName : null,
+    postedByAgent: session ? session.name : null,
+  }, broadcast);
+  if (result.error) return { error: result.error };
+
+  // A card an agent posted while the user was looking at a terminal would
+  // otherwise land silently on a tab they cannot see. The board's own form
+  // needs no toast — the user is looking straight at the column it lands in.
+  if (session && broadcast) {
+    broadcast({
+      type: 'notification', level: 'info',
+      message: `${session.name} posted a job: "${result.job.title}"`,
+    });
+  }
+  return {
+    job: result.job,
+    repoName: basename(resolved.path),
+    // Whether the board will actually act on it. Reported out loud, because a
+    // stopped dispatcher means the card just sits in To do — and an agent
+    // telling its user "queued" would imply work is under way when none is.
+    dispatcherRunning: !!boardSettings().running,
+  };
 }
 
 export function updateJob(jobId, fields, broadcast) {

@@ -4,6 +4,8 @@ import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
 import { RING_BUFFER_MAX } from './state.js';
+import { mintAgentToken } from './auth.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
@@ -34,6 +36,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     session.exited = true;
     clearInterval(session.stateCheckInterval);
     clearTimeout(session.scanTimer);
+    // The config file holds this agent's board credential. resolveAgentToken
+    // already stops honouring the token the moment `exited` is set, so this is
+    // about not leaving credentials lying in the filesystem, not about access.
+    removeMcpConfig(sessionId);
     updateState(session, broadcast);
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
   });
@@ -48,9 +54,16 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
 export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId }, broadcast) {
   const { file, args } = parseCommand(command);
 
+  // Minted before the spawn so it can go into the MCP config the agent reads at
+  // startup, and parked on the session below so resolveAgentToken can find its
+  // way back from a request to the agent that made it.
+  const agentToken = mintAgentToken();
+  const mcpConfigPath = writeMcpConfig(sessionId, agentToken);
+  const spawnArgs = withMcpConfig(file, args, mcpConfigPath);
+
   let ptyProcess;
   try {
-    ptyProcess = spawnPty(file, args, {
+    ptyProcess = spawnPty(file, spawnArgs, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
@@ -58,6 +71,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
       env: { ...process.env, TERM: 'xterm-256color' },
     });
   } catch (err) {
+    removeMcpConfig(sessionId);   // nothing will ever read it now
     return { error: `Failed to start "${command}". Is the command installed?` };
   }
 
@@ -76,6 +90,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     recentStrippedLines: [],
     isTUI: isTUI ?? /^(claude|aider)\b/.test(command),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
+    agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client
     // uses this to add the tab WITHOUT stealing focus, since an unattended
     // dispatcher would otherwise yank the user's cursor away every few minutes.

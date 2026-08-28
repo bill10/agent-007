@@ -10,7 +10,7 @@
 //   server/pty.js    PTY lifecycle (spawn, handlers, state detection)
 //   server/jobs.js   Job board (persistence, dispatcher loop, PR watching)
 //   server/ws.js     WebSocket (message routing, broadcast, origin check)
-//   server/http.js   HTTP routes (/api/browse, origin check middleware)
+//   server/http.js   HTTP routes (/api/browse, /api/jobs, /mcp, origin + auth)
 
 import express from 'express';
 import { createServer } from 'http';
@@ -38,7 +38,10 @@ const server = createServer(app);
 const wss = new WebSocketServer({ server, verifyClient });
 
 // --- HTTP routes ---
-setupRoutes(app, join(__dirname, 'public'));
+// broadcast is injected for the same reason server/jobs.js takes it as an
+// argument: http.js must not import ws.js, and a job posted through the MCP
+// tool has to repaint every open board the moment it lands.
+setupRoutes(app, join(__dirname, 'public'), { broadcast });
 
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.

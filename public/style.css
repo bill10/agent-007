@@ -1429,6 +1429,9 @@ body {
   color: var(--text-dim);
 }
 .job-card-repo { color: var(--text-muted); }
+/* Posted by an agent rather than typed into the form. Accent-tinted so a board
+   full of cards still shows at a glance which ones a machine queued. */
+.job-card-via { color: var(--accent); opacity: 0.85; }
 
 .job-card-detail {
   font-size: 10px;

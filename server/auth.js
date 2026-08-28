@@ -18,6 +18,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { sessions } from './state.js';
 
 export const USERS_PATH = process.env.AGENT007_USERS_PATH
   || join(homedir(), '.agent-007', 'users.json');
@@ -105,16 +106,57 @@ export function resolveToken(token) {
   return null;
 }
 
+// Just the Authorization header. Split out because agent tokens are accepted
+// ONLY in this form: a ?token= URL lands in reverse-proxy and access logs, and
+// nothing legitimately puts an agent token in a URL.
+export function tokenFromAuthHeader(req) {
+  const auth = req.headers?.authorization;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  return null;
+}
+
 // Pull a bearer token from an Express request: Authorization header first,
 // then a ?token= query param (needed for the WebSocket handshake, where the
 // browser can't set headers).
 export function tokenFromRequest(req) {
-  const auth = req.headers?.authorization;
-  if (auth && auth.startsWith('Bearer ')) return auth.slice(7).trim();
+  const header = tokenFromAuthHeader(req);
+  if (header) return header;
   try {
     const url = new URL(req.url, 'http://localhost');
     const q = url.searchParams.get('token');
     if (q) return q;
   } catch {}
+  return null;
+}
+
+// --- Agent session tokens (job board: the MCP tool) ---
+//
+// Every agent terminal is spawned with a one-off bearer token so the board's
+// MCP server can tell which agent is calling. The token is minted per session,
+// lives in memory on the session object plus one mode-0600 config file that is
+// deleted when the PTY exits, and stops resolving the moment that session ends.
+// Nothing is written to the agent's environment: an env var is inherited by
+// every child process the agent runs, which is a much wider blast radius than
+// a file only the MCP client reads at startup.
+//
+// It is deliberately NOT a user credential. It identifies one live agent and
+// reaches exactly one surface (POST /mcp and POST /api/jobs); every other /api
+// route is user-only by construction (see requireUser in server/http.js).
+export function mintAgentToken() {
+  return 'a007a_' + randomBytes(32).toString('base64url');
+}
+
+// Resolve a token to the live session that owns it. Sessions are few, so a scan
+// beats a second index that has to be invalidated on every exit — and an exited
+// session's token stops resolving with no cleanup step at all.
+export function resolveAgentToken(token) {
+  if (!token) return null;
+  const presented = Buffer.from(String(token), 'utf8');
+  for (const session of sessions.values()) {
+    if (session.exited || !session.agentToken) continue;
+    const stored = Buffer.from(session.agentToken, 'utf8');
+    if (stored.length !== presented.length) continue;
+    if (timingSafeEqual(stored, presented)) return session;
+  }
   return null;
 }
