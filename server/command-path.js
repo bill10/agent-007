@@ -13,9 +13,19 @@
 // with a launchable extension up front is what keeps it from happening.
 
 import { statSync } from 'fs';
-import { delimiter, extname, isAbsolute, resolve, sep } from 'path';
+import { join, resolve } from 'path';
 
 const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD';
+
+// A Windows PATH is always ';'-separated and its separators are always `\` or
+// `/`, whatever platform this process happens to be running on. Taking those
+// from `path.delimiter` / `path.sep` instead would make the `platform`
+// argument a lie on a POSIX host — and the CI runner is Linux.
+const WIN_PATH_DELIMITER = ';';
+const HAS_SEPARATOR_RE = /[\\/]/;
+const DRIVE_PREFIX_RE = /^[a-zA-Z]:/;
+// Whatever follows the last dot of the final path segment.
+const OWN_EXT_RE = /\.[^.\\/]*$/;
 
 function isFile(p) {
   try { return statSync(p).isFile(); } catch { return false; }
@@ -48,13 +58,14 @@ export function resolveExecutable(file, env = process.env, platform = process.pl
   // A command that already carries a launchable extension is used verbatim;
   // anything else gets each PATHEXT entry appended, the same order cmd.exe
   // would try them in.
-  const ownExt = extname(file);
+  const ownExt = (file.match(OWN_EXT_RE) || [''])[0];
   const candidates = ownExt && exts.includes(ownExt.toLowerCase())
     ? [file]
     : exts.map(e => file + e);
 
-  // A command containing a separator is a path, not a PATH lookup.
-  if (file.includes('/') || file.includes(sep) || isAbsolute(file)) {
+  // A command carrying a separator or a drive letter is a path, not a PATH
+  // lookup. Relative ones resolve against the working directory.
+  if (HAS_SEPARATOR_RE.test(file) || DRIVE_PREFIX_RE.test(file)) {
     for (const candidate of candidates) {
       const full = resolve(cwd, candidate);
       if (isFile(full)) return full;
@@ -62,11 +73,14 @@ export function resolveExecutable(file, env = process.env, platform = process.pl
     return null;
   }
 
-  const dirs = (env.PATH || env.Path || '').split(delimiter).filter(Boolean);
-  // cmd.exe looks in the working directory before PATH.
-  for (const dir of [cwd, ...dirs]) {
+  // PATH only — deliberately NOT the working directory, even though cmd.exe
+  // searches there first. The working directory is the agent's worktree, so
+  // searching it would let a `claude.cmd` committed to a repository replace the
+  // command the agent runs. child_process and PowerShell skip it too.
+  const dirs = (env.PATH || env.Path || '').split(WIN_PATH_DELIMITER).filter(Boolean);
+  for (const dir of dirs) {
     for (const candidate of candidates) {
-      const full = resolve(dir.replace(/^"|"$/g, ''), candidate);
+      const full = join(dir.replace(/^"|"$/g, ''), candidate);
       if (isFile(full)) return full;
     }
   }

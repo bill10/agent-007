@@ -8,6 +8,10 @@ import { tmpdir } from 'os';
 // shim (`claude`, `aider`, anything from npm) has to be resolved to its real
 // filename before node-pty sees it. Getting this wrong crashes the whole
 // server asynchronously, so the resolution rules get covered directly.
+//
+// These run on the Linux CI runner too, with platform forced to 'win32' — the
+// reason resolveExecutable reads Windows' `;` PATH separator from a constant
+// instead of from `path.delimiter`.
 describe('resolveExecutable on Windows', () => {
   let base, binDir, otherDir;
   const env = () => ({
@@ -24,8 +28,14 @@ describe('resolveExecutable on Windows', () => {
     // The npm shape: an extensionless bash shim next to the launchable .cmd.
     writeFileSync(join(binDir, 'claude'), '#!/bin/sh\n');
     writeFileSync(join(binDir, 'claude.cmd'), '@echo off\n');
-    writeFileSync(join(otherDir, 'tool.exe'), 'MZ');
+    // Same basename in both PATH entries, to pin the search order.
     writeFileSync(join(otherDir, 'claude.cmd'), '@echo off\n');
+    writeFileSync(join(otherDir, 'tool.exe'), 'MZ');
+    // Both extensions in one directory, to pin the PATHEXT order.
+    writeFileSync(join(binDir, 'dual.cmd'), '@echo off\n');
+    writeFileSync(join(binDir, 'dual.exe'), 'MZ');
+    // Sitting in the working directory, where nothing should look.
+    writeFileSync(join(base, 'hijack.cmd'), '@echo off\n');
   });
   afterAll(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
 
@@ -41,14 +51,14 @@ describe('resolveExecutable on Windows', () => {
     expect(resolve('tool')).toBe(join(otherDir, 'tool.exe'));
   });
 
-  it('takes the first PATH entry that matches', () => {
-    expect(resolve('claude')).toBe(join(binDir, 'claude.cmd'));
+  it('honours PATHEXT order within a directory', () => {
+    expect(resolve('dual')).toBe(join(binDir, 'dual.exe'));
   });
 
-  it('honours PATHEXT order within a directory', () => {
-    writeFileSync(join(binDir, 'dual.cmd'), '@echo off\n');
-    writeFileSync(join(binDir, 'dual.exe'), 'MZ');
-    expect(resolve('dual')).toBe(join(binDir, 'dual.exe'));
+  it('never searches the working directory, so a repo cannot hijack the command', () => {
+    // cwd is the agent's worktree. cmd.exe would run ./hijack.cmd here;
+    // child_process and PowerShell would not, and neither do we.
+    expect(resolve('hijack')).toBe(null);
   });
 
   it('uses a command that already carries a launchable extension verbatim', () => {

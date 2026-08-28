@@ -43,10 +43,13 @@ function installAsyncSpawnGuard() {
     console.error(`${reason} — session left unstarted.`);
     if (!attempt) return;
 
+    // Same teardown as the onExit handler below, so a session that died this
+    // way reports DISCONNECTED rather than sitting at WORKING in the office.
     const { session, broadcast } = attempt;
     session.exited = true;
     clearInterval(session.stateCheckInterval);
     clearTimeout(session.scanTimer);
+    updateState(session, broadcast);
     if (broadcast) broadcast({ type: 'session-ended', sessionId: session.id, reason });
   });
 }
