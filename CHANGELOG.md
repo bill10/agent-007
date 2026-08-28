@@ -5,6 +5,22 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.6.0] - 2026-08-28
+
+### Fixed
+
+- A finished job card now shows what it produced. One card reached Review with
+  its pull request open and displayed nothing but its title: the agent's name was
+  discarded on restart, the branch was only drawn as part of the agent line so it
+  vanished with it, and a card moved to Review by hand never looked up its pull
+  request. The name is kept as a record of who did the work, the branch stands on
+  its own, and a manual move fetches the pull request once.
+- A card no longer claims the board is still waiting for a pull request directly
+  above the number of the one it just found.
+- Agents are identified in a way that cannot be reused between runs. Previously a
+  finished card could point at a slot number that a completely different agent
+  later occupied, so it reported an agent alive that had nothing to do with it.
+
 ## [0.3.5.0] - 2026-08-28
 
 ### Fixed
