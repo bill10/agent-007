@@ -20,7 +20,6 @@ const CHAR_PALETTES = [
 const WALL_H = 36 * Z;
 const WALL_BOTTOM = WALL_H + 2 * Z;
 const WS_W = 32, WS_H = 36, WS_GAP_X = 12, WS_GAP_Y = 18;
-const COUCH_BUFFER = 24; // Z-units below baseboard reserved for U-shaped seating + plants
 
 // Persistent dust mote positions (stable across frames)
 const DUST_MOTES = [
@@ -40,14 +39,9 @@ const BOOK_COLORS = [
 const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
 
 // --- Furniture sprites ---
-// Seating: LPC Revised Base Object Kit (CC-BY-SA 3.0)
 // Desk/Plant: Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
 const SPRITE_PATHS = {
-  sofa:    'assets/furniture/sofa_front.png',       // 53×32 brown casual sofa (front view)
-  chairL:  'assets/furniture/armchair_left.png',    // 24×32 armchair faces left
-  chairR:  'assets/furniture/armchair_right.png',   // 24×32 armchair faces right
-  plant:   'assets/furniture/plant_big.png',         // 32×32 potted office plant (Antea CC-BY 4.0)
-  table:   'assets/furniture/table_small.png',      // 32×32 small round table
+  plant:   'assets/furniture/plant_big.png',        // 32×32 potted office plant (Antea CC-BY 4.0)
   desk:    'assets/furniture/desk.png',             // 32×32 computer desk with monitor
   desk2:   'assets/furniture/desk2.png',            // 32×32 alt desk layout
 };
@@ -112,10 +106,10 @@ function getWindowColors(tod) {
 }
 
 // --- Grid layout: center workstations horizontally, and vertically within
-// the open floor (below the windows + seating zone). Centering in the FULL
+// the open floor (below the windows + job board zone). Centering in the FULL
 // panel height left the desks floating mid-canvas with a large dead band of
 // empty floor below them when only a few agents were running. ---
-const FLOOR_TOP = WALL_BOTTOM + 26 * Z; // reserve the top zone for windows + couches
+const FLOOR_TOP = WALL_BOTTOM + 26 * Z; // reserve the top zone for windows + job boards
 function computeGridLayout(agentCount, panelWidth, panelHeight) {
   const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z + WS_GAP_X) / (WS_W + WS_GAP_X))));
   const count = Math.max(1, agentCount);
@@ -356,52 +350,221 @@ function drawBookshelves(ctx, w) {
   }
 }
 
-// --- Seating areas under bookshelves (3 U-shaped reading nooks, sprite-based) ---
-function drawSeatingAreas(ctx, w) {
-  if (!SPRITES.sofa || !SPRITES.chairL || !SPRITES.chairR) return;
+// --- Job boards (3 freestanding whiteboards on stands, replacing the old
+// seating nooks). Drawn with primitives, not sprites: the boards stand on the
+// floor in front of the wall, never hang on it. ---
+const BOARD_W = 26;      // Z units — outer frame width (capped to the wall section)
+const BOARD_H = 19;      // Z units — outer frame height
+const BOARD_LEG_H = 9;   // Z units — frame bottom down to the feet
+const BOARD_FRAME = 1;   // Z units — frame thickness around the writable surface
+const BOARD_FOOT_OFFSET = 14; // Z units below the baseboard where the feet land
+const BOARD_MIN_W = 8;   // Z units — below this the section is too narrow to draw into
+const BOARD_BRACE_H = 3; // Z units — brace (and centre-post foot) above the feet
+
+const BOARD_TITLES = ['JOBS', 'HIRE', 'OPEN'];  // equal length: none condenses under maxWidth
+const BOARD_TITLE_INK = ['#2f6fb0', '#b0392b', '#2f7a4a'];
+const BOARD_TITLE_FONT = `bold ${3 * Z}px monospace`;
+
+// Job posts pinned to each board. Positions are fractions of the writable
+// surface so the layout survives the board being narrowed on a small panel.
+const JOB_POSTS = [
+  [
+    { x: 0.05, y: 0.34, w: 0.42, h: 0.29, lines: 3 },
+    { x: 0.53, y: 0.32, w: 0.41, h: 0.33, lines: 4 },
+    { x: 0.07, y: 0.68, w: 0.37, h: 0.26, lines: 2 },
+    { x: 0.52, y: 0.70, w: 0.42, h: 0.24, lines: 2 },
+  ],
+  [
+    { x: 0.06, y: 0.33, w: 0.39, h: 0.32, lines: 4 },
+    { x: 0.51, y: 0.36, w: 0.43, h: 0.27, lines: 3 },
+    { x: 0.18, y: 0.70, w: 0.56, h: 0.24, lines: 2 },
+  ],
+  [
+    { x: 0.07, y: 0.34, w: 0.46, h: 0.25, lines: 3 },
+    { x: 0.60, y: 0.33, w: 0.33, h: 0.31, lines: 3 },
+    { x: 0.05, y: 0.64, w: 0.41, h: 0.30, lines: 3 },
+    { x: 0.53, y: 0.69, w: 0.40, h: 0.25, lines: 2 },
+  ],
+];
+const PAPER_TINTS = ['#f6f3ea', '#eef1f7', '#fbf6e4', '#f2f4ef'];
+const PIN_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#d4a847'];
+
+// Geometry for the three boards, in screen pixels. Exported so the placement
+// rules (inside its own wall section, clear of the window sills and the desk
+// grid) can be asserted in tests without a canvas.
+export function computeBoardLayout(panelWidth) {
   const z = Z;
-  const layout = computeWallLayout(w);
+  const layout = computeWallLayout(panelWidth);
 
-  // Sprite scaling — fit sofa to ~22Z wide
-  const sofaScale = (22 * z) / SPRITES.sofa.naturalWidth;
-  const sofaW = Math.floor(SPRITES.sofa.naturalWidth * sofaScale);
-  const sofaH = Math.floor(SPRITES.sofa.naturalHeight * sofaScale);
+  // Cap the board to its wall section so it can never spill under a window. On
+  // a panel too narrow for even a stub board, draw nothing rather than overlap.
+  // Even Z-width keeps the frame's centre exactly on the stand's centre line.
+  const boardZ = Math.min(BOARD_W, layout.shelfW - 2) & ~1;
+  const boardW = boardZ * z;
+  const boardH = BOARD_H * z;
+  const footY = WALL_BOTTOM + BOARD_FOOT_OFFSET * z;   // feet on the floor, clear of the desks
+  const frameBottom = footY - BOARD_LEG_H * z;
+  const boardTop = frameBottom - boardH;
 
-  // Armchairs: scale to ~10Z wide (left faces right, right faces left)
-  const chairLScale = (10 * z) / SPRITES.chairL.naturalWidth;
-  const chairLW = Math.floor(SPRITES.chairL.naturalWidth * chairLScale);
-  const chairLH = Math.floor(SPRITES.chairL.naturalHeight * chairLScale);
+  const sections = [layout.shelf1X, layout.shelf2X, layout.shelf3X].map((secX) => {
+    const centerX = Math.floor((secX + layout.shelfW / 2) * z);
+    return { centerX, left: secX * z, right: (secX + layout.shelfW) * z };
+  });
 
-  const chairRScale = (10 * z) / SPRITES.chairR.naturalWidth;
-  const chairRW = Math.floor(SPRITES.chairR.naturalWidth * chairRScale);
-  const chairRH = Math.floor(SPRITES.chairR.naturalHeight * chairRScale);
+  return {
+    visible: boardZ >= BOARD_MIN_W,
+    boardW, boardH, boardTop, frameBottom, footY, sections,
+    sillBottom: (3 + layout.windowH) * z + z,          // window frame bottom + sill
+    floorTop: FLOOR_TOP,
+  };
+}
 
-  // In 3/4 top-down perspective, the sofa "back" is the top edge of the sprite.
-  // Move sofa UP so its back overlaps with the baseboard (touching the wall).
-  const seatY = WALL_BOTTOM - Math.floor(sofaH * 0.3);
+function drawJobBoardEasels(ctx, w) {
+  const board = computeBoardLayout(w);
+  if (!board.visible) return;
 
-  const shelfXs = [layout.shelf1X, layout.shelf2X, layout.shelf3X];
+  board.sections.forEach(({ centerX }, i) => {
+    drawBoardStand(ctx, centerX, board.frameBottom, board.footY, board.boardW);
+    drawWhiteboard(ctx, centerX - Math.floor(board.boardW / 2), board.boardTop, board.boardW, board.boardH, i);
+  });
+}
 
-  for (const shX of shelfXs) {
-    const centerX = Math.floor((shX + layout.shelfW / 2) * z);
+// A-frame metal stand: two splayed legs, a brace, and a contact shadow.
+function drawBoardStand(ctx, centerX, topY, footY, boardW) {
+  const z = Z;
+  const legTop = Math.round(boardW * 0.18);
+  const legFoot = Math.round(boardW * 0.42);
+  const lw = Math.max(2, Math.round(z * 0.8));
 
-    // Sofa (centered under shelf, back against wall)
-    const sx = centerX - Math.floor(sofaW / 2);
-    ctx.drawImage(SPRITES.sofa, sx, seatY, sofaW, sofaH);
+  // Contact shadow on the floor — stacked rects, not an ellipse: everything
+  // else in the room is hard-edged and a path fill would be antialiased.
+  ctx.fillStyle = 'rgba(0,0,0,0.13)';
+  ctx.fillRect(centerX - Math.round(boardW * 0.36), footY, Math.round(boardW * 0.72), z);
+  ctx.fillStyle = 'rgba(0,0,0,0.09)';
+  ctx.fillRect(centerX - Math.round(boardW * 0.22), footY + z, Math.round(boardW * 0.44), z);
 
-    // Coffee table (centered below sofa)
-    if (SPRITES.table) {
-      const tableScale = (8 * z) / SPRITES.table.naturalWidth;
-      const tableW = Math.floor(SPRITES.table.naturalWidth * tableScale);
-      const tableH = Math.floor(SPRITES.table.naturalHeight * tableScale);
-      ctx.drawImage(SPRITES.table, centerX - Math.floor(tableW / 2), seatY + sofaH + z, tableW, tableH);
-    }
+  const leg = (dir) => {
+    ctx.beginPath();
+    ctx.moveTo(centerX + dir * legTop - lw / 2, topY);
+    ctx.lineTo(centerX + dir * legTop + lw / 2, topY);
+    ctx.lineTo(centerX + dir * legFoot + lw / 2, footY);
+    ctx.lineTo(centerX + dir * legFoot - lw / 2, footY);
+    ctx.closePath();
+    ctx.fill();
+  };
 
-    // Inverse U: left position uses right-facing chair, right uses left-facing
-    const chairY = seatY + sofaH - 4 * z;
-    ctx.drawImage(SPRITES.chairR, sx - chairRW, chairY, chairRW, chairRH);
-    ctx.drawImage(SPRITES.chairL, sx + sofaW, chairY, chairLW, chairLH);
+  ctx.fillStyle = '#9aa1ab';
+  leg(-1);
+  leg(1);
+
+  // Centre post from the frame down to the brace
+  ctx.fillRect(centerX - lw / 2, topY, lw, Math.max(0, footY - BOARD_BRACE_H * z - topY));
+
+  // Shaded inner edge of each leg
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.fillRect(centerX - legFoot - lw / 2, footY - z, lw, z);
+  ctx.fillRect(centerX + legFoot - lw / 2, footY - z, lw, z);
+
+  // Cross brace
+  const braceY = footY - BOARD_BRACE_H * z;
+  ctx.fillStyle = '#8b929c';
+  ctx.fillRect(centerX - Math.round(boardW * 0.34), braceY, Math.round(boardW * 0.68), Math.max(1, Math.round(z * 0.6)));
+
+  // Feet caps
+  ctx.fillStyle = '#5a6068';
+  ctx.fillRect(centerX - legFoot - lw, footY - 1, lw * 2, Math.max(1, Math.round(z * 0.7)));
+  ctx.fillRect(centerX + legFoot - lw, footY - 1, lw * 2, Math.max(1, Math.round(z * 0.7)));
+}
+
+function drawWhiteboard(ctx, x, y, w, h, idx) {
+  const z = Z;
+  const fb = BOARD_FRAME * z;
+
+  // Drop shadow against the wall
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  ctx.fillRect(x + z, y + z, w, h);
+
+  // Aluminium frame
+  ctx.fillStyle = '#b9c0c9';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#d5dae1';
+  ctx.fillRect(x, y, w, Math.max(1, Math.round(fb / 2)));
+  ctx.fillStyle = '#8d949d';
+  ctx.fillRect(x, y + h - Math.max(1, Math.round(fb / 2)), w, Math.max(1, Math.round(fb / 2)));
+
+  // Writable surface
+  const sx = x + fb, sy = y + fb;
+  const sw = w - 2 * fb, sh = h - 2 * fb;
+  ctx.fillStyle = '#f7f8f5';
+  ctx.fillRect(sx, sy, sw, sh);
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  ctx.fillRect(sx, sy + sh - z, sw, z);          // soft shading along the bottom
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.fillRect(sx, sy, sw, Math.max(1, Math.round(z / 2)));
+
+  // Marker-written heading
+  const title = BOARD_TITLES[idx % BOARD_TITLES.length];
+  ctx.save();
+  ctx.fillStyle = BOARD_TITLE_INK[idx % BOARD_TITLE_INK.length];
+  ctx.font = BOARD_TITLE_FONT;
+  ctx.textAlign = 'center';
+  ctx.fillText(title, sx + sw / 2, sy + 3 * z, sw - 2 * z);
+  ctx.fillRect(Math.round(sx + sw * 0.28), sy + 4 * z, Math.round(sw * 0.44), 1);
+  ctx.restore();
+
+  // Pinned job posts
+  const posts = JOB_POSTS[idx % JOB_POSTS.length];
+  posts.forEach((post, pi) => {
+    // Offset by board so the three boards don't repeat the same colour run.
+    const px = Math.round(sx + post.x * sw);
+    const py = Math.round(sy + post.y * sh);
+    const pw = Math.max(4, Math.round(post.w * sw));
+    const ph = Math.max(4, Math.round(post.h * sh));
+    drawJobPost(ctx, px, py, pw, ph, post.lines, idx * 3 + pi);
+  });
+
+  // Marker tray with two markers
+  const trayW = Math.round(w * 0.5);
+  const trayX = x + Math.round((w - trayW) / 2);
+  ctx.fillStyle = '#a7aeb8';
+  ctx.fillRect(trayX, y + h, trayW, z);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.fillRect(trayX, y + h + z, trayW, 1);
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(trayX + z, y + h, Math.round(trayW * 0.28), Math.max(1, Math.round(z * 0.7)));
+  ctx.fillStyle = '#2980b9';
+  ctx.fillRect(trayX + Math.round(trayW * 0.5), y + h, Math.round(trayW * 0.28), Math.max(1, Math.round(z * 0.7)));
+}
+
+// One sheet of paper: drop shadow, tinted stock, ruled "text", and a pin.
+function drawJobPost(ctx, x, y, w, h, lines, idx) {
+  const z = Z;
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.fillRect(x + 1, y + 1, w, h);
+  ctx.fillStyle = PAPER_TINTS[idx % PAPER_TINTS.length];
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.fillRect(x, y + h - 1, w, 1);
+
+  // Headline bar, then thinner body lines
+  const pad = Math.max(2, Math.round(w * 0.12));
+  let ly = y + Math.max(2, Math.round(h * 0.22));
+  ctx.fillStyle = 'rgba(45, 50, 58, 0.75)';
+  ctx.fillRect(x + pad, ly, Math.max(2, Math.round((w - 2 * pad) * 0.7)), 2);
+
+  ctx.fillStyle = 'rgba(70, 76, 86, 0.45)';
+  const gap = Math.max(2, Math.floor((h - (ly - y) - 4) / Math.max(1, lines - 1)));
+  for (let i = 1; i < lines; i++) {
+    ly += gap;
+    if (ly + 1 > y + h - 2) break;
+    const lw = Math.round((w - 2 * pad) * (i === lines - 1 ? 0.55 : 0.9));
+    ctx.fillRect(x + pad, ly, Math.max(2, lw), 1);
   }
+
+  // Push pin
+  ctx.fillStyle = PIN_COLORS[idx % PIN_COLORS.length];
+  const pinS = Math.max(2, Math.round(z * 0.7));
+  ctx.fillRect(x + Math.round(w / 2) - Math.round(pinS / 2), y - Math.round(pinS / 2), pinS, pinS);
 }
 
 // --- Potted plants under windows (sprite-based) ---
@@ -982,10 +1145,10 @@ export function renderOffice() {
   // Layer 3: Windows (2 windows with day/night + light beams)
   drawWindows(ctx, w, theme);
   // Layer 4: (bookshelves removed — bare plaster wall)
-  // Layer 5: Seating areas (brown leather couches + chairs under shelves)
-  drawSeatingAreas(ctx, w);
-  // Layer 5b: Potted plants (under windows)
+  // Layer 5: Potted plants (against the wall, under the windows)
   drawPlants(ctx, w);
+  // Layer 5b: Job boards — they stand out on the floor, so they occlude the plants
+  drawJobBoardEasels(ctx, w);
   // Layer 6: Ambient particles
   drawParticles(ctx, w, h);
 
