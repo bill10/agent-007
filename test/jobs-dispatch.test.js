@@ -989,3 +989,26 @@ describe('moving to review when the agent is already gone', () => {
     expect(job.agentSessionId).toBeNull();   // but the link still goes
   });
 });
+
+describe('requeueing clears every per-attempt field', () => {
+  beforeEach(resetBoard);
+
+  it('drops the PR-check note along with the branch and PR', async () => {
+    // The note describes an attempt that no longer exists; carrying it onto a
+    // fresh To do card reports a failure against work not yet tried.
+    addJob({ title: 'unreachable repo', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await checkPullRequests(noopBroadcast, {
+      findPr: async () => ({ pr: null, error: 'Could not resolve to a Repository' }),
+    });
+    const job = allJobs()[0];
+    expect(job.prCheckError).toBeTruthy();
+
+    await moveJob(job.id, 'todo', noopBroadcast, { killSession: async (id) => sessions.delete(id) });
+    expect(job.state).toBe('todo');
+    expect(job.prCheckError).toBeNull();
+    expect(job.prCheckErrorAt).toBeNull();
+    expect(job.branchName).toBeNull();
+    expect(job.prNumber).toBeNull();
+  });
+});

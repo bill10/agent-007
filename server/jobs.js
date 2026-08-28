@@ -156,6 +156,11 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     job.prUrl = null;
     job.prNumber = null;
     job.reviewAt = null;
+    // Also the PR-check note: it describes an attempt that no longer exists, so
+    // carrying it onto a fresh To do card would report a failure against work
+    // that has not been tried yet.
+    job.prCheckError = null;
+    job.prCheckErrorAt = null;
   }
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
   // A manual move means "the PR was opened outside the board". Look it up, or
