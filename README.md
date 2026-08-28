@@ -22,7 +22,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Multi-repo support** -- Add any number of repos. Spawn agents on different repos and manage them all from one place.
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see.
 - **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste (Cmd+V a screenshot), and draggable tabs for reordering.
-- **Job board** -- Queue work instead of babysitting it. A job has a title, details, and a repo; the board scans every 5 minutes, and for each queued job whose repo is under its agent cap it spawns a fresh agent on its own worktree and a branch named after the job, then watches for the pull request. Jobs move To do -> In progress -> Review on their own. An agent that stops to ask you something turns its card orange and puts a count on the Jobs tab; click it to land in that terminal, answer, and it carries on.
+- **Job board** -- Queue work instead of babysitting it. A job has a title, details, and a repo; the board scans every 5 minutes, and for each queued job whose repo is under its agent cap it spawns a fresh agent on its own worktree and a branch named after the job, then watches for the pull request. Jobs move To do -> In progress -> Review on their own. An agent that stops to ask you something turns its card orange and puts a count on the Jobs tab; click it to land in that terminal, answer, and it carries on. Any agent can queue a job too -- tell the one you are talking to to post it, and it lands in To do marked "via <agent>".
 - **Dark/light themes** -- Gold-accented dark theme and a Linear-inspired warm light theme. Toggles instantly, including terminal colors.
 - **Live sync** -- Branch names, file changes, line-level diff stats (+/-), and agent states update in real time across all panels.
 - **Voice input** -- Dictate prompts instead of typing. Click the mic button floating at the terminal's bottom-right (or `Cmd+D`), allow microphone access on first use, speak, and the transcript is typed into the active terminal; press Enter to send. Uses the browser's Web Speech API (Chrome, Edge, Safari; the recognition language follows your browser's locale) and needs HTTPS or localhost -- for remote access use `tailscale serve` (see `docs/REMOTE.md`). The mic is deliberately bounded: it stops after ~1 minute without delivered speech, always after 5 minutes, on switching or closing agents, when an agent's shell ends, and when the tab is hidden. Two things to know: most browsers process speech on vendor servers (Chrome/Edge send audio to Google/Microsoft; Safari may process on-device), so don't dictate secrets; and transcripts arrive as keystrokes, so a program waiting on a single key (a pager, a y/n prompt) reacts to speech like typing -- watch the prompt while dictating. OS-level dictation (macOS dictation, iOS keyboard mic, Windows `Win+H`) also types straight into the terminal and works in any browser.
@@ -67,6 +67,33 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 │   diffs)    │   agents)    │   tab per agent)    │
 └─────────────┴──────────────┴────────────────────┘
 ```
+
+### Asking an agent to post a job
+
+While you are working with an agent, you can hand it work for later instead of
+letting it derail what it is doing:
+
+> "Add that to the job board -- a job to fix the flaky worktree test."
+
+Every agent terminal is spawned with `agent-007-job` on its `PATH`, so the agent
+posts the card itself:
+
+```bash
+agent-007-job "Fix the flaky worktree test" --detail "Fails on Windows only; see TODOS.md"
+# Posted "Fix the flaky worktree test" in agent-007 to the Agent 007 job board (To do).
+```
+
+The card lands in **To do**, attributed to the agent that posted it, and is
+dispatched like any other job. The repo defaults to the one that terminal is
+working in; `--repo <path-or-folder-name>` picks a different one. `--help` lists
+the rest. Behind it is `POST /api/jobs`, authenticated with a per-session token
+the server puts in the agent's environment (`AGENT007_TOKEN`) -- it is minted
+per terminal, kept in memory only, and stops working the moment that agent exits.
+
+An agent that has never heard of the command will find it with
+`agent-007-job --help`; dispatched job agents are told about it in their prompt,
+so they can queue follow-up work they find instead of building it.
+
 
 ## Configuration
 
@@ -150,10 +177,13 @@ server/
   git.js           Git operations (worktree, file tree, diff)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
-  http.js          HTTP routes (/api/browse, origin check middleware)
+  http.js          HTTP routes (/api/browse, /api/jobs, origin + auth middleware)
   auth.js          Login tokens, user accounts, per-agent ownership checks
+  agent-env.js     Environment handed to every agent PTY (job CLI on PATH, token)
 bin/
   adduser.js       Create a login user (`npm run adduser`)
+  agent-cli/
+    agent-007-job  Post a job to the board from inside an agent terminal
 public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
@@ -169,6 +199,8 @@ public/
     auth.js        Login tokens, presence, HTML escaping
 lib/
   helpers.js       State detection, git parsing, codename/cocktail pools
+  jobs.js          Job schema, dispatch selection, PR parsing, status derivation
+  job-cli.js       `agent-007-job` argument/environment parsing
 ```
 
 ## Contributing

@@ -234,6 +234,35 @@ recurring sweep over jobs already there. An agent you re-adopt on a shipped
 branch to address review comments is yours; a poll that killed it every five
 minutes would make Review permanently hostile to working on your own PR.
 
+### Agent-posted jobs
+An agent you are talking to can post a card itself, so "add that to the board"
+does not mean leaving the conversation to type it. Every agent PTY is spawned
+with `agent-007-job` first on its `PATH` (`server/agent-env.js`) and a
+per-session bearer token in `AGENT007_TOKEN`; the command POSTs to `/api/jobs`.
+
+- **PATH, not documentation.** An agent does not discover a command it has to be
+  told the absolute path of. The directory holds exactly one script, so nothing
+  else in `bin/` (notably `adduser.js`) leaks into an agent's shell.
+- **A token per terminal, in memory only.** It identifies one live agent, never
+  a user: it is minted at spawn, parked on the session object, never written to
+  disk, accepted only in an `Authorization` header (never `?token=`, which lands
+  in proxy logs), and it stops resolving the moment the PTY exits. Routes that
+  are not for agents say so (`requireUser`), so the weaker credential can only
+  do this one thing. It grants nothing a process in that terminal could not
+  already do — it is already a shell on this machine — and that is the line to
+  hold.
+- **The repo defaults to the agent's own; `--repo` reaches any configured one.**
+  Deliberate, and worth being explicit about: an agent in repo A can queue a job
+  that a fresh agent later runs in repo B. That is not an escalation — a shell
+  in repo A's terminal can already run an agent in repo B directly — but it does
+  mean the token is scoped to "this board", not "this repo". Anything narrower
+  would break the case the feature exists for: noticing work while you are
+  somewhere else.
+- **Attribution is two facts, not one.** `postedByAgent` (which agent typed it)
+  is stored beside `postedBy`/`postedByName` (whose work it is), and the card
+  shows the agent as an accent-tinted `via <name>`. Folding them into one field
+  would make a machine-queued card indistinguishable from a hand-typed one.
+
 ### Branch naming
 Board branches are named from the job title rather than a cocktail:
 `{git-username}/add-rate-limiting`. Slugged to `[a-z0-9-]` and length-bounded,
