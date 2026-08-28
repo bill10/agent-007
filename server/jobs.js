@@ -14,7 +14,7 @@ import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
-  parsePrList, JOB_STATES,
+  parsePrList, branchSlugFromTitle, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
 } from '../lib/jobs.js';
 
@@ -170,10 +170,16 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated 
   const dispatched = [];
   for (const job of candidates) {
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
+    // Branch named after the job, not a cocktail, so `git branch` reads like
+    // the board. Two jobs can share a title, so collisions take a -2 suffix
+    // rather than failing the dispatch.
+    const branch = branchSlugFromTitle(job.title);
     // spawnedBy:'board' rides along on the session so the client can open the
     // tab WITHOUT stealing focus. An unattended dispatcher yanking the user out
     // of whatever they are typing every few minutes would be unusable.
-    const result = await createSession(command, null, job.repoPath, null, job.postedBy || null, { spawnedBy: 'board', jobId: job.id });
+    const result = await createSession(command, null, job.repoPath, branch, job.postedBy || null, {
+      spawnedBy: 'board', jobId: job.id, branchSuffixOnCollision: true,
+    });
     if (result.error) {
       // Surface the failure on the card and leave it in To do; the next tick
       // retries. A broken repo shows a visible reason instead of a job that

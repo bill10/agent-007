@@ -26,7 +26,7 @@ function resetBoard() {
 function fakeCreateSession(calls, { fail = false } = {}) {
   let n = 0;
   return async (command, name, repoPath, branch, ownerId, meta) => {
-    calls.push({ command, repoPath, ownerId, meta });
+    calls.push({ command, repoPath, branch, ownerId, meta });
     if (fail) return { error: 'Failed to create worktree: disk on fire' };
     n++;
     const session = {
@@ -307,5 +307,29 @@ describe('agents do not pile up across many jobs', () => {
     expect(peak).toBeLessThanOrEqual(2);
     expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
     expect(allJobs().filter(j => j.state === 'review')).toHaveLength(8);
+  });
+});
+
+// --- Branch naming through a real dispatch ---
+
+describe('branch naming on dispatch', () => {
+  beforeEach(resetBoard);
+
+  it('asks for a branch derived from the job title, with collision fallback', async () => {
+    addJob({ title: 'Add rate limiting!', repoPath: REPO }, noopBroadcast);
+    const calls = [];
+    await dispatchOnce(fakeCreateSession(calls), noopBroadcast);
+    // createSession(command, name, repoPath, customBranch, ownerId, meta)
+    expect(calls[0].branch).toBe('add-rate-limiting');
+    // Two jobs may share a title, so a taken branch must take a suffix rather
+    // than failing the dispatch outright.
+    expect(calls[0].meta.branchSuffixOnCollision).toBe(true);
+  });
+
+  it('runs the agent in auto mode', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    const calls = [];
+    await dispatchOnce(fakeCreateSession(calls), noopBroadcast);
+    expect(calls[0].command).toContain('--permission-mode auto');
   });
 });

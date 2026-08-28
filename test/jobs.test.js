@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
-  createJob, countInFlightByRepo, selectDispatchableJobs,
+  createJob, countInFlightByRepo, selectDispatchableJobs, branchSlugFromTitle,
   buildJobPrompt, buildJobCommand, deriveJobStatus, parsePrList,
   JOB_STATES, MAX_TITLE_LEN, STALLED_AFTER_MS, DEFAULT_PERMISSION_MODE,
+  MAX_BRANCH_SLUG_LEN, DISPATCH_INTERVAL_MS,
 } from '../lib/jobs.js';
 import { parseCommand, detectState } from '../lib/helpers.js';
 
@@ -163,17 +164,17 @@ describe('buildJobCommand', () => {
     expect(parsed.args[1]).toBe('bypassPermissions');
   });
 
-  it('includes the title, the detail, and the PR instruction', () => {
+  it('includes the title, the detail, and the ship instruction', () => {
     const prompt = buildJobPrompt(job({ title: 'T', detail: 'D' }));
     expect(prompt.startsWith('T')).toBe(true);
     expect(prompt).toContain('D');
-    expect(prompt).toContain('gh pr create');
+    expect(prompt).toContain('/ship');
   });
 
   it('handles a job with no detail', () => {
     const prompt = buildJobPrompt(job({ title: 'Only a title', detail: '' }));
     expect(prompt).toContain('Only a title');
-    expect(prompt).toContain('gh pr create');
+    expect(prompt).toContain('/ship');
   });
 });
 
@@ -295,5 +296,57 @@ describe('workspace-trust dialog is detected as needing the user', () => {
       lastStrippedLine: 'Enter to confirm \u00b7 Esc to cancel',
       recentStrippedLines: ['Enter to confirm \u00b7 Esc to cancel'],
     }))).toBe('MESSAGE');
+  });
+});
+
+// --- Branch naming ---
+
+describe('branchSlugFromTitle', () => {
+  it('reads like the job title', () => {
+    expect(branchSlugFromTitle('Add rate limiting')).toBe('add-rate-limiting');
+    expect(branchSlugFromTitle('UPPER Case-Thing')).toBe('upper-case-thing');
+  });
+
+  it('strips punctuation that git refs forbid', () => {
+    // ~ ^ : ? * [ .. and a leading dash are all illegal in a ref name; keeping
+    // to [a-z0-9-] side-steps the whole rule set rather than enumerating it.
+    for (const title of ['Fix ~weird^ name:?', 'a..b', '--leading', 'trailing--', 'x[0]*y']) {
+      const slug = branchSlugFromTitle(title);
+      expect(slug).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    }
+  });
+
+  it('bounds the length and never ends in a dash', () => {
+    const slug = branchSlugFromTitle('word '.repeat(40));
+    expect(slug.length).toBeLessThanOrEqual(MAX_BRANCH_SLUG_LEN);
+    expect(slug.endsWith('-')).toBe(false);
+  });
+
+  it('falls back rather than producing an empty ref', () => {
+    // A title of pure punctuation or non-Latin script would otherwise slug to
+    // '' and make `git worktree add -b <gituser>/` fail.
+    expect(branchSlugFromTitle('———')).toBe('job');
+    expect(branchSlugFromTitle('')).toBe('job');
+    expect(branchSlugFromTitle('   ')).toBe('job');
+    expect(branchSlugFromTitle(null)).toBe('job');
+  });
+});
+
+// --- Dispatch defaults ---
+
+describe('dispatch defaults', () => {
+  it('scans every 5 minutes', () => {
+    expect(DISPATCH_INTERVAL_MS).toBe(5 * 60 * 1000);
+  });
+
+  it('runs agents in auto mode', () => {
+    expect(DEFAULT_PERMISSION_MODE).toBe('auto');
+  });
+
+  it('tells the agent to review, fix, re-review, then ship', () => {
+    const prompt = buildJobPrompt({ title: 'T', detail: 'D' });
+    expect(prompt).toContain('/review');
+    expect(prompt).toContain('/ship');
+    expect(prompt.indexOf('/review')).toBeLessThan(prompt.lastIndexOf('/ship'));
   });
 });

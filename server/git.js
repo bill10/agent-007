@@ -120,7 +120,7 @@ const BRANCH_EXISTS_RE = /a branch named .* already exists|cannot lock ref '[^']
 //
 // `customBranch` never retries — the user asked for that specific name, so a
 // collision is an error to report, not a cue to silently pick something else.
-export async function createWorktree(repoPath, agentName, customBranch) {
+export async function createWorktree(repoPath, agentName, customBranch, { suffixOnCollision = false } = {}) {
   const dirName = repoDirName(repoPath);
   const gitUser = await branchPrefix(repoPath);
   const worktreePath = join(WORKTREE_DIR, dirName, agentName);
@@ -139,6 +139,23 @@ export async function createWorktree(repoPath, agentName, customBranch) {
   };
 
   if (customBranch) {
+    // suffixOnCollision is for names DERIVED from something else — the job
+    // board builds a branch from the job title, and two jobs may reasonably
+    // share a title ("fix flaky test"). A hard failure there would strand the
+    // job forever, so walk -2, -3, ... the same way the cocktail pool does.
+    //
+    // A name the USER typed still fails loudly: they asked for that specific
+    // branch, so a collision is something to report, not to silently rename.
+    if (suffixOnCollision) {
+      const MAX_SUFFIX = 50;
+      for (let n = 1; n <= MAX_SUFFIX; n++) {
+        const candidate = n === 1 ? customBranch : `${customBranch}-${n}`;
+        const result = await attempt(candidate);
+        if (result.branchTaken) continue;
+        return result;
+      }
+      return { error: `Could not find a free branch name based on "${customBranch}"` };
+    }
     const result = await attempt(customBranch);
     if (result.branchTaken) {
       return { error: `Branch "${result.branchName}" already in use — choose a different agent name` };
