@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.10.0] - 2026-08-28
+
+### Changed
+
+- Clicking a job that is in progress now opens that agent's terminal. Before,
+  only the small status pill at the bottom of the card was a jump target, which
+  is a hard thing to find and a harder thing to hit; the obvious gesture, which
+  is to click the job you want to look at, did nothing. The whole card is now
+  the target, and it lights up on hover to say so. The pill still works and
+  remains the keyboard path, so nothing that used to work has moved. Clicks on
+  the card's own buttons, on its pull request link, and clicks that finish
+  selecting text on the card are all left alone.
+
 ## [0.3.9.0] - 2026-08-28
 
 ### Changed

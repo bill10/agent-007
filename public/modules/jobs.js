@@ -111,6 +111,14 @@ function renderCard(job) {
   card.className = 'job-card' + (status ? ` status-${status}` : '');
   card.dataset.jobId = job.id;
 
+  // An in-progress job whose agent is still around is a jump target. The badge
+  // below stays clickable, but the whole card is a far bigger hit area than a
+  // one-line pill, and "click the job to see the agent" is what the columns
+  // already imply.
+  const liveAgentId = job.state === 'in-progress' && job.agentSessionId && agents.has(job.agentSessionId)
+    ? job.agentSessionId
+    : null;
+
   const title = document.createElement('div');
   title.className = 'job-card-title';
   title.textContent = job.title;
@@ -155,13 +163,13 @@ function renderCard(job) {
     const badge = document.createElement('button');
     badge.className = `job-card-status job-status-${status}`;
     badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml(STATUS_TEXT[status] || status)}`;
-    const canJump = job.agentSessionId && agents.has(job.agentSessionId);
+    const canJump = !!liveAgentId;
     badge.title = canJump
       ? `Open ${job.agentName}'s terminal`
       : 'This agent is no longer running';
     badge.onclick = (e) => {
       e.stopPropagation();
-      if (canJump) switchToSession(job.agentSessionId);
+      if (canJump) switchToSession(liveAgentId);
     };
     if (!canJump) badge.disabled = true;
     card.appendChild(badge);
@@ -207,6 +215,24 @@ function renderCard(job) {
   }
 
   card.appendChild(renderCardActions(job));
+
+  if (liveAgentId) {
+    // Pointer affordance only. The card holds buttons and a link, so giving it
+    // role="button" would flatten them out of the accessibility tree, and a
+    // second tab stop would just duplicate the status badge — which is already
+    // a real button that jumps to the same place.
+    card.classList.add('job-card-live');
+    card.title = `Open ${job.agentName || 'this agent'}'s terminal`;
+    card.onclick = (e) => {
+      // The buttons and the PR link own their own clicks, and a click that ends
+      // a selection inside this card is someone reading it, not asking to leave.
+      if (e.target.closest && e.target.closest('button, a')) return;
+      const sel = window.getSelection?.();
+      if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
+      switchToSession(liveAgentId);
+    };
+  }
+
   return card;
 }
 
