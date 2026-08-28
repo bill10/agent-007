@@ -5,7 +5,7 @@ import { homedir } from 'os';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
-import { writeMcpConfig, removeMcpConfig, withMcpConfig } from './agent-mcp.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
@@ -58,7 +58,10 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // startup, and parked on the session below so resolveAgentToken can find its
   // way back from a request to the agent that made it.
   const agentToken = mintAgentToken();
-  const mcpConfigPath = writeMcpConfig(sessionId, agentToken);
+  // Only for a command that can actually read it. Writing one for every session
+  // would put a live board credential on disk for terminals that have no way to
+  // use it — a plain `bash` tab does not need one.
+  const mcpConfigPath = takesMcpConfig(file) ? writeMcpConfig(sessionId, agentToken) : null;
   const spawnArgs = withMcpConfig(file, args, mcpConfigPath);
 
   let ptyProcess;

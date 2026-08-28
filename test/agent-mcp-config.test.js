@@ -14,7 +14,7 @@ const DIR = mkdtempSync(join(tmpdir(), 'a007-mcp-'));
 process.env.AGENT007_MCP_DIR = DIR;
 
 const {
-  writeMcpConfig, removeMcpConfig, mcpConfigPath, mcpConfigBody,
+  writeMcpConfig, removeMcpConfig, sweepMcpConfigs, mcpConfigPath, mcpConfigBody,
   withMcpConfig, takesMcpConfig, boardBaseUrl, MCP_SERVER_NAME,
 } = await import('../server/agent-mcp.js');
 
@@ -80,6 +80,39 @@ describe('which commands take --mcp-config', () => {
     for (const cmd of ['gemini', 'codex', 'aider', 'bash', '/usr/local/bin/gemini', '']) {
       expect(takesMcpConfig(cmd)).toBe(false);
     }
+  });
+
+  it('recognises the Windows launcher', () => {
+    // On Windows the thing on PATH is claude.cmd. Spelling it out would
+    // otherwise silently get no tool at all.
+    // Backslash paths are deliberately not asserted: path.basename only splits
+    // on them when running ON Windows, so such a case would test Node, not this.
+    for (const cmd of ['claude.cmd', 'claude.exe', 'claude.CMD']) {
+      expect(takesMcpConfig(cmd)).toBe(true);
+    }
+    expect(takesMcpConfig('gemini.cmd')).toBe(false);
+  });
+});
+
+describe('stale configs from a previous run', () => {
+  it('are swept at boot, so dead credentials do not pile up', () => {
+    // Files are removed when their PTY exits, but a crash or a plain restart
+    // never runs that handler. Without a sweep every run leaves its tokens
+    // behind for ever.
+    writeMcpConfig('session-1', 'tok-1');
+    writeMcpConfig('session-2', 'tok-2');
+    sweepMcpConfigs();
+    expect(existsSync(mcpConfigPath('session-1'))).toBe(false);
+    expect(existsSync(mcpConfigPath('session-2'))).toBe(false);
+  });
+
+  it('sweeps cleanly when nothing is there yet', () => {
+    expect(() => sweepMcpConfigs()).not.toThrow();
+  });
+
+  it('leaves the directory usable afterwards', () => {
+    sweepMcpConfigs();
+    expect(writeMcpConfig('session-9', 'tok')).toBe(mcpConfigPath('session-9'));
   });
 });
 

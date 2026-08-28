@@ -31,6 +31,7 @@ import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verify
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans } from './server/state.js';
+import { sweepMcpConfigs } from './server/agent-mcp.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -145,6 +146,14 @@ setupWebSocket(wss, { createSession, killSession });
 
 // --- Startup ---
 async function startup() {
+  // Agent MCP configs are removed when their PTY exits; a crash or a restart
+  // never runs that handler, so clear whatever the last run left behind.
+  //
+  // Inside startup(), NOT at module scope: importing server.js must not delete
+  // anything. test/server.test.js imports this file before it sets PORT, so a
+  // module-scope sweep would target the default port and wipe the configs of a
+  // real server running on 7007 while the suite ran.
+  sweepMcpConfigs();
   loadConfig();
   recoverCrashedSessions(broadcast);
   mkdirSync(WORKTREE_DIR, { recursive: true });

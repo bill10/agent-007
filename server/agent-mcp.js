@@ -12,8 +12,13 @@ import { PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
 // Alongside config.json and users.json rather than in the worktree: a config
 // file dropped into the repo the agent is working in would show up in
 // `git status` and eventually in somebody's commit.
+//
+// Keyed by port, which is what makes sweepMcpConfigs() safe. Two Agent 007
+// servers on one machine necessarily hold different ports, so a boot-time sweep
+// of this directory can only ever delete files from a previous run of THIS
+// instance — never a live file belonging to one running alongside it.
 export const MCP_CONFIG_DIR = process.env.AGENT007_MCP_DIR
-  || join(homedir(), '.agent-007', 'mcp');
+  || join(homedir(), '.agent-007', 'mcp', String(PORT));
 
 // The server name the agent sees. Tools are namespaced by it
 // (mcp__agent-007-board__post_job), so it must not collide with a server the
@@ -80,14 +85,35 @@ export function removeMcpConfig(sessionId) {
   }
 }
 
+// Called once at boot. Files are normally removed when their PTY exits, but a
+// crash or a plain restart kills every agent without that handler running, so
+// each previous run leaves its credentials behind and they accumulate for ever.
+// They are dead credentials — resolveAgentToken only honours a token belonging
+// to a live session — but a directory of files that LOOK like live tokens is
+// not something to leave lying around.
+//
+// Safe because no session exists yet at boot, and because the directory is
+// per-port: it cannot contain a file belonging to another running instance.
+export function sweepMcpConfigs() {
+  try {
+    rmSync(MCP_CONFIG_DIR, { recursive: true, force: true });
+  } catch (err) {
+    console.error('Could not clear stale MCP configs:', err.message);
+  }
+}
+
 // Only Claude Code takes `--mcp-config`. Verified against the other agents a
 // user might reasonably type here: Gemini CLI has no per-invocation MCP config
 // flag at all (only `gemini mcp add`, which mutates its persistent settings),
 // and Codex configures MCP through ~/.codex/config.toml. Appending the flag to
 // either would be an unknown-option error and a failed spawn, so the rule is:
 // inject for `claude`, pass everything else through untouched.
+// On Windows the thing on PATH is `claude.cmd`, and a user who spells that out
+// would otherwise silently get no tool at all.
+const WINDOWS_EXEC_EXT = /\.(cmd|exe|bat|ps1)$/i;
+
 export function takesMcpConfig(file) {
-  return basename(String(file || '')) === 'claude';
+  return basename(String(file || '')).replace(WINDOWS_EXEC_EXT, '') === 'claude';
 }
 
 /**

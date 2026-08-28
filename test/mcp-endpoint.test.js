@@ -190,6 +190,15 @@ describe('posting a job through the tool', () => {
     expect(allJobs()).toHaveLength(0);
   });
 
+  it('carries postedByAgent out to the client on the board payload', async () => {
+    // The seam between the stored job and the rendered card. jobsPayload spreads
+    // the job today, but if it ever grows a field whitelist the "via <agent>"
+    // credit would vanish silently and both other tests would still pass.
+    await callTool({ title: 'Add rate limiting' });
+    const payload = broadcasts.find(m => m.type === 'jobs-list');
+    expect(payload.jobs[0].postedByAgent).toBe('Onyx');
+  });
+
   it('repaints every open board and announces the card', async () => {
     // The user may be looking at a terminal, not the board tab.
     await callTool({ title: 'Add rate limiting' });
