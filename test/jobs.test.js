@@ -349,6 +349,25 @@ describe('dispatch defaults', () => {
     expect(prompt).toContain('/ship');
     expect(prompt.indexOf('/review')).toBeLessThan(prompt.lastIndexOf('/ship'));
   });
+
+  it('forbids ending the turn before the PR exists', () => {
+    // An agent finished its task and /review, then ended its turn with "Next is
+    // /ship" — treating the sequence as a plan to report on rather than one to
+    // finish. Nobody was there to say "continue", so the job stalled at a
+    // prompt with all its work uncommitted. The instruction has to close that
+    // stopping point off explicitly.
+    const prompt = buildJobPrompt({ title: 'T' });
+    expect(prompt).toMatch(/do not end your turn until \/ship/i);
+    // And it must name the specific failure, not just assert the rule.
+    expect(prompt).toMatch(/describe what you would do next/i);
+  });
+
+  it('still allows stopping for a real question or a hard failure', () => {
+    // The rule must not read as "never stop", or an agent that genuinely needs
+    // the user will thrash instead of asking.
+    const prompt = buildJobPrompt({ title: 'T' });
+    expect(prompt).toMatch(/question you genuinely cannot answer|failure you cannot get past/i);
+  });
 });
 
 // --- Permission mode is argv, so it must be an allowlist ---
