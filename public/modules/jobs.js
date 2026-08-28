@@ -264,6 +264,14 @@ function renderToolbar() {
 // --- Form ---
 
 function openForm(jobId) {
+  // The agent spawn form is an overlay anchored below the 36px header strip,
+  // and it sizes to its own content rather than covering the viewport, so the
+  // board's toolbar and cards stay clickable underneath it. Every door into
+  // this form goes through here, so this is the one place that has to dismiss
+  // it — otherwise the form opens behind the overlay and focuses a title input
+  // the user cannot see, swallowing whatever they type next.
+  const spawn = document.getElementById('spawn-form');
+  if (spawn) spawn.style.display = 'none';
   editingJobId = jobId || null;
   const form = document.getElementById('job-form');
   const titleEl = document.getElementById('job-title');
@@ -323,18 +331,13 @@ function saveForm() {
   closeForm();
 }
 
-// Opening the form from outside the board — the top bar's "+ Job" button.
-// Two things have to happen before the form is any use. The board may not be
-// the visible tab, so bring it up first. And the agent spawn form is an
-// app-wide overlay anchored below the 40px header strip, which leaves both
-// header buttons clickable underneath it: left up, it would hide this form
-// while openForm() focused its title input, swallowing everything the user
-// typed next. app.js closes this form on the way in the other direction.
-// The tab strip repaints itself: showJobBoard() fires the board-visibility
-// hook, which app.js wires to updateTabs().
+// Opening the form from outside the board — the top bar's "+ Job" button. The
+// board may not be the visible tab, so bring it up first; otherwise the form
+// opens where nobody can see it. The tab strip repaints itself: showJobBoard()
+// fires the board-visibility hook, which app.js wires to updateTabs(), and
+// openForm() clears the spawn overlay. app.js closes this form on the way in
+// the other direction.
 export function openJobForm() {
-  const spawn = document.getElementById('spawn-form');
-  if (spawn) spawn.style.display = 'none';
   showJobBoard();
   openForm(null);
 }

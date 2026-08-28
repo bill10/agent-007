@@ -287,6 +287,24 @@ describe('show / hide', () => {
     expect(document.activeElement.id).toBe('job-title');
   });
 
+  it('dismisses the spawn overlay from the board\'s own buttons too', () => {
+    // The overlay sizes to its content instead of covering the viewport, so
+    // the board's toolbar and cards stay clickable underneath it. Every door
+    // into the form has to clear it, not just the top-bar shortcut.
+    handleJobsList({ jobs: [JOB()], settings: {} });
+    const spawn = document.getElementById('spawn-form');
+
+    spawn.style.display = 'flex';
+    document.getElementById('btn-new-job').click();
+    expect(spawn.style.display).toBe('none');
+
+    spawn.style.display = 'flex';
+    const edit = [...document.querySelectorAll('.job-card button')]
+      .find((b) => b.textContent === 'Edit');
+    edit.click();
+    expect(spawn.style.display).toBe('none');
+  });
+
   it('opens the form even on a page with no spawn overlay', () => {
     document.getElementById('spawn-form').remove();
     expect(() => openJobForm()).not.toThrow();
