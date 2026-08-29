@@ -5,6 +5,28 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.11.1] - 2026-08-28
+
+### Fixed
+
+- Agents start on Windows. Spawning or re-spawning one used to kill the whole
+  server with `Cannot create process, error code: 2`, taking every other agent's
+  terminal down with it. `claude` installs from npm as `claude.cmd`, and the
+  Windows console host only ever looks for a `.exe`, so it never found the
+  command it had just been told existed. Agent 007 now hands it the full path to
+  a file Windows can actually launch.
+- Re-spawning an agent whose worktree was deleted says so on that one tab
+  instead of ending the session. Windows reports a missing working directory
+  after the terminal has already been handed back, far too late for the old
+  error path, so the directory is checked before the terminal is opened. Any
+  other console-host failure is now contained to the agent it belongs to.
+- Adding a repository works on Windows. Every path you could type was rejected
+  as "Path must be absolute", because the check looked for a leading slash and
+  an absolute Windows path starts with a drive letter.
+- The repository browser opens where you point it. Typing a Windows path and
+  clicking Browse used to send you to your home directory, and at the top of a
+  drive the "up" entry navigated to itself instead of stopping.
+
 ## [0.3.11.0] - 2026-08-28
 
 ### Added
@@ -46,23 +68,6 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   the UI, so the whole class of problem is gone.
 - The "cannot check for a pull request here" note no longer follows a card into
   the archive still telling the user to move it by hand.
-- Agents start on Windows. Spawning or re-spawning one used to kill the whole
-  server with `Cannot create process, error code: 2`, taking every other agent's
-  terminal down with it. `claude` installs from npm as `claude.cmd`, and the
-  Windows console host only ever looks for a `.exe`, so it never found the
-  command it had just been told existed. Agent 007 now hands it the full path to
-  a file Windows can actually launch.
-- Re-spawning an agent whose worktree was deleted says so on that one tab
-  instead of ending the session. Windows reports a missing working directory
-  after the terminal has already been handed back, far too late for the old
-  error path, so the directory is checked before the terminal is opened. Any
-  other console-host failure is now contained to the agent it belongs to.
-- Adding a repository works on Windows. Every path you could type was rejected
-  as "Path must be absolute", because the check looked for a leading slash and
-  an absolute Windows path starts with a drive letter.
-- The repository browser opens where you point it. Typing a Windows path and
-  clicking Browse used to send you to your home directory, and at the top of a
-  drive the "up" entry navigated to itself instead of stopping.
 
 ### Changed
 
