@@ -44,11 +44,13 @@ function installAsyncSpawnGuard() {
     if (!attempt) return;
 
     // Same teardown as the onExit handler below, so a session that died this
-    // way reports DISCONNECTED rather than sitting at WORKING in the office.
+    // way reports DISCONNECTED rather than sitting at WORKING in the office,
+    // and its board credential does not outlive the process that never ran.
     const { session, broadcast } = attempt;
     session.exited = true;
     clearInterval(session.stateCheckInterval);
     clearTimeout(session.scanTimer);
+    removeMcpConfig(session.id);
     updateState(session, broadcast);
     if (broadcast) broadcast({ type: 'session-ended', sessionId: session.id, reason });
   });
@@ -100,7 +102,8 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // Both of these are checked up front because Windows reports them from the
   // console host *after* spawn() returns — see server/command-path.js. An
   // unusable cwd is the usual re-spawn failure: the agent's worktree was
-  // deleted while it was parked as an orphan.
+  // deleted while it was parked as an orphan. Checked before the token is
+  // minted so a doomed spawn never puts a board credential on disk.
   if (!isUsableCwd(cwd)) {
     return { error: `Working directory no longer exists: ${cwd}` };
   }
