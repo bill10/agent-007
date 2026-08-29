@@ -1,5 +1,6 @@
 // Job board — a pinned tab in the terminal panel. Renders three columns
-// (To do / In progress / Review) and drives the dispatcher settings.
+// (To do / In progress / Review), an archive of finished jobs behind a toolbar
+// toggle, and drives the dispatcher settings.
 //
 // Card *state* comes from the server (durable, persisted). The "needs you"
 // badge is computed here from the live agent map, because it describes a PTY
@@ -11,6 +12,10 @@ import { send } from './ws.js';
 import { escapeHtml } from './auth.js';
 import { switchToSession } from './terminal.js';
 
+// The columns, in board order. `done` deliberately has none: a job whose PR
+// merged is finished work, and a Review column that accumulates it stops
+// meaning "needs your review". Those jobs are kept and reachable through the
+// Finished jobs view below.
 const COLUMNS = [
   { state: 'todo', label: 'To do' },
   { state: 'in-progress', label: 'In progress' },
@@ -21,6 +26,10 @@ const COLUMNS = [
 const STALLED_AFTER_MS = 3 * 60 * 1000;
 
 let editingJobId = null;
+// Which of the two views the board is showing. The columns and the finished
+// list share the same space rather than stacking, so the finished archive can
+// never push the live work off the screen.
+let showingFinished = false;
 
 // --- Helpers ---
 
@@ -68,6 +77,17 @@ export function renderBoard() {
   const container = document.getElementById('job-columns');
   if (!container || !boardActive) return;
 
+  const finished = [...jobs.values()].filter(j => j.state === 'done');
+  const panel = document.getElementById('job-finished');
+  // A page served from cache after an upgrade can have the old markup and the
+  // new module — nothing busts the cache on app.js. Falling back to the columns
+  // beats hiding them to show an archive whose container does not exist.
+  if (!panel) showingFinished = false;
+  renderFinishedToggle(finished.length);
+  if (panel) panel.style.display = showingFinished ? 'flex' : 'none';
+  container.style.display = showingFinished ? 'none' : '';
+  if (showingFinished) return renderFinishedList(finished);
+
   const byState = new Map(COLUMNS.map(c => [c.state, []]));
   for (const job of jobs.values()) {
     if (byState.has(job.state)) byState.get(job.state).push(job);
@@ -103,6 +123,43 @@ export function renderBoard() {
     colEl.appendChild(cards);
     container.appendChild(colEl);
   }
+}
+
+// Newest first: the thing that just merged is the one you are most likely to be
+// looking for.
+function renderFinishedList(finished) {
+  const cards = document.getElementById('job-finished-cards');
+  const count = document.getElementById('job-finished-count');
+  if (!cards) return;
+  const sorted = [...finished].sort((a, b) =>
+    String(b.doneAt || b.prMergedAt || '').localeCompare(String(a.doneAt || a.prMergedAt || '')));
+  if (count) count.textContent = String(sorted.length);
+  cards.innerHTML = '';
+  if (sorted.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'job-column-empty';
+    empty.textContent = 'No finished jobs yet — a card lands here once its pull request merges.';
+    cards.appendChild(empty);
+    return;
+  }
+  for (const job of sorted) cards.appendChild(renderCard(job));
+}
+
+// The title and aria-pressed move with the label: a tooltip still describing the
+// view you just left is worse than no tooltip, and the accent border is the only
+// other thing saying which view you are in — which reaches nobody using a screen
+// reader.
+function renderFinishedToggle(count) {
+  const btn = document.getElementById('btn-finished-jobs');
+  if (!btn) return;
+  btn.textContent = showingFinished
+    ? '\u2190 Back to board'
+    : `View finished jobs${count ? ` (${count})` : ''}`;
+  btn.title = showingFinished
+    ? 'Back to the To do / In progress / Review columns'
+    : 'Jobs whose pull request has merged. They leave the board but are kept here.';
+  btn.setAttribute('aria-pressed', String(showingFinished));
+  btn.classList.toggle('showing', showingFinished);
 }
 
 function renderCard(job) {
@@ -182,6 +239,15 @@ function renderCard(job) {
     note.className = 'job-card-retired';
     note.textContent = 'agent closed · worktree released';
     card.appendChild(note);
+  }
+
+  if (job.state === 'done') {
+    const fin = document.createElement('div');
+    fin.className = 'job-card-finished';
+    fin.textContent = job.prMergedAt
+      ? `merged ${relativeTime(job.prMergedAt)}`
+      : `finished ${relativeTime(job.doneAt)}`;
+    card.appendChild(fin);
   }
 
   // The URL comes from `gh pr list`, but it still ends up in an href, and a
@@ -265,6 +331,20 @@ function renderCardActions(job) {
   }
   if (job.state === 'review') {
     actions.appendChild(mk('← In progress', 'Send back to In progress', () => send({ type: 'job-move', jobId: job.id, state: 'in-progress' })));
+    // The board files a card away by itself once its PR merges; this is the
+    // same move by hand, for a PR the board cannot see or work that landed
+    // some other way. It is one-way — done is the end of a card's life on the
+    // board — so it asks first, the way Delete does.
+    actions.appendChild(mk('✓ Done', 'File this job away as finished. This is final: the card leaves the board for Finished jobs and cannot be brought back.', () => {
+      // Names the agent for the same reason Delete does: this move retires it,
+      // and an agent re-adopted on a shipped branch is one someone is using.
+      const agentNote = job.agentSessionId
+        ? `${job.agentName || 'Its agent'} is closed and its worktree released. `
+        : '';
+      if (confirm(`File "${job.title}" away as finished?\n\n${agentNote}The card leaves the board for Finished jobs and cannot be moved back — follow-up work needs a new job.`)) {
+        send({ type: 'job-move', jobId: job.id, state: 'done' });
+      }
+    }));
   }
   actions.appendChild(mk('Delete', 'Delete this job from the board', () => {
     if (confirm(`Delete "${job.title}"?\n\n${job.agentSessionId ? 'Its agent is closed and the worktree released. Uncommitted or unpushed work is kept as an orphan.' : 'This removes the card.'}`)) {
@@ -306,6 +386,15 @@ function openForm(jobId) {
   const spawn = document.getElementById('spawn-form');
   if (spawn) spawn.style.display = 'none';
   editingJobId = jobId || null;
+  // A new job lands in To do, which the archive is covering. Posting one from
+  // there would look like nothing happened, so the form takes you back to the
+  // columns first — the same move showJobBoard makes. Repainted immediately
+  // rather than waiting for the server's next broadcast, so the form never
+  // opens over a view its result will not appear in.
+  if (showingFinished) {
+    showingFinished = false;
+    renderBoard();
+  }
   const form = document.getElementById('job-form');
   const titleEl = document.getElementById('job-title');
   const detailEl = document.getElementById('job-detail');
@@ -382,6 +471,10 @@ export function closeJobForm() {
 // --- Show / hide ---
 
 export function showJobBoard() {
+  // Always open on the columns. Opening the board is the user asking for the
+  // live work; the archive is somewhere you go on purpose, not somewhere the
+  // Jobs tab can strand you.
+  showingFinished = false;
   const agent = activeSessionId ? agents.get(activeSessionId) : null;
   if (agent) agent.termEl.style.display = 'none';
   document.getElementById('terminal-empty').style.display = 'none';
@@ -431,6 +524,8 @@ export function setupJobBoard() {
   document.getElementById('btn-dispatch-now').onclick = () => {
     send({ type: 'job-dispatch-now' });
   };
+  const finishedBtn = document.getElementById('btn-finished-jobs');
+  if (finishedBtn) finishedBtn.onclick = () => { showingFinished = !showingFinished; renderBoard(); };
   document.getElementById('job-max-per-repo').onchange = (e) => {
     const value = parseInt(e.target.value, 10);
     if (Number.isFinite(value)) send({ type: 'job-settings', maxPerRepo: value });

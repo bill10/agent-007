@@ -5,6 +5,53 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.11.0] - 2026-08-28
+
+### Added
+
+- **A merged pull request takes its card off the board.** Jobs gain a fourth
+  state, `done`, with no column. The Review column exists to hold the short list
+  of things a human still has to look at; letting merged work pile up in it made
+  it an archive nobody read. The job itself is kept, not deleted, with its agent,
+  branch and PR link intact.
+- **View finished jobs.** A toolbar toggle swaps the columns for the archive,
+  newest first, each card saying when it merged. A Review card also gains
+  "✓ Done" to file one away by hand, for a merge the board cannot see; it asks
+  first, because done is the end of a card's life on the board. A finished card
+  cannot be moved back — follow-up work on merged code is a new job, and the
+  archived card is the record to point at. Deleting it is the only other option.
+
+### Fixed
+
+- The board no longer confuses "some pull request on this branch merged" with
+  "this card's pull request merged". `gh pr list --head` matches the head ref
+  *name*, and that name outlives the branch: a merged PR stays in the listing
+  forever, and board branch names are reused once the branch is deleted at
+  retirement. The sweep now matches on the card's own PR number, or on a merge
+  that postdates the current attempt. Without it a stale merge filed a card away
+  while its real pull request was still open, overwriting the card's PR number
+  on the way out so the open one was no longer recorded anywhere.
+- A pull request that opens and merges inside one scan interval no longer
+  strands its job. `--state open` cannot see a merged PR, so the open-PR watcher
+  found nothing and left the card in In progress reading "agent gone" forever,
+  for work that had shipped. The merge sweep now covers In progress as well as
+  Review, and retires the agent when it finishes a job from there.
+- A finished card can no longer be walked back onto the board and re-filed by
+  the next scan. It kept the pull request that finished it, and `reviewAt` stays
+  the sweep's time floor, so a job moved back to In progress carried a spent PR
+  of record into its new attempt: the sweep matched that same old merge within
+  five minutes, filed the card away again, and — because finishing from In
+  progress retires an agent — closed whatever terminal had been re-adopted on
+  the branch. Done is now terminal, enforced on the server rather than only in
+  the UI, so the whole class of problem is gone.
+- The "cannot check for a pull request here" note no longer follows a card into
+  the archive still telling the user to move it by hand.
+
+### Changed
+
+- One `gh auth status` and one `gh auth token` per account now serve a whole
+  scan instead of being re-run for every job, with a one-minute cache. Signing
+  in or out is still picked up promptly.
 ## [0.3.10.1] - 2026-08-28
 
 ### Changed

@@ -179,6 +179,64 @@ durable (persisted in `config.json`). What a live agent is *doing* is derived;
 what the board could not do — a PR check that failed — is stored, because it is
 a fact about the board, not about a PTY.
 
+### The fourth state has no column
+
+A job whose PR has merged is `done`, and `done` is the one state with no
+column. A Review column that accumulates merged work stops meaning
+"needs your review" — the only column whose job is to hold a short list of
+things a human still has to look at becomes an archive nobody reads.
+
+The sweep covers In progress as well as Review: a PR can open and merge inside
+one scan interval, and `--state open` cannot see it afterwards, so a
+Review-only sweep would leave that card in In progress forever reading "agent
+gone" for work that had shipped. Finishing from In progress retires the agent
+(that is what the per-repo cap counts); finishing from Review does not.
+
+The job itself is kept, never deleted: it is the record of what an agent did and
+where the PR is. It is reached through **View finished jobs** in the toolbar,
+which swaps the columns for the archive rather than sitting beside them, so a
+list that only grows can never squeeze the live work.
+
+**Done is terminal.** A finished card cannot be moved back onto the board; the
+only thing that can happen to it is deletion, and the manual `✓ Done` button
+asks before filing a card away because of it. An earlier design let a card
+return to Review, and it could not be made safe: the card keeps the PR that
+finished it, and `reviewAt` is the sweep's time floor, so a job walked back to
+In progress carried a spent PR of record into its new attempt. The sweep matched
+that same old merge on the very next scan and filed the card away again — and
+because finishing from in-progress retires an agent, it killed whatever terminal
+had been re-adopted on the branch. Clearing those fields instead would trade the
+bug for a card whose history is gone, which defeats the point of keeping it.
+Work that follows a merged PR is a new job; the archive keeps the old one to
+point at.
+
+Four rules keep the transition honest:
+
+- **Only MERGED finishes a job.** A PR closed without merging left the work
+  undelivered, and someone still has to decide what to do about it — its card
+  stays on the board.
+- **Only THIS card's merge finishes it.** `gh pr list --head <branch>` matches
+  the head ref *name*, and that name outlives the branch: a merged PR stays in
+  the listing forever, and board branch names are reused once the branch is
+  deleted at retirement. So the sweep matches on the card's own PR number when
+  it has one, and otherwise only accepts a merge that happened after this
+  attempt started. Without that, a stale merge files a card away while its real
+  pull request is still open — and overwrites the card's PR number on the way
+  out, so the open one is no longer recorded anywhere.
+- **`prMergedAt` is written once and never cleared.** Nothing leaves done, so
+  nothing needs to unwind it. It is also what the archive reads to tell a merge
+  from a card filed away by hand: a manual `✓ Done` stamps `doneAt` but not
+  `prMergedAt`, because the board is recording that the *user* called the job
+  finished, which is not a claim about GitHub.
+- **The sweep never retires an agent it finds in Review.** Unlike the one-shot
+  kill at the PR, this runs every scan; an agent you re-adopted on a shipped
+  branch to address review comments is yours. Finishing from In progress is the
+  one exception, and barely one: that is a job leaving in-progress, which is
+  exactly what the per-repo cap counts. A manual move to Done retires it too,
+  because that is the user saying the job is over. Exactly one manual move keeps
+  an agent — a move into In progress, taking the work back up; every other one
+  retires it.
+
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
   `--state-*` tokens rather than introducing a second vocabulary:
@@ -230,12 +288,16 @@ A dispatched agent is an ordinary agent with one difference: its tab opens
 without taking focus (`spawnedBy: 'board'`), because an unattended dispatcher
 firing every five minutes would otherwise move the user's cursor mid-sentence.
 Its tab dot carries a faint outline to show where it came from, and the tab is
-disposed automatically when the agent is retired at its PR.
+disposed automatically when the agent is retired.
 
-Retirement happens ONLY at the moment a job transitions to Review, never as a
-recurring sweep over jobs already there. An agent you re-adopt on a shipped
-branch to address review comments is yours; a poll that killed it every five
-minutes would make Review permanently hostile to working on your own PR.
+Retirement happens when a job LEAVES In progress — to Review when its pull
+request appears, or straight to Done when that pull request opened and merged
+inside a single scan — and on a manual move to Done, which is the user saying
+the job is over. It never happens as a recurring sweep over jobs already in
+Review, and never over a card in the archive, which no longer has an agent to
+retire. An agent you re-adopt on a shipped branch to address review comments is
+yours; a poll that killed it every five minutes would make Review permanently
+hostile to working on your own PR.
 
 ### Agent-posted jobs
 An agent you are talking to can put a card on the board when you ask it to, so

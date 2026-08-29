@@ -75,6 +75,36 @@ describe('restart recovery for in-flight jobs', () => {
   });
 });
 
+describe('restart recovery for finished cards', () => {
+  it('drops the dead agent link on review and done cards, keeping the credit', () => {
+    // Session ids come from a counter that restarts at zero, so a stale
+    // `session-3` on an archived card can later name a completely unrelated
+    // live agent — and deleting that card would kill it and release its
+    // worktree. The name stays: it is the record of who did the work.
+    writeConfig([
+      {
+        id: 'j1', title: 'in review', repoPath: '/r', state: 'review',
+        agentSessionId: 'session-3', agentName: 'Viper',
+        branchName: 'bill/a', prNumber: 1, reviewAt: '2026-08-27T00:00:00Z',
+      },
+      {
+        id: 'j2', title: 'archived', repoPath: '/r', state: 'done',
+        agentSessionId: 'session-3', agentName: 'Apex',
+        branchName: 'bill/b', prNumber: 2,
+        prMergedAt: '2026-08-27T00:00:00Z', doneAt: '2026-08-27T00:00:01Z',
+      },
+    ]);
+    loadConfig();
+    for (const job of config.jobs) expect(job.agentSessionId).toBeNull();
+    expect(config.jobs[0].agentName).toBe('Viper');
+    expect(config.jobs[1].agentName).toBe('Apex');
+    // Nothing else about a finished card moves.
+    expect(config.jobs[1].state).toBe('done');
+    expect(config.jobs[1].prMergedAt).toBe('2026-08-27T00:00:00Z');
+  });
+
+});
+
 describe('stale agent links after a restart', () => {
   it('clears the session link on a review job too, not just in-flight ones', () => {
     // Session ids are only unique within a process generation, so a link kept

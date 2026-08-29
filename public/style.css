@@ -1253,6 +1253,21 @@ body {
 
 .job-dispatcher { display: flex; align-items: center; gap: 8px; }
 
+/* Same shape as the dispatcher controls — it is a view switch, not an action,
+   so it stays quiet until it is the view you are in. */
+.job-finished-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.job-finished-btn:hover { border-color: var(--accent); color: var(--accent); }
+.job-finished-btn.showing { color: var(--accent); border-color: var(--accent); }
+
 .job-run-toggle,
 .job-run-now {
   padding: 4px 10px;
@@ -1396,6 +1411,35 @@ body {
   color: var(--text-dim);
   text-align: center;
 }
+
+/* --- Finished jobs --- */
+
+/* Takes the columns' place rather than sitting beside them, so an archive that
+   only grows can never squeeze the live work. */
+.job-finished {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.job-finished-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: var(--bg-tabs);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.job-finished-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.job-finished-count { font-size: 10px; color: var(--text-dim); }
 
 /* --- Cards --- */
 
@@ -1555,6 +1599,15 @@ body {
 }
 
 .job-card-retired {
+  font-size: 9px;
+  color: var(--text-dim);
+  opacity: 0.8;
+}
+
+/* Every card in the archive carries this line, so a colour here would be pure
+   decoration — it differentiates nothing. Matches .job-card-retired exactly:
+   both are 9px card metadata that has stopped being actionable. */
+.job-card-finished {
   font-size: 9px;
   color: var(--text-dim);
   opacity: 0.8;

@@ -17,7 +17,8 @@ import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
-  parsePrList, branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
+  parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
+  branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN,
 } from '../lib/jobs.js';
@@ -73,6 +74,27 @@ export function broadcastJobs(broadcast) {
 function persist(broadcast) {
   saveConfig(broadcast);
   broadcastJobs(broadcast);
+}
+
+// --- PR-check notes ---
+
+// Why the board cannot see this job's pull request, written onto the card.
+// Shared by both sweeps: they ask GitHub different questions but report the
+// answer the same way, under the same rule — write only when the text changes,
+// so a permanent failure does not rewrite config.json every scan. Each returns
+// whether it actually changed anything, so a caller can decide to persist.
+function notePrCheckError(job, message) {
+  if (job.prCheckError === message) return false;
+  job.prCheckError = message;
+  job.prCheckErrorAt = new Date().toISOString();
+  return true;
+}
+
+function clearPrCheckError(job) {
+  if (!job.prCheckError) return false;
+  job.prCheckError = null;
+  job.prCheckErrorAt = null;
+  return true;
 }
 
 // --- CRUD ---
@@ -199,8 +221,9 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   return { job: removed };
 }
 
-// Manual move (the buttons on a card). Kept deliberately permissive: automatic
-// transitions can be wrong, so the user always has the last word.
+// Manual move (the buttons on a card). Permissive everywhere the card is still
+// on the board, because automatic transitions can be wrong and the user should
+// have the last word — with one exception, below: done is terminal.
 //
 // Moving back to To do also RETIRES the job's agent. Unlinking it without
 // killing it left a running agent that no job pointed at: it no longer counted
@@ -213,6 +236,21 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
+  // Done is terminal. A finished card is the record of work that shipped, and
+  // the only thing that can happen to it is deletion.
+  //
+  // It is enforced here and not just in the UI because letting a card back onto
+  // the board could not be made safe. The card keeps the PR that finished it,
+  // and reviewAt is the sweep's time floor, so a job walked back to In progress
+  // carried a spent PR of record into its new attempt: checkMergedPullRequests
+  // re-matched that same old merge on the very next scan and filed the card
+  // away again — killing whatever agent had been re-adopted on the branch,
+  // because finishing from in-progress retires one. Clearing those fields would
+  // just trade that for a card whose history is gone. Work that follows a
+  // merged PR is a new job, and the archive keeps the old one to point at.
+  if (job.state === 'done') {
+    return { error: 'That job is finished — post a new job for follow-up work, or delete this card' };
+  }
   // A job with no branch has never been dispatched, so nothing can move it out
   // of in-progress again: the dispatcher only looks at todo, and the PR watcher
   // only at jobs with a branch. Accepting the move would strand it forever.
@@ -226,7 +264,15 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // being the same set — because countInFlightByRepo stops counting a job the
   // moment it leaves in-progress. The agent would keep a worktree and a PTY
   // while the board dispatched a replacement past the cap.
-  const retiringSessionId = (state === 'todo' || state === 'review') ? job.agentSessionId : null;
+  //
+  // "Done" retires it for the same reason and one more: a finished card is off
+  // the board, so an agent still attached to it would be running with nothing
+  // visible pointing at it. (The automatic merge sweep deliberately does NOT do
+  // this — see checkMergedPullRequests.)
+  //
+  // One move keeps the agent, and it is the one that means "I am still working
+  // on this": a move INTO in-progress, taking the work back up.
+  const retiringSessionId = state === 'in-progress' ? null : job.agentSessionId;
   job.state = state;
   if (state === 'todo') {
     job.agentSessionId = null;
@@ -237,13 +283,19 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     job.prUrl = null;
     job.prNumber = null;
     job.reviewAt = null;
-    // Also the PR-check note: it describes an attempt that no longer exists, so
-    // carrying it onto a fresh To do card would report a failure against work
-    // that has not been tried yet.
-    job.prCheckError = null;
-    job.prCheckErrorAt = null;
   }
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
+  // Stamped on arrival, and never cleared, because nothing leaves done. A job
+  // finished by hand gets a doneAt but no prMergedAt: the board is recording
+  // that the USER called it finished, which is not a claim about GitHub.
+  if (state === 'done') job.doneAt = new Date().toISOString();
+  // The note explaining why the board could not check this job's PR describes an
+  // attempt the user is now overriding by hand, so it must not survive the move:
+  // not onto a fresh To do card, where it would report a failure against work
+  // that has not been tried yet, and not into the archive, where it would still
+  // be telling the user to move the card by hand. The Review case is handled
+  // below, where a successful lookup clears it too.
+  if (state !== 'review') clearPrCheckError(job);
   // A manual move means "the PR was opened outside the board". Look it up, or
   // the card sits in Review with no link to the thing it produced — nothing
   // else backfills it, since the watcher only examines in-progress jobs.
@@ -484,22 +536,67 @@ async function ghToken(login) {
 // instead of a walk. Memory only; a stale guess costs one retry.
 const ghAccountForRepo = new Map();
 
+// The account list and its tokens are the same for every job in a scan, but the
+// walk is per job — so without this a scan over N jobs pays N `gh auth status`
+// plus N-per-account `gh auth token` subprocess spawns for answers that cannot
+// have changed. Short TTL rather than a per-scan cache because both sweeps and
+// the "Run now" button walk independently; a minute is long enough to collapse
+// a scan and short enough that signing in or out is picked up promptly.
+const GH_AUTH_TTL_MS = 60_000;
+const ghAuthCache = new Map();   // key -> { at, value }
+
+async function ghCached(key, produce) {
+  const hit = ghAuthCache.get(key);
+  if (hit && Date.now() - hit.at < GH_AUTH_TTL_MS) return hit.value;
+  const value = await produce();
+  ghAuthCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+const ghAccountsCached = () => ghCached('accounts', ghAccounts);
+const ghTokenCached = (login) => ghCached(`token:${login}`, () => ghToken(login));
+
+// Names the command in a failure message, so "…failed (tried 2 accounts)" says
+// what was actually run rather than leaving the reader to guess.
+const GH_PR_LIST = 'gh pr list';
+
+// First line only: gh errors are one useful line plus usage noise.
+function ghErrorDetail(err) {
+  return String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
+}
+
 async function prListOnce(repoPath, branchName, token) {
   try {
-    const stdout = await runGh(
-      ['pr', 'list', '--head', branchName, '--state', 'open', '--json', 'number,url,state,isDraft'],
-      { cwd: repoPath, token },
-    );
+    const stdout = await runGh(openPrListArgs(branchName), { cwd: repoPath, token });
     return { pr: parsePrList(stdout) };
   } catch (err) {
-    // First line only: gh errors are one useful line plus usage noise.
-    const detail = String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
-    return { error: detail || 'gh pr list failed' };
+    return { error: ghErrorDetail(err) || `${GH_PR_LIST} failed` };
   }
 }
 
-// `gh pr list` against the repo, filtered to the job's branch. Runs in the main
-// repo (not the worktree) so it still works after the worktree is removed.
+// The merged twin of prListOnce. `--state merged` rather than reading the state
+// off the open query, because gh's default listing is open-only: a merged PR
+// simply vanishes from it, which is indistinguishable from a branch that never
+// had one.
+async function mergedPrListOnce(repoPath, branchName, token, match) {
+  try {
+    const stdout = await runGh(mergedPrListArgs(branchName), { cwd: repoPath, token });
+    return { pr: parseMergedPr(stdout, match) };
+  } catch (err) {
+    return { error: ghErrorDetail(err) || `${GH_PR_LIST} failed` };
+  }
+}
+
+// Is this even a path we can ask gh about? Cheap local checks first, so a
+// removed repo or an undispatched job never shells out at all.
+async function isQueryableRepo(repoPath, branchName) {
+  if (!repoPath || !branchName || !existsSync(repoPath)) return false;
+  try {
+    return !!(await gitExec(['-C', repoPath, 'rev-parse', '--git-dir']));
+  } catch { return false; }
+}
+
+// The account walk, shared by every gh lookup.
 //
 // Tries EVERY signed-in gh account before giving up. One machine can hold
 // several, and a private repo is usually visible to exactly one of them — this
@@ -508,25 +605,14 @@ async function prListOnce(repoPath, branchName, token) {
 // `Could not resolve to a Repository` from the active account while another
 // account on the same machine could see the repo perfectly well.
 //
-// Returns { pr } on a successful query — pr null meaning "no PR yet" — or
-// { pr: null, error } only when EVERY account failed. An earlier version
-// collapsed both into null, so a repo the board could never see looked exactly
-// like a branch with no PR, and its jobs sat in progress forever unexplained.
+// `query(token)` runs one lookup and returns `{ error }` to mean "this account
+// cannot see the repo" or anything else to mean success. A success ends the
+// walk and is handed back verbatim, so each lookup keeps its own return shape.
 //
-// The three collaborators are injectable for the same reason createSession and
-// killSession are: otherwise the account walk — ordering, dedup, remembering,
-// error aggregation — is only reachable by talking to real GitHub accounts.
-export async function findPrForBranch(repoPath, branchName, {
-  listAccounts = ghAccounts,
-  tokenFor = ghToken,
-  prList = prListOnce,
-} = {}) {
-  if (!repoPath || !branchName || !existsSync(repoPath)) return { pr: null };
-  try {
-    const stdout = await gitExec(['-C', repoPath, 'rev-parse', '--git-dir']);
-    if (!stdout) return { pr: null };
-  } catch { return { pr: null }; }
-
+// The collaborators are injectable for the same reason createSession and
+// killSession are: otherwise the walk — ordering, dedup, remembering, error
+// aggregation — is only reachable by talking to real GitHub accounts.
+async function walkGhAccounts(repoPath, query, { listAccounts = ghAccountsCached, tokenFor = ghTokenCached, label = GH_PR_LIST } = {}) {
   // Label for a lookup that uses no explicit token — whatever gh picks itself.
   const AMBIENT = 'signed-in account';
   const tried = [];
@@ -535,7 +621,7 @@ export async function findPrForBranch(repoPath, branchName, {
   const attempt = async (label, token) => {
     if (tried.includes(label)) return null;
     tried.push(label);
-    const result = await prList(repoPath, branchName, token);
+    const result = await query(token);
     // Detail only — the account list in the final message names who was tried,
     // and the errors are almost always identical across accounts anyway.
     if (result.error) { failures.push(result.error); return null; }
@@ -548,7 +634,7 @@ export async function findPrForBranch(repoPath, branchName, {
     const token = await tokenFor(remembered);
     if (token) {
       const hit = await attempt(remembered, token);
-      if (hit) return hit;
+      if (hit) return { ok: true, result: hit };
     }
   }
 
@@ -564,21 +650,112 @@ export async function findPrForBranch(repoPath, branchName, {
     const token = await tokenFor(login);
     if (!token) continue;
     const hit = await attempt(login, token);
-    if (hit) { ghAccountForRepo.set(repoPath, login); return hit; }
+    if (hit) { ghAccountForRepo.set(repoPath, login); return { ok: true, result: hit }; }
   }
 
   // 3. Last resort: no explicit token. Covers a token supplied through the
   //    environment, an enterprise host, and older gh versions whose auth status
   //    this cannot enumerate.
   const ambient = await attempt(AMBIENT, undefined);
-  if (ambient) { ghAccountForRepo.delete(repoPath); return ambient; }
+  if (ambient) { ghAccountForRepo.delete(repoPath); return { ok: true, result: ambient }; }
 
   ghAccountForRepo.delete(repoPath);
   const plural = tried.length === 1 ? '' : 's';
   return {
-    pr: null,
-    error: `${failures[0] || 'gh pr list failed'} (tried ${tried.length} account${plural}: ${tried.join(', ')})`,
+    ok: false,
+    error: `${failures[0] || `${label} failed`} (tried ${tried.length} account${plural}: ${tried.join(', ')})`,
   };
+}
+
+// `gh pr list` against the repo, filtered to the job's branch. Runs in the main
+// repo (not the worktree) so it still works after the worktree is removed.
+//
+// Returns { pr } on a successful query — pr null meaning "no PR yet" — or
+// { pr: null, error } only when EVERY account failed. An earlier version
+// collapsed both into null, so a repo the board could never see looked exactly
+// like a branch with no PR, and its jobs sat in progress forever unexplained.
+// Guard, walk, unwrap — identical for both branch lookups; only the query
+// differs. They stay two named exports rather than one function with a flag so
+// each call site says which question it is asking.
+async function branchPrLookup(repoPath, branchName, query, { listAccounts, tokenFor, label }) {
+  if (!(await isQueryableRepo(repoPath, branchName))) return { pr: null };
+  const walked = await walkGhAccounts(repoPath, query, { listAccounts, tokenFor, label });
+  return walked.ok ? walked.result : { pr: null, error: walked.error };
+}
+
+export async function findPrForBranch(repoPath, branchName, {
+  listAccounts = ghAccountsCached,
+  tokenFor = ghTokenCached,
+  prList = prListOnce,
+} = {}) {
+  return branchPrLookup(repoPath, branchName, token => prList(repoPath, branchName, token),
+    { listAccounts, tokenFor, label: GH_PR_LIST });
+}
+
+// The same lookup, asking instead whether the branch's PR has MERGED. Same
+// account walk, same error contract — { pr: null } means "not merged (yet)",
+// and an error means nobody could see the repo.
+//
+// `prNumber` and `mergedAfter` are what make the answer about THIS card rather
+// than about the branch name — see parseMergedPr for why the distinction is not
+// academic. They are passed on to the parser, not to gh: `gh pr list` has no
+// way to ask "the merge of PR #7", only "merges on this head ref".
+export async function findMergedPrForBranch(repoPath, branchName, {
+  listAccounts = ghAccountsCached,
+  tokenFor = ghTokenCached,
+  prList = mergedPrListOnce,
+  prNumber = null,
+  mergedAfter = null,
+} = {}) {
+  const match = { number: prNumber, mergedAfter };
+  return branchPrLookup(repoPath, branchName, token => prList(repoPath, branchName, token, match),
+    { listAccounts, tokenFor, label: `${GH_PR_LIST} --state merged` });
+}
+
+// Close the agent that delivered a job, resolving it by branch when the stored
+// link is gone. This is what keeps the per-repo cap meaningful: in-progress jobs
+// and live agents stay the same set, so nothing accumulates. killSession ->
+// removeWorktree deletes the worktree and the local branch (fully pushed by
+// then); the PR is untouched. The card keeps the whole record — agent name,
+// branch, PR link — so nothing is lost by the terminal going away, and the work
+// itself is on the remote.
+//
+// Resolved by branch because a restart nulls every agentSessionId, so a job
+// whose PR is discovered afterwards would otherwise have nothing to retire and
+// its agent would hold a worktree for already-delivered work indefinitely. The
+// branch finds it: created per job, not reused while it exists, durable across
+// restarts.
+//
+// Called ONLY at the moment a job leaves in-progress — to Review when its PR
+// appears, or straight to Done when the merge sweep catches a PR that opened and
+// merged inside one scan — never over jobs already in Review. An agent you
+// re-adopt on a shipped branch to address review comments is yours; a poll that
+// killed it every five minutes would make Review permanently hostile to working
+// on your own PR.
+//
+// Returns whether it actually closed something. A failure is logged and
+// swallowed: the work has shipped either way, so a cleanup that did not work
+// must not strand the card in In progress.
+async function retireAgentForJob(job, askedBranch, askedSessionId, killSession) {
+  if (!killSession) return false;
+  const linked = askedSessionId && askedSessionId === job.agentSessionId
+    ? sessions.get(askedSessionId)
+    : null;
+  const session = linked || [...sessions.values()].find(candidate =>
+    candidate && !candidate.exited
+    && candidate.branchName === askedBranch
+    && candidate.repoPath === job.repoPath,
+  );
+  if (!session || session.exited) return false;
+  try {
+    if (!job.agentName) job.agentName = session.name;
+    await killSession(session.id);
+    job.agentSessionId = null;   // only after the kill actually succeeded
+    return true;
+  } catch (err) {
+    console.error(`Failed to close agent for job "${job.title}":`, err.message);
+    return false;
+  }
 }
 
 // `findPr` is injected for the same reason createSession and killSession are:
@@ -617,22 +794,14 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
       // one. Written only when the text changes, so a permanent failure does
       // not rewrite config.json every five minutes.
       const message = `Cannot check for a pull request here — ${error}. This job stays put until you move it by hand.`;
-      if (job.prCheckError !== message) {
-        job.prCheckError = message;
-        job.prCheckErrorAt = new Date().toISOString();
-        noted = true;
-      }
+      if (notePrCheckError(job, message)) noted = true;
       continue;
     }
 
     // The query worked, so a previous "cannot check" note is wrong — clear it
     // even when there is still no PR, or a repo that regained access would keep
     // claiming it was unreachable until a PR happened to appear.
-    if (job.prCheckError) {
-      job.prCheckError = null;
-      job.prCheckErrorAt = null;
-      noted = true;
-    }
+    if (clearPrCheckError(job)) noted = true;
 
     if (!pr) continue;
     job.state = 'review';
@@ -645,46 +814,7 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     job.lastErrorAt = null;
     moved.push(job);
 
-    // Always retire the agent. This is what keeps the per-repo cap meaningful:
-    // in-progress jobs and live agents stay the same set, so nothing
-    // accumulates. killSession -> removeWorktree deletes the worktree and the
-    // local branch (fully pushed by then); the PR is untouched. The card keeps
-    // the whole record — agent name, branch, PR link — so nothing is lost by
-    // the terminal going away, and the work itself is on the remote.
-    // Retire the agent, resolving it by branch when the stored link is gone.
-    //
-    // A restart nulls every agentSessionId, so a job whose PR is discovered
-    // afterwards would reach review with nothing to retire, and its agent would
-    // hold a worktree for already-delivered work indefinitely. The branch finds
-    // it: created per job, not reused while it exists, durable across restarts.
-    //
-    // Deliberately only at the moment of transition, never as a recurring sweep
-    // over jobs already in review. An agent you re-adopt on a shipped branch to
-    // address review comments is yours; a poll that killed it every five minutes
-    // would make Review permanently hostile to working on your own PR.
-    let closed = false;
-    if (killSession) {
-      const linked = askedSessionId && askedSessionId === job.agentSessionId
-        ? sessions.get(askedSessionId)
-        : null;
-      const session = linked || [...sessions.values()].find(candidate =>
-        candidate && !candidate.exited
-        && candidate.branchName === askedBranch
-        && candidate.repoPath === job.repoPath,
-      );
-      if (session && !session.exited) {
-        try {
-          if (!job.agentName) job.agentName = session.name;
-          await killSession(session.id);
-          job.agentSessionId = null;   // only after the kill actually succeeded
-          closed = true;
-        } catch (err) {
-          // A failed cleanup must not strand the card in In progress: the PR
-          // is open either way, so the job is genuinely ready for review.
-          console.error(`Failed to close agent for job "${job.title}":`, err.message);
-        }
-      }
-    }
+    const closed = await retireAgentForJob(job, askedBranch, askedSessionId, killSession);
     if (broadcast) {
       broadcast({
         type: 'notification', level: 'info',
@@ -695,6 +825,102 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
   }
   if (moved.length > 0 || noted) persist(broadcast);
   return moved;
+}
+
+// -> Done, once the PR has merged.
+//
+// A merged PR is finished work. Leaving its card in Review means the column
+// slowly fills with things nobody has to look at again, and stops meaning
+// "needs your review" — so the card leaves the board while the job itself is
+// kept, reachable through Finished jobs.
+//
+// Covers In progress as well as Review, because a PR can open and merge inside
+// one scan interval and `gh pr list --state open` cannot see it afterwards: the
+// open query returns nothing, so checkPullRequests leaves the job in progress,
+// and a Review-only sweep would never look at it. That card would sit in In
+// progress forever reading "agent gone", holding a slot on the Jobs tab badge,
+// for work that had actually shipped — the exact case this whole change exists
+// to file away.
+//
+// Deliberately narrower than checkPullRequests in three ways:
+//
+//  - Only MERGED counts, and only THIS card's merge (see parseMergedPr). A PR
+//    closed without merging left the work undelivered and someone still has to
+//    decide what to do about it, so its card stays.
+//  - No agent is retired when finishing from REVIEW. An agent you re-adopted on
+//    a shipped branch to address review comments is yours, and this runs every
+//    scan — the same reasoning that keeps checkPullRequests' kill at the moment
+//    of transition only. Finishing from IN PROGRESS does retire it, because
+//    that is a job leaving in-progress, which is exactly what the per-repo cap
+//    counts. A manual move to Done retires it too, for the same reason.
+export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch } = {}) {
+  // prMergedAt is only ever written alongside state 'done', and done is
+  // terminal, so the state filter already excludes every stamped job. Kept as a
+  // cheap assertion of that invariant rather than a live condition.
+  const candidates = allJobs().filter(j =>
+    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt);
+  if (candidates.length === 0) return [];
+  const finished = [];
+  let noted = false;   // a PR-check failure was recorded on some card
+  for (const job of candidates) {
+    // Captured for the same reason checkPullRequests captures them: findMerged
+    // is a network call, and a move or delete during it would otherwise let us
+    // apply the answer to a job that has since moved on.
+    const askedBranch = job.branchName;
+    const askedState = job.state;
+    const askedSessionId = job.agentSessionId;
+    // What makes the answer about this card and not about the branch name: its
+    // PR of record when it has one, otherwise the earliest merge that could be
+    // its work. Board branch names outlive their branches and get reused.
+    const { pr, error } = await findMerged(job.repoPath, askedBranch, {
+      prNumber: job.prNumber ?? null,
+      mergedAfter: job.reviewAt || job.startedAt || null,
+    });
+
+    if (!allJobs().includes(job) || job.state !== askedState || job.branchName !== askedBranch) continue;
+
+    if (error) {
+      // Same field as the in-progress check, and for the same reason: the user
+      // needs to know the board cannot see this repo's pull requests rather
+      // than assuming nothing has merged.
+      // Only reported for a Review card. An in-progress job is already covered
+      // by checkPullRequests' own note about the same repo, and writing a
+      // second one over it would just churn the field between the two sweeps.
+      if (askedState === 'review') {
+        const message = `Cannot check whether this pull request merged — ${error}. This job stays in Review until you move it by hand.`;
+        if (notePrCheckError(job, message)) noted = true;
+      }
+      continue;
+    }
+
+    if (askedState === 'review' && clearPrCheckError(job)) noted = true;
+
+    if (!pr) continue;
+    job.state = 'done';
+    job.prMergedAt = pr.mergedAt || new Date().toISOString();
+    job.doneAt = new Date().toISOString();
+    // The merged PR is the authority on where the work ended up: a card that
+    // never reached Review has no URL yet, and this is the moment one exists.
+    if (pr.url) job.prUrl = pr.url;
+    if (pr.number != null) job.prNumber = pr.number;
+    if (!job.reviewAt) job.reviewAt = job.doneAt;
+    finished.push(job);
+
+    // Leaving in-progress is what the cap counts, so that agent goes — same
+    // rule as the PR transition. A card already in Review keeps its agent.
+    const closed = askedState === 'in-progress'
+      ? await retireAgentForJob(job, askedBranch, askedSessionId, killSession)
+      : false;
+    if (broadcast) {
+      broadcast({
+        type: 'notification', level: 'info',
+        message: `Job "${job.title}" is done — PR #${job.prNumber} merged. It moved to Finished jobs.`
+          + (closed ? ` · ${job.agentName} closed, worktree released` : ''),
+      });
+    }
+  }
+  if (finished.length > 0 || noted) persist(broadcast);
+  return finished;
 }
 
 // --- Scan ---
@@ -714,11 +940,15 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
 // spawn) and trivially hit by clicking Run now while a tick is in flight.
 let scanInFlight = false;
 
-export async function runScan(createSession, broadcast, { onSessionCreated, killSession } = {}) {
+// findPr/findMerged are forwarded rather than left to their defaults so the
+// order of the scan — PRs found, then merges swept, then dispatch — is
+// reachable from a test without talking to GitHub.
+export async function runScan(createSession, broadcast, { onSessionCreated, killSession, findPr, findMerged } = {}) {
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
-    await checkPullRequests(broadcast, { killSession });
+    await checkPullRequests(broadcast, { killSession, findPr });
+    await checkMergedPullRequests(broadcast, { killSession, findMerged });
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
     return { skipped: false };
   } finally {
