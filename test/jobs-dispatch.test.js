@@ -381,20 +381,19 @@ describe('checkMergedPullRequests', () => {
     expect(asked.mergedAfter).toBe(job.reviewAt);
   });
 
-  it('does not undo a finished job the user put back on the board', async () => {
-    // Without the prMergedAt guard, "← Review" would be silently reversed by
-    // the next scan five minutes later, and the button would be useless.
+  it('leaves a finished job finished — the sweep never sees it again', async () => {
+    // Done is terminal, so a swept card cannot come back and be re-swept. The
+    // state filter is what enforces it; prMergedAt is a second belt.
     const job = await inReview();
     const findMerged = merged({ url: 'u', number: 5, mergedAt: '2026-08-28T10:00:00Z' });
     await checkMergedPullRequests(noopBroadcast, { findMerged });
     expect(job.state).toBe('done');
+    const doneAt = job.doneAt;
 
-    await moveJob(job.id, 'review', noopBroadcast);
-    expect(job.state).toBe('review');
-    expect(job.doneAt).toBeNull();
-
-    await checkMergedPullRequests(noopBroadcast, { findMerged });
-    expect(job.state).toBe('review');
+    const finished = await checkMergedPullRequests(noopBroadcast, { findMerged });
+    expect(finished).toEqual([]);
+    expect(job.state).toBe('done');
+    expect(job.doneAt).toBe(doneAt);
   });
 
   it('leaves the agent alone — a re-adopted agent may be working the review', async () => {
@@ -443,15 +442,11 @@ describe('checkMergedPullRequests', () => {
 
   it('stamps prMergedAt even when the merged PR reports no mergedAt', async () => {
     // parseMergedPr accepts a PR carrying only state:MERGED, so this shape is
-    // reachable — and prMergedAt is the flag that stops the sweep re-finishing
-    // a job, so a null landing there would break "← Review" silently.
+    // reachable, and the archive reads prMergedAt to say when the work landed.
+    // A null there would leave a merged card claiming only "finished".
     const job = await inReview();
     await checkMergedPullRequests(noopBroadcast, { findMerged: merged({ url: 'u', number: 5, mergedAt: null }) });
     expect(Date.parse(job.prMergedAt)).not.toBeNaN();
-
-    await moveJob(job.id, 'review', noopBroadcast);
-    await checkMergedPullRequests(noopBroadcast, { findMerged: merged({ url: 'u', number: 5, mergedAt: null }) });
-    expect(job.state).toBe('review');
   });
 
   it('never asks about a review job that has no branch', async () => {
@@ -531,11 +526,11 @@ describe('moving a job to done', () => {
     expect(killed).toEqual([sid]);
   });
 
-  it('does not kill a re-adopted agent when a finished card goes back to Review', async () => {
-    // The sweep files a card away without touching an agent someone re-adopted
-    // on that branch for review comments. The button that undoes the sweep must
-    // not kill it either — otherwise "put this back on the board" silently
-    // closes the terminal the user is working in.
+  it('refuses every move out of done, and touches nothing when it does', async () => {
+    // Done is terminal. Letting a card back onto the board carried its spent PR
+    // of record into the new attempt, so the sweep re-matched that same old
+    // merge on the next scan and filed the card away again — killing any agent
+    // re-adopted on the branch, because finishing from in-progress retires one.
     addJob({ title: 'still working', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
@@ -550,68 +545,41 @@ describe('moving a job to done', () => {
       findMerged: async () => ({ pr: { url: 'u', number: 1, mergedAt: '2026-08-28T10:00:00Z' } }),
     });
     expect(job.state).toBe('done');
+    const doneAt = job.doneAt;
 
     const killed = [];
-    await moveJob(job.id, 'review', noopBroadcast, { killSession: async (id) => killed.push(id) });
-    expect(job.state).toBe('review');
+    for (const state of ['review', 'in-progress', 'todo']) {
+      const res = await moveJob(job.id, state, noopBroadcast, { killSession: async (id) => killed.push(id) });
+      expect(res.error).toMatch(/finished/);
+      expect(job.state).toBe('done');
+    }
+    // A refused move is a no-op: no agent closed, no stamp disturbed.
     expect(killed).toEqual([]);
+    expect(job.doneAt).toBe(doneAt);
+    expect(job.prNumber).toBe(1);
+    expect(sessions.get('session-readopted').exited).toBe(false);
   });
 
-  it('still retires the agent when a finished card is requeued', async () => {
+  it('still retires the agent when an in-progress job is requeued', async () => {
     // Requeueing means start over, so the agent and its worktree do go.
     addJob({ title: 'start over', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
     const sid = job.agentSessionId;
-    await moveJob(job.id, 'done', noopBroadcast);
-    job.agentSessionId = sid;   // the manual Done above already retired it
     const killed = [];
     await moveJob(job.id, 'todo', noopBroadcast, { killSession: async (id) => killed.push(id) });
     expect(killed).toEqual([sid]);
   });
 
-  it('leaves prMergedAt null, so a later merge can still be seen', async () => {
-    // Finishing by hand is not a claim about GitHub. If the PR does merge
-    // afterwards, the sweep is still allowed to record it.
+  it('leaves prMergedAt null, so the card says "finished" and not "merged"', async () => {
+    // Finishing by hand is not a claim about GitHub, and the archive reads the
+    // difference off this field.
     addJob({ title: 'by hand', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
     await moveJob(job.id, 'done', noopBroadcast);
     expect(job.prMergedAt).toBeNull();
-    await moveJob(job.id, 'review', noopBroadcast);
-    await checkMergedPullRequests(noopBroadcast, {
-      findMerged: async () => ({ pr: { url: 'u', number: 8, mergedAt: '2026-08-28T11:00:00Z' } }),
-    });
-    expect(job.state).toBe('done');
-    expect(job.prMergedAt).toBe('2026-08-28T11:00:00Z');
-  });
-
-  it('lets a job that goes back to In progress be finished by its NEXT pull request', async () => {
-    // Done -> Review -> In progress -> a new PR. Keeping the old prMergedAt
-    // through that walk would exclude the job from the merge sweep forever, so
-    // its new PR could never take the card off the board again.
-    addJob({ title: 'second attempt', repoPath: REPO }, noopBroadcast);
-    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
-    const job = allJobs()[0];
-    await checkPullRequests(noopBroadcast, {
-      findPr: async () => ({ pr: { url: 'u', number: 1 } }),
-      killSession: async (id) => sessions.delete(id),
-    });
-    await checkMergedPullRequests(noopBroadcast, {
-      findMerged: async () => ({ pr: { url: 'u', number: 1, mergedAt: '2026-08-28T10:00:00Z' } }),
-    });
-    expect(job.state).toBe('done');
-
-    await moveJob(job.id, 'review', noopBroadcast);
-    await moveJob(job.id, 'in-progress', noopBroadcast);
-    expect(job.prMergedAt).toBeNull();
-
-    await moveJob(job.id, 'review', noopBroadcast);
-    await checkMergedPullRequests(noopBroadcast, {
-      findMerged: async () => ({ pr: { url: 'u2', number: 2, mergedAt: '2026-08-29T10:00:00Z' } }),
-    });
-    expect(job.state).toBe('done');
-    expect(job.prNumber).toBe(2);
+    expect(Date.parse(job.doneAt)).not.toBeNaN();
   });
 
   it('clears the "cannot check" note when the user moves the card by hand', async () => {
@@ -629,15 +597,18 @@ describe('moving a job to done', () => {
     expect(job.prCheckErrorAt).toBeNull();
   });
 
-  it('requeueing a finished job wipes the finish, not just the state', async () => {
+  it('cannot be requeued — follow-up work is a new job', async () => {
+    // The archive is the record of what shipped. Reusing the card would mean
+    // either carrying a spent PR into a new attempt or erasing that record.
     addJob({ title: 'redo', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
     await moveJob(job.id, 'done', noopBroadcast);
-    await moveJob(job.id, 'todo', noopBroadcast);
-    expect(job.state).toBe('todo');
-    expect(job.doneAt).toBeNull();
-    expect(job.prMergedAt).toBeNull();
+    const doneAt = job.doneAt;
+    const { error } = await moveJob(job.id, 'todo', noopBroadcast);
+    expect(error).toMatch(/finished/);
+    expect(job.state).toBe('done');
+    expect(job.doneAt).toBe(doneAt);
   });
 });
 

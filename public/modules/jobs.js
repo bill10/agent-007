@@ -333,11 +333,13 @@ function renderCardActions(job) {
     actions.appendChild(mk('← In progress', 'Send back to In progress', () => send({ type: 'job-move', jobId: job.id, state: 'in-progress' })));
     // The board files a card away by itself once its PR merges; this is the
     // same move by hand, for a PR the board cannot see or work that landed
-    // some other way.
-    actions.appendChild(mk('✓ Done', 'File this job away as finished — it leaves the board and stays in Finished jobs', () => send({ type: 'job-move', jobId: job.id, state: 'done' })));
-  }
-  if (job.state === 'done') {
-    actions.appendChild(mk('← Review', 'Put this job back on the board in Review', () => send({ type: 'job-move', jobId: job.id, state: 'review' })));
+    // some other way. It is one-way — done is the end of a card's life on the
+    // board — so it asks first, the way Delete does.
+    actions.appendChild(mk('✓ Done', 'File this job away as finished. This is final: the card leaves the board for Finished jobs and cannot be brought back.', () => {
+      if (confirm(`File "${job.title}" away as finished?\n\nIt leaves the board for Finished jobs and cannot be moved back. Follow-up work needs a new job.`)) {
+        send({ type: 'job-move', jobId: job.id, state: 'done' });
+      }
+    }));
   }
   actions.appendChild(mk('Delete', 'Delete this job from the board', () => {
     if (confirm(`Delete "${job.title}"?\n\n${job.agentSessionId ? 'Its agent is closed and the worktree released. Uncommitted or unpushed work is kept as an orphan.' : 'This removes the card.'}`)) {

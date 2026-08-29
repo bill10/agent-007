@@ -15,9 +15,11 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   it an archive nobody read. The job itself is kept, not deleted, with its agent,
   branch and PR link intact.
 - **View finished jobs.** A toolbar toggle swaps the columns for the archive,
-  newest first, each card saying when it merged. "← Review" puts one back on the
-  board. A Review card also gains "✓ Done" to file it away by hand, for a merge
-  the board cannot see.
+  newest first, each card saying when it merged. A Review card also gains
+  "✓ Done" to file one away by hand, for a merge the board cannot see; it asks
+  first, because done is the end of a card's life on the board. A finished card
+  cannot be moved back — follow-up work on merged code is a new job, and the
+  archived card is the record to point at. Deleting it is the only other option.
 
 ### Fixed
 
@@ -34,12 +36,14 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   found nothing and left the card in In progress reading "agent gone" forever,
   for work that had shipped. The merge sweep now covers In progress as well as
   Review, and retires the agent when it finishes a job from there.
-- Putting a finished job back on the board no longer closes a terminal. The
-  automatic sweep deliberately spares an agent someone re-adopted on a shipped
-  branch to handle review comments; "← Review" now spares it too.
-- A job walked Done → Review → In progress can be finished by its *next* pull
-  request. `prMergedAt` is cleared on the way back to work, so the sweep is not
-  permanently excluded from a card that has more work coming.
+- A finished card can no longer be walked back onto the board and re-filed by
+  the next scan. It kept the pull request that finished it, and `reviewAt` stays
+  the sweep's time floor, so a job moved back to In progress carried a spent PR
+  of record into its new attempt: the sweep matched that same old merge within
+  five minutes, filed the card away again, and — because finishing from In
+  progress retires an agent — closed whatever terminal had been re-adopted on
+  the branch. Done is now terminal, enforced on the server rather than only in
+  the UI, so the whole class of problem is gone.
 - The "cannot check for a pull request here" note no longer follows a card into
   the archive still telling the user to move it by hand.
 

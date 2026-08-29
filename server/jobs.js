@@ -221,8 +221,9 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   return { job: removed };
 }
 
-// Manual move (the buttons on a card). Kept deliberately permissive: automatic
-// transitions can be wrong, so the user always has the last word.
+// Manual move (the buttons on a card). Permissive everywhere the card is still
+// on the board, because automatic transitions can be wrong and the user should
+// have the last word — with one exception, below: done is terminal.
 //
 // Moving back to To do also RETIRES the job's agent. Unlinking it without
 // killing it left a running agent that no job pointed at: it no longer counted
@@ -235,6 +236,21 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
+  // Done is terminal. A finished card is the record of work that shipped, and
+  // the only thing that can happen to it is deletion.
+  //
+  // It is enforced here and not just in the UI because letting a card back onto
+  // the board could not be made safe. The card keeps the PR that finished it,
+  // and reviewAt is the sweep's time floor, so a job walked back to In progress
+  // carried a spent PR of record into its new attempt: checkMergedPullRequests
+  // re-matched that same old merge on the very next scan and filed the card
+  // away again — killing whatever agent had been re-adopted on the branch,
+  // because finishing from in-progress retires one. Clearing those fields would
+  // just trade that for a card whose history is gone. Work that follows a
+  // merged PR is a new job, and the archive keeps the old one to point at.
+  if (job.state === 'done') {
+    return { error: 'That job is finished — post a new job for follow-up work, or delete this card' };
+  }
   // A job with no branch has never been dispatched, so nothing can move it out
   // of in-progress again: the dispatcher only looks at todo, and the PR watcher
   // only at jobs with a branch. Accepting the move would strand it forever.
@@ -254,14 +270,9 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // visible pointing at it. (The automatic merge sweep deliberately does NOT do
   // this — see checkMergedPullRequests.)
   //
-  // Two moves keep the agent, and they are the two that mean "I am still
-  // working on this": any move INTO in-progress (taking the work back up), and
-  // Done -> Review. The second matters because the sweep files a card away
-  // without touching an agent someone re-adopted on that branch to handle
-  // review comments — so the button that undoes the sweep must not kill it
-  // either. "Put this card back" is not "close my terminal".
-  const keepingAgent = state === 'in-progress' || (job.state === 'done' && state === 'review');
-  const retiringSessionId = keepingAgent ? null : job.agentSessionId;
+  // One move keeps the agent, and it is the one that means "I am still working
+  // on this": a move INTO in-progress, taking the work back up.
+  const retiringSessionId = state === 'in-progress' ? null : job.agentSessionId;
   job.state = state;
   if (state === 'todo') {
     job.agentSessionId = null;
@@ -273,19 +284,11 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     job.prNumber = null;
     job.reviewAt = null;
   }
-  // Back to work means the merged PR of record is history: the next PR on this
-  // job is a different one. Without this a job walked Done -> Review -> In
-  // progress keeps the old prMergedAt, and since the merge sweep skips any job
-  // that has one, its NEW pull request could never finish the card again.
-  if (state === 'todo' || state === 'in-progress') job.prMergedAt = null;
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
-  // One rule, not two: a job is stamped when it reaches Done, keeps the stamp
-  // while it stays there, and loses it on the way out. Putting a finished job
-  // back on the board deliberately leaves prMergedAt alone — that is what tells
-  // the merge sweep it has already had its say about this PR, so the user's
-  // move is not silently undone on the next scan. A job finished by hand has no
-  // prMergedAt, so a later merge can still find it.
-  job.doneAt = state === 'done' ? (job.doneAt || new Date().toISOString()) : null;
+  // Stamped on arrival, and never cleared, because nothing leaves done. A job
+  // finished by hand gets a doneAt but no prMergedAt: the board is recording
+  // that the USER called it finished, which is not a claim about GitHub.
+  if (state === 'done') job.doneAt = new Date().toISOString();
   // The note explaining why the board could not check this job's PR describes an
   // attempt the user is now overriding by hand, so it must not survive the move:
   // not onto a fresh To do card, where it would report a failure against work
@@ -844,17 +847,16 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
 //  - Only MERGED counts, and only THIS card's merge (see parseMergedPr). A PR
 //    closed without merging left the work undelivered and someone still has to
 //    decide what to do about it, so its card stays.
-//  - A job that already carries a prMergedAt is skipped. That is what lets the
-//    user put a finished job back on the board: without it, "← Review" would be
-//    silently undone by the next scan five minutes later.
 //  - No agent is retired when finishing from REVIEW. An agent you re-adopted on
 //    a shipped branch to address review comments is yours, and this runs every
 //    scan — the same reasoning that keeps checkPullRequests' kill at the moment
 //    of transition only. Finishing from IN PROGRESS does retire it, because
 //    that is a job leaving in-progress, which is exactly what the per-repo cap
-//    counts. A manual move to Done retires it too, but Done -> Review does not,
-//    so undoing this sweep by hand cannot kill that agent either (see moveJob).
+//    counts. A manual move to Done retires it too, for the same reason.
 export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch } = {}) {
+  // prMergedAt is only ever written alongside state 'done', and done is
+  // terminal, so the state filter already excludes every stamped job. Kept as a
+  // cheap assertion of that invariant rather than a live condition.
   const candidates = allJobs().filter(j =>
     (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt);
   if (candidates.length === 0) return [];

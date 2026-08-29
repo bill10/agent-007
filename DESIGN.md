@@ -197,6 +197,19 @@ where the PR is. It is reached through **View finished jobs** in the toolbar,
 which swaps the columns for the archive rather than sitting beside them, so a
 list that only grows can never squeeze the live work.
 
+**Done is terminal.** A finished card cannot be moved back onto the board; the
+only thing that can happen to it is deletion, and the manual `✓ Done` button
+asks before filing a card away because of it. An earlier design let a card
+return to Review, and it could not be made safe: the card keeps the PR that
+finished it, and `reviewAt` is the sweep's time floor, so a job walked back to
+In progress carried a spent PR of record into its new attempt. The sweep matched
+that same old merge on the very next scan and filed the card away again — and
+because finishing from in-progress retires an agent, it killed whatever terminal
+had been re-adopted on the branch. Clearing those fields instead would trade the
+bug for a card whose history is gone, which defeats the point of keeping it.
+Work that follows a merged PR is a new job; the archive keeps the old one to
+point at.
+
 Four rules keep the transition honest:
 
 - **Only MERGED finishes a job.** A PR closed without merging left the work
@@ -210,22 +223,19 @@ Four rules keep the transition honest:
   attempt started. Without that, a stale merge files a card away while its real
   pull request is still open — and overwrites the card's PR number on the way
   out, so the open one is no longer recorded anywhere.
-- **`prMergedAt` is written once, and cleared on the way back to work.** It is
-  what lets "← Review" put a finished job back: without it the merge sweep would
-  silently undo the move on the next scan five minutes later. A job finished by
-  hand has no `prMergedAt`, so a later merge can still be recorded. Moving to
-  To do or In progress clears it, because the next pull request on that job is a
-  different one — keeping the old stamp would exclude the card from the sweep
-  forever.
+- **`prMergedAt` is written once and never cleared.** Nothing leaves done, so
+  nothing needs to unwind it. It is also what the archive reads to tell a merge
+  from a card filed away by hand: a manual `✓ Done` stamps `doneAt` but not
+  `prMergedAt`, because the board is recording that the *user* called the job
+  finished, which is not a claim about GitHub.
 - **The sweep never retires an agent it finds in Review.** Unlike the one-shot
   kill at the PR, this runs every scan; an agent you re-adopted on a shipped
   branch to address review comments is yours. Finishing from In progress is the
   one exception, and barely one: that is a job leaving in-progress, which is
   exactly what the per-repo cap counts. A manual move to Done retires it too,
-  because that is the user saying the job is over — but Done -> Review does not,
-  for the same reason the sweep does not: putting a card back on the board is not
-  closing a terminal. The two moves that keep an agent are any move into In
-  progress, and Done -> Review; every other manual move retires it.
+  because that is the user saying the job is over. Exactly one manual move keeps
+  an agent — a move into In progress, taking the work back up; every other one
+  retires it.
 
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
@@ -284,7 +294,8 @@ Retirement happens when a job LEAVES In progress — to Review when its pull
 request appears, or straight to Done when that pull request opened and merged
 inside a single scan — and on a manual move to Done, which is the user saying
 the job is over. It never happens as a recurring sweep over jobs already in
-Review. An agent you re-adopt on a shipped branch to address review comments is
+Review, and never over a card in the archive, which no longer has an agent to
+retire. An agent you re-adopt on a shipped branch to address review comments is
 yours; a poll that killed it every five minutes would make Review permanently
 hostile to working on your own PR.
 

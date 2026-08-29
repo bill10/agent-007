@@ -509,21 +509,33 @@ describe('finished jobs', () => {
     expect(document.querySelector('#job-finished-cards .job-column-empty').textContent).toMatch(/No finished jobs/);
   });
 
-  it('puts a finished job back on the board', () => {
+  it('offers no way back onto the board — only Delete', () => {
+    // Done is terminal: the card is the record of what shipped, and the server
+    // refuses every move out of it. Rendering a button the server would reject
+    // is worse than rendering none.
     handleJobsList({ jobs: [finishedJob()], settings: {} });
     document.getElementById('btn-finished-jobs').click();
-    const restore = [...finishedCards()[0].querySelectorAll('.job-card-btn')]
-      .find(b => b.textContent.includes('Review'));
-    restore.click();
-    expect(send).toHaveBeenCalledWith({ type: 'job-move', jobId: 'done-1', state: 'review' });
+    const labels = [...finishedCards()[0].querySelectorAll('.job-card-btn')].map(b => b.textContent);
+    expect(labels).toEqual(['Delete']);
   });
 
   it('offers Done on a review card, for a merge the board cannot see', () => {
+    // It asks first, like Delete: the move cannot be undone.
     handleJobsList({ jobs: [JOB({ id: 'r', state: 'review' })], settings: {} });
     const doneBtn = [...cards()[0].querySelectorAll('.job-card-btn')]
       .find(b => b.textContent.includes('Done'));
+    window.confirm = vi.fn(() => true);
     doneBtn.click();
     expect(send).toHaveBeenCalledWith({ type: 'job-move', jobId: 'r', state: 'done' });
+  });
+
+  it('does not file a card away when the confirm is declined', () => {
+    handleJobsList({ jobs: [JOB({ id: 'r', state: 'review' })], settings: {} });
+    const doneBtn = [...cards()[0].querySelectorAll('.job-card-btn')]
+      .find(b => b.textContent.includes('Done'));
+    window.confirm = vi.fn(() => false);
+    doneBtn.click();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('stays in the archive when the server broadcasts a new job list', () => {
