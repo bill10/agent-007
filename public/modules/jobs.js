@@ -336,7 +336,12 @@ function renderCardActions(job) {
     // some other way. It is one-way — done is the end of a card's life on the
     // board — so it asks first, the way Delete does.
     actions.appendChild(mk('✓ Done', 'File this job away as finished. This is final: the card leaves the board for Finished jobs and cannot be brought back.', () => {
-      if (confirm(`File "${job.title}" away as finished?\n\nIt leaves the board for Finished jobs and cannot be moved back. Follow-up work needs a new job.`)) {
+      // Names the agent for the same reason Delete does: this move retires it,
+      // and an agent re-adopted on a shipped branch is one someone is using.
+      const agentNote = job.agentSessionId
+        ? `${job.agentName || 'Its agent'} is closed and its worktree released. `
+        : '';
+      if (confirm(`File "${job.title}" away as finished?\n\n${agentNote}The card leaves the board for Finished jobs and cannot be moved back — follow-up work needs a new job.`)) {
         send({ type: 'job-move', jobId: job.id, state: 'done' });
       }
     }));

@@ -529,6 +529,17 @@ describe('finished jobs', () => {
     expect(send).toHaveBeenCalledWith({ type: 'job-move', jobId: 'r', state: 'done' });
   });
 
+  it('warns that filing a card away closes its agent', () => {
+    // Same disclosure Delete makes: this move retires the agent, and one
+    // re-adopted on a shipped branch is a terminal someone is working in.
+    handleJobsList({ jobs: [JOB({ id: 'r', state: 'review', agentSessionId: 'session-1', agentName: 'Viper' })], settings: {} });
+    const doneBtn = [...cards()[0].querySelectorAll('.job-card-btn')]
+      .find(b => b.textContent.includes('Done'));
+    window.confirm = vi.fn(() => false);
+    doneBtn.click();
+    expect(window.confirm.mock.calls[0][0]).toMatch(/Viper is closed/);
+  });
+
   it('does not file a card away when the confirm is declined', () => {
     handleJobsList({ jobs: [JOB({ id: 'r', state: 'review' })], settings: {} });
     const doneBtn = [...cards()[0].querySelectorAll('.job-card-btn')]
