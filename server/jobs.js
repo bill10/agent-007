@@ -159,6 +159,17 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
   if (resolved.error) return { error: resolved.error };
 
+  // A non-string schedule (a JSON number, an object) must come back as an
+  // error, not a silent one-time card: the plain HTTP door has no schema in
+  // front of it, the caller asked for a scheduled job, and every other bad
+  // input here is answered with a message the caller can act on.
+  if (schedule != null && typeof schedule !== 'string') {
+    return { error: 'schedule must be a string — a five-field cron expression or an @shorthand' };
+  }
+  if (type != null && typeof type !== 'string') {
+    return { error: 'type must be a string — "one-time" or "scheduled"' };
+  }
+
   const result = addJob({
     // Typed explicitly: this comes off the wire, and a non-string would be
     // stringified into the card ("[object Object]") rather than rejected.

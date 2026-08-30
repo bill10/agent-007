@@ -1502,7 +1502,7 @@ body {
 .job-card-type {
   margin-left: 6px;
   padding: 1px 5px;
-  font-size: 8px;
+  font-size: 9px;
   letter-spacing: 0.5px;
   text-transform: uppercase;
   color: var(--accent);

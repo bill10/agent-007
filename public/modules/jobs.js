@@ -74,7 +74,13 @@ function untilTime(iso) {
 function clockTime(iso) {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return '';
-  return new Date(then).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  // Past ~6 days the weekday alone no longer says which date is meant (a
+  // monthly cron's "next Sat" could be either of two Saturdays), so add it.
+  const far = then - Date.now() > 6 * 24 * 60 * 60 * 1000;
+  return new Date(then).toLocaleString([], {
+    weekday: 'short', ...(far ? { month: 'short', day: 'numeric' } : {}),
+    hour: '2-digit', minute: '2-digit',
+  });
 }
 
 function isScheduled(job) {
@@ -211,7 +217,11 @@ function renderFinishedToggle(count) {
 function renderCard(job) {
   const card = document.createElement('div');
   const status = liveStatus(job);
-  card.className = 'job-card' + (status ? ` status-${status}` : '');
+  // A scheduled run that has gone quiet or whose agent exited is a run that
+  // FINISHED (statusText says so in words) — so style it idle-gray, not the
+  // alarm red/gray of a one-time card whose agent died mid-job.
+  const displayStatus = isScheduled(job) && (status === 'gone' || status === 'stalled') ? 'stalled' : status;
+  card.className = 'job-card' + (displayStatus ? ` status-${displayStatus}` : '');
   card.dataset.jobId = job.id;
 
   // An in-progress job whose agent is still around is a jump target. The badge
@@ -311,7 +321,7 @@ function renderCard(job) {
 
   if (status) {
     const badge = document.createElement('button');
-    badge.className = `job-card-status job-status-${status}`;
+    badge.className = `job-card-status job-status-${displayStatus}`;
     badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml(statusText(job, status))}`;
     const canJump = !!liveAgentId;
     badge.title = canJump
@@ -489,7 +499,8 @@ function syncScheduleField() {
 // The real parser is lib/cron.js on the server, and it stays the authority; this
 // exists so the commonest typo (too few fields) is caught while the form is
 // still open and the user's text is still in it, rather than coming back as a
-// toast after the form has closed.
+// toast after the form has closed. Keep the @-list in sync with CRON_MACROS in
+// lib/cron.js — public/ cannot import server modules, so this is a copy.
 const CRON_MACROS = ['@yearly', '@annually', '@monthly', '@weekly', '@daily', '@midnight', '@hourly'];
 
 function looksLikeCron(text) {

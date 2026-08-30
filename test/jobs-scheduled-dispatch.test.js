@@ -211,7 +211,9 @@ describe('editing and moving a scheduled card', () => {
     // The old due time belonged to the old cron, so it must not survive: every
     // five minutes is at most five minutes away, not up to a day.
     const after = Date.parse(job.nextRunAt);
-    expect(after).toBeLessThan(before);
+    // Or-equal: between 08:55 and 09:00 both crons resolve to the same 09:00,
+    // and the upper bound below is what proves the recompute happened.
+    expect(after).toBeLessThanOrEqual(before);
     expect(after).toBeGreaterThan(Date.now());
     expect(after).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
   });
@@ -234,6 +236,22 @@ describe('editing and moving a scheduled card', () => {
     expect(job.nextRunAt).toBeNull();
   });
 
+  it('re-arms from the NEW schedule when a card was edited while its run was in flight', async () => {
+    addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
+    const job = allJobs()[0];
+    sessions.set('s1', { id: 's1', state: 'WAITING', exited: false, lastOutputAt: 0 });
+    Object.assign(job, { state: 'in-progress', agentSessionId: 's1', branchName: 'bill/x' });
+
+    updateJob(job.id, { schedule: '*/5 * * * *' }, noopBroadcast);
+    // No due time while the run is in flight — the run-end reset owns it.
+    expect(job.nextRunAt).toBeNull();
+
+    await finishScheduledRuns(noopBroadcast);
+    expect(job.state).toBe('todo');
+    // Re-armed from the NEW cron: every five minutes is minutes away, not 9am.
+    expect(Date.parse(job.nextRunAt)).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
+  });
+
   it('re-arms rather than immediately re-fires when the user ends a run by hand', async () => {
     addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
     const job = allJobs()[0];
@@ -253,6 +271,11 @@ describe('posting a scheduled job on an agent behalf', () => {
     expect(result.job.type).toBe('scheduled');
     expect(result.job.schedule).toBe('@daily');
     expect(Date.parse(result.job.nextRunAt)).not.toBeNaN();
+  });
+
+  it('rejects a non-string schedule instead of silently making a one-time card', () => {
+    expect(postJobForAgent({ title: 'Digest', repo: REPO, schedule: 30 }, noopBroadcast).error).toMatch(/schedule must be a string/i);
+    expect(allJobs()).toHaveLength(0);
   });
 
   it('hands the cron error back to the agent instead of queueing a card that never fires', () => {

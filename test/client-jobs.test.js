@@ -803,3 +803,26 @@ describe('what "quiet" means on a scheduled card', () => {
     expect(document.querySelector('.job-card-status').textContent).toMatch(/may need you/);
   });
 });
+
+describe('the kept last-run agent link', () => {
+  it('renders and jumps to the kept terminal while it is still alive', () => {
+    agents.set('s9', { name: 'Viper', state: 'WAITING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({ jobs: [SCHEDULED({ state: 'todo', lastRunSessionId: 's9', lastRunAgentName: 'Viper' })], settings: {} });
+    const btn = document.querySelector('.job-card-lastrun');
+    expect(btn).not.toBeNull();
+    expect(btn.textContent).toContain('Viper');
+    btn.click();
+    expect(switchToSession).toHaveBeenCalledWith('s9');
+  });
+
+  it('renders nothing once the tab is gone — a restart leaves a stale pointer', () => {
+    handleJobsList({ jobs: [SCHEDULED({ state: 'todo', lastRunSessionId: 's9', lastRunAgentName: 'Viper' })], settings: {} });
+    expect(document.querySelector('.job-card-lastrun')).toBeNull();
+  });
+
+  it('renders no link while the next run is already in progress', () => {
+    agents.set('s9', { name: 'Viper', state: 'WAITING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's10', lastRunSessionId: 's9' })], settings: {} });
+    expect(document.querySelector('.job-card-lastrun')).toBeNull();
+  });
+});
