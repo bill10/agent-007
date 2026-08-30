@@ -5,6 +5,43 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.12.0] - 2026-08-30
+
+### Added
+
+- **Scheduled jobs.** A job card can now be a standing one that fires on a cron
+  schedule instead of being dispatched once. Pick "Scheduled" in the job form and
+  give it a schedule — `0 9 * * 1-5` for weekday mornings, or one of `@hourly`,
+  `@daily`, `@weekly`, `@monthly`, `@yearly` — and the board runs it every time
+  it comes due, in the server's local time. The card shows its schedule, when it
+  next fires, and how many times it has run.
+- A scheduled job does not have to be a coding task, so its prompt is just the
+  task plus one line about assuming rather than asking. When the run goes quiet
+  the board puts the card back in To do with its next run time — and keeps the
+  agent's terminal open so you can read what the run wrote; the next run, or
+  closing the tab, retires it. It cycles To do → In progress → To do and never
+  reaches Review, so one card is one standing job — neither the pull-request
+  watcher nor the merged-PR sweep will file a scheduled card away, even when a
+  run's work happens to open or merge one.
+- Agents can post a scheduled card too: `post_job` and `POST /api/jobs` take an
+  optional `schedule`, and the reply reads back the schedule and the next run
+  time so a cron expression that means something other than you intended is
+  visible while there is still someone in the conversation to correct it.
+
+### Changed
+
+- Scheduled jobs sit outside the per-repo agent cap, in both directions: a run
+  in flight does not consume a slot a one-time job could use, and busy one-time
+  jobs cannot hold a schedule back — missed firings are never replayed, so a
+  firing starved by the cap would simply be lost.
+- Existing jobs are now called **one-time** jobs. Nothing about them changed —
+  they are dispatched once, move to Review when their pull request appears, and
+  stop there. Cards posted before this release are one-time jobs.
+- The Jobs tab's attention badge and a card's status pill both know the
+  difference between an agent that went quiet with work unfinished and a
+  scheduled run that simply ended. A finished run no longer asks for your
+  attention.
+
 ## [0.3.11.1] - 2026-08-28
 
 ### Fixed

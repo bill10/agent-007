@@ -237,6 +237,102 @@ Four rules keep the transition honest:
   an agent — a move into In progress, taking the work back up; every other one
   retires it.
 
+### One-time and scheduled cards
+
+Two kinds of card share those three columns.
+
+A **one-time** job is the original: dispatched once, it crosses the board and
+stops in Review when its pull request appears. A **scheduled** job is a standing
+card fired by a cron schedule; it cycles To do -> In progress -> To do and never
+reaches Review. Cards written before types existed carry no `type` at all, so
+every read goes through `jobType()` — a missing type is one-time, which is what
+those cards have always been.
+
+- **Same columns, not a fourth one.** A scheduled card between runs is queued
+  work like any other, and pulling it into its own column would take it out of
+  the glance the three columns exist to give. It is marked with a chip and a row
+  showing the cron, the next run, and how many times it has run.
+- **Exempt from the per-repo cap, in both directions.** The cap exists to
+  bound how many agents the board piles onto one repo while draining the
+  one-time queue. A scheduled card neither counts toward it nor waits behind
+  it: it is already bounded — one run at a time, at cron pace — and holding it
+  under the cap would let two long one-time jobs silently starve every
+  schedule on the repo, with the missed firings never replayed. The cap's
+  invariant is unchanged for what it actually governs: one-time in-progress
+  cards and their live agents remain the same set.
+- **The prompt is the task, plus one line.** A scheduled job need not be code
+  at all, so the review/ship instruction is gone — telling an agent that
+  summarises yesterday's commits to run `/ship` would push it into inventing a
+  change so it had something to open a pull request with. Nothing replaces it:
+  an agent already ends its turn with a summary, and the kept terminal (below)
+  is what makes that summary readable. The one line that stays is
+  assumptions-over-questions, because a run that stops to ask holds its card
+  in In progress until a human notices.
+- **A run ends with its agent, not with a pull request.** There is no artefact
+  to watch for, so what is left is the agent: the run is over when it exits, or
+  when it has been parked at its prompt past the quiet window. MESSAGE is
+  excluded — that is the agent asking a question, and killing it would throw
+  away the answer it is waiting for, so such a run holds its slot and shows
+  "needs you" exactly as a one-time job does. `finishScheduledRuns` runs first
+  in each scan, so a run that ended has its card back in To do in time for the
+  same scan to dispatch what was queued behind it. A session gone entirely also
+  counts as over, so a run whose agent was killed or crashed closes out the
+  same way. A restart does not wait for that: `loadConfig` re-arms a scheduled
+  card caught in-progress on the spot — back to To do, next run computed from
+  now, with a `lastError` naming the interrupted run's branch so its work can
+  be recovered from the orphans list. **End run** on the card is the manual
+  version of the same move, and its only manual control while running.
+- **The run's terminal outlives the run.** The agent is not killed when the
+  run ends: its terminal is the run's only output — a scheduled job need not
+  produce code — and killing it would destroy the summary before anyone read
+  it. The card keeps a pointer to the tab ("last run · open terminal"), and
+  the next dispatch retires it, or the user closes it by hand; deleting the
+  card retires it too. Bounded at one kept agent, and so one worktree, per
+  card between runs.
+- **A run that leaves a dirty worktree orphans it, every time.** `removeWorktree`
+  keeps a worktree whose tree is dirty or whose commits are unpushed, which is
+  the right call for a one-time job — that is somebody's work. Recurrence
+  amplifies it: a scheduled job that reliably leaves a modified file orphans
+  one worktree per run, hourly, each one when the next run retires the kept
+  agent. Deliberately not capped here. The orphan
+  notification fires on every run, so it is visible rather than silent, and the
+  fix belongs in the job (stop leaving files behind), not in a policy that
+  starts deleting work the rest of the app promises to keep. `git status
+  --porcelain` respects `.gitignore`, so build output in an ignored path does
+  not trigger it.
+- **The PR watcher and the merge sweep both skip scheduled cards.** A scheduled
+  run that happens to open a pull request must not be moved to Review, and one
+  whose pull request merges must not be filed away as done — either would take
+  the card out of rotation permanently, and done is terminal. The server
+  refuses a manual move to Review or Done for the same reason (delete the card
+  to retire its schedule), and type and schedule are only editable while the
+  card sits in To do — flipping an in-flight card would corrupt the cap
+  accounting and the run finisher's view of it.
+- **The next run is measured from the end of the last one**, never stepped on
+  from the previous due time, so a run that overran its own interval schedules
+  the next one afterwards instead of coming due again the instant it lands.
+  Missed firings never queue up, but the LAST one is owed: a board stopped
+  overnight still holds each card's past due time, so every overdue schedule
+  fires once at the first scan after boot and re-arms into the future from
+  there. One catch-up run, never a backlog.
+- **Cron granularity is bounded by the scan interval.** The dispatcher only acts
+  on a scan (five minutes by default, floor 30s), so `* * * * *` means "every
+  scan", not every minute. Times are the server's local time — the schedule is
+  written by the person sitting in front of the machine the agents run on.
+- **A five-field parser, not a dependency** (`lib/cron.js`). Ranges, lists,
+  steps, `7` for Sunday, and the `@hourly`/`@daily`/... shorthands, plus the one
+  genuinely surprising rule: when both day fields are restricted they are ORed.
+  `nextCronTime` walks whole months and days rather than minute by minute, and
+  gives up after four years — enough for 29 February, bounded for an expression
+  like `0 0 30 2 *` that parses fine and can never match. Such a card is stored
+  and says "never fires again" rather than being refused, because refusing it
+  would mean the parser having to know about calendars — and `isJobDue` treats
+  it as never due, since "no next run time" would otherwise read as "due now"
+  and fire the card on every scan. Local arithmetic is also how the walk moves,
+  so an hour that a daylight-saving transition skips simply does not fire that
+  day (what cron does), and a step that fails to advance ends the walk rather
+  than spinning.
+
 ### Card states and colors
 - Left border and status pill follow the agent's live state, reusing the shared
   `--state-*` tokens rather than introducing a second vocabulary:
@@ -246,6 +342,9 @@ Four rules keep the transition honest:
     attention with one that is actually blocking)
   - `quiet -- may need you` -> `--state-idle` (parked at a prompt past the window)
   - `agent gone` -> `--state-disconnected` (session ended)
+  - On a scheduled card, `quiet` and `agent gone` both render as `run finished`
+    in idle gray instead: that quiet IS the run's completion signal, and the
+    alarm colors would tell the user they might be needed when they are not.
 - Clicking anywhere on an in-progress card switches to that agent's terminal;
   the status pill does the same, and stays the keyboard path since the card
   itself is not a tab stop. Card buttons, the PR link, and a click that ends
@@ -290,10 +389,13 @@ firing every five minutes would otherwise move the user's cursor mid-sentence.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired.
 
-Retirement happens when a job LEAVES In progress — to Review when its pull
-request appears, or straight to Done when that pull request opened and merged
-inside a single scan — and on a manual move to Done, which is the user saying
-the job is over. It never happens as a recurring sweep over jobs already in
+Retirement happens when a one-time job LEAVES In progress — to Review when its
+pull request appears, or straight to Done when that pull request opened and
+merged inside a single scan — and on a manual move to Done, which is the user
+saying the job is over. A scheduled run's agent is the exception: it outlives
+its run as the kept terminal and is retired by the next dispatch, by the user
+closing the tab, or with the card's deletion (see "One-time and scheduled
+cards"). It never happens as a recurring sweep over jobs already in
 Review, and never over a card in the archive, which no longer has an agent to
 retire. An agent you re-adopt on a shipped branch to address review comments is
 yours; a poll that killed it every five minutes would make Review permanently

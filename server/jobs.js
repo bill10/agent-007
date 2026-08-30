@@ -20,8 +20,10 @@ import {
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
   branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
-  MAX_TITLE_LEN, MAX_DETAIL_LEN,
+  MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
+  isScheduledRunOver, scheduledRunReset,
 } from '../lib/jobs.js';
+import { nextCronIso } from '../lib/cron.js';
 
 // --- Board settings ---
 
@@ -59,6 +61,9 @@ export function jobsPayload() {
     const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
     return {
       ...job,
+      // Resolved rather than raw: cards written before scheduled jobs existed
+      // carry no type at all, and the client should not have to know that.
+      type: jobType(job),
       status: deriveJobStatus(job, session),
       agentState: session ? session.state : null,
       agentAlive: !!(session && !session.exited),
@@ -99,8 +104,8 @@ function clearPrCheckError(job) {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent }, broadcast) {
-  const result = createJob({ title, detail, repoPath, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   allJobs().push(result.job);
   persist(broadcast);
@@ -148,11 +153,22 @@ export function resolveRepoRef(ref) {
 // Not ownership-gated, matching the WebSocket `job-create` handler: the board is
 // shared workspace state, and postedBy/postedByAgent are attribution rather than
 // access control.
-export function postJobForAgent({ title, detail, repo, session, user }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, type, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
   if (resolved.error) return { error: resolved.error };
+
+  // A non-string schedule (a JSON number, an object) must come back as an
+  // error, not a silent one-time card: the plain HTTP door has no schema in
+  // front of it, the caller asked for a scheduled job, and every other bad
+  // input here is answered with a message the caller can act on.
+  if (schedule != null && typeof schedule !== 'string') {
+    return { error: 'schedule must be a string — a five-field cron expression or an @shorthand' };
+  }
+  if (type != null && typeof type !== 'string') {
+    return { error: 'type must be a string — "one-time" or "scheduled"' };
+  }
 
   const result = addJob({
     // Typed explicitly: this comes off the wire, and a non-string would be
@@ -161,6 +177,11 @@ export function postJobForAgent({ title, detail, repo, session, user }, broadcas
     title: typeof title === 'string' ? title : '',
     detail: typeof detail === 'string' ? detail : '',
     repoPath: resolved.path,
+    // A schedule alone makes it a scheduled job — createJob owns that rule, and
+    // the cron validation with it, so a bad expression comes back as a message
+    // the calling agent can act on rather than a card that never fires.
+    type: typeof type === 'string' ? type : undefined,
+    schedule: typeof schedule === 'string' ? schedule : '',
     postedBy: user ? user.id : null,
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
@@ -194,6 +215,35 @@ export function updateJob(jobId, fields, broadcast) {
   // The repo is only editable while the job is still unassigned — once an agent
   // is working in a worktree, repointing the card would misattribute the work.
   if (fields.repoPath && job.state === 'todo') job.repoPath = fields.repoPath;
+  // Type and schedule move together: "scheduled with no cron" and "one-time
+  // carrying a cron" are both incoherent, so they are resolved as a pair and
+  // rejected as a pair. Nothing is written until the pair validates, or a bad
+  // cron would half-apply — the type switched, the schedule refused.
+  if (fields.type !== undefined || fields.schedule !== undefined) {
+    const resolved = resolveJobType({
+      type: fields.type !== undefined ? fields.type : jobType(job),
+      schedule: fields.schedule !== undefined ? fields.schedule : job.schedule,
+    });
+    if (resolved.error) return { error: resolved.error };
+    const changes = resolved.type !== jobType(job)
+      || (resolved.schedule || null) !== (job.schedule || null);
+    // Changing what a card IS is only allowed while it sits in To do, for the
+    // same reason repoPath is: flipping an in-flight one-time card to
+    // scheduled frees its per-repo cap slot while its agent still runs (the
+    // cap skips scheduled cards), and finishScheduledRuns would then quietly
+    // close that run out and re-arm it forever. The form only offers Edit in
+    // To do; the raw message has to be refused too. Resending the current
+    // values is not a change, so an ordinary save is untouched.
+    if (changes && job.state !== 'todo') {
+      return { error: 'Type and schedule can only change while the card is in To do' };
+    }
+    job.type = resolved.type;
+    job.schedule = resolved.schedule;
+    // Recompute only on a real change: the old due time belongs to the old
+    // cron, but a save that merely retitled the card must not re-arm an
+    // overdue schedule and eat the firing that was about to happen.
+    if (changes) job.nextRunAt = resolved.schedule ? nextCronIso(resolved.schedule) : null;
+  }
   persist(broadcast);
   return { job };
 }
@@ -208,11 +258,14 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   if (idx === -1) return { error: 'Job not found' };
   const [removed] = jobs.splice(idx, 1);
   persist(broadcast);
-  if (removed.agentSessionId && killSession) {
-    const session = sessions.get(removed.agentSessionId);
+  // Both the live agent and a scheduled card's kept last-run agent: with the
+  // card gone, nothing else would ever retire either of them.
+  for (const sessionId of [removed.agentSessionId, removed.lastRunSessionId]) {
+    if (!sessionId || !killSession) continue;
+    const session = sessions.get(sessionId);
     if (session && !session.exited) {
       try {
-        await killSession(removed.agentSessionId);
+        await killSession(sessionId);
       } catch (err) {
         console.error(`Failed to close agent for deleted job "${removed.title}":`, err.message);
       }
@@ -251,6 +304,14 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (job.state === 'done') {
     return { error: 'That job is finished — post a new job for follow-up work, or delete this card' };
   }
+  // A scheduled card cycles To do <-> In progress, and nothing on the board
+  // ever touches one parked in Review — both PR sweeps skip the type, and the
+  // run finisher only reads In progress — while done is terminal, so either
+  // move ends a standing schedule for good. The UI hides those buttons on a
+  // scheduled card; the raw message has to be refused too.
+  if (isScheduled(job) && (state === 'review' || state === 'done')) {
+    return { error: 'A scheduled job cycles between To do and In progress — delete the card to retire its schedule' };
+  }
   // A job with no branch has never been dispatched, so nothing can move it out
   // of in-progress again: the dispatcher only looks at todo, and the PR watcher
   // only at jobs with a branch. Accepting the move would strand it forever.
@@ -275,6 +336,10 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   const retiringSessionId = state === 'in-progress' ? null : job.agentSessionId;
   job.state = state;
   if (state === 'todo') {
+    // A scheduled card returning to To do is re-armed, not blanked: it keeps its
+    // schedule and gets the next due time. Without this a manual requeue would
+    // leave nextRunAt in the past and the card would fire again immediately.
+    if (isScheduled(job)) job.nextRunAt = job.schedule ? nextCronIso(job.schedule) : null;
     job.agentSessionId = null;
     job.agentName = null;
     job.startedAt = null;
@@ -430,11 +495,37 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
       continue;
     }
 
+    // Only now that the replacement run is real does the previous run's kept
+    // agent retire (see finishScheduledRuns). Retiring before the spawn meant
+    // a failed createSession destroyed the last run's only output and left no
+    // new run behind it — the card showed a dispatch error and the summary the
+    // board promises to keep was gone. removeWorktree still protects the work:
+    // dirty or unpushed changes become an orphan rather than being deleted.
+    if (isScheduled(job) && job.lastRunSessionId) {
+      const prev = sessions.get(job.lastRunSessionId);
+      if (prev && !prev.exited && killSession) {
+        try {
+          await killSession(job.lastRunSessionId);
+        } catch (err) {
+          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
+        }
+      }
+      job.lastRunSessionId = null;
+      job.lastRunAgentName = null;
+    }
+
     if (onSessionCreated) onSessionCreated(session);
     job.state = 'in-progress';
     job.agentSessionId = session.id;
     job.agentName = session.name;
     job.startedAt = new Date().toISOString();
+    if (isScheduled(job)) {
+      // Counted at dispatch, not at completion: the run happened whether or not
+      // the agent got anywhere, and a card that keeps failing should still show
+      // that it has been trying.
+      job.runCount = (Number(job.runCount) || 0) + 1;
+      job.lastRunAt = job.startedAt;
+    }
     job.branchName = session.branchName;
     job.worktreePath = session.worktreePath;
     job.lastError = null;
@@ -763,7 +854,10 @@ async function retireAgentForJob(job, askedBranch, askedSessionId, killSession) 
 // and cannot be substituted from outside, so the PR-to-review transition would
 // otherwise only be testable by talking to GitHub.
 export async function checkPullRequests(broadcast, { killSession, findPr = findPrForBranch } = {}) {
-  const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName);
+  // One-time jobs only. A scheduled card is not trying to produce a pull
+  // request, and moving it to Review on the strength of one would take it out of
+  // rotation permanently — the column it cycles through is To do, not Review.
+  const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName && !isScheduled(j));
   if (inProgress.length === 0) return [];
   const moved = [];
   let noted = false;   // a PR-check failure was recorded on some card
@@ -857,8 +951,11 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   // prMergedAt is only ever written alongside state 'done', and done is
   // terminal, so the state filter already excludes every stamped job. Kept as a
   // cheap assertion of that invariant rather than a live condition.
+  // Scheduled cards are excluded for the same reason checkPullRequests skips
+  // them, only more so: done is terminal, so a scheduled run whose work merged
+  // would leave the board for good instead of re-arming for its next run.
   const candidates = allJobs().filter(j =>
-    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt);
+    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && !isScheduled(j));
   if (candidates.length === 0) return [];
   const finished = [];
   let noted = false;   // a PR-check failure was recorded on some card
@@ -923,11 +1020,51 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   return finished;
 }
 
+// --- Scheduled runs ---
+
+// Close out scheduled runs that are over and re-arm their cards.
+//
+// This is the scheduled counterpart of checkPullRequests: the point in the scan
+// where a finished run is noticed and its card re-armed. It runs FIRST, so a
+// run that ended since the last tick has its card back in To do in time for the
+// same scan to dispatch whatever was waiting behind it.
+//
+// The agent is deliberately NOT killed here. Its terminal is the run's only
+// output — a scheduled job need not produce code, and the summary it wrote
+// lives in the session's ring buffer, which a kill would destroy before anyone
+// could read it. The card keeps a pointer (lastRunSessionId) and the tab stays
+// open; the next dispatch retires it, or the user closes it. Bounded at one
+// kept agent per card. The cap is unaffected: scheduled cards are exempt from
+// it in both directions (see selectDispatchableJobs).
+export async function finishScheduledRuns(broadcast) {
+  const running = allJobs().filter(j => isScheduled(j) && j.state === 'in-progress');
+  if (running.length === 0) return [];
+  const finished = [];
+  for (const job of running) {
+    const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
+    if (!isScheduledRunOver(job, session)) continue;
+
+    const agentName = job.agentName;
+    Object.assign(job, scheduledRunReset(job));
+    finished.push(job);
+    if (broadcast) {
+      broadcast({
+        type: 'notification', level: 'info',
+        message: `Scheduled job "${job.title}" finished its run`
+          + (agentName ? ` · ${agentName} kept open to read` : '')
+          + (job.nextRunAt ? ` · next ${new Date(job.nextRunAt).toLocaleString()}` : ''),
+      });
+    }
+  }
+  if (finished.length > 0) persist(broadcast);
+  return finished;
+}
+
 // --- Scan ---
 
-// One scan = check for PRs, then dispatch. Both entry points (the interval
-// timer and the "Run now" button) go through here, behind a single in-flight
-// flag.
+// One scan = close out finished scheduled runs, check for PRs, then dispatch.
+// Both entry points (the interval timer and the "Run now" button) go through
+// here, behind a single in-flight flag.
 //
 // The guard is not decorative. dispatchOnce reads job.state to pick candidates,
 // then awaits createSession, and only sets state = 'in-progress' after that
@@ -947,6 +1084,7 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
+    await finishScheduledRuns(broadcast);
     await checkPullRequests(broadcast, { killSession, findPr });
     await checkMergedPullRequests(broadcast, { killSession, findMerged });
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });

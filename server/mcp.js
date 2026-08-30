@@ -36,7 +36,8 @@ export const POST_JOB_TOOL = {
     + 'a task to another agent — not for work you are already doing. The board '
     + 'dispatches each card to a fresh agent in its own git worktree and branch, so '
     + 'the detail must be everything that agent needs to do the work unattended: it '
-    + 'will not have this conversation.',
+    + 'will not have this conversation. Pass `schedule` to make it a recurring job '
+    + 'that runs on a cron schedule instead of once.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -55,6 +56,16 @@ export const POST_JOB_TOOL = {
         description:
           'Which repository to run the job in — a full path or just the folder name. '
           + 'Defaults to the repository this terminal is working in.',
+      },
+      schedule: {
+        type: 'string',
+        description:
+          'Optional. Supplying this makes the card a SCHEDULED job that runs again '
+          + 'on every match instead of once: a five-field cron expression in the '
+          + "server's local time (\"0 9 * * 1-5\" = 09:00 on weekdays), or one of "
+          + '@hourly, @daily, @weekly, @monthly, @yearly. A scheduled job need not be '
+          + 'a coding task and is not expected to open a pull request. Omit this for '
+          + 'ordinary work that should happen once.',
       },
     },
     required: ['title'],
@@ -111,12 +122,21 @@ export function handleMcpMessage(msg, ctx = {}) {
       title: args.title,
       detail: args.detail,
       repo: args.repo,
+      schedule: args.schedule,
       session: ctx.session || null,
     });
     if (result.error) return ok(id, toolText(result.error, true));
 
     const where = result.repoName ? ` in ${result.repoName}` : '';
-    const line = `Posted "${result.job.title}"${where} to the Agent 007 job board (To do).`;
+    // Read back the schedule the board actually stored, and when it next fires.
+    // A cron expression is easy to get subtly wrong ("0 0 * * 0" is not weekly
+    // to everyone), and a concrete next-run time is what makes the mistake
+    // visible while the user is still in the conversation to correct it.
+    const when = result.job.schedule
+      ? ` on a schedule (${result.job.schedule}${result.job.nextRunAt ? `, next ${new Date(result.job.nextRunAt).toLocaleString()}` : ''})`
+      : '';
+    const column = result.job.schedule ? '' : ' (To do)';
+    const line = `Posted "${result.job.title}"${where}${when} to the Agent 007 job board${column}.`;
     // The dispatcher note matters: with the board stopped the card sits there
     // doing nothing, and an agent reporting "queued it" without saying so would
     // leave the user believing work had started.

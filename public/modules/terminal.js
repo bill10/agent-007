@@ -323,6 +323,10 @@ export function updateTabs() {
   const attention = [...jobs.values()].filter((j) => {
     if (j.state !== 'in-progress' || !j.agentSessionId) return false;
     const a = agents.get(j.agentSessionId);
+    // A scheduled run whose agent has gone is a run that FINISHED — that is the
+    // completion signal, and the board closes the card out on its next scan.
+    // Only a genuine question needs a human, so that is all this counts.
+    if (j.type === 'scheduled') return !!a && a.state === 'MESSAGE';
     return !a || a.state === 'MESSAGE' || a.state === 'DISCONNECTED';
   }).length;
   boardTab.innerHTML = '<svg class="board-tab-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1" y="1.5" width="2.6" height="9"/><rect x="4.7" y="1.5" width="2.6" height="6"/><rect x="8.4" y="1.5" width="2.6" height="7.5"/></svg>';

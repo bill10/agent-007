@@ -362,6 +362,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'job-create': {
           const result = addJob({
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
+            type: msg.jobType, schedule: msg.schedule,
             postedBy: ws.user ? ws.user.id : null,
             postedByName: ws.user ? ws.user.displayName : null,
           }, broadcast);
@@ -369,7 +370,10 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           break;
         }
         case 'job-update': {
-          const result = updateJob(msg.jobId, { title: msg.title, detail: msg.detail, repoPath: msg.repoPath }, broadcast);
+          const result = updateJob(msg.jobId, {
+            title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
+            type: msg.jobType, schedule: msg.schedule,
+          }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }

@@ -23,6 +23,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see.
 - **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste (Cmd+V a screenshot), and draggable tabs for reordering.
 - **Job board** -- Queue work instead of babysitting it. A job has a title, details, and a repo; the board scans every 5 minutes, and for each queued job whose repo is under its agent cap it spawns a fresh agent on its own worktree and a branch named after the job, then watches for the pull request. Jobs move To do -> In progress -> Review on their own, and once the pull request merges the card leaves the board for **View finished jobs** -- so the Review column keeps meaning "needs your review". A finished card stays finished: it is the record of what shipped, and follow-up work is a new job. An agent that stops to ask you something turns its card orange and puts a count on the Jobs tab; click it to land in that terminal, answer, and it carries on.
+- **Scheduled jobs** -- A card can also be a standing one, fired by a cron schedule (`0 9 * * 1-5`, or `@daily`) in the server's local time rather than dispatched once. A scheduled job need not be a coding task -- it does the work, writes what it found in its terminal, and when it goes quiet the board puts the card back in To do with its next run time, keeping the terminal open to read until the next run replaces it. It cycles To do -> In progress -> To do, never reaches Review, and sits outside the per-repo agent cap, so busy one-time jobs can't starve a schedule.
 - **Ask an agent to post a job** -- Say "add that to the job board" to an agent you are already working with and it posts the card itself, so noticing work does not mean stopping to type it into the form. The board appears in every Claude Code agent as an MCP tool, so the agent can see it without being told it exists; Claude Code still asks you to approve the call, so a card is never filed behind your back. The card lands in To do showing "via <agent>", and runs in that terminal's repo unless the agent names another.
 - **Dark/light themes** -- Gold-accented dark theme and a Linear-inspired warm light theme. Toggles instantly, including terminal colors.
 - **Live sync** -- Branch names, file changes, line-level diff stats (+/-), and agent states update in real time across all panels.
@@ -149,6 +150,8 @@ server/
   config.js        Config persistence (load, save, crash recovery)
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
+  jobs.js          Job board dispatcher (scan, spawn, PR watch, scheduled runs)
+  command-path.js  Resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
   http.js          HTTP routes (/api/browse, /api/jobs, /mcp, origin + auth gates)
@@ -165,6 +168,7 @@ public/
     office.js      Canvas pixel art (workstations, characters, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
+    jobs.js        Job board UI (columns, cards, the job form)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared agent state
     shortcuts.js   Keyboard shortcuts
@@ -172,6 +176,8 @@ public/
     auth.js        Login tokens, presence, HTML escaping
 lib/
   helpers.js       State detection, git parsing, codename/cocktail pools
+  jobs.js          Pure job-board logic (states, prompts, dispatch selection)
+  cron.js          Five-field cron parser (schedules for scheduled jobs)
 ```
 
 ## Contributing

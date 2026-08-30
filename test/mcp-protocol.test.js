@@ -109,6 +109,27 @@ describe('tools/call post_job', () => {
     expect(reply.result.content[0].text).toBe('Title is required');
   });
 
+  it('passes the schedule through and reads back the cron and next run', () => {
+    const postJob = fakePostJob({
+      job: { id: 'job-1', title: 'Digest', schedule: '@daily', nextRunAt: new Date(Date.now() + 3600_000).toISOString() },
+    });
+    const reply = call({ title: 'Digest', schedule: '@daily' }, postJob);
+    expect(postJob.mock.calls[0][0].schedule).toBe('@daily');
+    const text = reply.result.content[0].text;
+    // The read-back is the whole point: a wrong cron is visible while someone
+    // is still in the conversation to correct it.
+    expect(text).toContain('@daily');
+    expect(text).toMatch(/next /i);
+    expect(text).not.toContain('(To do)');
+  });
+
+  it('hands a bad cron back as a tool error the agent can read', () => {
+    const reply = call({ title: 'Digest', schedule: 'every friday' },
+      fakePostJob({ error: 'A cron schedule has five fields', job: undefined }));
+    expect(reply.result.isError).toBe(true);
+    expect(reply.result.content[0].text).toMatch(/five fields/);
+  });
+
   it('rejects an unknown tool name', () => {
     const reply = handleMcpMessage(
       { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'delete_everything', arguments: {} } },

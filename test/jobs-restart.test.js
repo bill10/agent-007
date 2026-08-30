@@ -128,3 +128,40 @@ describe('stale agent links after a restart', () => {
     expect(config.jobs[0].agentSessionId).toBeNull();
   });
 });
+
+describe('restart recovery for a scheduled run', () => {
+  it('re-arms it instead of leaving it waiting for a PR that is not coming', () => {
+    // A scheduled run cannot be resumed and the PR watcher deliberately skips
+    // it, so leaving it in-progress would park the card there for good.
+    writeConfig([{
+      id: 's1', title: 'Daily digest', repoPath: '/r', type: 'scheduled',
+      schedule: '0 9 * * *', state: 'in-progress',
+      agentSessionId: 'session-9', agentName: 'Viper',
+      branchName: 'bill/digest', startedAt: '2026-08-27T00:00:00Z',
+      runCount: 4, lastRunAt: '2026-08-27T00:00:00Z',
+    }]);
+    loadConfig();
+    const job = config.jobs[0];
+    expect(job.state).toBe('todo');
+    expect(job.agentSessionId).toBeNull();
+    expect(job.branchName).toBeNull();
+    expect(Date.parse(job.nextRunAt)).toBeGreaterThan(Date.now());
+    // The record of what it has done survives; only the dead run is cleared.
+    expect(job.schedule).toBe('0 9 * * *');
+    expect(job.runCount).toBe(4);
+    expect(job.lastRunAt).toBe('2026-08-27T00:00:00Z');
+    // And the branch is still named, in case that run left something worth
+    // recovering from the orphans list.
+    expect(job.lastError).toMatch(/bill\/digest/);
+  });
+
+  it('says nothing about a lost branch when the run never got as far as one', () => {
+    writeConfig([{
+      id: 's2', title: 'Daily digest', repoPath: '/r', type: 'scheduled',
+      schedule: '@daily', state: 'in-progress', agentSessionId: 'session-3',
+    }]);
+    loadConfig();
+    expect(config.jobs[0].state).toBe('todo');
+    expect(config.jobs[0].lastError).toBeNull();
+  });
+});
