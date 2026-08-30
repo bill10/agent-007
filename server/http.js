@@ -160,7 +160,11 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
           if (a.isGitRepo !== b.isGitRepo) return a.isGitRepo ? -1 : 1;
           return a.name.localeCompare(b.name);
         });
-      const parent = resolved === '/' ? null : dirname(resolved);
+      // dirname() of a root is that same root ('/' on POSIX, 'C:\' on Windows),
+      // so compare instead of hard-coding '/': the Windows drive root would
+      // otherwise offer an "up" link that navigates to itself forever.
+      const parentDir = dirname(resolved);
+      const parent = parentDir === resolved ? null : parentDir;
       const isGitRepo = existsSync(join(resolved, '.git'));
       res.json({ path: resolved, parent, isGitRepo, entries: dirs });
     } catch (err) {

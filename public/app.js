@@ -18,6 +18,7 @@ import {
 import { setupShortcuts } from './modules/shortcuts.js';
 import { setupVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
+import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -169,7 +170,7 @@ let dirBrowserOnSelect = null;
 function openDirBrowser(startPath, onSelect) {
   dirBrowserOnSelect = onSelect || null;
   document.getElementById('dir-browser-modal').style.display = 'flex';
-  fetchDirectory(startPath && startPath.startsWith('/') ? startPath : '');
+  fetchDirectory(isAbsolutePath(startPath) ? startPath : '');
 }
 
 function closeDirBrowser(selectedPath) {
@@ -255,7 +256,7 @@ function renderDirList(data) {
       el.appendChild(badge);
     }
 
-    const fullPath = data.path === '/' ? '/' + entry.name : data.path + '/' + entry.name;
+    const fullPath = joinBrowsePath(data.path, entry.name);
     // Single-click always navigates into directory
     el.onclick = () => fetchDirectory(fullPath);
     list.appendChild(el);

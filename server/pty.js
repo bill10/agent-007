@@ -3,6 +3,7 @@
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
+import { resolveExecutable, isUsableCwd } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
@@ -11,6 +12,49 @@ import { broadcastJobs } from './jobs.js';
 // Regex constants for output filtering (shared, not recreated per event)
 const TRIVIAL_RE = /^[\s.·•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷─━▏▎▍▌▋▊▉█░▒▓⬡◐◑◒◓|\\\/\-*>]+$/;
 const ESCAPE_REMNANT_RE = /^[\d;]*[a-zA-Z]$/;
+
+// node-pty's Windows backend creates the real process on a worker callback
+// after spawn() has returned, so a CreateProcessW failure surfaces as an
+// uncaught exception instead of a rejected spawn — and takes the whole office
+// down with it. The checks in createSessionFromConfig cover the two causes we
+// know of (unlaunchable command, missing cwd); this net catches whatever else
+// the console host decides to fail on, so one bad agent costs one tab.
+const ASYNC_SPAWN_FAILURE_RE = /Cannot create process, error code: (\d+)/;
+let asyncSpawnGuardInstalled = false;
+let lastSpawnAttempt = null;
+
+function installAsyncSpawnGuard() {
+  if (asyncSpawnGuardInstalled) return;
+  asyncSpawnGuardInstalled = true;
+  process.on('uncaughtException', (err) => {
+    const match = ASYNC_SPAWN_FAILURE_RE.exec(err?.message || '');
+    if (!match) {
+      // Not ours. Reproduce Node's default uncaughtException behaviour rather
+      // than silently swallowing an unrelated bug.
+      console.error(err);
+      process.exit(1);
+    }
+
+    // The failure lands within milliseconds of the spawn that caused it and
+    // that session has produced no output, so the last attempt is the culprit.
+    const attempt = lastSpawnAttempt;
+    lastSpawnAttempt = null;
+    const reason = `Failed to start "${attempt?.command || 'command'}" (Windows error ${match[1]})`;
+    console.error(`${reason} — session left unstarted.`);
+    if (!attempt) return;
+
+    // Same teardown as the onExit handler below, so a session that died this
+    // way reports DISCONNECTED rather than sitting at WORKING in the office,
+    // and its board credential does not outlive the process that never ran.
+    const { session, broadcast } = attempt;
+    session.exited = true;
+    clearInterval(session.stateCheckInterval);
+    clearTimeout(session.scanTimer);
+    removeMcpConfig(session.id);
+    updateState(session, broadcast);
+    if (broadcast) broadcast({ type: 'session-ended', sessionId: session.id, reason });
+  });
+}
 
 /**
  * Attach onData + onExit handlers to a PTY process.
@@ -53,6 +97,19 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  */
 export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId }, broadcast) {
   const { file, args } = parseCommand(command);
+  const cwd = worktreePath || homedir();
+
+  // Both of these are checked up front because Windows reports them from the
+  // console host *after* spawn() returns — see server/command-path.js. An
+  // unusable cwd is the usual re-spawn failure: the agent's worktree was
+  // deleted while it was parked as an orphan. Checked before the token is
+  // minted so a doomed spawn never puts a board credential on disk.
+  if (!isUsableCwd(cwd)) {
+    return { error: `Working directory no longer exists: ${cwd}` };
+  }
+  // Falls back to the bare name when nothing matched, leaving node-pty's own
+  // lookup (and its catchable "File not found") in charge.
+  const resolvedFile = resolveExecutable(file, process.env, process.platform, cwd) || file;
 
   // Minted before the spawn so it can go into the MCP config the agent reads at
   // startup, and parked on the session below so resolveAgentToken can find its
@@ -64,13 +121,14 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   const mcpConfigPath = takesMcpConfig(file) ? writeMcpConfig(sessionId, agentToken) : null;
   const spawnArgs = withMcpConfig(file, args, mcpConfigPath);
 
+  installAsyncSpawnGuard();
   let ptyProcess;
   try {
-    ptyProcess = spawnPty(file, spawnArgs, {
+    ptyProcess = spawnPty(resolvedFile, spawnArgs, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
-      cwd: worktreePath || homedir(),
+      cwd,
       env: { ...process.env, TERM: 'xterm-256color' },
     });
   } catch (err) {
@@ -116,6 +174,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     lastScanOutputAt: null,    // value of lastOutputAt at the last git scan (idle gate)
   };
 
+  lastSpawnAttempt = { session, command, broadcast };
   setupPtyHandlers(session, sessionId, broadcast);
   return { session };
 }

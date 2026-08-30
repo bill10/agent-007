@@ -42,9 +42,12 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
 - Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), and the board's MCP tool (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`)
 
-> **Windows note:** `test/server.test.js` currently fails to load under vitest on
-> Windows (node-pty's native addon; see TODOS.md). It runs green in CI (ubuntu),
-> and the other suites pass locally on Windows.
+> **Windows note:** four tests fail locally on Windows and pass in CI (ubuntu).
+> `test/server.test.js` fails to load at all (node-pty's native addon). Two
+> assertions in `test/agent-mcp-config.test.js` expect mode `0600`, which Windows
+> cannot express through `chmod`. One in `test/mcp-endpoint.test.js` splits a
+> fixture path on `/` only. All four are tracked in TODOS.md; the rest of the
+> suite passes locally on Windows.
 
 ## Code Style
 
