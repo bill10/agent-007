@@ -109,9 +109,8 @@ function getWindowColors(tod) {
 // the open floor (below the windows + job board zone). Centering in the FULL
 // panel height left the desks floating mid-canvas with a large dead band of
 // empty floor below them when only a few agents were running. ---
-// Reserve the top zone for the windows and job boards. The boards end well
-// short of this (their shadows reach 8 Z below the baseboard); the rest is
-// walking room between the boards and the first row of desks.
+// The boards end well short of FLOOR_TOP (their shadows reach 8 Z below the
+// baseboard); the rest is walking room before the first row of desks.
 const FLOOR_TOP = WALL_BOTTOM + 26 * Z;
 function computeGridLayout(agentCount, panelWidth, panelHeight) {
   const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z + WS_GAP_X) / (WS_W + WS_GAP_X))));
