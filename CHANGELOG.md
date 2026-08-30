@@ -20,7 +20,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   the board puts the card back in To do with its next run time — and keeps the
   agent's terminal open so you can read what the run wrote; the next run, or
   closing the tab, retires it. It cycles To do → In progress → To do and never
-  reaches Review, so one card is one standing job.
+  reaches Review, so one card is one standing job — neither the pull-request
+  watcher nor the merged-PR sweep will file a scheduled card away, even when a
+  run's work happens to open or merge one.
 - Agents can post a scheduled card too: `post_job` and `POST /api/jobs` take an
   optional `schedule`, and the reply reads back the schedule and the next run
   time so a cron expression that means something other than you intended is
