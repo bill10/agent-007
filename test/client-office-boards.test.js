@@ -4,7 +4,9 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computeBoardLayout } = await import('../public/modules/office.js');
+const { computeBoardLayout, BOARD_TITLES } = await import('../public/modules/office.js');
+const { COLUMNS } = await import('../public/modules/jobs.js');
+const { JOB_STATES } = await import('../lib/jobs.js');
 
 const Z = 3;
 
@@ -46,11 +48,17 @@ describe('job board placement', () => {
     }
   });
 
-  it('hangs below the window sills and stands clear of the desk grid', () => {
+  it('stands almost against the wall, on the floor, clear of the desk grid', () => {
     for (const w of widths) {
       const board = computeBoardLayout(w);
       if (!board.visible) continue;
-      expect(board.boardTop, `panel ${w}`).toBeGreaterThanOrEqual(board.sillBottom);
+      // Feet on the floor (below the baseboard), no further out than the
+      // plant pots' fronts (6 Z deep): the boards belong against the wall,
+      // not wandering out into the room.
+      expect(board.footY, `panel ${w}`).toBeGreaterThan(board.wallBottom);
+      expect(board.footY - board.wallBottom, `panel ${w}`).toBeLessThanOrEqual(6 * Z);
+      // The frame rises up the wall but never above the ceiling line.
+      expect(board.boardTop, `panel ${w}`).toBeGreaterThanOrEqual(0);
       expect(board.footY, `panel ${w}`).toBeLessThan(board.floorTop);
       expect(board.frameBottom, `panel ${w}`).toBeLessThan(board.footY);
     }
@@ -59,5 +67,19 @@ describe('job board placement', () => {
   it('draws nothing rather than smudges on a panel too narrow for a board', () => {
     expect(computeBoardLayout(160).visible).toBe(false);
     expect(computeBoardLayout(900).visible).toBe(true);
+  });
+});
+
+// The three whiteboards are the real board's columns, in order. The column
+// list exists three times (server states, board tab labels, canvas titles)
+// and nothing imports across them, so this is what keeps them in step.
+// `done` has no column (a merged card leaves the board), so no whiteboard.
+describe('job board titles', () => {
+  it('are the board tab column labels, shouted', () => {
+    expect(BOARD_TITLES).toEqual(COLUMNS.map((c) => c.label.toUpperCase()));
+  });
+
+  it('cover every job state except done, in order', () => {
+    expect(COLUMNS.map((c) => c.state)).toEqual(JOB_STATES.filter((s) => s !== 'done'));
   });
 });

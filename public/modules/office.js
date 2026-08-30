@@ -109,7 +109,10 @@ function getWindowColors(tod) {
 // the open floor (below the windows + job board zone). Centering in the FULL
 // panel height left the desks floating mid-canvas with a large dead band of
 // empty floor below them when only a few agents were running. ---
-const FLOOR_TOP = WALL_BOTTOM + 26 * Z; // reserve the top zone for windows + job boards
+// Reserve the top zone for the windows and job boards. The boards end well
+// short of this (their shadows reach 8 Z below the baseboard); the rest is
+// walking room between the boards and the first row of desks.
+const FLOOR_TOP = WALL_BOTTOM + 26 * Z;
 function computeGridLayout(agentCount, panelWidth, panelHeight) {
   const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z + WS_GAP_X) / (WS_W + WS_GAP_X))));
   const count = Math.max(1, agentCount);
@@ -357,11 +360,20 @@ const BOARD_W = 26;      // Z units — outer frame width (capped to the wall se
 const BOARD_H = 19;      // Z units — outer frame height
 const BOARD_LEG_H = 9;   // Z units — frame bottom down to the feet
 const BOARD_FRAME = 1;   // Z units — frame thickness around the writable surface
-const BOARD_FOOT_OFFSET = 14; // Z units below the baseboard where the feet land
+// Z units below the baseboard where the feet land. Almost against the wall,
+// but level with the fronts of the plant pots (which sit 6 Z deep): the boards
+// are drawn over the plants, and the room's 3/4 view reads lower as nearer, so
+// feet any higher would paint a board over a pot that is closer to the viewer.
+const BOARD_FOOT_OFFSET = 6;
 const BOARD_MIN_W = 8;   // Z units — below this the section is too narrow to draw into
 const BOARD_BRACE_H = 3; // Z units — brace (and centre-post foot) above the feet
 
-const BOARD_TITLES = ['JOBS', 'HIRE', 'OPEN'];  // equal length: none condenses under maxWidth
+// The real board's columns: COLUMNS in jobs.js, upper-cased, which a test
+// keeps in step with lib/jobs.js JOB_STATES. Not imported from jobs.js, which
+// would drag the socket and auth modules into the canvas. 'IN PROGRESS' only
+// fits a full-width board (panel >= 432px); narrower than that fillText's
+// maxWidth condenses it, harder the narrower the panel gets.
+export const BOARD_TITLES = ['TO DO', 'IN PROGRESS', 'REVIEW'];
 const BOARD_TITLE_INK = ['#2f6fb0', '#b0392b', '#2f7a4a'];
 const BOARD_TITLE_FONT = `bold ${3 * Z}px monospace`;
 
@@ -390,8 +402,8 @@ const PAPER_TINTS = ['#f6f3ea', '#eef1f7', '#fbf6e4', '#f2f4ef'];
 const PIN_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#d4a847'];
 
 // Geometry for the three boards, in screen pixels. Exported so the placement
-// rules (inside its own wall section, clear of the window sills and the desk
-// grid) can be asserted in tests without a canvas.
+// rules (inside its own wall section, almost against the wall, clear of the
+// desk grid) can be asserted in tests without a canvas.
 export function computeBoardLayout(panelWidth) {
   const z = Z;
   const layout = computeWallLayout(panelWidth);
@@ -402,7 +414,7 @@ export function computeBoardLayout(panelWidth) {
   const boardZ = Math.min(BOARD_W, layout.shelfW - 2) & ~1;
   const boardW = boardZ * z;
   const boardH = BOARD_H * z;
-  const footY = WALL_BOTTOM + BOARD_FOOT_OFFSET * z;   // feet on the floor, clear of the desks
+  const footY = WALL_BOTTOM + BOARD_FOOT_OFFSET * z;   // feet on the floor, just off the baseboard
   const frameBottom = footY - BOARD_LEG_H * z;
   const boardTop = frameBottom - boardH;
 
@@ -414,7 +426,7 @@ export function computeBoardLayout(panelWidth) {
   return {
     visible: boardZ >= BOARD_MIN_W,
     boardW, boardH, boardTop, frameBottom, footY, sections,
-    sillBottom: (3 + layout.windowH) * z + z,          // window frame bottom + sill
+    wallBottom: WALL_BOTTOM,
     floorTop: FLOOR_TOP,
   };
 }
@@ -508,8 +520,11 @@ function drawWhiteboard(ctx, x, y, w, h, idx) {
   ctx.fillStyle = BOARD_TITLE_INK[idx % BOARD_TITLE_INK.length];
   ctx.font = BOARD_TITLE_FONT;
   ctx.textAlign = 'center';
-  ctx.fillText(title, sx + sw / 2, sy + 3 * z, sw - 2 * z);
-  ctx.fillRect(Math.round(sx + sw * 0.28), sy + 4 * z, Math.round(sw * 0.44), 1);
+  const maxW = sw - 2 * z;
+  ctx.fillText(title, sx + sw / 2, sy + 3 * z, maxW);
+  // Underline as wide as the heading actually came out (condensed or not).
+  const titleW = Math.min(maxW, Math.round(ctx.measureText(title).width));
+  ctx.fillRect(Math.round(sx + (sw - titleW) / 2), sy + 4 * z, titleW, 1);
   ctx.restore();
 
   // Pinned job posts
@@ -1147,7 +1162,8 @@ export function renderOffice() {
   // Layer 4: (bookshelves removed — bare plaster wall)
   // Layer 5: Potted plants (against the wall, under the windows)
   drawPlants(ctx, w);
-  // Layer 5b: Job boards — they stand out on the floor, so they occlude the plants
+  // Layer 5b: Job boards — their feet stand level with the plant pots' fronts,
+  // so where a board meets a plant at a section edge the board wins
   drawJobBoardEasels(ctx, w);
   // Layer 6: Ambient particles
   drawParticles(ctx, w, h);
