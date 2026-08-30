@@ -275,9 +275,13 @@ those cards have always been.
   away the answer it is waiting for, so such a run holds its slot and shows
   "needs you" exactly as a one-time job does. `finishScheduledRuns` runs first
   in each scan, so a run that ended has its card back in To do in time for the
-  same scan to dispatch what was queued behind it. Because a session gone
-  entirely also counts as over, this doubles as the recovery path after a
-  restart.
+  same scan to dispatch what was queued behind it. A session gone entirely also
+  counts as over, so a run whose agent was killed or crashed closes out the
+  same way. A restart does not wait for that: `loadConfig` re-arms a scheduled
+  card caught in-progress on the spot — back to To do, next run computed from
+  now, with a `lastError` naming the interrupted run's branch so its work can
+  be recovered from the orphans list. **End run** on the card is the manual
+  version of the same move, and its only manual control while running.
 - **The run's terminal outlives the run.** The agent is not killed when the
   run ends: its terminal is the run's only output — a scheduled job need not
   produce code — and killing it would destroy the summary before anyone read
@@ -299,7 +303,11 @@ those cards have always been.
 - **The PR watcher and the merge sweep both skip scheduled cards.** A scheduled
   run that happens to open a pull request must not be moved to Review, and one
   whose pull request merges must not be filed away as done — either would take
-  the card out of rotation permanently, and done is terminal.
+  the card out of rotation permanently, and done is terminal. The server
+  refuses a manual move to Review or Done for the same reason (delete the card
+  to retire its schedule), and type and schedule are only editable while the
+  card sits in To do — flipping an in-flight card would corrupt the cap
+  accounting and the run finisher's view of it.
 - **The next run is measured from the end of the last one**, never stepped on
   from the previous due time, so a run that overran its own interval schedules
   the next one afterwards instead of coming due again the instant it lands.
@@ -334,6 +342,9 @@ those cards have always been.
     attention with one that is actually blocking)
   - `quiet -- may need you` -> `--state-idle` (parked at a prompt past the window)
   - `agent gone` -> `--state-disconnected` (session ended)
+  - On a scheduled card, `quiet` and `agent gone` both render as `run finished`
+    in idle gray instead: that quiet IS the run's completion signal, and the
+    alarm colors would tell the user they might be needed when they are not.
 - Clicking anywhere on an in-progress card switches to that agent's terminal;
   the status pill does the same, and stays the keyboard path since the card
   itself is not a tab stop. Card buttons, the PR link, and a click that ends
@@ -378,10 +389,13 @@ firing every five minutes would otherwise move the user's cursor mid-sentence.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired.
 
-Retirement happens when a job LEAVES In progress — to Review when its pull
-request appears, or straight to Done when that pull request opened and merged
-inside a single scan — and on a manual move to Done, which is the user saying
-the job is over. It never happens as a recurring sweep over jobs already in
+Retirement happens when a one-time job LEAVES In progress — to Review when its
+pull request appears, or straight to Done when that pull request opened and
+merged inside a single scan — and on a manual move to Done, which is the user
+saying the job is over. A scheduled run's agent is the exception: it outlives
+its run as the kept terminal and is retired by the next dispatch, by the user
+closing the tab, or with the card's deletion (see "One-time and scheduled
+cards"). It never happens as a recurring sweep over jobs already in
 Review, and never over a card in the archive, which no longer has an agent to
 retire. An agent you re-adopt on a shipped branch to address review comments is
 yours; a poll that killed it every five minutes would make Review permanently

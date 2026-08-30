@@ -40,7 +40,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
-- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), and the board's MCP tool (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`)
+- Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), the cron parser and scheduled-job lifecycle (`test/cron.test.js`, `test/jobs-scheduled.test.js`, `test/jobs-scheduled-dispatch.test.js`, `test/jobs-restart.test.js`), and the board's MCP tool (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`)
 
 > **Windows note:** four tests fail locally on Windows and pass in CI (ubuntu).
 > `test/server.test.js` fails to load at all (node-pty's native addon). Two
@@ -65,6 +65,8 @@ server/
   config.js        Config persistence
   direct-run.js    Entry-point detection (npm start guard)
   git.js           Git operations
+  jobs.js          Job board dispatcher (scans, spawns agents, watches PRs)
+  command-path.js  Resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
   http.js          HTTP routes and the user/agent auth gates
@@ -72,7 +74,7 @@ server/
   agent-mcp.js     Per-session MCP config for spawned agents
   auth.js          Login tokens, ownership, agent session tokens
 bin/adduser.js     Create a login user (npm run adduser)
-lib/helpers.js     Pure functions (tested)
+lib/               Pure functions, tested (helpers.js, jobs.js job logic, cron.js parser)
 public/            Frontend (vanilla JS, no build)
 ```
 

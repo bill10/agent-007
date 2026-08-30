@@ -150,6 +150,8 @@ server/
   config.js        Config persistence (load, save, crash recovery)
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
+  jobs.js          Job board dispatcher (scan, spawn, PR watch, scheduled runs)
+  command-path.js  Resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
   http.js          HTTP routes (/api/browse, /api/jobs, /mcp, origin + auth gates)
@@ -166,6 +168,7 @@ public/
     office.js      Canvas pixel art (workstations, characters, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
+    jobs.js        Job board UI (columns, cards, the job form)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared agent state
     shortcuts.js   Keyboard shortcuts
@@ -173,6 +176,8 @@ public/
     auth.js        Login tokens, presence, HTML escaping
 lib/
   helpers.js       State detection, git parsing, codename/cocktail pools
+  jobs.js          Pure job-board logic (states, prompts, dispatch selection)
+  cron.js          Five-field cron parser (schedules for scheduled jobs)
 ```
 
 ## Contributing
