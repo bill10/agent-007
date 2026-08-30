@@ -7,7 +7,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { basename, join } from 'path';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-mcprepo-'));
 const REPO2 = mkdtempSync(join(tmpdir(), 'a007-mcprepo2-'));
@@ -183,7 +183,7 @@ describe('posting a job through the tool', () => {
 
   it('reaches another configured repo by folder name', async () => {
     // Deliberate: an agent noticing work elsewhere is the case this exists for.
-    await callTool({ title: 'Elsewhere', repo: REPO2.split('/').pop() });
+    await callTool({ title: 'Elsewhere', repo: basename(REPO2) });
     expect(allJobs()[0].repoPath).toBe(REPO2);
   });
 
@@ -252,7 +252,7 @@ describe('POST /api/jobs — the door for agents that cannot take an MCP server'
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.job.title).toBe('From a plain HTTP agent');
-    expect(body.repoName).toBe(REPO.split('/').pop());
+    expect(body.repoName).toBe(basename(REPO));
     expect(allJobs()).toHaveLength(1);
   });
 

@@ -42,12 +42,11 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input, the Jobs tab, and the office whiteboards, whose titles are checked against the Jobs tab's columns)
 - Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), the cron parser and scheduled-job lifecycle (`test/cron.test.js`, `test/jobs-scheduled.test.js`, `test/jobs-scheduled-dispatch.test.js`, `test/jobs-restart.test.js`), and the board's MCP tool (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`)
 
-> **Windows note:** four tests fail locally on Windows and pass in CI (ubuntu).
-> `test/server.test.js` fails to load at all (node-pty's native addon). Two
-> assertions in `test/agent-mcp-config.test.js` expect mode `0600`, which Windows
-> cannot express through `chmod`. One in `test/mcp-endpoint.test.js` splits a
-> fixture path on `/` only. All four are tracked in TODOS.md; the rest of the
-> suite passes locally on Windows.
+> **Windows note:** the suite runs on Windows too. `vitest.config.js` keeps
+> node-pty external so its native addon is never transformed, and the two
+> `0600` mode assertions in `test/agent-mcp-config.test.js` are skipped there
+> because Windows has no POSIX permission bits, so the MCP config file is not
+> owner-only there (that would take an ACL, not a mode).
 
 ## Code Style
 
