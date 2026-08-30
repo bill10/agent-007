@@ -898,8 +898,11 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   // prMergedAt is only ever written alongside state 'done', and done is
   // terminal, so the state filter already excludes every stamped job. Kept as a
   // cheap assertion of that invariant rather than a live condition.
+  // Scheduled cards are excluded for the same reason checkPullRequests skips
+  // them, only more so: done is terminal, so a scheduled run whose work merged
+  // would leave the board for good instead of re-arming for its next run.
   const candidates = allJobs().filter(j =>
-    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt);
+    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && !isScheduled(j));
   if (candidates.length === 0) return [];
   const finished = [];
   let noted = false;   // a PR-check failure was recorded on some card

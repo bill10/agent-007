@@ -283,9 +283,10 @@ those cards have always been.
   starts deleting work the rest of the app promises to keep. `git status
   --porcelain` respects `.gitignore`, so build output in an ignored path does
   not trigger it.
-- **The PR watcher skips scheduled cards.** A scheduled run that happens to open
-  a pull request must not be moved to Review — that would take the card out of
-  rotation permanently.
+- **The PR watcher and the merge sweep both skip scheduled cards.** A scheduled
+  run that happens to open a pull request must not be moved to Review, and one
+  whose pull request merges must not be filed away as done — either would take
+  the card out of rotation permanently, and done is terminal.
 - **The next run is measured from the end of the last one**, never stepped on
   from the previous due time, so a run that overran its own interval schedules
   the next one afterwards instead of coming due again the instant it lands. No

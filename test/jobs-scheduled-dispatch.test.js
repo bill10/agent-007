@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import {
-  addJob, updateJob, moveJob, dispatchOnce, finishScheduledRuns, checkPullRequests,
+  addJob, updateJob, moveJob, dispatchOnce, finishScheduledRuns, checkPullRequests, checkMergedPullRequests,
   runScan, allJobs, boardSettings, jobsPayload, postJobForAgent,
 } from '../server/jobs.js';
 import { STALLED_AFTER_MS } from '../lib/jobs.js';
@@ -88,6 +88,18 @@ describe('the PR watcher and scheduled jobs', () => {
 
     expect(await checkPullRequests(noopBroadcast, { findPr })).toEqual([]);
     expect(allJobs()[0].state).toBe('in-progress');
+  });
+
+  it('leaves a scheduled run alone even when its branch has a merged PR', async () => {
+    // Done is terminal. Filing the card away would end the standing job the
+    // first time one of its runs happened to ship something.
+    addJob({ title: 'Nightly sweep', repoPath: REPO, schedule: '0 3 * * *' }, noopBroadcast);
+    Object.assign(allJobs()[0], { state: 'in-progress', branchName: 'bill/sweep', agentSessionId: 's1', startedAt: past() });
+    const findMerged = async () => ({ pr: { url: 'https://x/pull/7', number: 7, mergedAt: new Date().toISOString() } });
+
+    expect(await checkMergedPullRequests(noopBroadcast, { findMerged })).toEqual([]);
+    expect(allJobs()[0].state).toBe('in-progress');
+    expect(allJobs()[0].prMergedAt).toBeNull();
   });
 });
 
