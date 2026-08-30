@@ -51,6 +51,14 @@
   Not built with the view because the request was to show ALL finished jobs, and
   a silent cap contradicts that. Retention is a policy the user should choose.
 
+## MCP config file is not owner-only on Windows
+- **What:** `server/agent-mcp.js` writes the agent's bearer token to `~/.agent-007/mcp/<port>/` with `mode: 0o600` plus `chmod`. Windows has no POSIX mode bits, so the file inherits the directory's ACL instead. Decide whether that is acceptable (the default dir sits under the user profile, which is user-scoped on typical installs) or set an explicit owner-only ACL there.
+- **Why:** The file holds a live credential; `0600` is the whole protection on POSIX and it is silently absent on Windows. `AGENT007_MCP_DIR` can also point anywhere.
+- **Effort:** S (human: ~2 hours / CC: ~20 min), mostly deciding the threat model.
+- **Priority:** P3
+- **Depends on:** Nothing
+- **Context:** Surfaced while making the test suite pass on Windows (2026-08-30): the mode assertions are skipped there rather than weakened on POSIX.
+
 ## Pre-seed workspace trust for board-dispatched agents
 
 - **What:** Before the job board spawns an agent, write `hasTrustDialogAccepted`

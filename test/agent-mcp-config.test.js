@@ -45,13 +45,16 @@ describe('the config an agent reads at startup', () => {
     expect(boardBaseUrl()).toMatch(/^http:\/\/(127\.0\.0\.1|localhost|\[?::1\]?)/);
   });
 
-  it('writes the file readable only by its owner', () => {
-    // It holds a live credential.
+  it('writes the token into the file the agent will read', () => {
     const path = writeMcpConfig('session-1', 'a007a_secret');
     expect(path).toBe(mcpConfigPath('session-1'));
-    if (POSIX) expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers[MCP_SERVER_NAME].headers.Authorization)
       .toBe('Bearer a007a_secret');
+  });
+
+  it.skipIf(!POSIX)('writes the file readable only by its owner', () => {
+    // It holds a live credential.
+    expect(statSync(writeMcpConfig('session-1', 'a007a_secret')).mode & 0o777).toBe(0o600);
   });
 
   it.skipIf(!POSIX)('tightens the mode even when a file was already there', () => {
