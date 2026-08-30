@@ -784,8 +784,8 @@ describe('what "quiet" means on a scheduled card', () => {
   const quietAgent = { state: 'WAITING', lastOutputAt: Date.now() - 4 * 60 * 1000 };
 
   it('reads as the run finishing, not as a warning that you may be needed', () => {
-    // The board reads that same quiet as "done" and closes the run on its next
-    // scan, so "may need you" would be the opposite of true.
+    // The board reads that same quiet as "done" and re-arms the card on its
+    // next scan, so "may need you" would be the opposite of true.
     agents.set('s1', quietAgent);
     handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
     expect(document.querySelector('.job-card-status').textContent).toMatch(/run finished/);

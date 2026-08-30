@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import {
-  addJob, updateJob, moveJob, dispatchOnce, finishScheduledRuns, checkPullRequests, checkMergedPullRequests,
+  addJob, updateJob, moveJob, deleteJob, dispatchOnce, finishScheduledRuns, checkPullRequests, checkMergedPullRequests,
   runScan, allJobs, boardSettings, jobsPayload, postJobForAgent,
 } from '../server/jobs.js';
 import { STALLED_AFTER_MS } from '../lib/jobs.js';
@@ -120,65 +120,73 @@ describe('finishScheduledRuns', () => {
     return job;
   }
 
-  it('closes the agent and re-arms the card once the run goes quiet', async () => {
+  it('keeps the agent and re-arms the card once the run goes quiet', async () => {
     const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    const killed = [];
-    const finished = await finishScheduledRuns(noopBroadcast, { killSession: fakeKillSession(killed) });
+    const finished = await finishScheduledRuns(noopBroadcast);
 
     expect(finished).toHaveLength(1);
-    expect(killed).toEqual(['s1']);
     expect(job.state).toBe('todo');
     expect(job.agentSessionId).toBeNull();
     expect(job.branchName).toBeNull();
+    // The agent is NOT closed: its terminal is the run's only output, and the
+    // card keeps a pointer to it until the next run retires it.
+    expect(sessions.has('s1')).toBe(true);
+    expect(job.lastRunSessionId).toBe('s1');
+    expect(job.lastRunAgentName).toBe('Viper');
     // Re-armed rather than blanked: the schedule and the run record survive.
     expect(job.schedule).toBe('0 9 * * *');
     expect(job.runCount).toBe(1);
     expect(Date.parse(job.nextRunAt)).toBeGreaterThan(Date.now());
   });
 
+  it('retires the kept agent when the next run dispatches', async () => {
+    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
+    await finishScheduledRuns(noopBroadcast);
+    expect(job.lastRunSessionId).toBe('s1');
+
+    job.nextRunAt = past();   // due again, with the old tab still open
+    const calls = [];
+    const killed = [];
+    await dispatchOnce(fakeCreateSession(calls), noopBroadcast, { killSession: fakeKillSession(killed) });
+
+    expect(killed).toEqual(['s1']);
+    expect(job.lastRunSessionId).toBeNull();
+    expect(job.state).toBe('in-progress');
+    expect(job.agentSessionId).toBe('session-1');
+  });
+
+  it('retires the kept agent when the card is deleted', async () => {
+    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
+    await finishScheduledRuns(noopBroadcast);
+    const killed = [];
+    await deleteJob(job.id, noopBroadcast, { killSession: fakeKillSession(killed) });
+    expect(killed).toEqual(['s1']);
+    expect(allJobs()).toHaveLength(0);
+  });
+
   it('leaves a run that is still working exactly where it is', async () => {
     const job = runningJob();
-    const killed = [];
-    expect(await finishScheduledRuns(noopBroadcast, { killSession: fakeKillSession(killed) })).toEqual([]);
-    expect(killed).toEqual([]);
+    expect(await finishScheduledRuns(noopBroadcast)).toEqual([]);
     expect(job.state).toBe('in-progress');
   });
 
   it('leaves a run that is asking the user a question alone', async () => {
     const job = runningJob({ state: 'MESSAGE', lastOutputAt: Date.now() - STALLED_AFTER_MS - 60_000 });
-    const killed = [];
-    await finishScheduledRuns(noopBroadcast, { killSession: fakeKillSession(killed) });
-    expect(killed).toEqual([]);
+    await finishScheduledRuns(noopBroadcast);
     expect(job.state).toBe('in-progress');
   });
 
-  it('recovers a run whose agent died with the server, without needing a kill', async () => {
+  it('recovers a run whose agent died with the server', async () => {
     const job = runningJob();
     sessions.clear();          // what a restart leaves behind
-    const killed = [];
-    await finishScheduledRuns(noopBroadcast, { killSession: fakeKillSession(killed) });
-    expect(killed).toEqual([]);
+    await finishScheduledRuns(noopBroadcast);
     expect(job.state).toBe('todo');
     expect(Date.parse(job.nextRunAt)).toBeGreaterThan(Date.now());
   });
 
-  it('re-arms the card even when closing the agent fails, rather than stranding it', async () => {
-    const job = runningJob({ exited: false, state: 'WAITING', lastOutputAt: 0 });
-    const failingKill = async () => { throw new Error('worktree busy'); };
-    await finishScheduledRuns(noopBroadcast, { killSession: failingKill });
-    expect(job.state).toBe('todo');
-  });
-
-  it('does not write over a card the user moved while the kill was in flight', async () => {
-    const job = runningJob({ state: 'WAITING', lastOutputAt: 0 });
-    // A slow kill, during which the card is deleted — the same race the PR
-    // watcher guards against.
-    const killSession = async () => { config.jobs = []; };
-    expect(await finishScheduledRuns(noopBroadcast, { killSession })).toEqual([]);
-    expect(job.state).toBe('in-progress');   // the detached object is untouched
-  });
-
-  it('frees the repo slot in time for the same scan to dispatch what was waiting', async () => {
+  it('re-arms a finished run before the same scan dispatches, in one tick', async () => {
+    // Ordering, not the cap (scheduled cards sit outside it): the run that
+    // ended since the last tick is back in To do before dispatch looks.
     boardSettings().maxPerRepo = 1;
     const done = runningJob({ state: 'WAITING', lastOutputAt: 0 });
     addJob({ title: 'Queued work', repoPath: REPO }, noopBroadcast);

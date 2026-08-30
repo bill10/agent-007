@@ -104,10 +104,21 @@ describe('selectDispatchableJobs with scheduled jobs', () => {
     expect(selected.map(j => j.id)).toEqual(['one']);
   });
 
-  it('still counts a scheduled run in flight against the per-repo cap', () => {
+  it('does not count a scheduled run in flight against the per-repo cap', () => {
+    // The cap bounds the one-time queue; a run in flight must not eat a slot
+    // a one-time job would otherwise get.
     const running = { ...make({ schedule: '0 9 * * *' }), id: 'sched', state: 'in-progress', agentSessionId: 's1' };
     const queued = { ...make(), id: 'one' };
-    expect(selectDispatchableJobs([running, queued], { now, maxPerRepo: 1 })).toEqual([]);
+    expect(selectDispatchableJobs([running, queued], { now, maxPerRepo: 1 }).map(j => j.id)).toEqual(['one']);
+  });
+
+  it('is not held under the cap by busy one-time jobs', () => {
+    // Missed firings are never replayed, so a schedule starved by the cap
+    // would silently lose runs.
+    const busy = { ...make(), id: 'one', state: 'in-progress', agentSessionId: 's1' };
+    const due = { ...make({ schedule: '0 9 * * *' }), id: 'sched', nextRunAt: new Date(now - 1000).toISOString() };
+    expect(selectDispatchableJobs([busy, due], { now, maxPerRepo: 1, liveSessionIds: new Set(['s1']) }).map(j => j.id))
+      .toEqual(['sched']);
   });
 });
 
@@ -120,10 +131,9 @@ describe('the scheduled prompt', () => {
     const prompt = buildJobPrompt(scheduled);
     expect(prompt).not.toMatch(/\/review/);
     expect(prompt).not.toMatch(/\/ship/);
-    expect(prompt).not.toMatch(/pull request the board watches|watches for the pull request/i);
-    // And says so out loud, so the agent does not invent a change to ship.
-    expect(prompt).toMatch(/not necessarily a coding task/i);
-    expect(prompt).toMatch(/do not open a pull request unless/i);
+    // Nothing about pull requests at all: the task plus the one line that
+    // matters. Anything more nudges a non-coding run toward inventing code.
+    expect(prompt).not.toMatch(/pull request/i);
   });
 
   it('keeps the title, the detail and the schedule that produced the run', () => {
@@ -193,6 +203,10 @@ describe('scheduledRunReset', () => {
     };
     const reset = scheduledRunReset(job, now);
     expect(reset.state).toBe('todo');
+    // The run's agent is not closed — the card hands the live link over to
+    // lastRun* so the kept tab stays reachable until the next run retires it.
+    expect(reset.lastRunSessionId).toBe('s1');
+    expect(reset.lastRunAgentName).toBe('Viper');
     expect(reset.agentSessionId).toBeNull();
     expect(reset.agentName).toBeNull();
     expect(reset.branchName).toBeNull();

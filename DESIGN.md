@@ -252,32 +252,45 @@ those cards have always been.
   work like any other, and pulling it into its own column would take it out of
   the glance the three columns exist to give. It is marked with a chip and a row
   showing the cron, the next run, and how many times it has run.
-- **It cycles through To do, so the cap keeps working.** The invariant the
-  per-repo cap depends on is that in-progress cards and live board agents are
-  the same set. A scheduled run is an ordinary in-progress card with an ordinary
-  agent for as long as it lasts, so nothing about the cap, the dispatcher or
-  worktree cleanup had to learn a special case.
-- **The prompt drops the review/ship instruction.** A scheduled job need not be
-  code at all. Telling an agent that summarises yesterday's commits to run
-  `/review` and `/ship` would push it into inventing a change so it had something
-  to open a pull request with. The scheduled suffix says the opposite out loud —
-  do the work, do not open a PR unless the work calls for one, and finish by
-  writing what you found in the terminal. What it keeps is the part that is
-  still true: nobody is watching, so assume rather than ask.
+- **Exempt from the per-repo cap, in both directions.** The cap exists to
+  bound how many agents the board piles onto one repo while draining the
+  one-time queue. A scheduled card neither counts toward it nor waits behind
+  it: it is already bounded — one run at a time, at cron pace — and holding it
+  under the cap would let two long one-time jobs silently starve every
+  schedule on the repo, with the missed firings never replayed. The cap's
+  invariant is unchanged for what it actually governs: one-time in-progress
+  cards and their live agents remain the same set.
+- **The prompt is the task, plus one line.** A scheduled job need not be code
+  at all, so the review/ship instruction is gone — telling an agent that
+  summarises yesterday's commits to run `/ship` would push it into inventing a
+  change so it had something to open a pull request with. Nothing replaces it:
+  an agent already ends its turn with a summary, and the kept terminal (below)
+  is what makes that summary readable. The one line that stays is
+  assumptions-over-questions, because a run that stops to ask holds its card
+  in In progress until a human notices.
 - **A run ends with its agent, not with a pull request.** There is no artefact
   to watch for, so what is left is the agent: the run is over when it exits, or
   when it has been parked at its prompt past the quiet window. MESSAGE is
   excluded — that is the agent asking a question, and killing it would throw
   away the answer it is waiting for, so such a run holds its slot and shows
   "needs you" exactly as a one-time job does. `finishScheduledRuns` runs first
-  in each scan, so a run that ended frees its repo slot in time for the same
-  scan to dispatch what was queued behind it. Because a session gone entirely
-  also counts as over, this doubles as the recovery path after a restart.
+  in each scan, so a run that ended has its card back in To do in time for the
+  same scan to dispatch what was queued behind it. Because a session gone
+  entirely also counts as over, this doubles as the recovery path after a
+  restart.
+- **The run's terminal outlives the run.** The agent is not killed when the
+  run ends: its terminal is the run's only output — a scheduled job need not
+  produce code — and killing it would destroy the summary before anyone read
+  it. The card keeps a pointer to the tab ("last run · open terminal"), and
+  the next dispatch retires it, or the user closes it by hand; deleting the
+  card retires it too. Bounded at one kept agent, and so one worktree, per
+  card between runs.
 - **A run that leaves a dirty worktree orphans it, every time.** `removeWorktree`
   keeps a worktree whose tree is dirty or whose commits are unpushed, which is
   the right call for a one-time job — that is somebody's work. Recurrence
-  amplifies it: a scheduled job that reliably leaves a modified file orphans one
-  worktree per run, hourly. Deliberately not capped here. The orphan
+  amplifies it: a scheduled job that reliably leaves a modified file orphans
+  one worktree per run, hourly, each one when the next run retires the kept
+  agent. Deliberately not capped here. The orphan
   notification fires on every run, so it is visible rather than silent, and the
   fix belongs in the job (stop leaving files behind), not in a policy that
   starts deleting work the rest of the app promises to keep. `git status

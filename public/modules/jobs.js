@@ -109,11 +109,11 @@ const STATUS_TEXT = {
 // "Quiet" means two different things depending on the card. On a one-time job it
 // is a warning — the agent may be waiting on you and its PR never appeared. On a
 // scheduled run it is the completion signal itself: the board reads that same
-// quiet as "done" and closes the run on its next scan, so telling the user they
-// might be needed would be the opposite of true.
+// quiet as "done" and re-arms the card on its next scan (keeping the agent's
+// terminal open to read), so telling the user they might be needed would be
+// the opposite of true.
 function statusText(job, status) {
-  if (isScheduled(job) && status === 'stalled') return 'run finished — closing';
-  if (isScheduled(job) && status === 'gone') return 'run finished';
+  if (isScheduled(job) && (status === 'stalled' || status === 'gone')) return 'run finished';
   return STATUS_TEXT[status] || status;
 }
 
@@ -272,6 +272,19 @@ function renderCard(job) {
     if (runs) bits.push(`<span class="job-card-runs">· ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
     sched.innerHTML = bits.join(' ');
     card.appendChild(sched);
+
+    // The last run's agent is kept open so its terminal can be read (the next
+    // run replaces it). Only rendered while that tab actually exists — after a
+    // restart, or once the user closes it, the pointer is stale and the row
+    // would lead nowhere.
+    if (job.state !== 'in-progress' && job.lastRunSessionId && agents.has(job.lastRunSessionId)) {
+      const last = document.createElement('button');
+      last.className = 'job-card-lastrun';
+      last.textContent = `last run: ${job.lastRunAgentName || 'agent'} — open terminal`;
+      last.title = "Read what the last run wrote. The tab stays until the next run starts or you close it.";
+      last.onclick = (e) => { e.stopPropagation(); switchToSession(job.lastRunSessionId); };
+      card.appendChild(last);
+    }
   }
 
   if (job.detail) {

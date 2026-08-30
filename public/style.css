@@ -1644,6 +1644,20 @@ body {
   opacity: 0.8;
 }
 
+/* The kept last-run agent on a scheduled card. Clickable, unlike
+   .job-card-retired, because the tab is still there to open. */
+.job-card-lastrun {
+  font-size: 9px;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+.job-card-lastrun:hover { text-decoration: underline; }
+
 /* Every card in the archive carries this line, so a colour here would be pure
    decoration — it differentiates nothing. Matches .job-card-retired exactly:
    both are 9px card metadata that has stopped being actionable. */

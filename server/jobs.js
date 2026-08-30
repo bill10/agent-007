@@ -235,11 +235,14 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   if (idx === -1) return { error: 'Job not found' };
   const [removed] = jobs.splice(idx, 1);
   persist(broadcast);
-  if (removed.agentSessionId && killSession) {
-    const session = sessions.get(removed.agentSessionId);
+  // Both the live agent and a scheduled card's kept last-run agent: with the
+  // card gone, nothing else would ever retire either of them.
+  for (const sessionId of [removed.agentSessionId, removed.lastRunSessionId]) {
+    if (!sessionId || !killSession) continue;
+    const session = sessions.get(sessionId);
     if (session && !session.exited) {
       try {
-        await killSession(removed.agentSessionId);
+        await killSession(sessionId);
       } catch (err) {
         console.error(`Failed to close agent for deleted job "${removed.title}":`, err.message);
       }
@@ -422,6 +425,23 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
+    // The previous run's agent was kept open so its terminal could be read
+    // (see finishScheduledRuns). A new run starting is the moment that tab
+    // stops being "the last run" — retire it before spawning the replacement.
+    // removeWorktree still protects the work: dirty or unpushed changes become
+    // an orphan rather than being deleted.
+    if (isScheduled(job) && job.lastRunSessionId) {
+      const prev = sessions.get(job.lastRunSessionId);
+      if (prev && !prev.exited && killSession) {
+        try {
+          await killSession(job.lastRunSessionId);
+        } catch (err) {
+          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
+        }
+      }
+      job.lastRunSessionId = null;
+      job.lastRunAgentName = null;
+    }
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
     // Branch named after the job, not a cocktail, so `git branch` reads like
     // the board. Two jobs can share a title, so collisions take a -2 suffix
@@ -972,16 +992,18 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
 // Close out scheduled runs that are over and re-arm their cards.
 //
 // This is the scheduled counterpart of checkPullRequests: the point in the scan
-// where finished work is retired and its slot released. It runs FIRST, so a run
-// that ended since the last tick frees its repo slot in time for the same scan
-// to dispatch whatever was waiting behind it.
+// where a finished run is noticed and its card re-armed. It runs FIRST, so a
+// run that ended since the last tick has its card back in To do in time for the
+// same scan to dispatch whatever was waiting behind it.
 //
-// Killing the agent is not optional housekeeping. It is what keeps the per-repo
-// cap meaningful — in-progress cards and live board agents stay the same set —
-// and it is what releases the worktree. removeWorktree still protects the work:
-// uncommitted or unpushed changes become an orphan rather than being deleted,
-// so a scheduled run that did produce something does not lose it.
-export async function finishScheduledRuns(broadcast, { killSession } = {}) {
+// The agent is deliberately NOT killed here. Its terminal is the run's only
+// output — a scheduled job need not produce code, and the summary it wrote
+// lives in the session's ring buffer, which a kill would destroy before anyone
+// could read it. The card keeps a pointer (lastRunSessionId) and the tab stays
+// open; the next dispatch retires it, or the user closes it. Bounded at one
+// kept agent per card. The cap is unaffected: scheduled cards are exempt from
+// it in both directions (see selectDispatchableJobs).
+export async function finishScheduledRuns(broadcast) {
   const running = allJobs().filter(j => isScheduled(j) && j.state === 'in-progress');
   if (running.length === 0) return [];
   const finished = [];
@@ -989,30 +1011,14 @@ export async function finishScheduledRuns(broadcast, { killSession } = {}) {
     const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
     if (!isScheduledRunOver(job, session)) continue;
 
-    // Capture before the await, and re-check after it, for the same reason
-    // checkPullRequests does: killSession is slow (it removes a worktree) and
-    // WebSocket handlers run during it, so the card may have been deleted,
-    // moved or requeued by hand in the meantime.
-    const askedSessionId = job.agentSessionId;
     const agentName = job.agentName;
-    if (session && !session.exited && killSession) {
-      try {
-        await killSession(askedSessionId);
-      } catch (err) {
-        // The run is over either way — the agent going unclosed is a leaked
-        // worktree, not a reason to strand the card in In progress forever.
-        console.error(`Failed to close agent for scheduled job "${job.title}":`, err.message);
-      }
-    }
-    if (!allJobs().includes(job) || job.state !== 'in-progress' || job.agentSessionId !== askedSessionId) continue;
-
     Object.assign(job, scheduledRunReset(job));
     finished.push(job);
     if (broadcast) {
       broadcast({
         type: 'notification', level: 'info',
         message: `Scheduled job "${job.title}" finished its run`
-          + (agentName ? ` · ${agentName} closed` : '')
+          + (agentName ? ` · ${agentName} kept open to read` : '')
           + (job.nextRunAt ? ` · next ${new Date(job.nextRunAt).toLocaleString()}` : ''),
       });
     }
@@ -1045,7 +1051,7 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
-    await finishScheduledRuns(broadcast, { killSession });
+    await finishScheduledRuns(broadcast);
     await checkPullRequests(broadcast, { killSession, findPr });
     await checkMergedPullRequests(broadcast, { killSession, findMerged });
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
