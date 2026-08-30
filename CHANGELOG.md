@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.12.2] - 2026-08-30
+
+### Fixed
+
+- The test suite passes on Windows. `test/server.test.js` used to fail before a
+  single test ran because Vite tried to transform node-pty's native addon; the
+  test runner now leaves node-pty alone. Three assertions that assumed `/` path
+  separators or POSIX permission bits no longer fail on a Windows machine, and
+  the owner-only check on the agent MCP config file still holds on Linux and
+  macOS.
+
 ## [0.3.12.1] - 2026-08-30
 
 ### Changed
