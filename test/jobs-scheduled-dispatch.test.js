@@ -7,7 +7,7 @@ import {
   addJob, updateJob, moveJob, deleteJob, dispatchOnce, finishScheduledRuns, checkPullRequests, checkMergedPullRequests,
   runScan, allJobs, boardSettings, jobsPayload, postJobForAgent,
 } from '../server/jobs.js';
-import { STALLED_AFTER_MS } from '../lib/jobs.js';
+import { STALLED_AFTER_MS, jobType } from '../lib/jobs.js';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-sched-'));
 const noopBroadcast = () => {};
@@ -236,20 +236,55 @@ describe('editing and moving a scheduled card', () => {
     expect(job.nextRunAt).toBeNull();
   });
 
-  it('re-arms from the NEW schedule when a card was edited while its run was in flight', async () => {
+  it('refuses a type or schedule change while the run is in flight', async () => {
+    // Flipping an in-flight one-time card to scheduled would free its cap slot
+    // while its agent still runs, and hand the run to finishScheduledRuns.
+    addJob({ title: 'One-timer', repoPath: REPO }, noopBroadcast);
+    const job = allJobs()[0];
+    Object.assign(job, { state: 'in-progress', branchName: 'bill/x', agentSessionId: 's1' });
+    expect(updateJob(job.id, { type: 'scheduled', schedule: '0 9 * * *' }, noopBroadcast).error)
+      .toMatch(/to do/i);
+    expect(jobType(job)).toBe('one-time');
+    expect(job.schedule).toBeFalsy();
+  });
+
+  it('lets an ordinary save resend the same type and schedule, without eating a due firing', () => {
     addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
     const job = allJobs()[0];
-    sessions.set('s1', { id: 's1', state: 'WAITING', exited: false, lastOutputAt: 0 });
-    Object.assign(job, { state: 'in-progress', agentSessionId: 's1', branchName: 'bill/x' });
+    job.nextRunAt = past();   // overdue — a firing is about to happen
+    updateJob(job.id, { title: 'Digest v2', type: 'scheduled', schedule: '0 9 * * *' }, noopBroadcast);
+    expect(job.title).toBe('Digest v2');
+    // The save resent the current schedule; the pending firing survives.
+    expect(Date.parse(job.nextRunAt)).toBeLessThan(Date.now());
+  });
 
-    updateJob(job.id, { schedule: '*/5 * * * *' }, noopBroadcast);
-    // No due time while the run is in flight — the run-end reset owns it.
-    expect(job.nextRunAt).toBeNull();
+  it('refuses to park a scheduled card in Review or file it away as Done', async () => {
+    addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
+    const job = allJobs()[0];
+    Object.assign(job, { state: 'in-progress', branchName: 'bill/x' });
+    expect((await moveJob(job.id, 'review', noopBroadcast, {})).error).toMatch(/scheduled/i);
+    expect((await moveJob(job.id, 'done', noopBroadcast, {})).error).toMatch(/scheduled/i);
+    expect(job.state).toBe('in-progress');
+  });
 
+  it("keeps the last run's agent when the next dispatch fails to spawn", async () => {
+    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
+    const job = allJobs()[0];
+    sessions.set('s1', { id: 's1', name: 'Viper', state: 'WAITING', exited: false, lastOutputAt: 0 });
+    Object.assign(job, {
+      state: 'in-progress', agentSessionId: 's1', agentName: 'Viper',
+      branchName: 'bill/x', worktreePath: '/wt/1', startedAt: past(),
+    });
     await finishScheduledRuns(noopBroadcast);
+    job.nextRunAt = past();
+    const killed = [];
+    const failCreate = async () => ({ error: 'worktree exploded' });
+    await dispatchOnce(failCreate, noopBroadcast, { killSession: fakeKillSession(killed) });
+    // The kept terminal — the last run's only output — survives the failure.
+    expect(killed).toEqual([]);
+    expect(job.lastRunSessionId).toBe('s1');
     expect(job.state).toBe('todo');
-    // Re-armed from the NEW cron: every five minutes is minutes away, not 9am.
-    expect(Date.parse(job.nextRunAt)).toBeLessThanOrEqual(Date.now() + 5 * 60_000);
+    expect(job.lastError).toMatch(/worktree exploded/);
   });
 
   it('re-arms rather than immediately re-fires when the user ends a run by hand', async () => {

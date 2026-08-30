@@ -225,12 +225,24 @@ export function updateJob(jobId, fields, broadcast) {
       schedule: fields.schedule !== undefined ? fields.schedule : job.schedule,
     });
     if (resolved.error) return { error: resolved.error };
+    const changes = resolved.type !== jobType(job)
+      || (resolved.schedule || null) !== (job.schedule || null);
+    // Changing what a card IS is only allowed while it sits in To do, for the
+    // same reason repoPath is: flipping an in-flight one-time card to
+    // scheduled frees its per-repo cap slot while its agent still runs (the
+    // cap skips scheduled cards), and finishScheduledRuns would then quietly
+    // close that run out and re-arm it forever. The form only offers Edit in
+    // To do; the raw message has to be refused too. Resending the current
+    // values is not a change, so an ordinary save is untouched.
+    if (changes && job.state !== 'todo') {
+      return { error: 'Type and schedule can only change while the card is in To do' };
+    }
     job.type = resolved.type;
     job.schedule = resolved.schedule;
-    // Recompute rather than keep: the old due time belongs to the old cron.
-    // Only for a card sitting in To do — a run in flight sets its own next time
-    // when it finishes, and writing one now would be overwritten there anyway.
-    job.nextRunAt = resolved.schedule && job.state === 'todo' ? nextCronIso(resolved.schedule) : null;
+    // Recompute only on a real change: the old due time belongs to the old
+    // cron, but a save that merely retitled the card must not re-arm an
+    // overdue schedule and eat the firing that was about to happen.
+    if (changes) job.nextRunAt = resolved.schedule ? nextCronIso(resolved.schedule) : null;
   }
   persist(broadcast);
   return { job };
@@ -291,6 +303,14 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // merged PR is a new job, and the archive keeps the old one to point at.
   if (job.state === 'done') {
     return { error: 'That job is finished — post a new job for follow-up work, or delete this card' };
+  }
+  // A scheduled card cycles To do <-> In progress, and nothing on the board
+  // ever touches one parked in Review — both PR sweeps skip the type, and the
+  // run finisher only reads In progress — while done is terminal, so either
+  // move ends a standing schedule for good. The UI hides those buttons on a
+  // scheduled card; the raw message has to be refused too.
+  if (isScheduled(job) && (state === 'review' || state === 'done')) {
+    return { error: 'A scheduled job cycles between To do and In progress — delete the card to retire its schedule' };
   }
   // A job with no branch has never been dispatched, so nothing can move it out
   // of in-progress again: the dispatcher only looks at todo, and the PR watcher
@@ -436,23 +456,6 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
-    // The previous run's agent was kept open so its terminal could be read
-    // (see finishScheduledRuns). A new run starting is the moment that tab
-    // stops being "the last run" — retire it before spawning the replacement.
-    // removeWorktree still protects the work: dirty or unpushed changes become
-    // an orphan rather than being deleted.
-    if (isScheduled(job) && job.lastRunSessionId) {
-      const prev = sessions.get(job.lastRunSessionId);
-      if (prev && !prev.exited && killSession) {
-        try {
-          await killSession(job.lastRunSessionId);
-        } catch (err) {
-          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
-        }
-      }
-      job.lastRunSessionId = null;
-      job.lastRunAgentName = null;
-    }
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
     // Branch named after the job, not a cocktail, so `git branch` reads like
     // the board. Two jobs can share a title, so collisions take a -2 suffix
@@ -490,6 +493,25 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
         }
       }
       continue;
+    }
+
+    // Only now that the replacement run is real does the previous run's kept
+    // agent retire (see finishScheduledRuns). Retiring before the spawn meant
+    // a failed createSession destroyed the last run's only output and left no
+    // new run behind it — the card showed a dispatch error and the summary the
+    // board promises to keep was gone. removeWorktree still protects the work:
+    // dirty or unpushed changes become an orphan rather than being deleted.
+    if (isScheduled(job) && job.lastRunSessionId) {
+      const prev = sessions.get(job.lastRunSessionId);
+      if (prev && !prev.exited && killSession) {
+        try {
+          await killSession(job.lastRunSessionId);
+        } catch (err) {
+          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
+        }
+      }
+      job.lastRunSessionId = null;
+      job.lastRunAgentName = null;
     }
 
     if (onSessionCreated) onSessionCreated(session);

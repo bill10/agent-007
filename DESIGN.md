@@ -302,9 +302,11 @@ those cards have always been.
   the card out of rotation permanently, and done is terminal.
 - **The next run is measured from the end of the last one**, never stepped on
   from the previous due time, so a run that overran its own interval schedules
-  the next one afterwards instead of coming due again the instant it lands. No
-  missed firing is ever replayed: a board that was stopped overnight owes
-  nothing in the morning.
+  the next one afterwards instead of coming due again the instant it lands.
+  Missed firings never queue up, but the LAST one is owed: a board stopped
+  overnight still holds each card's past due time, so every overdue schedule
+  fires once at the first scan after boot and re-arms into the future from
+  there. One catch-up run, never a backlog.
 - **Cron granularity is bounded by the scan interval.** The dispatcher only acts
   on a scan (five minutes by default, floor 30s), so `* * * * *` means "every
   scan", not every minute. Times are the server's local time — the schedule is

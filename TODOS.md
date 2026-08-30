@@ -1,5 +1,22 @@
 # TODOS
 
+## A scheduled run that never goes quiet starves its schedule silently
+- **What:** A scheduled run only ends on agent exit or WAITING past the quiet
+  window, so an agent wedged producing output (a spinner, a loop) holds the
+  card at "running now" forever: no attention badge (scheduled cards badge only
+  on MESSAGE), no notification, and every future firing is silently lost until
+  a human notices and clicks End run. Add a max-run-duration ceiling (a board
+  setting, since "too long" varies by job) or at least surface "running for
+  N× its interval" on the card and the badge.
+- **Why:** The board's promise is unattended recurrence; a single wedged run
+  breaks that promise invisibly, which is the worst way to break it.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P2
+- **Depends on:** Scheduled jobs (v0.3.12.0)
+- **Context:** Raised by the adversarial review during /ship (2026-08-30). A
+  ceiling is policy, so it needs a knob, not a hardcoded constant — deferred
+  rather than guessed.
+
 ## Back off the merge check on long-lived Review cards
 - **What:** Record a `lastMergeCheckAt` on each job and let `checkMergedPullRequests`
   skip cards it checked recently — every scan for the first hour after `reviewAt`,

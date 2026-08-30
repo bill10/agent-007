@@ -7,6 +7,26 @@ import { parseCron, isValidCron, nextCronTime, nextCronIso, CRON_MACROS, MAX_SCH
 const at = (y, m, d, hh = 0, mm = 0) => new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
 const next = (expr, from) => new Date(nextCronTime(expr, from));
 
+describe('the day-field star rule', () => {
+  const at = (y, m, d, hh = 0, mm = 0) => new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
+  const next = (expr, from) => new Date(nextCronTime(expr, from));
+
+  it('treats a step like */2 as a star, the way Vixie cron does', () => {
+    // dow begins with `*`, so BOTH day conditions must hold: the 1st of a
+    // month AND an even weekday. The OR reading would return the very next
+    // even weekday instead of waiting for a matching 1st.
+    const d = next('0 0 1 * */2', at(2026, 5, 15));
+    expect(d.getDate()).toBe(1);
+    expect([0, 2, 4, 6]).toContain(d.getDay());
+  });
+
+  it('applies the same rule with the step on the day-of-month side', () => {
+    const d = next('0 0 */2 * 1', at(2026, 5, 15));
+    expect(d.getDay()).toBe(1);          // a Monday
+    expect(d.getDate() % 2).toBe(1);     // on an odd day (*/2 from 1)
+  });
+});
+
 describe('parseCron', () => {
   it('expands each field into the values it matches', () => {
     const p = parseCron('0 9 * * 1-5');
