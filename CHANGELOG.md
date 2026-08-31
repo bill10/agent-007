@@ -5,6 +5,14 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.15.1] - 2026-08-31
+
+### Changed
+
+- The explorer section that lists terminals spawned without a repository is
+  now titled "No repository" (was "No repo"). Each entry keeps its live state
+  dot and click-to-focus, so repo-less sessions stay visible in the roster.
+
 ## [0.3.15.0] - 2026-08-31
 
 ### Added

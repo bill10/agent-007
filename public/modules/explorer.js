@@ -256,12 +256,12 @@ export function renderExplorer() {
     content.appendChild(section);
   }
 
-  // Agents without repos (legacy mode)
+  // Agents spawned without a repository — name + state dot only, click to focus
   const noRepoAgents = [...agents.entries()].filter(([, a]) => !a.repoPath);
   if (noRepoAgents.length > 0) {
     const section = document.createElement('div');
     section.className = 'explorer-repo';
-    const { header, isCollapsed } = makeRepoHeader('(no repo)', 'No repo');
+    const { header, isCollapsed } = makeRepoHeader('(no repo)', 'No repository');
     if (isCollapsed) {
       header.appendChild(makeCollapsedBadge(noRepoAgents.map(([, a]) => a), noRepoAgents.length));
     }
