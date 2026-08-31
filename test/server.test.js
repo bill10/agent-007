@@ -358,6 +358,7 @@ describe('auth enforcement (live enable)', () => {
     });
     expect(welcome.authEnabled).toBe(true);
     expect(welcome.user.displayName).toBe('Tester');
+    expect(welcome.platform).toBe(process.platform);
   });
 });
 

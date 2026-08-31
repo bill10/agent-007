@@ -21,10 +21,20 @@ export function setBoardSettings(s) { boardSettings = { ...boardSettings, ...s }
 // --- Viewer identity & ownership (phase 2) ---
 export let selfUserId = null;
 export let authEnabled = false;
+export let serverPlatform = ''; // process.platform of the server, from the welcome message
 
-export function setSelf(userId, enabled) {
+export function setSelf(userId, enabled, platform) {
   selfUserId = userId;
   authEnabled = !!enabled;
+  if (platform) serverPlatform = platform;
+}
+
+// The shell preset offered in the spawn form follows the server's OS —
+// commands run there, not in the browser.
+export function shellPreset() {
+  return serverPlatform === 'win32'
+    ? { label: 'PowerShell', cmd: 'powershell.exe' }
+    : { label: 'Bash', cmd: 'bash' };
 }
 
 // True if the current viewer may control this agent: always in single-player
