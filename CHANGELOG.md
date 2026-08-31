@@ -18,6 +18,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   Windows checkouts got CRLF, and the `\r` after `server.js`'s shebang line
   broke Vite's transform of that file — the whole `test/server.test.js` suite
   died at collection with "Invalid or unexpected token".
+- On Windows, Vitest's test and hook timeouts are 30s instead of 5s/10s: the
+  git-heavy worktree tests run 5-12s on a Windows CI runner and were timing
+  out.
 
 ## [0.3.12.2] - 2026-08-30
 
