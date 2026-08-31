@@ -154,3 +154,7 @@
 - **Priority:** P2
 - **Depends on:** Multiplayer phase 1 (identity & auth) — shipped.
 - **Context:** Raised by adversarial + security review of the phase 1 auth PR (2026-07-18). Accepted as a known limitation for now: the app itself doesn't log request URLs and deployment is behind Tailscale, so exposure is bounded. Revisit when auth hardens further (phase 2+).
+
+## Completed
+
+(Nothing yet — completed items move here with their shipped version.)
