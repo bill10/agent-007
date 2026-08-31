@@ -15,6 +15,13 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   follows the server's operating system: PowerShell on a Windows server, Bash
   everywhere else.
 
+### Fixed
+
+- Codex and Gemini agents now read correctly in the pixel office: state
+  detection treats `codex` and `gemini` commands as TUI sessions, so their
+  workstations show working/waiting/needs-attention instead of plain-shell
+  states.
+
 ## [0.3.13.1] - 2026-08-31
 
 ### Changed
