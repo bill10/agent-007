@@ -104,6 +104,8 @@
   per-invocation MCP config flag, only `gemini mcp add` writing persistent
   settings; Codex configures MCP through `~/.codex/config.toml`. Both would need
   a write-then-clean-up dance that the per-session file for Claude avoids.
+  Since v0.3.14.0 the spawn dialog offers Codex and Gemini as one-click
+  presets, so running them is a promoted path rather than an edge case.
 
 ## Diff-between-agents for conflict files
 - **What:** When a conflict is detected (two agents modified the same file), clicking the warning icon shows both agents' diffs for that file side-by-side or sequentially.

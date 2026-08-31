@@ -17,10 +17,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Fixed
 
-- Codex and Gemini agents now read correctly in the pixel office: state
-  detection treats `codex` and `gemini` commands as TUI sessions, so their
-  workstations show working/waiting/needs-attention instead of plain-shell
-  states.
+- A quiet Codex or Gemini agent no longer reads as idle: state detection now
+  treats `codex` and `gemini` commands as TUI sessions, so their workstations
+  show waiting (green) at a quiet prompt instead of idle gray.
 
 ## [0.3.13.1] - 2026-08-31
 

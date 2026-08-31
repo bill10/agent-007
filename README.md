@@ -172,7 +172,7 @@ public/
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
     ws.js          WebSocket client with auto-reload on reconnect
-    state.js       Shared agent state
+    state.js       Shared client state (agents, repos, viewer identity, server platform)
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
