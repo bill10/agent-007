@@ -51,7 +51,7 @@ Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ A
 
 ## How It Works
 
-Each agent runs in its own [git worktree](https://git-scm.com/docs/git-worktree), so multiple agents can work on the same repo without stepping on each other. The server manages PTY processes via [node-pty](https://github.com/nicknisi/node-pty) and communicates with the browser over WebSocket. The pixel office is rendered on an HTML canvas with a day/night cycle that follows your local time.
+Each agent runs in its own [git worktree](https://git-scm.com/docs/git-worktree), so multiple agents can work on the same repo without stepping on each other. The server manages PTY processes via [node-pty](https://github.com/microsoft/node-pty) and communicates with the browser over WebSocket. The pixel office is rendered on an HTML canvas with a day/night cycle that follows your local time.
 
 Every agent's branch starts from your repository's base branch as it exists on
 the remote, fetched just before the worktree is created, so an agent never picks
@@ -137,9 +137,11 @@ distinct color and shows up in the presence indicator.
 - A CLI to run as the agent (defaults to `claude`, but works with any command)
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
 - **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
-- **Windows:** [windows-build-tools](https://github.com/nicknisi/node-pty#windows) or Visual Studio Build Tools
+- **Windows:** [Visual Studio Build Tools](https://github.com/microsoft/node-pty#windows) with the C++ workload
 
 > **Note:** `node-pty` (used for terminal sessions) is a native addon that requires a C++ compiler. The requirements above ensure it compiles during `npm install`.
+
+Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, and browsing paths all handle Windows natively, and CI runs the test suite on both Ubuntu and Windows. One Windows caveat: the per-agent MCP config file protects its token with POSIX file permissions, which Windows doesn't have, so on a shared Windows machine other local users can read it.
 
 ## Architecture
 
