@@ -9,7 +9,7 @@ Contributions are welcome! This project is intentionally simple: vanilla JS, no 
 - **C++ build tools** (required by `node-pty`):
   - macOS: `xcode-select --install`
   - Linux: `sudo apt install build-essential python3`
-  - Windows: [windows-build-tools](https://github.com/nicknisi/node-pty#windows)
+  - Windows: [Visual Studio Build Tools](https://github.com/microsoft/node-pty#windows) with the C++ workload
 
 ## Setup
 

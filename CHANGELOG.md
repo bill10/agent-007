@@ -18,10 +18,10 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Fixed
 
-- The README's node-pty links pointed at a personal fork; they now point at
-  microsoft/node-pty, where the dependency actually lives, and the Windows
-  requirement names Visual Studio Build Tools instead of the deprecated
-  windows-build-tools.
+- The README's and CONTRIBUTING's node-pty links pointed at a personal fork;
+  they now point at microsoft/node-pty, where the dependency actually lives,
+  and the Windows requirement names Visual Studio Build Tools instead of the
+  deprecated windows-build-tools.
 
 ## [0.3.13.0] - 2026-08-31
 
