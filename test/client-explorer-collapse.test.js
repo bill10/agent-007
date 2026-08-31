@@ -173,6 +173,17 @@ describe('explorer repo section collapse/expand', () => {
     expect(headerOf('iota').textContent).toContain('▾');
   });
 
+  it('collapsed state is written to localStorage so a refresh keeps it', () => {
+    repos.set('/repos/mu', { slug: 'mu', exists: true });
+    renderExplorer();
+
+    headerOf('mu').click();
+    expect(JSON.parse(localStorage.getItem('agent007-collapsed-repos'))).toContain('/repos/mu');
+
+    headerOf('mu').click();
+    expect(JSON.parse(localStorage.getItem('agent007-collapsed-repos'))).not.toContain('/repos/mu');
+  });
+
   it('"No repo" section collapses and re-expands', () => {
     agents.set('s1', AGENT(null, { name: 'Loner' }));
     renderExplorer();

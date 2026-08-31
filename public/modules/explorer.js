@@ -12,7 +12,8 @@ let fullTreeSessions = new Set();  // sessionIds showing full tree
 let fullTreeCache = new Map();     // sessionId -> full tree data
 let fullTreePending = new Set();   // in-flight full tree requests
 let expandedDirs = new Set();      // "sessionId:dir/path" expanded directories (collapsed by default)
-let collapsedRepos = new Set();    // repoPaths with collapsed sections
+const COLLAPSED_KEY = 'agent007-collapsed-repos';
+let collapsedRepos = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]'));  // repoPaths with collapsed sections
 
 export function setupExplorer() {
   document.getElementById('btn-toggle-explorer').onclick = toggleExplorer;
@@ -195,6 +196,7 @@ export function renderExplorer() {
     removeBtn.onclick = (e) => {
       e.stopPropagation();
       collapsedRepos.delete(repoPath);
+      saveCollapsedRepos();
       send({ type: 'remove-repo', path: repoPath });
     };
     headerActions.appendChild(removeBtn);
@@ -276,9 +278,14 @@ export function renderExplorer() {
   content.scrollTop = scrollTop;
 }
 
+function saveCollapsedRepos() {
+  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedRepos]));
+}
+
 function toggleRepoCollapse(repoPath) {
   if (collapsedRepos.has(repoPath)) collapsedRepos.delete(repoPath);
   else collapsedRepos.add(repoPath);
+  saveCollapsedRepos();
   renderExplorer();
   // Re-render destroys the focused header node; refocus it so keyboard
   // toggling works repeatedly, not just once.
