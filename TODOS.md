@@ -51,21 +51,13 @@
   Not built with the view because the request was to show ALL finished jobs, and
   a silent cap contradicts that. Retention is a policy the user should choose.
 
-## Three MCP tests assert POSIX-only behaviour and fail on Windows
-- **What:** `test/mcp-endpoint.test.js` asserts `body.repoName` equals `REPO.split('/').pop()`, which returns the whole string for a `C:\...` fixture path, so the assertion compares a basename against a full path. Fix: `basename(REPO)`. `test/agent-mcp-config.test.js` asserts the MCP config file's mode is `0o600` twice; Windows has no POSIX permission bits, so `writeFileSync(..., { mode: 0o600 })` lands as `0o666` and the assertion reads 438 where it wants 384. Fix: skip the mode assertions off POSIX, or assert through a helper that knows the platform.
-- **Why:** `npm test` cannot go green on a Windows machine, so a Windows contributor has no clean baseline to judge their own branch against and has to triage three unrelated failures on every run. Both are test-side assumptions, not product bugs — the server returns the right basename, and the 0600 intent is simply unexpressible through `chmod` on Windows. Worth noting separately that the credential file therefore is **not** owner-only on Windows; if that matters, it needs an ACL, not a mode.
-- **Effort:** XS for the two test fixes (human: ~15 min / CC: ~5 min). The Windows ACL question is its own, larger call.
-- **Priority:** P1
+## MCP config file is not owner-only on Windows
+- **What:** `server/agent-mcp.js` writes the agent's bearer token to `~/.agent-007/mcp/<port>/` with `mode: 0o600` plus `chmod`. Windows has no POSIX mode bits, so the file inherits the directory's ACL instead. Decide whether that is acceptable (the default dir sits under the user profile, which is user-scoped on typical installs) or set an explicit owner-only ACL there.
+- **Why:** The file holds a live credential; `0600` is the whole protection on POSIX and it is silently absent on Windows. `AGENT007_MCP_DIR` can also point anywhere.
+- **Effort:** S (human: ~2 hours / CC: ~20 min), mostly deciding the threat model.
+- **Priority:** P3
 - **Depends on:** Nothing
-- **Context:** Found during /ship on `fix/respawn-pty-create-process` (2026-08-28). Verified pre-existing: all three reproduce identically on unmodified `origin/main` (a947d89) in a fresh worktree, and none of the files involved are touched by that branch. CI runs ubuntu-latest, where all three pass, so the gap is Windows-local only.
-
-## server.test.js fails to load under vitest on Windows
-- **What:** `test/server.test.js` fails at collection with `SyntaxError: Invalid or unexpected token` importing `../server.js` — vitest can't load node-pty's native `.node` binary through the `server.js → server/pty.js → node-pty` chain on Windows. Likely fix: externalize node-pty in `vitest.config.js` (`test.server.deps.external`) or mock `server/pty.js` in the suite.
-- **Why:** The server integration suite (auth handshake, WS behavior) never runs on Windows dev machines, so Windows contributors ship those paths untested locally. CI (ubuntu) still runs it green, so the gap is local-only. It also blocks any test that imports `server/pty.js` directly, so the Windows spawn guards (`isUsableCwd` rejection, the async CreateProcessW guard) can only be covered through `server/command-path.js`, never end to end.
-- **Effort:** S (human: ~1-2 hours / CC: ~15-30 min)
-- **Priority:** P0
-- **Depends on:** Nothing
-- **Context:** Found by /ship test triage on `lawson-wong/daiquiri` (2026-08-26). Reproduces identically on unmodified `main` code in a fresh worktree, so it is pre-existing and environment-specific, not branch-caused.
+- **Context:** Surfaced while making the test suite pass on Windows (2026-08-30): the mode assertions are skipped there rather than weakened on POSIX.
 
 ## Pre-seed workspace trust for board-dispatched agents
 

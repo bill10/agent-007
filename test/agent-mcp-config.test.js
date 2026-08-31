@@ -10,6 +10,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+// Windows has no POSIX mode bits: writeFileSync's mode lands as 0o666 and chmod
+// is a no-op, so the owner-only property can only be asserted on POSIX.
+const POSIX = process.platform !== 'win32';
+
 const DIR = mkdtempSync(join(tmpdir(), 'a007-mcp-'));
 process.env.AGENT007_MCP_DIR = DIR;
 
@@ -41,16 +45,19 @@ describe('the config an agent reads at startup', () => {
     expect(boardBaseUrl()).toMatch(/^http:\/\/(127\.0\.0\.1|localhost|\[?::1\]?)/);
   });
 
-  it('writes the file readable only by its owner', () => {
-    // It holds a live credential.
+  it('writes the token into the file the agent will read', () => {
     const path = writeMcpConfig('session-1', 'a007a_secret');
     expect(path).toBe(mcpConfigPath('session-1'));
-    expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(path, 'utf8')).mcpServers[MCP_SERVER_NAME].headers.Authorization)
       .toBe('Bearer a007a_secret');
   });
 
-  it('tightens the mode even when a file was already there', () => {
+  it.skipIf(!POSIX)('writes the file readable only by its owner', () => {
+    // It holds a live credential.
+    expect(statSync(writeMcpConfig('session-1', 'a007a_secret')).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(!POSIX)('tightens the mode even when a file was already there', () => {
     // writeFileSync ignores its mode argument entirely for an existing file, so
     // a leftover world-readable file from an earlier run would stay that way.
     mkdirSync(DIR, { recursive: true });
