@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.12.3] - 2026-08-30
+
+### Changed
+
+- CI runs the test suite on windows-latest as well as ubuntu, so a change that
+  passes locally on macOS/Linux can still go red on the Windows leg.
+
+### Fixed
+
+- A `.gitattributes` file forces LF line endings at checkout. Without it,
+  Windows checkouts got CRLF, and the `\r` after `server.js`'s shebang line
+  broke Vite's transform of that file — the whole `test/server.test.js` suite
+  died at collection with "Invalid or unexpected token".
+
 ## [0.3.12.2] - 2026-08-30
 
 ### Fixed
