@@ -51,21 +51,27 @@ Two themes: dark (default) and light. Gold accent in both. Persisted to localSto
 --accent:        #d4a847    /* gold: interactive elements, brand */
 ```
 
-### Light Theme (Linear-inspired warm palette)
+### Light Theme (warm low-glare paper, Flexoki-style neutrals)
 ```css
---bg-dark:       #f2f1ee    /* headers, sidebars */
---bg-panel:      #f9f8f7    /* content panels */
---bg-office:     #f2f1ee    /* pixel office */
---bg-terminal:   #f9f8f7    /* terminal */
---bg-tabs:       #f2f1ee    /* tab bar */
---border:        #e4e2dd
---text:          #222222
---text-muted:    #6b6b6b
---text-dim:      #999999
---accent:        #a07d2e    /* darker gold for contrast on light bg */
+--bg-dark:       #e6e4d9    /* headers, sidebars */
+--bg-panel:      #f2f0e5    /* content panels */
+--bg-office:     #dad8ce    /* pixel office */
+--bg-terminal:   #f2f0e5    /* terminal */
+--bg-tabs:       #e6e4d9    /* tab bar */
+--border:        #c6c3b6
+--text:          #1c1b1a    /* warm near-black ink */
+--text-muted:    #62615c
+--text-dim:      #6b6a64
+--accent:        #7d611f    /* darker gold: 4.5:1+ on both cream surfaces */
 ```
+Surfaces stay in the cream band (~L*90) rather than near-white so long
+terminal sessions don't glare. Light mode also overrides the state colors,
+`--accent-contrast` (text on accent-filled buttons: #111 on dark, #fff on
+light), and `--hover` (row-hover overlay: white-tint on dark, black-tint on
+light) — see `style.css`. `test/theme-tokens.test.js` guards this file, the
+CSS tokens, and the terminal palette against drifting apart.
 
-### State indicators (shared across both themes)
+### State indicators (dark theme values; light overrides them in style.css)
 ```css
 --state-working:      #d4a847    /* yellow: agent is producing output */
 --state-waiting:      #7fbc6a    /* green: agent is at a prompt */

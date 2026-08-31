@@ -19,9 +19,12 @@ function getTerminalTheme() {
   const isLight = document.documentElement.getAttribute('data-theme') === 'light';
   return isLight
     ? {
-        // GitHub-light ANSI palette — the dark palette's cyan/green/yellow
-        // were near-invisible on the light terminal background.
-        background: '#f9f8f7', foreground: '#24292f', cursor: '#a07d2e', selectionBackground: '#dcd8d0',
+        // GitHub-light ANSI palette on a warm paper background — the dark
+        // palette's cyan/green/yellow were near-invisible on light. The
+        // background/foreground/cursor track the CSS light-theme tokens
+        // (guarded by test/theme-tokens.test.js); selection is a gold-tinted
+        // cream chosen to stay visible against the #f2f0e5 ground.
+        background: '#f2f0e5', foreground: '#1c1b1a', cursor: '#7d611f', selectionBackground: '#e4d8ab',
         black: '#24292f',
         red: '#cf222e',
         green: '#1a7f37',
@@ -29,13 +32,15 @@ function getTerminalTheme() {
         blue: '#0969da',
         magenta: '#8250df',
         cyan: '#1b7c83',
-        white: '#6e7781',
+        // white / bright entries darkened from stock GitHub-light: that
+        // palette assumes a #ffffff ground and loses AA on the cream one.
+        white: '#5c6570',
         brightBlack: '#57606a',
         brightRed: '#a40e26',
         brightGreen: '#1a7f37',
         brightYellow: '#633c01',
-        brightBlue: '#218bff',
-        brightMagenta: '#a475f9',
+        brightBlue: '#0969da',
+        brightMagenta: '#8250df',
         brightCyan: '#3192aa',
         brightWhite: '#24292f',
       }

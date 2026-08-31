@@ -488,6 +488,9 @@ function applyTheme(theme) {
   document.getElementById('theme-icon-moon').style.display = theme === 'light' ? '' : 'none';
   localStorage.setItem('agent007-theme', theme);
   updateTerminalThemes();
+  // The animation loop skips frames with no living agents, so repaint the
+  // office once or it keeps the previous theme's colors until an agent moves.
+  renderOffice();
 }
 
 // --- Active Tab Restore ---
