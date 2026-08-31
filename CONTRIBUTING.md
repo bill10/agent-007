@@ -48,8 +48,9 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 > `test/agent-mcp-config.test.js` are skipped there because Windows has no POSIX
 > permission bits, so the MCP config file is not owner-only on Windows (see
 > TODOS.md). The PTY lifecycle tests spawn `echo`, `cat` and `sleep`, so they
-> need those on `PATH` (Git for Windows provides them). CI runs ubuntu only;
-> a full green run on a Windows machine has not been confirmed yet.
+> need those on `PATH` (Git for Windows provides them). CI runs the suite on
+> both ubuntu and Windows, so a change that passes locally on macOS/Linux can
+> still go red on the Windows leg.
 
 ## Code Style
 
