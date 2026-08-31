@@ -352,6 +352,20 @@ body {
   color: var(--text-dim);
   font-size: 10px;
 }
+.spawn-presets { display: flex; gap: 8px; }
+.spawn-preset-btn {
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-dark);
+  color: var(--text-dim);
+  transition: border-color 0.15s, color 0.15s;
+}
+.spawn-preset-btn:hover { border-color: var(--accent); color: var(--text); }
+.spawn-preset-btn.selected { border-color: var(--accent); color: var(--accent); }
 .spawn-advanced-toggle {
   font-size: 11px;
   color: var(--text-dim);

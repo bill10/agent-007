@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handleStateChange,
@@ -36,6 +36,12 @@ setOnSessionChanged(() => {
 window._onBoardVisibilityChanged = () => updateTabs();
 
 // --- Spawn Form ---
+const DEFAULT_COMMAND = 'claude';
+
+// Reassigned by setupSpawnForm; called again when the welcome message arrives
+// so a form opened during the connect window picks up the server's real OS.
+let refreshSpawnPresets = () => {};
+
 function setupSpawnForm() {
   const form = document.getElementById('spawn-form');
   const cmdInput = document.getElementById('spawn-command');
@@ -46,6 +52,41 @@ function setupSpawnForm() {
   const repoDropdown = document.getElementById('repo-dropdown');
   const advancedToggle = document.getElementById('spawn-advanced-toggle');
   const advancedSection = document.getElementById('spawn-advanced');
+  const presetsEl = document.getElementById('spawn-presets');
+
+  // Presets fill the Command field in Advanced; rendered on each open because
+  // the server platform arrives async in the welcome message.
+  function renderPresets() {
+    const presets = [
+      { label: 'Claude Code', cmd: DEFAULT_COMMAND },
+      { label: 'Codex', cmd: 'codex' },
+      { label: 'Gemini', cmd: 'gemini' },
+      shellPreset(),
+    ];
+    presetsEl.innerHTML = '';
+    for (const p of presets) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'spawn-preset-btn';
+      btn.textContent = p.label;
+      btn.dataset.cmd = p.cmd;
+      btn.onclick = () => {
+        cmdInput.value = p.cmd;
+        highlightPreset();
+      };
+      presetsEl.appendChild(btn);
+    }
+    highlightPreset();
+  }
+
+  function highlightPreset() {
+    const cmd = cmdInput.value.trim();
+    for (const btn of presetsEl.children) {
+      btn.classList.toggle('selected', btn.dataset.cmd === cmd);
+    }
+  }
+  cmdInput.addEventListener('input', highlightPreset);
+  refreshSpawnPresets = renderPresets;
 
   advancedToggle.onclick = () => {
     const open = advancedSection.style.display !== 'none';
@@ -72,7 +113,8 @@ function setupSpawnForm() {
     nameInput.value = '';
     branchInput.value = '';
     startPointInput.value = '';
-    cmdInput.value = 'claude';
+    cmdInput.value = DEFAULT_COMMAND;
+    renderPresets();
     advancedSection.style.display = 'none';
     advancedToggle.innerHTML = 'Advanced &#x25B6;';
     clearSpawnError();
@@ -89,7 +131,7 @@ function setupSpawnForm() {
   let spawnTimeout = null;
 
   function doSpawn() {
-    const command = cmdInput.value.trim() || 'claude';
+    const command = cmdInput.value.trim() || DEFAULT_COMMAND;
     const name = nameInput.value.trim() || undefined;
     const branch = branchInput.value.trim() || undefined;
     const repoPath = repoInput.value.trim() || undefined;
@@ -405,7 +447,8 @@ function setupResize() {
 function onMessage(msg) {
   switch (msg.type) {
     case 'welcome':
-      setSelf(msg.user ? msg.user.id : null, msg.authEnabled);
+      setSelf(msg.user ? msg.user.id : null, msg.authEnabled, msg.platform);
+      refreshSpawnPresets();
       break;
     case 'presence': renderPresence(msg.users, selfUserId); break;
     case 'session-created':
