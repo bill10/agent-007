@@ -5,6 +5,24 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.13.1] - 2026-08-31
+
+### Changed
+
+- The README now says what the last few releases made true: Agent 007 runs on
+  macOS, Linux, and Windows — spawning agents, adding repositories, and
+  browsing paths all handle Windows natively, and CI runs the test suite on
+  both Ubuntu and Windows. It also names the one Windows caveat: the per-agent
+  MCP config file's token protection is POSIX permissions, which Windows
+  doesn't have.
+
+### Fixed
+
+- The README's node-pty links pointed at a personal fork; they now point at
+  microsoft/node-pty, where the dependency actually lives, and the Windows
+  requirement names Visual Studio Build Tools instead of the deprecated
+  windows-build-tools.
+
 ## [0.3.13.0] - 2026-08-31
 
 ### Added
