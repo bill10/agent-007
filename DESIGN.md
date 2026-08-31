@@ -62,16 +62,24 @@ Two themes: dark (default) and light. Gold accent in both. Persisted to localSto
 --text:          #1c1b1a    /* warm near-black ink */
 --text-muted:    #62615c
 --text-dim:      #6b6a64
---accent:        #7d611f    /* darker gold: 4.5:1+ on both cream surfaces */
+--accent:        #7d611f    /* darker gold: 4.5:1+ on panel/header creams, 4.1:1 non-text on the office canvas */
+--accent-contrast: #fff     /* ink on accent fills and message-state chips (#111 on dark) */
+--hover:         rgba(0,0,0,0.05)   /* row-hover overlay (white-tint on dark) */
+--state-working:      #8c6200
+--state-waiting:      #1a7f37
+--state-message:      #aa540f
+--state-idle:         #7b7973
+--state-disconnected: #c8222e
+--state-recording:    #c8222e
 ```
 Surfaces stay in the cream band (~L*90) rather than near-white so long
-terminal sessions don't glare. Light mode also overrides the state colors,
-`--accent-contrast` (text on accent-filled buttons: #111 on dark, #fff on
-light), and `--hover` (row-hover overlay: white-tint on dark, black-tint on
-light) — see `style.css`. `test/theme-tokens.test.js` guards this file, the
-CSS tokens, and the terminal palette against drifting apart.
+terminal sessions don't glare. `test/theme-tokens.test.js` guards every hex
+value in the fence above against the CSS tokens in `style.css`, checks that
+every `:root` token has a light override, and keeps the terminal's
+background/foreground/cursor on the same values. The 16-color ANSI palette
+below is hand-picked and not auto-guarded.
 
-### State indicators (dark theme values; light overrides them in style.css)
+### State indicators (dark theme values; light values in the fence above)
 ```css
 --state-working:      #d4a847    /* yellow: agent is producing output */
 --state-waiting:      #7fbc6a    /* green: agent is at a prompt */
@@ -88,6 +96,17 @@ blue: #58a6ff     magenta: #bc8cff cyan: #76d9e6     white: #c9d1d9
 brightBlack: #8b949e  brightRed: #ffa198   brightGreen: #56d364  brightYellow: #e3b341
 brightBlue: #79c0ff   brightMagenta: #d2a8ff  brightCyan: #a5d6ff  brightWhite: #f0f3f6
 ```
+
+### Terminal ANSI Colors (light theme — GitHub light on warm paper)
+```
+black: #24292f    red: #cf222e     green: #1a7f37    yellow: #7d4e00
+blue: #0969da     magenta: #8250df cyan: #1b7c83     white: #5c6570
+brightBlack: #57606a  brightRed: #a40e26   brightGreen: #1a7f37  brightYellow: #633c01
+brightBlue: #0969da   brightMagenta: #8250df  brightCyan: #3192aa  brightWhite: #24292f
+```
+White and the brights are darkened from stock GitHub-light, which assumes a
+#ffffff ground; bold blue/magenta deliberately reuse the normal-weight colors
+because the stock brights wash out on the cream ground.
 
 ## Typography
 
@@ -495,6 +514,8 @@ the open PR).
 - Sun/moon SVG icons in terminal panel header
 - Toggles between dark and light themes
 - Terminal colors update in real time (full ANSI palette swap)
+- The office canvas repaints once on toggle — the animation loop skips frames
+  when no agents are alive, so without it the canvas kept the old theme's colors
 
 ### Auto-reload on reconnect
 - WebSocket reconnection triggers full page reload

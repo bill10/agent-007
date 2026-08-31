@@ -7,11 +7,17 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ## [0.3.13.0] - 2026-08-31
 
+### Added
+
+- A theme-token sync test (`test/theme-tokens.test.js`) that fails if the
+  palette in DESIGN.md, the CSS light-theme tokens, and the terminal's core
+  colors drift apart.
+
 ### Changed
 
 - Light mode is easier on the eyes: panels and the terminal now sit on warm
   low-glare cream surfaces instead of near-white, with warm near-black ink
-  and a darker gold accent, all tuned to WCAG AA contrast.
+  and a darker gold accent, tuned to WCAG AA contrast on the panel surfaces.
 - Light-mode state colors, terminal ANSI colors, and text selection were
   retuned for the cream background so nothing washes out.
 
