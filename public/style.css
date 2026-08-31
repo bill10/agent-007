@@ -13,6 +13,8 @@
   --text-muted: #9ca3af;
   --text-dim: #6b7280;
   --accent: #d4a847;
+  --accent-contrast: #111;
+  --hover: rgba(255,255,255,0.05);
   --state-working: #d4a847;
   --state-waiting: #7fbc6a;
   --state-message: #e0853a;
@@ -21,25 +23,29 @@
   --state-recording: #c44040;
 }
 
-/* Theme: Light */
+/* Theme: Light — warm low-glare paper (Flexoki-style neutrals).
+   Surfaces sit in the cream band (~L*90) instead of near-white so long
+   terminal sessions don't glare; ink is warm near-black, not pure gray. */
 [data-theme="light"] {
   color-scheme: light;
-  --bg-dark: #eae7e0;
-  --bg-panel: #f9f8f7;
-  --bg-office: #f2f1ee;
-  --bg-terminal: #f9f8f7;
-  --bg-tabs: #eae7e0;
-  --border: #d9d4ca;
-  --text: #222222;
-  --text-muted: #6b6b6b;
-  --text-dim: #6e6e6e;
-  --accent: #a07d2e;
-  --state-working: #bf8700;
+  --bg-dark: #e6e4d9;
+  --bg-panel: #f2f0e5;
+  --bg-office: #dad8ce;
+  --bg-terminal: #f2f0e5;
+  --bg-tabs: #e6e4d9;
+  --border: #c6c3b6;
+  --text: #1c1b1a;
+  --text-muted: #62615c;
+  --text-dim: #6b6a64;
+  --accent: #7d611f;
+  --accent-contrast: #fff;
+  --hover: rgba(0,0,0,0.05);
+  --state-working: #8c6200;
   --state-waiting: #1a7f37;
-  --state-message: #cf6e1e;
-  --state-idle: #8b949e;
-  --state-disconnected: #cf222e;
-  --state-recording: #cf222e;
+  --state-message: #aa540f;
+  --state-idle: #7b7973;
+  --state-disconnected: #c8222e;
+  --state-recording: #c8222e;
 }
 
 /* Focus visibility — keyboard users get a visible ring */
@@ -337,7 +343,7 @@ body {
   flex-direction: column;
   gap: 2px;
 }
-.repo-dropdown-item:hover { background: rgba(255,255,255,0.05); }
+.repo-dropdown-item:hover { background: var(--hover); }
 .repo-dropdown-slug {
   color: var(--text);
   font-size: 12px;
@@ -381,7 +387,7 @@ body {
 }
 .spawn-form-actions button:first-child {
   background: var(--accent);
-  color: #111;
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: bold;
 }
@@ -462,7 +468,7 @@ body {
   color: var(--text);
   transition: background 0.1s;
 }
-.dir-browser-entry:hover { background: rgba(255,255,255,0.05); }
+.dir-browser-entry:hover { background: var(--hover); }
 .dir-browser-entry.is-git { color: var(--accent); }
 .dir-browser-entry-icon { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
 .dir-browser-entry-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -503,7 +509,7 @@ body {
 }
 .dir-browser-actions button:first-child {
   background: var(--accent);
-  color: #111;
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: bold;
 }
@@ -698,7 +704,7 @@ body {
   border-left: 2px solid transparent;
   transition: background 0.1s;
 }
-.explorer-branch:hover { background: rgba(255,255,255,0.05); }
+.explorer-branch:hover { background: var(--hover); }
 .explorer-branch.active {
   background: var(--bg-terminal);
   border-left-color: var(--accent);
@@ -823,7 +829,7 @@ body {
   cursor: pointer;
   min-height: 24px;
 }
-.explorer-file:hover { background: rgba(255,255,255,0.05); }
+.explorer-file:hover { background: var(--hover); }
 .explorer-status-dot {
   width: 6px;
   height: 6px;
@@ -868,6 +874,11 @@ body {
 }
 .explorer-diff .diff-add { color: #98c379; background: rgba(26, 58, 26, 0.5); }
 .explorer-diff .diff-del { color: #e06c75; background: rgba(58, 26, 26, 0.5); }
+/* The dark add/del pair composites to mud on the cream light theme */
+[data-theme="light"] .explorer-diff .diff-add,
+[data-theme="light"] .diff-viewer-content .diff-add { color: #116329; background: rgba(26, 127, 55, 0.12); }
+[data-theme="light"] .explorer-diff .diff-del,
+[data-theme="light"] .diff-viewer-content .diff-del { color: #a40e26; background: rgba(200, 34, 46, 0.10); }
 .explorer-diff .diff-hunk { color: var(--accent); }
 .explorer-diff .diff-empty { color: var(--text-dim); font-style: italic; }
 
@@ -954,6 +965,8 @@ body {
   letter-spacing: 3px;
   pointer-events: none;
 }
+/* White watermark is invisible on the light office canvas */
+[data-theme="light"] .office-label { color: rgba(0,0,0,0.14); }
 #office-canvas {
   width: 100%;
   flex: 1;
@@ -1020,7 +1033,7 @@ body {
   transition: background 0.15s;
   position: relative;
 }
-.terminal-tab:hover { background: rgba(255,255,255,0.05); }
+.terminal-tab:hover { background: var(--hover); }
 .terminal-tab.active {
   color: var(--text);
   background: var(--bg-terminal);
@@ -1101,7 +1114,7 @@ body {
   left: 50%;
   transform: translateX(-50%);
   background: var(--state-message);
-  color: #111;
+  color: var(--accent-contrast);
   padding: 6px 20px;
   border-radius: 0 0 6px 6px;
   font-size: 12px;

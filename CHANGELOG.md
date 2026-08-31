@@ -5,6 +5,30 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.13.0] - 2026-08-31
+
+### Added
+
+- A theme-token sync test (`test/theme-tokens.test.js`) that fails if the
+  palette in DESIGN.md, the CSS light-theme tokens, and the terminal's core
+  colors drift apart.
+
+### Changed
+
+- Light mode is easier on the eyes: panels and the terminal now sit on warm
+  low-glare cream surfaces instead of near-white, with warm near-black ink
+  and a darker gold accent, tuned to WCAG AA contrast on the panel surfaces.
+- Light-mode state colors, terminal ANSI colors, and text selection were
+  retuned for the cream background so nothing washes out.
+
+### Fixed
+
+- Diff add/delete highlighting, row-hover feedback, the office watermark,
+  and primary-button labels were unreadable in light mode; each now has a
+  light-theme-aware color.
+- Toggling the theme with no agents running repaints the office canvas
+  immediately instead of leaving it in the old theme's colors.
+
 ## [0.3.12.3] - 2026-08-30
 
 ### Changed
