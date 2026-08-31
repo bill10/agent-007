@@ -168,7 +168,7 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 - **Walls:** Fixed warm cream plaster, independent of UI theme
 - **Floor:** Warm wood planks, fixed base `#4a3525`
 - **Windows:** Two windows with day/night cycle based on local time
-- **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), each with paper job posts pinned to it, standing where the couch nooks used to be. Room props only; the kanban feature in the `## Job Board` section below is unrelated
+- **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them), each with paper job posts pinned to it. Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test; the pinned posts are decoration and do not reflect real cards
 - **Plants:** Potted plants under windows
 - **Particles:** 5 ambient dust motes
 

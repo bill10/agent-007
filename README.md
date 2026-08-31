@@ -165,7 +165,7 @@ public/
   style.css        Dark/light themes via CSS custom properties
   app.js           Main entry point
   modules/
-    office.js      Canvas pixel art (workstations, characters, day/night)
+    office.js      Canvas pixel art (workstations, characters, job boards, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)

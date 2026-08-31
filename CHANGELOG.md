@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.12.1] - 2026-08-30
+
+### Changed
+
+- **The office whiteboards are the job board.** The three whiteboards on the
+  office canvas now read TO DO, IN PROGRESS and REVIEW, the columns of the Jobs
+  tab, instead of the made-up JOBS / HIRE / OPEN. They also stand almost
+  against the back wall, level with the plant pots, rather than out on the
+  floor. A test keeps the three titles in step with the Jobs tab's columns and
+  the server's job states, so renaming a column can no longer leave the office
+  showing something else.
+- Each whiteboard's heading underline now matches the heading's width instead
+  of a fixed fraction of the board.
+
 ## [0.3.12.0] - 2026-08-30
 
 ### Added

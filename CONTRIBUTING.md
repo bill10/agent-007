@@ -39,7 +39,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 
 - `test/helpers.test.js` -- Pure function unit tests (state detection, ANSI stripping, git parsing)
 - `test/server.test.js` -- Integration tests (HTTP API, WebSocket, PTY lifecycle)
-- `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input)
+- `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, voice input, the Jobs tab, and the office whiteboards, whose titles are checked against the Jobs tab's columns)
 - Plus focused server-side suites: adduser, auth, origin checks, branch cleanup/sync, git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), the cron parser and scheduled-job lifecycle (`test/cron.test.js`, `test/jobs-scheduled.test.js`, `test/jobs-scheduled-dispatch.test.js`, `test/jobs-restart.test.js`), and the board's MCP tool (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`)
 
 > **Windows note:** four tests fail locally on Windows and pass in CI (ubuntu).

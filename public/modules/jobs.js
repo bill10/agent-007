@@ -21,7 +21,7 @@ import { switchToSession } from './terminal.js';
 // merged is finished work, and a Review column that accumulates it stops
 // meaning "needs your review". Those jobs are kept and reachable through the
 // Finished jobs view below.
-const COLUMNS = [
+export const COLUMNS = [
   { state: 'todo', label: 'To do' },
   { state: 'in-progress', label: 'In progress' },
   { state: 'review', label: 'Review' },
