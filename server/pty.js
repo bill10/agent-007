@@ -149,7 +149,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     lastResizeAt: 0,
     lastStrippedLine: '',
     recentStrippedLines: [],
-    isTUI: isTUI ?? /^(claude|aider)\b/.test(command),
+    isTUI: isTUI ?? /^(claude|aider|codex|gemini)\b/.test(command),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client

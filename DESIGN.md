@@ -526,6 +526,11 @@ the open PR).
 - Uses capture phase to intercept before xterm.js
 
 ### New agent spawning
+- Preset buttons at the top of the spawn dialog (Claude Code, Codex, Gemini,
+  and a shell) fill the Command field, which lives inside the collapsed
+  Advanced section; the shell preset follows the server's OS — PowerShell on
+  win32, Bash elsewhere — using the `platform` field the welcome message
+  carries, and re-renders if the form was opened before the socket connected
 - Newly spawned agent auto-activates (switches terminal tab)
 - Empty repos get automatic initial commit
 

@@ -112,7 +112,8 @@ export function setupWebSocket(wss, { createSession, killSession }) {
     clients.add(ws);
 
     // Tell the client who it is and whether auth is on.
-    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user) }));
+    // platform lets the client offer the right shell preset (bash vs PowerShell).
+    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user), platform: process.platform }));
 
     // Send repos list
     ws.send(JSON.stringify({

@@ -104,6 +104,8 @@
   per-invocation MCP config flag, only `gemini mcp add` writing persistent
   settings; Codex configures MCP through `~/.codex/config.toml`. Both would need
   a write-then-clean-up dance that the per-session file for Claude avoids.
+  Since v0.3.14.0 the spawn dialog offers Codex and Gemini as one-click
+  presets, so running them is a promoted path rather than an edge case.
 
 ## Diff-between-agents for conflict files
 - **What:** When a conflict is detected (two agents modified the same file), clicking the warning icon shows both agents' diffs for that file side-by-side or sequentially.
@@ -154,3 +156,7 @@
 - **Priority:** P2
 - **Depends on:** Multiplayer phase 1 (identity & auth) — shipped.
 - **Context:** Raised by adversarial + security review of the phase 1 auth PR (2026-07-18). Accepted as a known limitation for now: the app itself doesn't log request URLs and deployment is behind Tailscale, so exposure is bounded. Revisit when auth hardens further (phase 2+).
+
+## Completed
+
+(Nothing yet — completed items move here with their shipped version.)

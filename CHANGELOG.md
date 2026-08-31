@@ -5,6 +5,22 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.14.0] - 2026-08-31
+
+### Added
+
+- The "+ Agent" dialog now offers one-click presets — Claude Code, Codex,
+  Gemini, and Bash — so starting an agent no longer means typing its command.
+  Picking one fills the Command field under Advanced, and the shell preset
+  follows the server's operating system: PowerShell on a Windows server, Bash
+  everywhere else.
+
+### Fixed
+
+- A quiet Codex or Gemini agent no longer reads as idle: state detection now
+  treats `codex` and `gemini` commands as TUI sessions, so their workstations
+  show waiting (green) at a quiet prompt instead of idle gray.
+
 ## [0.3.13.1] - 2026-08-31
 
 ### Changed

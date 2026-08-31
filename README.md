@@ -38,7 +38,7 @@ npm install
 npm start
 ```
 
-Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ Agent**, pick a repo, and hit Start. **+ Job** posts work to the job board instead.
+Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ Agent**, pick a repo, and hit Start -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. **+ Job** posts work to the job board instead.
 
 ## Keyboard Shortcuts
 
@@ -172,7 +172,7 @@ public/
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
     ws.js          WebSocket client with auto-reload on reconnect
-    state.js       Shared agent state
+    state.js       Shared client state (agents, repos, viewer identity, server platform)
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
