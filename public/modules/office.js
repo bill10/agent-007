@@ -143,6 +143,7 @@ const POD_GAP_Y = 26;      // Z units between pod rows (vs WS_GAP_Y=18 within)
 const RUG_PAD_X = 4;       // Z units the rug extends past the desks each side
 const RUG_PAD_TOP = 7;     // Z units above the desks — the repo label sits here
 const RUG_PAD_BOTTOM = 12; // Z units below — covers the agent name labels
+const POD_TOP_MARGIN = 8;  // Z units of bare floor between FLOOR_TOP and the first rug
 
 // Pure layout: agentInfos is [{ id, repoPath, slug }] in spawn (map) order.
 // Returns { pods, positions } — positions maps id -> { x, y } (top-left px of
@@ -193,10 +194,14 @@ export function computePodLayout(agentInfos, panelWidth, panelHeight) {
     else { podRows[podRows.length - 1].push(pod); rowW = need; }
   }
 
-  // Center the arrangement in [FLOOR_TOP, panelHeight]; never start above the floor.
+  // Anchor the arrangement near the top of the floor: centering is capped so a
+  // sparse office leaves its empty wood at the bottom (decor lives there)
+  // instead of as a dead band under the job boards. A nearly-full floor still
+  // centers; never start above the floor.
   const rowHs = podRows.map(r => Math.max(0, ...r.map(p => p.h)));
   const totalH = (rowHs.reduce((a, b) => a + b, 0) + (podRows.length - 1) * POD_GAP_Y) * Z;
-  let y = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (panelHeight - FLOOR_TOP - totalH) / 2));
+  const centerOff = Math.floor((panelHeight - FLOOR_TOP - totalH) / 2);
+  let y = Math.max(FLOOR_TOP, FLOOR_TOP + Math.min((POD_TOP_MARGIN + RUG_PAD_TOP) * Z, centerOff));
 
   const outPods = [];
   const positions = new Map();
