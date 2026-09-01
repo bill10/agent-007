@@ -110,6 +110,12 @@ describe('pod layout', () => {
     expect(pods[0].w).toBe(WS_W * Z); // one column
     const xs = new Set(infos.map(({ id }) => positions.get(id).x));
     expect(xs.size).toBe(1); // all stacked vertically
+    // Pair 1 wraps below pair 0: b faces a, c lands two desk rows down
+    expect(positions.get('b').y - positions.get('a').y).toBe((WS_H + WS_GAP_Y) * Z);
+    expect(positions.get('c').y - positions.get('a').y).toBe(2 * (WS_H + WS_GAP_Y) * Z);
+    // The unpaired desk never reserves an empty facing row under the rug
+    const lastDeskBottom = Math.max(...infos.map(({ id }) => positions.get(id).y)) + WS_H * Z;
+    expect(pods[0].y + pods[0].h).toBe(lastDeskBottom);
     for (const { id } of infos) {
       const p = positions.get(id);
       expect(p.x).toBeGreaterThanOrEqual(0);
