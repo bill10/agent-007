@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.23.2] - 2026-09-01
+
+### Fixed
+
+- The pixel office's plants are smaller: every plant sprite (the wall cactus
+  and leafy plant, the floor plant, the corner pots) now draws at 1x so it reads
+  as desk-side decor, shorter than a job board, instead of standing as tall as
+  a person. Being smaller, the corner and floor plants also fit in offices that
+  used to be too crowded for them.
+- The two back-wall plants are centred in the gaps between the three job
+  boards, computed from the boards' positions, so they no longer overlap a
+  board edge and stay centred when the panel is resized. On a panel too narrow
+  for boards they stay out of the way too.
+
 ## [0.3.23.1] - 2026-09-01
 
 ### Changed
