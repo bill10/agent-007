@@ -1316,9 +1316,9 @@ export function noteAgentDeparture(sessionId) {
   if (!motionEnabled()) return;
   const agent = agents.get(sessionId);
   if (!agent || agent.state === 'DISCONNECTED') return;
-  const panel = document.getElementById('office-panel');
-  if (!panel) return;
-  const layout = computeOfficeLayout(panel.offsetWidth, panel.offsetHeight);
+  const canvas = document.getElementById('office-canvas');
+  if (!canvas) return;
+  const layout = computeOfficeLayout(canvas.clientWidth, canvas.clientHeight);
   const pos = deskCharPos(sessionId, layout);
   if (!pos) return;
   walkAnims.set(sessionId, {
@@ -1433,17 +1433,17 @@ function drawMotion(ctx, w, h, layout) {
 
 export function renderOffice() {
   const canvas = document.getElementById('office-canvas');
-  const panel = document.getElementById('office-panel');
+  // Size from the canvas's own CSS box (flex:1 below .office-header), not the
+  // panel's — the panel height includes the header, so a panel-sized canvas
+  // overflowed the bottom and clipped the sofa and corner plants.
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = panel.offsetWidth * dpr;
-  canvas.height = panel.offsetHeight * dpr;
-  canvas.style.width = `${panel.offsetWidth}px`;
-  canvas.style.height = `${panel.offsetHeight}px`;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.imageSmoothingEnabled = false;
-  const w = panel.offsetWidth;
-  const h = panel.offsetHeight;
   const theme = getThemeColors();
 
   // Layer 1: Floor (warm wood planks)

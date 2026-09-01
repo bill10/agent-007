@@ -140,7 +140,48 @@ describe('motion state', () => {
     state.agents.set('sd', { state: 'DISCONNECTED' });
     office.noteAgentDeparture('sd'); // already gone from the floor
     state.agents.set('sa', { state: 'WORKING' });
-    office.noteAgentDeparture('sa'); // no #office-panel in this DOM
+    office.noteAgentDeparture('sa'); // no #office-canvas in this DOM
     expect(office.hasMotion()).toBe(false);
+  });
+});
+
+// The panel is a flex column with .office-header above the canvas, so a
+// panel-sized canvas overflowed the bottom and clipped the sofa and plants.
+// Both sizing paths must read the canvas's own CSS box, never the panel's.
+function canvasDom() {
+  document.body.innerHTML =
+    '<div id="office-panel"><div class="office-header"></div><canvas id="office-canvas"></canvas></div>';
+  const panel = document.getElementById('office-panel');
+  const canvas = document.getElementById('office-canvas');
+  const dim = (el, props) => {
+    for (const [k, v] of Object.entries(props)) Object.defineProperty(el, k, { value: v, configurable: true });
+  };
+  dim(panel, { offsetWidth: 900, offsetHeight: 700 });
+  dim(canvas, { clientWidth: 600, clientHeight: 400 });
+  // happy-dom has no 2D context; every call is a no-op that returns the ctx
+  // (so chained results like createLinearGradient().addColorStop still work).
+  const ctx = new Proxy({}, { get: () => () => ctx, set: () => true });
+  canvas.getContext = () => ctx;
+  return { panel, canvas };
+}
+
+describe('canvas sizing', () => {
+  it('renderOffice sizes the backing store from the canvas box, not the panel', async () => {
+    const { office } = await freshMotion();
+    const { canvas } = canvasDom();
+    window.devicePixelRatio = 2;
+    office.renderOffice();
+    expect(canvas.width).toBe(600 * 2);
+    expect(canvas.height).toBe(400 * 2);
+    expect(canvas.style.width).toBe('');
+    expect(canvas.style.height).toBe('');
+  });
+
+  it('noteAgentDeparture lays out from the canvas box and queues a walk-out', async () => {
+    const { office, state } = await freshMotion();
+    canvasDom();
+    state.agents.set('sa', { state: 'WORKING', repoPath: '/r', repoSlug: 'r' });
+    office.noteAgentDeparture('sa');
+    expect(office.hasMotion()).toBe(true);
   });
 });
