@@ -178,16 +178,36 @@ draw at 2x — 16px art in a 32px-tile office).
 - Screenshots: `docs/office-pods-before.png`, `docs/office-pods-after.png`,
   `docs/office-pods-sparse.png`
 
+### Facing pairs (since v0.3.18.0)
+- Within a pod, desks pair up face-to-face across a shared aisle: agent `2p`
+  takes the top desk of pair `p`, flipped toward the viewer (`flip: true` in
+  the position map — the monitor's back faces the aisle), and agent `2p+1`
+  sits across from it at a default desk. Pairs flow left-to-right into
+  two-desk rows.
+- A lone agent, or the unpaired last agent of an odd pod, keeps the default
+  orientation; the pod's rug height stops at the deepest occupied desk row,
+  so an odd agent never reserves an empty row.
+- A flipped desk shows the monitor's back (`assets/furniture/pc_back.png`,
+  16x32 from pixel-agents, with a procedural fallback), and its character
+  draws behind the desk (anchored at the tile top, not sy+13) so the desk
+  occludes the lower body; the message bubble follows the head.
+- Screenshots: `docs/office-pairs-dark.png`, `docs/office-pairs-light.png`
+
 ### Workstation anatomy (back-to-front draw order)
 1. **Monitor** — 14w x 9h, 1px uniform bezel, content varies by state
 2. **Monitor stand** — 2w centered, 1px tall neck + 4w base
 3. **Desk** — sprite-based (desk.png / desk2.png), top 13 rows cropped
 4. **Character** — sprite-based (pixel-agents sheets `char_0.png`–`char_5.png`,
    16x32 frames drawn at 2x; variant picked by hashing the session id so an
-   agent keeps its look across renders). State-dependent pose, anchored at sy+13:
-   - WORKING: seated back-facing, 2-frame typing cycle (static under
-     `prefers-reduced-motion`)
-   - WAITING/MESSAGE: seated front-facing (turned around toward the viewer)
+   agent keeps its look across renders; the desk sprite variant hashes the
+   same way, so a desk's style sticks to its agent, not its slot).
+   State-dependent pose, anchored at sy+13 (tile top at a flipped desk):
+   - WORKING: seated typing, 2-frame cycle (static under
+     `prefers-reduced-motion`); back-facing at a default desk, front-facing
+     over the monitor back at a flipped desk
+   - WAITING/MESSAGE: facing the viewer — a default desk turns the chair
+     around; a flipped desk already points this way, so the character takes
+     the reading pose to stay distinguishable from flipped typing
    - IDLE: standing, facing the viewer
    - DISCONNECTED: pixel art X pattern, no character
 5. **Name tag** — bold 11px monospace, centered below character
