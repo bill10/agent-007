@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.21.1] - 2026-09-01
+
+### Fixed
+
+- The rug under each repo's desk pod is visible again in light mode. It was
+  tinted with the theme accent, and the light theme's darker gold is almost
+  the same colour as the wood floor, so the rug disappeared. The rug now uses
+  the same fixed gold in both themes, like the rest of the office furniture;
+  the repo label keeps the theme's text colour.
+
 ## [0.3.21.0] - 2026-09-01
 
 ### Changed

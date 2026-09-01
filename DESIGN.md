@@ -174,6 +174,11 @@ draw at 2x — 16px art in a 32px-tile office).
 - Rug pads the desk block by 4 Z units each side, 7 above (repo label) and
   12 below (agent name tags); rug rects double as the keep-out zone for
   ambient decor
+- Rug colour is the brand gold (`GOLD_RGB` in `office.js`, 10% fill with
+  32% outer and 16% inner borders), fixed in both themes like the walls and
+  floor: the light theme's darker accent is nearly the floor colour, so a
+  theme-tinted rug vanished in light mode (fixed in v0.3.21.1). The repo
+  label keeps the theme's text colour
 - Pods flow left-to-right and wrap when a row would overflow the panel; the
   arrangement is vertically centered on the floor, clamped to `FLOOR_TOP`
   (pure layout in `computePodLayout`, `public/modules/office.js`)
