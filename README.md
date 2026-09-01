@@ -17,7 +17,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 
 ## Features
 
-- **Pixel office** -- Canvas-rendered workstations that show each agent's state at a glance (working, waiting, needs attention, idle, disconnected). Characters face the screen when working and turn around when waiting.
+- **Pixel office** -- Canvas-rendered workstations that show each agent's state at a glance (working, waiting, needs attention, idle, disconnected). Characters face the screen when working and turn around when waiting. The three whiteboards mirror the job board live: one pinned paper per job in each column, with a "+N" note when more are queued than fit.
 - **Git worktree isolation** -- Each agent gets its own worktree and branch automatically. No merge conflicts between agents working on the same repo. Branches are named with cocktail names (`bill/vesper`, `bill/martini`, ...).
 - **Multi-repo support** -- Add any number of repos. Spawn agents on different repos and manage them all from one place.
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see. Repo sections collapse from their header (click, or Enter/Space when focused); a collapsed header keeps the agent count and a dot for the most urgent agent state, so folded sections still show when something needs you.
