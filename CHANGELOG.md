@@ -5,6 +5,15 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.23.1] - 2026-09-01
+
+### Changed
+
+- The wall hangings (clock and two small paintings) added in 0.3.22.0 are
+  removed again; the back wall beside the job boards is bare plaster.
+- The break-room sofa is now a side view that faces right, toward the coffee
+  table, instead of facing the viewer.
+
 ## [0.3.23.0] - 2026-09-01
 
 ### Changed
