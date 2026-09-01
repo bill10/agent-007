@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.23.0] - 2026-09-01
+
+### Changed
+
+- Desk pods in the pixel office now sit just below the job boards instead of
+  floating in the middle of the floor. With only a few agents the empty wood
+  collects at the bottom, where the sofa and plants live, rather than as a
+  dead band under the boards. A busy office that fills the floor lays out
+  exactly as before.
+
 ## [0.3.22.0] - 2026-09-01
 
 ### Changed
