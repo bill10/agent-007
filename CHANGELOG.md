@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.20.0] - 2026-09-01
+
+### Added
+
+- The pixel office now shows cause and effect in motion. When the job board
+  dispatches a job, a small paper flies from that job's whiteboard column down
+  to the new agent's desk. A newly spawned agent walks in from the office
+  entrance to its desk and sits; an exiting agent stands up and walks out
+  before its desk disappears — including agents the server retires, such as
+  board agents closing after opening their pull request.
+- Animations respect your system's reduce-motion setting (agents appear and
+  disappear instantly), never replay on page load for agents already running,
+  and skip entirely while the tab is in the background.
+
 ## [0.3.19.0] - 2026-09-01
 
 ### Changed

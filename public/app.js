@@ -8,7 +8,10 @@ import {
   setOnSessionChanged, handleUploadComplete, setupUpload,
   updateTerminalThemes,
 } from './modules/terminal.js';
-import { renderOffice, setupOfficeClick, startAnimationLoop } from './modules/office.js';
+import {
+  renderOffice, setupOfficeClick, startAnimationLoop,
+  noteAgentArrival, noteAgentDeparture, noteJobsUpdate,
+} from './modules/office.js';
 import {
   setupExplorer, handleReposList, handleFileTree, handleFullTree,
   handleConflictsUpdate, handleFileDiff, handleOrphansList,
@@ -452,13 +455,26 @@ function onMessage(msg) {
       break;
     case 'presence': renderPresence(msg.users, selfUserId); break;
     case 'session-created':
+      // A genuinely new session walks in; re-emits and the connect replay don't
+      if (!agents.has(msg.sessionId)) noteAgentArrival(msg.sessionId);
       handleSessionCreated(msg);
       if (window._onSessionCreatedCloseSpawn) window._onSessionCreatedCloseSpawn();
       scheduleTabRestore();
       break;
     case 'pty-output': handlePtyOutput(msg); break;
-    case 'state-change': handleStateChange(msg); break;
-    case 'session-ended': handleSessionEnded(msg); break;
+    case 'state-change':
+      // A process exit broadcasts DISCONNECTED here BEFORE session-ended, so
+      // this alive->dead transition is where the walk-out must be captured —
+      // by session-ended the DISCONNECTED guard would swallow it.
+      if (msg.state === 'DISCONNECTED') noteAgentDeparture(msg.sessionId);
+      handleStateChange(msg);
+      break;
+    case 'session-ended':
+      // Before the handler: the walk-out needs the desk position while the
+      // agent is still in the map.
+      noteAgentDeparture(msg.sessionId);
+      handleSessionEnded(msg);
+      break;
     case 'spawn-error':
       handleSpawnError(msg);
       if (window._onSpawnErrorInForm) window._onSpawnErrorInForm(msg.error);
@@ -480,7 +496,7 @@ function onMessage(msg) {
     case 'orphans-list': handleOrphansList(msg); break;
     // The office canvas pins one paper per job, so a jobs-list broadcast has
     // to repaint it too — the animation loop skips frames with no live agent.
-    case 'jobs-list': handleJobsList(msg); renderOffice(); break;
+    case 'jobs-list': handleJobsList(msg); noteJobsUpdate(); renderOffice(); break;
     case 'upload-complete': handleUploadComplete(msg); break;
     case 'notification': handleNotification(msg); break;
     case 'repo-error':

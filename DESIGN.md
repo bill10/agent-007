@@ -227,6 +227,19 @@ draw at 2x — 16px art in a 32px-tile office).
 - Accent-colored dots (not hardcoded orange), positioned relative to character
 - Only shown for MESSAGE state (agent needs user input)
 
+### Transient motion
+- **Walk in/out:** a newly spawned agent walks in from the entrance
+  (bottom-center) to its desk along an L-shaped path; a departing agent walks
+  out the same way before its desk disappears. While a walk plays, the motion
+  overlay draws the character instead of the seated pass.
+- **Dispatch paper:** when the board hands a job to a fresh agent, a small
+  paper arcs from that job's whiteboard column down to the new desk.
+- All motion is client-side and time-based: animations never replay on page
+  load (the connect sync renders pre-existing agents seated), are not queued
+  while the tab is hidden, and are disabled under `prefers-reduced-motion`
+  (queried live, so flipping the OS setting applies to the next animation,
+  not the next reload).
+
 ### Room elements
 - **Walls:** Fixed warm cream plaster, independent of UI theme
 - **Floor:** Warm wood planks, fixed base `#4a3525`
