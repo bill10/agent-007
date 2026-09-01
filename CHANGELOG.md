@@ -13,11 +13,11 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   cut off mid-sprite. The canvas was being sized to the whole office panel,
   header included, so its bottom band hung below the panel edge and was
   clipped; it now fills exactly the area under the "+ Agent" / "+ Job" bar.
-  Desks sit correctly centred in that space and click-to-focus, panel
-  resizing, and the agent walk-out animation all measure the same box.
-- Opening the diff viewer no longer disturbs the office behind it: agents who
-  leave while a diff is open still walk out from their own desk, and dispatch
-  papers already in flight are not dropped.
+  Desks sit correctly centered in that space and click-to-focus, panel
+  resizing, and the agent walk-out animation all measure the same box. While
+  the diff viewer hides the office, the canvas keeps its last real size, so
+  agents who leave while a diff is open still walk out from their own desk
+  and dispatch papers already in flight are not dropped.
 
 ## [0.3.21.1] - 2026-09-01
 
