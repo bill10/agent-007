@@ -188,8 +188,10 @@ lays out against a 0x0 room.
   theme-tinted rug vanished in light mode (fixed in v0.3.21.1). The repo
   label keeps the theme's text colour
 - Pods flow left-to-right and wrap when a row would overflow the panel; the
-  arrangement is vertically centered on the floor, clamped to `FLOOR_TOP`
-  (pure layout in `computePodLayout`, `public/modules/office.js`)
+  arrangement is anchored near the top of the floor (first rug 8 Z below
+  `FLOOR_TOP`, `POD_TOP_MARGIN`) so a sparse office leaves its empty wood at
+  the bottom for decor. A nearly-full floor still centers, clamped to
+  `FLOOR_TOP` (pure layout in `computePodLayout`, `public/modules/office.js`)
 - Screenshots: `docs/office-pods-before.png`, `docs/office-pods-after.png`,
   `docs/office-pods-sparse.png`
 
