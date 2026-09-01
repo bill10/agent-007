@@ -5,6 +5,21 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.19.0] - 2026-09-01
+
+### Changed
+
+- Desks in a pod now pair up facing each other across a shared aisle, the way
+  a real office arranges them: the top desk of each pair turns toward you, its
+  character seated behind it with the monitor's back to the aisle, while its
+  partner faces it from the other side. A waiting agent at a turned desk reads
+  instead of typing so its state stays readable, a lone agent keeps the
+  familiar single desk, and an odd agent out takes a default desk at the end
+  of the pod without leaving an empty row under the rug.
+- Each agent's desk style now sticks to the agent (like its character sprite)
+  instead of its position in the room, so desks no longer restyle when an
+  unrelated agent leaves.
+
 ## [0.3.18.0] - 2026-08-31
 
 ### Changed
