@@ -19,6 +19,8 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 - Each agent's desk style now sticks to the agent (like its character sprite)
   instead of its position in the room, so desks no longer restyle when an
   unrelated agent leaves.
+- On narrow panels, a full-width pod now leaves room for its rug border
+  instead of letting the rug clip at the panel edges.
 
 ## [0.3.18.0] - 2026-08-31
 

@@ -168,7 +168,9 @@ draw at 2x — 16px art in a 32px-tile office).
   reshuffles desks inside a pod.
 - Cell: 32w x 36h Z units (96 x 108 screen px); gap within a pod: 12 x 18;
   gap between pods: 20 x 26
-- Max 4 columns per pod, responsive to panel width
+- Max 4 columns per pod, responsive to panel width; the column count
+  reserves the rug padding, so a max-width pod's rug never clips at the
+  panel edges
 - Rug pads the desk block by 4 Z units each side, 7 above (repo label) and
   12 below (agent name tags); rug rects double as the keep-out zone for
   ambient decor
