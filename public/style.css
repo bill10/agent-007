@@ -994,6 +994,7 @@ body {
 #office-canvas {
   width: 100%;
   flex: 1;
+  min-height: 0; /* else the h*dpr height attribute becomes the flex minimum and the canvas grows every frame on HiDPI */
   display: block;
   image-rendering: pixelated;
 }

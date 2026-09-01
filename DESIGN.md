@@ -161,6 +161,14 @@ Three-panel layout with per-panel headers:
 Canvas-rendered pixel art workstations at Z=3 scale factor (character sprites
 draw at 2x — 16px art in a 32px-tile office).
 
+The canvas is sized from its own CSS box (`flex: 1` under the office header,
+`min-height: 0`), never from the panel: the panel height includes the header,
+so a panel-sized canvas hung below the panel edge and clipped the sofa and
+corner plants (fixed in v0.3.21.2). `renderOffice`, click-to-focus, and the
+walk-out animation all lay out against that same box, and the last real size
+is kept while the diff viewer hides the canvas so nothing captured meanwhile
+lays out against a 0x0 room.
+
 ### Per-repo pods (since v0.3.18.0)
 - Desks are grouped into pods, one per repo, each on its own rug with the repo
   name above it; agents with no repo (bash terminals) share a final unlabeled

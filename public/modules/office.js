@@ -1316,9 +1316,11 @@ export function noteAgentDeparture(sessionId) {
   if (!motionEnabled()) return;
   const agent = agents.get(sessionId);
   if (!agent || agent.state === 'DISCONNECTED') return;
-  const panel = document.getElementById('office-panel');
-  if (!panel) return;
-  const layout = computeOfficeLayout(panel.offsetWidth, panel.offsetHeight);
+  const canvas = document.getElementById('office-canvas');
+  if (!canvas) return;
+  const { w, h } = canvasSize(canvas);
+  if (!w || !h) return;
+  const layout = computeOfficeLayout(w, h);
   const pos = deskCharPos(sessionId, layout);
   if (!pos) return;
   walkAnims.set(sessionId, {
@@ -1431,19 +1433,29 @@ function drawMotion(ctx, w, h, layout) {
   }
 }
 
+// Size from the canvas's own CSS box (flex:1 below .office-header), not the
+// panel's — the panel height includes the header, so a panel-sized canvas
+// overflowed the bottom and clipped the sofa and corner plants. The diff
+// viewer hides the canvas (display:none → 0x0 client box), so remember the
+// last real size: renders and walk-outs captured while hidden still lay out
+// against the room the user will see when it comes back.
+let lastCanvasSize = { w: 0, h: 0 };
+function canvasSize(canvas) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (w && h) lastCanvasSize = { w, h };
+  return lastCanvasSize;
+}
+
 export function renderOffice() {
   const canvas = document.getElementById('office-canvas');
-  const panel = document.getElementById('office-panel');
+  const { w, h } = canvasSize(canvas);
+  if (!w || !h) return; // no layout yet — nothing to draw into
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = panel.offsetWidth * dpr;
-  canvas.height = panel.offsetHeight * dpr;
-  canvas.style.width = `${panel.offsetWidth}px`;
-  canvas.style.height = `${panel.offsetHeight}px`;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
   const ctx = canvas.getContext('2d');
   ctx.scale(dpr, dpr);
   ctx.imageSmoothingEnabled = false;
-  const w = panel.offsetWidth;
-  const h = panel.offsetHeight;
   const theme = getThemeColors();
 
   // Layer 1: Floor (warm wood planks)
