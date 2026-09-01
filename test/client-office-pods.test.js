@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement } =
+const { computePodLayout, podRugRect, computeDecorPlacement, computeWallDecor } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -159,6 +159,26 @@ describe('pod layout', () => {
     }
     // Same inputs → same placement (deterministic)
     expect(computeDecorPlacement(rugs, W, H)).toEqual(spots);
+  });
+
+  it('an empty office never repeats a plant sprite more than twice', () => {
+    const kinds = computeDecorPlacement([], W, H).map(s => s.kind);
+    expect(kinds).toContain('lounge');
+    expect(kinds).toContain('largeplant');
+    for (const k of new Set(kinds)) expect(kinds.filter(x => x === k).length, k).toBeLessThanOrEqual(2);
+  });
+
+  it('wall hangings sit beside their board when the section has room, else above it', () => {
+    // Wide panel: every hanging hangs on the plaster at window height
+    const wide = computeWallDecor(W);
+    expect(wide.map(h => h.key)).toEqual(['painting1', 'clock', 'painting2']);
+    for (const h of wide) expect(h.y).toBe(2 * Z);
+    // Default 440px panel: boards fill their sections, so hangings move above them
+    const narrow = computeWallDecor(440);
+    expect(narrow).toHaveLength(3);
+    for (const h of narrow) expect(h.y).toBeLessThan(0);
+    // Too narrow for a board: nothing hangs
+    expect(computeWallDecor(120)).toEqual([]);
   });
 
   it('decor spots never overlap each other, even on a narrow panel', () => {

@@ -37,6 +37,17 @@ const SPRITE_PATHS = {
   plant:   'assets/furniture/plant_big.png',        // 32×32 potted office plant (Antea CC-BY 4.0)
   desk:    'assets/furniture/desk.png',             // 32×32 computer desk with monitor
   desk2:   'assets/furniture/desk2.png',            // 32×32 alt desk layout
+  // Ambient decor from pixel-agents (MIT). 16px-tile art, drawn at CHAR_SCALE
+  // like the characters so a plant stands as tall as a person, as upstream.
+  cactus:     'assets/furniture/cactus.png',           // 16×32
+  plant2:     'assets/furniture/plant_2.png',          // 16×32
+  largeplant: 'assets/furniture/large_plant.png',      // 32×48
+  sofa:       'assets/furniture/sofa_front.png',       // 32×16, facing the viewer
+  table:      'assets/furniture/coffee_table.png',     // 32×32
+  coffee:     'assets/furniture/coffee.png',           // 16×16, art in the top-right 8×7
+  clock:      'assets/furniture/clock.png',            // 16×32, face at rows 11-21
+  painting1:  'assets/furniture/small_painting.png',   // 16×32, frame at rows 12-26
+  painting2:  'assets/furniture/small_painting_2.png', // 16×32, frame at rows 12-26
   char0:   'assets/characters/char_0.png',
   char1:   'assets/characters/char_1.png',
   char2:   'assets/characters/char_2.png',
@@ -224,15 +235,21 @@ export function podRugRect(pod) {
 // Pure function of the rug rects + panel size, so placement is deterministic
 // for a given agent set. ---
 const DECOR_MARGIN = 6 * Z;
-const SOFA_W = 26, SOFA_H = 15;   // Z units
-const DECOR_PLANT_W = 16, DECOR_PLANT_H = 16;
+// All decor sizes below are in px. pixel-agents decor is 16px-tile art drawn
+// at DECOR_SCALE like the characters; plant_big is 32px art drawn at 16 Z.
+const DECOR_SCALE = CHAR_SCALE;
+const DECOR_PLANT_W = 16 * Z, DECOR_PLANT_H = 16 * Z;
+const LARGE_PLANT_W = 32 * DECOR_SCALE, LARGE_PLANT_H = 48 * DECOR_SCALE;
+const SOFA_W = 32 * DECOR_SCALE, SOFA_H = 16 * DECOR_SCALE;
+const TABLE_W = 32 * DECOR_SCALE, TABLE_H = 32 * DECOR_SCALE;
+const LOUNGE_GAP = 4; // between sofa and table
 export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
-  const z = Z, pw = DECOR_PLANT_W * z, ph = DECOR_PLANT_H * z;
+  const z = Z, pw = DECOR_PLANT_W, ph = DECOR_PLANT_H;
   const candidates = [
-    // Sofa + plant corner, bottom-left
-    { kind: 'sofa', x: 3 * z, y: panelHeight - (SOFA_H + 3) * z, w: (SOFA_W + DECOR_PLANT_W + 2) * z, h: SOFA_H * z },
-    // Lone plants in the remaining corners of the open floor
-    { kind: 'plant', x: panelWidth - pw - 3 * z, y: panelHeight - ph - 3 * z, w: pw, h: ph },
+    // Break-room corner, bottom-left: sofa beside a coffee table with the coffee pot on it
+    { kind: 'lounge', x: 3 * z, y: panelHeight - TABLE_H - 3 * z, w: SOFA_W + LOUNGE_GAP + TABLE_W, h: TABLE_H },
+    // A tall floor plant bottom-right, small potted plants in the top corners
+    { kind: 'largeplant', x: panelWidth - LARGE_PLANT_W - 3 * z, y: panelHeight - LARGE_PLANT_H - 3 * z, w: LARGE_PLANT_W, h: LARGE_PLANT_H },
     { kind: 'plant', x: 3 * z, y: FLOOR_TOP, w: pw, h: ph },
     { kind: 'plant', x: panelWidth - pw - 3 * z, y: FLOOR_TOP, w: pw, h: ph },
   ];
@@ -700,25 +717,55 @@ function drawJobPost(ctx, x, y, w, h, lines, idx) {
   ctx.fillRect(x + Math.round(w / 2) - Math.round(pinS / 2), y - Math.round(pinS / 2), pinS, pinS);
 }
 
-// --- Potted plants under windows (sprite-based) ---
+// Draw a sprite at an integer scale; no-op if its PNG failed to load.
+function drawSprite(ctx, key, x, y, scale = DECOR_SCALE) {
+  const img = SPRITES[key];
+  if (img) ctx.drawImage(img, x, y, img.naturalWidth * scale, img.naturalHeight * scale);
+}
+
+// --- One plant per window: a cactus left of the first, a leafy plant right of
+// the second. Pots stand just off the baseboard, level with the board feet. ---
 function drawPlants(ctx, w) {
-  if (!SPRITES.plant) return;
   const z = Z;
   const layout = computeWallLayout(w);
-  const windowXs = [layout.window1X * z, layout.window2X * z];
-  const ww = layout.windowW * z;
+  const plantH = 32 * DECOR_SCALE, plantW = 16 * DECOR_SCALE;
+  const plantY = WALL_BOTTOM + 5 * z - plantH;
+  const c1 = (layout.window1X + layout.windowW / 2) * z;
+  const c2 = (layout.window2X + layout.windowW / 2) * z;
+  drawSprite(ctx, 'cactus', Math.floor(c1 - 6 * z - plantW), plantY);
+  drawSprite(ctx, 'plant2', Math.floor(c2 + 6 * z), plantY);
+}
 
-  const plantScale = (16 * z) / SPRITES.plant.naturalWidth;
-  const plantW = Math.floor(SPRITES.plant.naturalWidth * plantScale);
-  const plantH = Math.floor(SPRITES.plant.naturalHeight * plantScale);
-  // 3/4 perspective: pot back touches the wall — pot top is ~55% down the sprite
-  const plantY = WALL_BOTTOM - Math.floor(plantH * 0.65);
+// --- Wall hangings: a painting for each outer job board, the clock for the
+// middle one. Each hangs on the plaster beside its board (window side) when
+// the wall section leaves room, else centred above the board — the default
+// 440px panel has boards wall-to-wall in every section. Pure; exported for
+// the placement test. ---
+const HANGING_W = 16 * DECOR_SCALE;
+const HANGING_ART_BOTTOM = 26 * DECOR_SCALE; // frame bottom edge within the 16×32 sprite
+export function computeWallDecor(panelWidth) {
+  const z = Z;
+  const board = computeBoardLayout(panelWidth);
+  if (!board.visible) return [];
+  const gap = 4 * z;
+  const half = Math.floor(board.boardW / 2);
+  const [s1, s2, s3] = board.sections;
+  const hangings = [
+    { key: 'painting1', sec: s1, x: s1.centerX + half + gap },
+    { key: 'clock',     sec: s2, x: s2.centerX + half + gap },
+    { key: 'painting2', sec: s3, x: s3.centerX - half - gap - HANGING_W },
+  ];
+  // Art sits at rows 11-26 of the 32-row sprite: y=2Z hangs it level with the
+  // window glass; the fallback tucks the frame bottom 1 Z above the board top.
+  const aboveY = board.boardTop - HANGING_ART_BOTTOM - z;
+  return hangings.map(({ key, sec, x }) =>
+    x >= sec.left + 2 * z && x + HANGING_W <= sec.right - 2 * z
+      ? { key, x, y: 2 * z }
+      : { key, x: sec.centerX - HANGING_W / 2, y: aboveY });
+}
 
-  for (const wx of windowXs) {
-    const center = wx + Math.floor(ww / 2);
-    ctx.drawImage(SPRITES.plant, center - 6 * z - plantW, plantY, plantW, plantH);
-    ctx.drawImage(SPRITES.plant, center + 6 * z, plantY, plantW, plantH);
-  }
+function drawWallDecor(ctx, w) {
+  for (const h of computeWallDecor(w)) drawSprite(ctx, h.key, h.x, h.y);
 }
 
 // Brand gold (#d4a847) as an rgb triple for rgba() tints on the canvas.
@@ -755,50 +802,22 @@ function drawPodRug(ctx, pod, theme) {
   }
 }
 
-// --- Ambient sofa (procedural — the old sofa sprite is gone; fixed warm
-// palette like the floor and desks, independent of UI theme) ---
-function drawSofa(ctx, x, y) {
-  const z = Z;
-  // Contact shadow
-  ctx.fillStyle = 'rgba(0,0,0,0.13)';
-  ctx.fillRect(x + z, y + (SOFA_H - 1) * z, (SOFA_W - 2) * z, z);
-  // Back rest
-  ctx.fillStyle = '#8a5a3a';
-  ctx.fillRect(x + 2 * z, y, (SOFA_W - 4) * z, 5 * z);
-  ctx.fillStyle = '#9a6a48';
-  ctx.fillRect(x + 2 * z, y, (SOFA_W - 4) * z, z);
-  // Armrests
-  ctx.fillStyle = '#7a4e32';
-  ctx.fillRect(x, y + 2 * z, 3 * z, 10 * z);
-  ctx.fillRect(x + (SOFA_W - 3) * z, y + 2 * z, 3 * z, 10 * z);
-  // Seat cushions with a split line
-  ctx.fillStyle = '#a4744e';
-  ctx.fillRect(x + 3 * z, y + 5 * z, (SOFA_W - 6) * z, 5 * z);
-  ctx.fillStyle = 'rgba(0,0,0,0.12)';
-  ctx.fillRect(x + Math.floor(SOFA_W / 2) * z, y + 5 * z, 1, 5 * z);
-  // Front skirt + feet
-  ctx.fillStyle = '#7a4e32';
-  ctx.fillRect(x + 3 * z, y + 10 * z, (SOFA_W - 6) * z, 3 * z);
-  ctx.fillStyle = '#4a3828';
-  ctx.fillRect(x + 2 * z, y + 13 * z, 2 * z, z);
-  ctx.fillRect(x + (SOFA_W - 4) * z, y + 13 * z, 2 * z, z);
-}
-
 function drawDecor(ctx, spots) {
-  const z = Z;
   const plant = SPRITES.plant;
-  const plantW = DECOR_PLANT_W * z;
-  const drawPlant = (px, py) => {
-    if (!plant) return;
-    const s = plantW / plant.naturalWidth;
-    ctx.drawImage(plant, px, py, plantW, Math.floor(plant.naturalHeight * s));
-  };
+  const plantW = DECOR_PLANT_W;
   for (const spot of spots) {
-    if (spot.kind === 'sofa') {
-      drawSofa(ctx, spot.x, spot.y);
-      drawPlant(spot.x + (SOFA_W + 2) * z, spot.y - z);
-    } else {
-      drawPlant(spot.x, spot.y);
+    if (spot.kind === 'lounge') {
+      // Sofa and table share a floor line; the coffee pot sits on the table top.
+      // Skip the whole group rather than draw a pot floating over a missing table.
+      if (!SPRITES.sofa || !SPRITES.table) continue;
+      drawSprite(ctx, 'sofa', spot.x, spot.y + TABLE_H - SOFA_H);
+      const tx = spot.x + SOFA_W + LOUNGE_GAP;
+      drawSprite(ctx, 'table', tx, spot.y);
+      drawSprite(ctx, 'coffee', tx + 8 * DECOR_SCALE, spot.y + 7 * DECOR_SCALE);
+    } else if (spot.kind === 'largeplant') {
+      drawSprite(ctx, 'largeplant', spot.x, spot.y);
+    } else if (plant) {
+      ctx.drawImage(plant, spot.x, spot.y, plantW, Math.floor(plant.naturalHeight * plantW / plant.naturalWidth));
     }
   }
 }
@@ -1464,7 +1483,8 @@ export function renderOffice() {
   drawWalls(ctx, w);
   // Layer 3: Windows (2 windows with day/night + light beams)
   drawWindows(ctx, w, theme);
-  // Layer 4: (bookshelves removed — bare plaster wall)
+  // Layer 4: Wall hangings (clock, paintings) beside the job boards
+  drawWallDecor(ctx, w);
   // Layer 5: Potted plants (against the wall, under the windows)
   drawPlants(ctx, w);
   // Layer 5b: Job boards — their feet stand level with the plant pots' fronts,
