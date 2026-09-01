@@ -166,7 +166,7 @@ public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
   app.js           Main entry point
-  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE, furniture/ CC-BY 4.0)
+  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE; furniture/ mixes Antea CC-BY 4.0 and pixel-agents MIT, see Acknowledgements)
   modules/
     office.js      Canvas pixel art (workstations, characters, job boards, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
