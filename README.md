@@ -166,7 +166,7 @@ public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
   app.js           Main entry point
-  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE, furniture/ CC-BY 4.0 plus the MIT pc_back.png)
+  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE, furniture/ CC-BY 4.0)
   modules/
     office.js      Canvas pixel art (workstations, characters, job boards, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
@@ -185,7 +185,7 @@ lib/
 
 ## Acknowledgements
 
-- Character sprites and the monitor-back sprite (`furniture/pc_back.png`) from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
+- Character sprites from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
 - Desk and plant sprites from the Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
 
 ## Contributing
