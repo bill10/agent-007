@@ -170,9 +170,12 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 1. **Monitor** — 14w x 9h, 1px uniform bezel, content varies by state
 2. **Monitor stand** — 2w centered, 1px tall neck + 4w base
 3. **Desk** — sprite-based (desk.png / desk2.png), top 13 rows cropped
-4. **Character** — state-dependent:
-   - WORKING: back-facing, close to desk (sy+13)
-   - WAITING/IDLE/MESSAGE: front-facing, leaned back (sy+18)
+4. **Character** — sprite-based (pixel-agents sheets `char_0.png`–`char_5.png`,
+   16x32 frames drawn at 2x; variant picked by hashing the session id so an
+   agent keeps its look across renders). State-dependent pose, anchored at sy+13:
+   - WORKING: seated back-facing, 2-frame typing cycle
+   - WAITING/MESSAGE: seated front-facing (turned around toward the viewer)
+   - IDLE: standing, facing the viewer
    - DISCONNECTED: pixel art X pattern, no character
 5. **Name tag** — bold 11px monospace, centered below character
    - Active: gold `#d4a847` with pulsing glow animation

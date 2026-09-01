@@ -182,6 +182,11 @@ lib/
   cron.js          Five-field cron parser (schedules for scheduled jobs)
 ```
 
+## Acknowledgements
+
+- Character sprites from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
+- Desk and plant sprites from the Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
+
 ## Contributing
 
 Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
