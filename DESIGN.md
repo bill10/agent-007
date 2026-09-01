@@ -234,11 +234,11 @@ draw at 2x — 16px art in a 32px-tile office).
   overlay draws the character instead of the seated pass.
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
-- All motion is client-side and time-based: animations self-expire on their
-  start timestamp, never replay on page load (the connect sync renders
-  pre-existing agents seated), skip while the tab is hidden, and are disabled
-  under `prefers-reduced-motion` (queried live, so flipping the OS setting
-  applies to the next animation, not the next reload).
+- All motion is client-side and time-based: animations never replay on page
+  load (the connect sync renders pre-existing agents seated), are not queued
+  while the tab is hidden, and are disabled under `prefers-reduced-motion`
+  (queried live, so flipping the OS setting applies to the next animation,
+  not the next reload).
 
 ### Room elements
 - **Walls:** Fixed warm cream plaster, independent of UI theme
