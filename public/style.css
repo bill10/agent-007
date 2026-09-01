@@ -650,7 +650,7 @@ body {
 .explorer-repo-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
   padding: 6px 10px;
   background: var(--bg-dark);
   font-size: 13px;
@@ -658,13 +658,23 @@ body {
   position: sticky;
   top: 0;
   z-index: 1;
-  cursor: default;
+  cursor: pointer;
 }
+.explorer-repo-header:hover { background: var(--bg-panel); }
 .explorer-repo-name {
   color: var(--text);
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.explorer-collapsed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: normal;
+  color: var(--text-dim);
 }
 .explorer-repo-actions {
   display: flex;

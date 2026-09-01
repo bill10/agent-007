@@ -12,6 +12,15 @@ let fullTreeSessions = new Set();  // sessionIds showing full tree
 let fullTreeCache = new Map();     // sessionId -> full tree data
 let fullTreePending = new Set();   // in-flight full tree requests
 let expandedDirs = new Set();      // "sessionId:dir/path" expanded directories (collapsed by default)
+const COLLAPSED_KEY = 'agent007-collapsed-repos';
+let collapsedRepos = loadCollapsedRepos();  // repoPaths with collapsed sections
+
+function loadCollapsedRepos() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY));
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch { return new Set(); }
+}
 
 export function setupExplorer() {
   document.getElementById('btn-toggle-explorer').onclick = toggleExplorer;
@@ -160,14 +169,10 @@ export function renderExplorer() {
     const section = document.createElement('div');
     section.className = 'explorer-repo';
 
-    // Sticky header
-    const header = document.createElement('div');
-    header.className = 'explorer-repo-header';
-
-    const headerName = document.createElement('span');
-    headerName.className = 'explorer-repo-name';
-    headerName.textContent = repo.slug;
-    header.appendChild(headerName);
+    // Sticky header — click to collapse/expand section
+    const branchAgents = repoAgents.get(repoPath) || [];
+    const repoOrphanList = repoOrphans.get(repoPath) || [];
+    const { header, isCollapsed } = makeRepoHeader(repoPath, repo.slug);
 
     if (!repo.exists) {
       const err = document.createElement('span');
@@ -197,31 +202,39 @@ export function renderExplorer() {
     removeBtn.title = 'Remove repo';
     removeBtn.onclick = (e) => {
       e.stopPropagation();
+      collapsedRepos.delete(repoPath);
+      saveCollapsedRepos();
       send({ type: 'remove-repo', path: repoPath });
     };
     headerActions.appendChild(removeBtn);
 
+    if (isCollapsed) {
+      header.appendChild(makeCollapsedBadge(
+        branchAgents.map(b => b.agent),
+        branchAgents.length + repoOrphanList.length
+      ));
+    }
     header.appendChild(headerActions);
     section.appendChild(header);
 
     // Branches
-    const branchAgents = repoAgents.get(repoPath) || [];
-    const repoOrphanList = repoOrphans.get(repoPath) || [];
-    if (branchAgents.length === 0 && repoOrphanList.length === 0 && repo.exists) {
-      const noBranch = document.createElement('div');
-      noBranch.className = 'explorer-no-agents';
-      noBranch.textContent = '(no agents)';
-      section.appendChild(noBranch);
-    }
+    if (!isCollapsed) {
+      if (branchAgents.length === 0 && repoOrphanList.length === 0 && repo.exists) {
+        const noBranch = document.createElement('div');
+        noBranch.className = 'explorer-no-agents';
+        noBranch.textContent = '(no agents)';
+        section.appendChild(noBranch);
+      }
 
-    for (const { sessionId, agent } of branchAgents) {
-      const branchEl = createBranchEntry(sessionId, agent);
-      section.appendChild(branchEl);
-    }
+      for (const { sessionId, agent } of branchAgents) {
+        const branchEl = createBranchEntry(sessionId, agent);
+        section.appendChild(branchEl);
+      }
 
-    // Render orphans for this repo
-    for (const { orphanId, orphan } of repoOrphanList) {
-      section.appendChild(createOrphanEntry(orphanId, orphan));
+      // Render orphans for this repo
+      for (const { orphanId, orphan } of repoOrphanList) {
+        section.appendChild(createOrphanEntry(orphanId, orphan));
+      }
     }
 
     content.appendChild(section);
@@ -232,15 +245,13 @@ export function renderExplorer() {
     if (repos.has(repoPath)) continue; // Already rendered above
     const section = document.createElement('div');
     section.className = 'explorer-repo';
-    const header = document.createElement('div');
-    header.className = 'explorer-repo-header';
-    const headerName = document.createElement('span');
-    headerName.className = 'explorer-repo-name';
-    headerName.textContent = orphanList[0].orphan.repoSlug || repoPath.split('/').pop();
-    header.appendChild(headerName);
+    const { header, isCollapsed } = makeRepoHeader(repoPath, orphanList[0].orphan.repoSlug || repoPath.split('/').pop());
+    if (isCollapsed) header.appendChild(makeCollapsedBadge([], orphanList.length));
     section.appendChild(header);
-    for (const { orphanId, orphan } of orphanList) {
-      section.appendChild(createOrphanEntry(orphanId, orphan));
+    if (!isCollapsed) {
+      for (const { orphanId, orphan } of orphanList) {
+        section.appendChild(createOrphanEntry(orphanId, orphan));
+      }
     }
     content.appendChild(section);
   }
@@ -250,25 +261,91 @@ export function renderExplorer() {
   if (noRepoAgents.length > 0) {
     const section = document.createElement('div');
     section.className = 'explorer-repo';
-    const header = document.createElement('div');
-    header.className = 'explorer-repo-header';
-    header.innerHTML = '<span class="explorer-repo-name">No repo</span>';
+    const { header, isCollapsed } = makeRepoHeader('(no repo)', 'No repo');
+    if (isCollapsed) {
+      header.appendChild(makeCollapsedBadge(noRepoAgents.map(([, a]) => a), noRepoAgents.length));
+    }
     section.appendChild(header);
-    for (const [sessionId, agent] of noRepoAgents) {
-      const entry = document.createElement('div');
-      entry.className = `explorer-branch${sessionId === activeSessionId ? ' active' : ''}`;
-      entry.onclick = () => switchToSession(sessionId);
-      const dot = document.createElement('span');
-      dot.className = 'explorer-dot';
-      dot.style.background = stateColor(agent.state);
-      entry.appendChild(dot);
-      entry.appendChild(document.createTextNode(agent.name));
-      section.appendChild(entry);
+    if (!isCollapsed) {
+      for (const [sessionId, agent] of noRepoAgents) {
+        const entry = document.createElement('div');
+        entry.className = `explorer-branch${sessionId === activeSessionId ? ' active' : ''}`;
+        entry.onclick = () => switchToSession(sessionId);
+        const dot = document.createElement('span');
+        dot.className = 'explorer-dot';
+        dot.style.background = stateColor(agent.state);
+        entry.appendChild(dot);
+        entry.appendChild(document.createTextNode(agent.name));
+        section.appendChild(entry);
+      }
     }
     content.appendChild(section);
   }
 
   content.scrollTop = scrollTop;
+}
+
+function saveCollapsedRepos() {
+  localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsedRepos]));
+}
+
+function toggleRepoCollapse(repoPath) {
+  if (collapsedRepos.has(repoPath)) collapsedRepos.delete(repoPath);
+  else collapsedRepos.add(repoPath);
+  saveCollapsedRepos();
+  renderExplorer();
+  // Re-render destroys the focused header node; refocus it so keyboard
+  // toggling works repeatedly, not just once.
+  for (const h of document.querySelectorAll('.explorer-repo-header')) {
+    if (h.dataset.repoKey === repoPath) { h.focus(); break; }
+  }
+}
+
+// Clickable section header: ▸/▾ arrow + name, click toggles collapse
+function makeRepoHeader(key, label) {
+  const isCollapsed = collapsedRepos.has(key);
+  const header = document.createElement('div');
+  header.className = 'explorer-repo-header';
+  header.onclick = () => toggleRepoCollapse(key);
+  // No role="button": the configured-repo header nests real buttons (+/×),
+  // and the button role makes descendants presentational (see learning
+  // job-card-role-button-hides-nested-controls). Keyboard path kept via
+  // tabindex + keydown instead.
+  header.tabIndex = 0;
+  header.dataset.repoKey = key;
+  header.setAttribute('aria-expanded', String(!isCollapsed));
+  header.onkeydown = (e) => {
+    if (e.target !== header) return; // let nested +/× buttons keep their keys
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleRepoCollapse(key);
+    }
+  };
+  const arrow = document.createElement('span');
+  arrow.className = 'explorer-toggle-arrow';
+  arrow.textContent = isCollapsed ? '▸' : '▾';
+  header.appendChild(arrow);
+  const headerName = document.createElement('span');
+  headerName.className = 'explorer-repo-name';
+  headerName.textContent = label;
+  header.appendChild(headerName);
+  return { header, isCollapsed };
+}
+
+// Collapsed sections still surface entry count + most urgent agent state
+const STATE_PRIORITY = ['MESSAGE', 'WAITING', 'WORKING', 'DISCONNECTED', 'IDLE'];
+function makeCollapsedBadge(agentList, count) {
+  const badge = document.createElement('span');
+  badge.className = 'explorer-collapsed-badge';
+  const top = STATE_PRIORITY.find(s => agentList.some(a => a.state === s));
+  if (top) {
+    const dot = document.createElement('span');
+    dot.className = 'explorer-dot';
+    dot.style.background = stateColor(top);
+    badge.appendChild(dot);
+  }
+  badge.appendChild(document.createTextNode(String(count)));
+  return badge;
 }
 
 function stateColor(state) {

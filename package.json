@@ -1,6 +1,6 @@
 {
   "name": "agent-007",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "description": "Pixel office for AI terminal agents. Spawn multiple Claude Code agents, watch them work in a virtual office, manage git worktrees, and view file changes.",
   "license": "MIT",
   "type": "module",

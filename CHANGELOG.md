@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.15.0] - 2026-08-31
+
+### Added
+
+- Repo sections in the file explorer can now be collapsed: click a repo
+  header (or focus it and press Enter/Space) to fold that section away and
+  click again to bring it back. A collapsed header still shows how many
+  agents live inside and a colored dot for the most urgent agent state, so
+  nothing important goes quiet just because a section is folded. Which
+  sections are folded is remembered in the browser, so a page refresh keeps
+  your layout.
+
 ## [0.3.14.0] - 2026-08-31
 
 ### Added
