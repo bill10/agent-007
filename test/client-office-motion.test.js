@@ -184,4 +184,27 @@ describe('canvas sizing', () => {
     office.noteAgentDeparture('sa');
     expect(office.hasMotion()).toBe(true);
   });
+
+  it('keeps the last real size while the canvas is hidden (diff viewer)', async () => {
+    const { office, state } = await freshMotion();
+    const { canvas } = canvasDom();
+    window.devicePixelRatio = 1;
+    office.renderOffice(); // learns 600x400
+    Object.defineProperty(canvas, 'clientWidth', { value: 0, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 0, configurable: true });
+    office.renderOffice();
+    expect(canvas.width).toBe(600); // not collapsed to 0x0
+    state.agents.set('sa', { state: 'WORKING', repoPath: '/r', repoSlug: 'r' });
+    office.noteAgentDeparture('sa');
+    expect(office.hasMotion()).toBe(true); // walk-out captured from the remembered room
+  });
+
+  it('renders nothing before the first layout', async () => {
+    const { office } = await freshMotion();
+    const { canvas } = canvasDom();
+    Object.defineProperty(canvas, 'clientWidth', { value: 0, configurable: true });
+    Object.defineProperty(canvas, 'clientHeight', { value: 0, configurable: true });
+    office.renderOffice();
+    expect(canvas.width).toBe(300); // untouched default
+  });
 });

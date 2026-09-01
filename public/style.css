@@ -994,7 +994,7 @@ body {
 #office-canvas {
   width: 100%;
   flex: 1;
-  min-height: 0;
+  min-height: 0; /* else the h*dpr height attribute becomes the flex minimum and the canvas grows every frame on HiDPI */
   display: block;
   image-rendering: pixelated;
 }
@@ -1416,7 +1416,7 @@ body {
   display: flex;
   gap: 1px;
   flex: 1;
-  min-height: 0;
+  min-height: 0; /* else the h*dpr height attribute becomes the flex minimum and the canvas grows every frame on HiDPI */
   background: var(--border);
 }
 
@@ -1469,7 +1469,7 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0;
+  min-height: 0; /* else the h*dpr height attribute becomes the flex minimum and the canvas grows every frame on HiDPI */
   background: var(--bg-panel);
 }
 .job-finished-header {
