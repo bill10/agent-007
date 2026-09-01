@@ -131,10 +131,10 @@ function getWindowColors(tod) {
   }
 }
 
-// --- Pod layout: per-repo desk clusters, centered on the open floor (below
-// the windows + job board zone). Agents on the same repo sit together in a
-// pod on a shared rug; different repos are separated by extra gap. A single
-// repo yields exactly the old centered uniform grid. ---
+// --- Pod layout: per-repo desk clusters anchored near the top of the open
+// floor (below the windows + job board zone). Agents on the same repo sit
+// together in a pod on a shared rug; different repos are separated by extra
+// gap. A single repo yields exactly the old uniform grid. ---
 // The boards end well short of FLOOR_TOP (their shadows reach 8 Z below the
 // baseboard); the rest is walking room before the first row of desks.
 const FLOOR_TOP = WALL_BOTTOM + 26 * Z;
