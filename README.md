@@ -17,7 +17,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 
 ## Features
 
-- **Pixel office** -- Canvas-rendered workstations that show each agent's state at a glance (working, waiting, needs attention, idle, disconnected). Desks are grouped into per-repo pods, each on its own labeled rug, in a front-facing grid (up to four desks across, wrapping into rows with an aisle between); leftover floor space fills with ambient decor (a sofa-and-coffee-table corner, potted plants) that yields as the office gets crowded, and the back wall carries a clock and paintings beside the job boards. Pixel-art characters (six sprite variants) face the screen when working, turn to face you when waiting, and stand up when idle. A newly spawned agent walks in from the entrance to its desk, a departing one walks out before its desk disappears, and when the job board dispatches a job a small paper flies from that job's whiteboard column to the new agent's desk (all motion respects `prefers-reduced-motion`). The three whiteboards mirror the job board live: one pinned paper per job in each column, with a "+N" note when more are queued than fit.
+- **Pixel office** -- Canvas-rendered workstations that show each agent's state at a glance (working, waiting, needs attention, idle, disconnected). Desks are grouped into per-repo pods, each on its own labeled rug, in a front-facing grid (up to four desks across, wrapping into rows with an aisle between); leftover floor space fills with ambient decor (a sofa-and-coffee-table corner, potted plants) that yields as the office gets crowded. Pixel-art characters (six sprite variants) face the screen when working, turn to face you when waiting, and stand up when idle. A newly spawned agent walks in from the entrance to its desk, a departing one walks out before its desk disappears, and when the job board dispatches a job a small paper flies from that job's whiteboard column to the new agent's desk (all motion respects `prefers-reduced-motion`). The three whiteboards mirror the job board live: one pinned paper per job in each column, with a "+N" note when more are queued than fit.
 - **Git worktree isolation** -- Each agent gets its own worktree and branch automatically. No merge conflicts between agents working on the same repo. Branches are named with cocktail names (`bill/vesper`, `bill/martini`, ...).
 - **Multi-repo support** -- Add any number of repos. Spawn agents on different repos and manage them all from one place.
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see. Repo sections collapse from their header (click, or Enter/Space when focused); a collapsed header keeps the agent count and a dot for the most urgent agent state, so folded sections still show when something needs you.
@@ -166,7 +166,7 @@ public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
   app.js           Main entry point
-  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE, furniture/ CC-BY 4.0)
+  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE; furniture/ mixes Antea CC-BY 4.0 and pixel-agents MIT, see Acknowledgements)
   modules/
     office.js      Canvas pixel art (workstations, characters, job boards, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
@@ -185,7 +185,7 @@ lib/
 
 ## Acknowledgements
 
-- Character sprites and the ambient decor sprites (`furniture/cactus.png`, `plant_2.png`, `large_plant.png`, `sofa_front.png`, `coffee_table.png`, `coffee.png`, `clock.png`, `small_painting.png`, `small_painting_2.png`) from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
+- Character sprites and the ambient decor sprites (`furniture/cactus.png`, `plant_2.png`, `large_plant.png`, `sofa_side.png`, `coffee_table.png`, `coffee.png`) from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
 - Desk and `plant_big.png` sprites from the Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
 
 ## Contributing
