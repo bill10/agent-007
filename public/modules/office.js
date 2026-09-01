@@ -4,19 +4,6 @@ import { switchToSession } from './terminal.js';
 
 const Z = 3;
 
-const CHAR_PALETTES = [
-  { hair: '#2c1810', skin: '#f5c5a3', shirt: '#4a90d9', pants: '#2c3e50' },
-  { hair: '#c0392b', skin: '#e8beac', shirt: '#27ae60', pants: '#1a332a' },
-  { hair: '#daa520', skin: '#ffdbac', shirt: '#8e44ad', pants: '#3d2b50' },
-  { hair: '#1a1a2e', skin: '#8d5524', shirt: '#e74c3c', pants: '#4a2020' },
-  { hair: '#8b4513', skin: '#d4a373', shirt: '#f39c12', pants: '#3d3020' },
-  { hair: '#f5a623', skin: '#c68642', shirt: '#2980b9', pants: '#1a2a40' },
-  { hair: '#5d4037', skin: '#f5c5a3', shirt: '#16a085', pants: '#0d3028' },
-  { hair: '#34495e', skin: '#d4a373', shirt: '#e67e22', pants: '#3d2a10' },
-  { hair: '#922b21', skin: '#ffdbac', shirt: '#34495e', pants: '#1a1a2e' },
-  { hair: '#4a235a', skin: '#e8beac', shirt: '#c0392b', pants: '#3d1a1a' },
-];
-
 const WALL_H = 36 * Z;
 const WALL_BOTTOM = WALL_H + 2 * Z;
 const WS_W = 32, WS_H = 36, WS_GAP_X = 12, WS_GAP_Y = 18;
@@ -38,13 +25,37 @@ const BOOK_COLORS = [
 
 const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
 
-// --- Furniture sprites ---
+// --- Furniture + character sprites ---
 // Desk/Plant: Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
+// Characters: pixel-agents (MIT), based on JIK-A-4 "Metro City" pack (CC0).
+// Each char sheet is 112×96: 7 columns × 3 rows of 16×32 frames.
+// Rows: 0 = facing down (viewer), 1 = facing up (back), 2 = facing right.
+// Columns: 0-2 walk cycle (1 = standing), 3-4 seated typing, 5-6 reading.
 const SPRITE_PATHS = {
   plant:   'assets/furniture/plant_big.png',        // 32×32 potted office plant (Antea CC-BY 4.0)
   desk:    'assets/furniture/desk.png',             // 32×32 computer desk with monitor
   desk2:   'assets/furniture/desk2.png',            // 32×32 alt desk layout
+  char0:   'assets/characters/char_0.png',
+  char1:   'assets/characters/char_1.png',
+  char2:   'assets/characters/char_2.png',
+  char3:   'assets/characters/char_3.png',
+  char4:   'assets/characters/char_4.png',
+  char5:   'assets/characters/char_5.png',
 };
+// Derived from the charN keys above; exported for the character-variant test.
+export const CHAR_VARIANTS = Object.keys(SPRITE_PATHS).filter((k) => k.startsWith('char')).length;
+const CHAR_FRAME_W = 16, CHAR_FRAME_H = 32;
+const CHAR_SCALE = 2; // 16px art in a 32px-tile office — 2x keeps pixels square
+const CHAR_ROW_DOWN = 0, CHAR_ROW_UP = 1;
+const CHAR_COL_STAND = 1, CHAR_COL_TYPE = 3;
+
+// Deterministic variant per agent id, stable across renders and reorders.
+export function charVariant(id) {
+  let h = 0;
+  const s = String(id);
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h) % CHAR_VARIANTS;
+}
 // Desk sprite: monitor part is in top 12 rows — we skip it and draw our own
 const DESK_CROP_Y = 13;
 // Per-desk-variant positions (in sprite pixels)
@@ -61,7 +72,7 @@ function loadSprites() {
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => { SPRITES[key] = img; resolve(); };
-      img.onerror = () => resolve(); // graceful fallback
+      img.onerror = () => { console.warn(`office: sprite failed to load: ${path}`); resolve(); };
       img.src = path;
     });
   });
@@ -136,35 +147,6 @@ function getWsScreenPos(idx, layout) {
     x: layout.startX + col * (WS_W + WS_GAP_X) * Z,
     y: layout.startY + row * (WS_H + WS_GAP_Y) * Z,
   };
-}
-
-// --- Color helpers ---
-function lightenColor(hex, amount) {
-  const r = Math.min(255, parseInt(hex.slice(1, 3), 16) + amount);
-  const g = Math.min(255, parseInt(hex.slice(3, 5), 16) + amount);
-  const b = Math.min(255, parseInt(hex.slice(5, 7), 16) + amount);
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function warmLighten(hex, amount) {
-  const r = Math.min(255, parseInt(hex.slice(1, 3), 16) + Math.round(amount * 1.3));
-  const g = Math.min(255, parseInt(hex.slice(3, 5), 16) + Math.round(amount * 1.1));
-  const b = Math.min(255, parseInt(hex.slice(5, 7), 16) + Math.round(amount * 0.7));
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function coolLighten(hex, amount) {
-  const r = Math.min(255, parseInt(hex.slice(1, 3), 16) + Math.round(amount * 0.85));
-  const g = Math.min(255, parseInt(hex.slice(3, 5), 16) + Math.round(amount * 1.0));
-  const b = Math.min(255, parseInt(hex.slice(5, 7), 16) + Math.round(amount * 1.2));
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
-function darkenColor(hex, factor) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgb(${Math.floor(r * factor)}, ${Math.floor(g * factor)}, ${Math.floor(b * factor)})`;
 }
 
 // --- Wall layout: 2 windows divide wall into 3 equal bookshelf sections ---
@@ -975,115 +957,6 @@ function drawDesk(ctx, x, y) {
   }
 }
 
-// Front-facing character (WAITING, IDLE, MESSAGE)
-function drawCharacterFront(ctx, x, y, palette) {
-  const z = Z;
-  const { hair, skin, shirt, pants } = palette;
-  const skinDark = darkenColor(skin, 0.82);
-  const shirtDark = darkenColor(shirt, 0.7);
-  const pantsDark = darkenColor(pants, 0.7);
-  // Hair
-  ctx.fillStyle = hair;
-  ctx.fillRect(x + 2 * z, y, 6 * z, z);           // rounded top
-  ctx.fillRect(x + z, y + z, 8 * z, z);
-  ctx.fillRect(x, y + 2 * z, z, z);                // sideburns
-  ctx.fillRect(x + 9 * z, y + 2 * z, z, z);
-  ctx.fillRect(x + 2 * z, y + 2 * z, 2 * z, z);   // eyebrow line
-  ctx.fillRect(x + 6 * z, y + 2 * z, 2 * z, z);
-  // Face
-  ctx.fillStyle = skin;
-  ctx.fillRect(x + z, y + 2 * z, 8 * z, 5 * z);
-  ctx.fillStyle = skinDark;
-  ctx.fillRect(x, y + 3 * z, z, 2 * z);            // ears
-  ctx.fillRect(x + 9 * z, y + 3 * z, z, 2 * z);
-  // Eyes
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(x + 2 * z, y + 3 * z, 2 * z, 2 * z);
-  ctx.fillRect(x + 6 * z, y + 3 * z, 2 * z, 2 * z);
-  ctx.fillStyle = '#222';
-  ctx.fillRect(x + 3 * z, y + 4 * z, z, z);
-  ctx.fillRect(x + 7 * z, y + 4 * z, z, z);
-  // Nose + mouth
-  ctx.fillStyle = skinDark;
-  ctx.fillRect(x + 4 * z, y + 5 * z, 2 * z, z);
-  ctx.fillRect(x + 4 * z, y + 6 * z, 2 * z, z);
-  // Chin
-  ctx.fillStyle = skin;
-  ctx.fillRect(x + 3 * z, y + 7 * z, 4 * z, z);
-  // Shirt body
-  ctx.fillStyle = shirt;
-  ctx.fillRect(x + z, y + 8 * z, 8 * z, 4 * z);
-  ctx.fillStyle = shirtDark;
-  ctx.fillRect(x + 3 * z, y + 8 * z, 4 * z, z);   // collar shadow
-  // Arms
-  ctx.fillStyle = shirt;
-  ctx.fillRect(x, y + 9 * z, z, 2 * z);
-  ctx.fillRect(x + 9 * z, y + 9 * z, z, 2 * z);
-  ctx.fillStyle = skin;
-  ctx.fillRect(x, y + 11 * z, z, z);               // hands
-  ctx.fillRect(x + 9 * z, y + 11 * z, z, z);
-  // Belt
-  ctx.fillStyle = pantsDark;
-  ctx.fillRect(x + z, y + 12 * z, 8 * z, z);
-  // Pants
-  ctx.fillStyle = pants;
-  ctx.fillRect(x + z, y + 13 * z, 3 * z, z);
-  ctx.fillRect(x + 6 * z, y + 13 * z, 3 * z, z);
-  // Shoes
-  ctx.fillStyle = '#2a2a2a';
-  ctx.fillRect(x + z, y + 14 * z, 3 * z, z);
-  ctx.fillRect(x + 6 * z, y + 14 * z, 3 * z, z);
-}
-
-// Back-facing character (WORKING)
-function drawCharacterBack(ctx, x, y, palette) {
-  const z = Z;
-  const { hair, skin, shirt, pants } = palette;
-  const shirtDark = darkenColor(shirt, 0.7);
-  const hairDark = darkenColor(hair, 0.8);
-  const pantsDark = darkenColor(pants, 0.7);
-  // Hair (full block from back)
-  ctx.fillStyle = hair;
-  ctx.fillRect(x + 2 * z, y, 6 * z, z);             // top row
-  ctx.fillRect(x + z, y + z, 8 * z, z);              // second row
-  ctx.fillRect(x, y + 2 * z, 10 * z, 3 * z);          // rows 2-4: full back
-  ctx.fillRect(x + z, y + 5 * z, 8 * z, 2 * z);      // rows 5-6: 1px less each side
-  ctx.fillStyle = hairDark;
-  ctx.fillRect(x + 4 * z, y + z, 2 * z, z);          // part line
-  ctx.fillRect(x + 3 * z, y + 3 * z, 4 * z, z);      // texture
-  // Neck
-  ctx.fillStyle = skin;
-  ctx.fillRect(x + 3 * z, y + 7 * z, 4 * z, z);
-  // Ears
-  ctx.fillStyle = darkenColor(skin, 0.82);
-  ctx.fillRect(x, y + 3 * z, z, 2 * z);
-  ctx.fillRect(x + 9 * z, y + 3 * z, z, 2 * z);
-  // Shirt body
-  ctx.fillStyle = shirt;
-  ctx.fillRect(x + z, y + 8 * z, 8 * z, 4 * z);
-  ctx.fillStyle = shirtDark;
-  ctx.fillRect(x + 2 * z, y + 8 * z, 6 * z, z);   // collar shadow
-  // Arms + typing animation
-  const tick = Math.floor(Date.now() / 150);
-  const leftUp = (tick % 4) < 2;
-  ctx.fillStyle = shirt;
-  ctx.fillRect(x, y + 9 * z, z, 2 * z);
-  ctx.fillRect(x + 9 * z, y + 9 * z, z, 2 * z);
-  ctx.fillStyle = skin;
-  ctx.fillRect(x, y + (leftUp ? 10 : 11) * z, z, z);
-  ctx.fillRect(x + 9 * z, y + (leftUp ? 11 : 10) * z, z, z);
-  // Belt
-  ctx.fillStyle = pantsDark;
-  ctx.fillRect(x + z, y + 12 * z, 8 * z, z);
-  // Pants
-  ctx.fillStyle = pants;
-  ctx.fillRect(x + z, y + 13 * z, 3 * z, z);
-  ctx.fillRect(x + 6 * z, y + 13 * z, 3 * z, z);
-  // Shoes
-  ctx.fillStyle = '#2a2a2a';
-  ctx.fillRect(x + z, y + 14 * z, 3 * z, z);
-  ctx.fillRect(x + 6 * z, y + 14 * z, 3 * z, z);
-}
 
 function drawMessageBubble(ctx, x, y, theme) {
   const z = Z;
@@ -1205,7 +1078,6 @@ export function renderOffice() {
   for (const [sessionId, agent] of agents) {
     const { x: sx, y: sy } = getWsScreenPos(idx, layout);
     const isActive = sessionId === activeSessionId;
-    const palette = CHAR_PALETTES[idx % CHAR_PALETTES.length];
     const state = agent.state;
     const alive = state !== 'DISCONNECTED';
     // Colleague agents (you don't own them) render dimmed with an owner label (phase 3).
@@ -1215,13 +1087,29 @@ export function renderOffice() {
     drawWorkstation(ctx, sx, sy, state, theme, idx, agent);
     drawMonitorGlow(ctx, sx, sy, state, theme);
 
-    if (alive) {
-      const charX = sx + (idx % 2 === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z;
+    const charX = sx + (idx % 2 === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z;
+    // Fall back to sheet 0 if this variant's PNG failed to load
+    const sheet = SPRITES['char' + charVariant(sessionId)] || SPRITES.char0;
+    if (alive && sheet) {
+      let row, col;
       if (state === 'WORKING') {
-        drawCharacterBack(ctx, charX, sy + 13 * Z, palette);
+        // Seated at the keyboard, back to the viewer, typing (2-frame cycle)
+        row = CHAR_ROW_UP;
+        col = CHAR_COL_TYPE + (prefersReducedMotion ? 0 : Math.floor(Date.now() / 300) % 2);
+      } else if (state === 'IDLE') {
+        row = CHAR_ROW_DOWN;
+        col = CHAR_COL_STAND;
       } else {
-        drawCharacterFront(ctx, charX, sy + 18 * Z, palette);
+        // WAITING / MESSAGE: turned around in the chair, facing the viewer
+        row = CHAR_ROW_DOWN;
+        col = CHAR_COL_TYPE;
       }
+      ctx.drawImage(
+        sheet,
+        col * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H,
+        charX - 1, sy + 13 * Z,
+        CHAR_FRAME_W * CHAR_SCALE, CHAR_FRAME_H * CHAR_SCALE
+      );
     }
 
     if (agent.name) {
@@ -1248,7 +1136,6 @@ export function renderOffice() {
     }
 
     if (state === 'MESSAGE') {
-      const charX = sx + (idx % 2 === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z;
       drawMessageBubble(ctx, charX + 5 * Z, sy + 5 * Z, theme);
     }
     if (state === 'DISCONNECTED') {

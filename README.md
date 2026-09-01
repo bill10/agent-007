@@ -17,7 +17,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 
 ## Features
 
-- **Pixel office** -- Canvas-rendered workstations that show each agent's state at a glance (working, waiting, needs attention, idle, disconnected). Characters face the screen when working and turn around when waiting. The three whiteboards mirror the job board live: one pinned paper per job in each column, with a "+N" note when more are queued than fit.
+- **Pixel office** -- Canvas-rendered workstations that show each agent's state at a glance (working, waiting, needs attention, idle, disconnected). Pixel-art characters (six sprite variants) face the screen when working, turn around in their chairs when waiting, and stand up when idle. The three whiteboards mirror the job board live: one pinned paper per job in each column, with a "+N" note when more are queued than fit.
 - **Git worktree isolation** -- Each agent gets its own worktree and branch automatically. No merge conflicts between agents working on the same repo. Branches are named with cocktail names (`bill/vesper`, `bill/martini`, ...).
 - **Multi-repo support** -- Add any number of repos. Spawn agents on different repos and manage them all from one place.
 - **Live file explorer** -- Real-time file tree with git status indicators, inline diff viewer, and a changes/all toggle to filter what you see. Repo sections collapse from their header (click, or Enter/Space when focused); a collapsed header keeps the agent count and a dot for the most urgent agent state, so folded sections still show when something needs you.
@@ -166,6 +166,7 @@ public/
   index.html       Three-panel layout
   style.css        Dark/light themes via CSS custom properties
   app.js           Main entry point
+  assets/          Pixel art sprites (characters/ MIT with vendored LICENSE, furniture/ CC-BY 4.0)
   modules/
     office.js      Canvas pixel art (workstations, characters, job boards, day/night)
     terminal.js    xterm.js terminals, clipboard paste, tab management
@@ -181,6 +182,11 @@ lib/
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
   cron.js          Five-field cron parser (schedules for scheduled jobs)
 ```
+
+## Acknowledgements
+
+- Character sprites from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
+- Desk and plant sprites from the Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
 
 ## Contributing
 

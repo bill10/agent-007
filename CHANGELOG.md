@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.17.0] - 2026-08-31
+
+### Changed
+
+- The agents in the pixel office are now real pixel-art characters (six
+  variants from the pixel-agents sprite pack) instead of procedurally drawn
+  figures. A working agent sits typing at its keyboard, an agent waiting for
+  you turns around in its chair to face you, and an idle agent stands by its
+  desk. Each agent keeps the same look for as long as it runs.
+
+### Removed
+
+- The old procedurally drawn character code (~150 lines of fillRect art).
+
 ## [0.3.16.0] - 2026-08-31
 
 ### Changed
