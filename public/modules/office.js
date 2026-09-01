@@ -1,5 +1,5 @@
 // Pixel office rendering — canvas drawing, click handling, animation
-import { agents, activeSessionId, canControlAgent } from './state.js';
+import { agents, jobs, activeSessionId, canControlAgent } from './state.js';
 import { switchToSession } from './terminal.js';
 
 const Z = 3;
@@ -373,30 +373,42 @@ const BOARD_BRACE_H = 3; // Z units — brace (and centre-post foot) above the f
 // fits a full-width board (panel >= 432px); narrower than that fillText's
 // maxWidth condenses it, harder the narrower the panel gets.
 export const BOARD_TITLES = ['TO DO', 'IN PROGRESS', 'REVIEW'];
+// The job states behind each board, in the same order as BOARD_TITLES.
+export const BOARD_STATES = ['todo', 'in-progress', 'review'];
 const BOARD_TITLE_INK = ['#2f6fb0', '#b0392b', '#2f7a4a'];
 const BOARD_TITLE_FONT = `bold ${3 * Z}px monospace`;
 
-// Job posts pinned to each board. Positions are fractions of the writable
-// surface so the layout survives the board being narrowed on a small panel.
-const JOB_POSTS = [
-  [
-    { x: 0.05, y: 0.34, w: 0.42, h: 0.29, lines: 3 },
-    { x: 0.53, y: 0.32, w: 0.41, h: 0.33, lines: 4 },
-    { x: 0.07, y: 0.68, w: 0.37, h: 0.26, lines: 2 },
-    { x: 0.52, y: 0.70, w: 0.42, h: 0.24, lines: 2 },
-  ],
-  [
-    { x: 0.06, y: 0.33, w: 0.39, h: 0.32, lines: 4 },
-    { x: 0.51, y: 0.36, w: 0.43, h: 0.27, lines: 3 },
-    { x: 0.18, y: 0.70, w: 0.56, h: 0.24, lines: 2 },
-  ],
-  [
-    { x: 0.07, y: 0.34, w: 0.46, h: 0.25, lines: 3 },
-    { x: 0.60, y: 0.33, w: 0.33, h: 0.31, lines: 3 },
-    { x: 0.05, y: 0.64, w: 0.41, h: 0.30, lines: 3 },
-    { x: 0.53, y: 0.69, w: 0.40, h: 0.25, lines: 2 },
-  ],
+// Pin slots for job posts, filled left-to-right top-to-bottom, one per real
+// job on that board's column. Positions are fractions of the writable surface
+// so the layout survives the board being narrowed on a small panel. Slightly
+// jittered so a full board reads as pinned paper, not a spreadsheet.
+const POST_SLOTS = [
+  { x: 0.05, y: 0.33, w: 0.28, h: 0.28, lines: 3 },
+  { x: 0.37, y: 0.31, w: 0.27, h: 0.31, lines: 4 },
+  { x: 0.68, y: 0.34, w: 0.27, h: 0.27, lines: 3 },
+  { x: 0.06, y: 0.66, w: 0.27, h: 0.27, lines: 2 },
+  { x: 0.36, y: 0.68, w: 0.28, h: 0.25, lines: 3 },
+  { x: 0.67, y: 0.66, w: 0.27, h: 0.28, lines: 2 },
 ];
+
+// How many posts each board shows for a given job count: one per job, capped
+// at the slots that fit. The overflow beyond the cap is drawn as a "+N" note.
+// Exported for the board-sync test.
+export function boardPostPlan(count) {
+  const shown = Math.min(count, POST_SLOTS.length);
+  return { shown, overflow: count - shown };
+}
+
+// Jobs per board column, in BOARD_STATES order. `done` jobs have left the
+// board and are not counted. Exported for the board-sync test.
+export function countBoardJobs(jobList) {
+  const counts = BOARD_STATES.map(() => 0);
+  for (const job of jobList) {
+    const i = BOARD_STATES.indexOf(job && job.state);
+    if (i >= 0) counts[i]++;
+  }
+  return counts;
+}
 const PAPER_TINTS = ['#f6f3ea', '#eef1f7', '#fbf6e4', '#f2f4ef'];
 const PIN_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#d4a847'];
 
@@ -434,9 +446,10 @@ function drawJobBoardEasels(ctx, w) {
   const board = computeBoardLayout(w);
   if (!board.visible) return;
 
+  const counts = countBoardJobs(jobs.values());
   board.sections.forEach(({ centerX }, i) => {
     drawBoardStand(ctx, centerX, board.frameBottom, board.footY, board.boardW);
-    drawWhiteboard(ctx, centerX - Math.floor(board.boardW / 2), board.boardTop, board.boardW, board.boardH, i);
+    drawWhiteboard(ctx, centerX - Math.floor(board.boardW / 2), board.boardTop, board.boardW, board.boardH, i, counts[i]);
   });
 }
 
@@ -487,7 +500,7 @@ function drawBoardStand(ctx, centerX, topY, footY, boardW) {
   ctx.fillRect(centerX + legFoot - lw, footY - 1, lw * 2, Math.max(1, Math.round(z * 0.7)));
 }
 
-function drawWhiteboard(ctx, x, y, w, h, idx) {
+function drawWhiteboard(ctx, x, y, w, h, idx, jobCount) {
   const z = Z;
   const fb = BOARD_FRAME * z;
 
@@ -526,16 +539,34 @@ function drawWhiteboard(ctx, x, y, w, h, idx) {
   ctx.fillRect(Math.round(sx + (sw - titleW) / 2), sy + 4 * z, titleW, 1);
   ctx.restore();
 
-  // Pinned job posts
-  const posts = JOB_POSTS[idx % JOB_POSTS.length];
-  posts.forEach((post, pi) => {
-    // Offset by board so the three boards don't repeat the same colour run.
+  // Pinned job posts — one per real job in this board's column
+  const { shown, overflow } = boardPostPlan(jobCount);
+  for (let pi = 0; pi < shown; pi++) {
+    const post = POST_SLOTS[pi];
     const px = Math.round(sx + post.x * sw);
     const py = Math.round(sy + post.y * sh);
     const pw = Math.max(4, Math.round(post.w * sw));
     const ph = Math.max(4, Math.round(post.h * sh));
+    // Offset by board so the three boards don't repeat the same colour run
+    // (stride 3 stays coprime-ish with the 4-colour palettes; a stride of
+    // POST_SLOTS.length would give boards 0 and 2 identical runs).
     drawJobPost(ctx, px, py, pw, ph, post.lines, idx * 3 + pi);
-  });
+  }
+  if (overflow > 0) {
+    // Marker note in the bottom-right corner for the jobs that don't fit,
+    // on a paper chip so it stays legible over the post pinned beneath it.
+    ctx.save();
+    ctx.font = BOARD_TITLE_FONT;
+    ctx.textAlign = 'right';
+    const label = `+${overflow}`;
+    const maxW = Math.round(sw / 2);
+    const labelW = Math.min(maxW, Math.ceil(ctx.measureText(label).width));
+    ctx.fillStyle = '#f7f8f5';
+    ctx.fillRect(sx + sw - labelW - 2 * z, sy + sh - 4 * z, labelW + 2 * z, 4 * z);
+    ctx.fillStyle = BOARD_TITLE_INK[idx % BOARD_TITLE_INK.length];
+    ctx.fillText(label, sx + sw - z, sy + sh - z, maxW);
+    ctx.restore();
+  }
 
   // Marker tray with two markers
   const trayW = Math.round(w * 0.5);

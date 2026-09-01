@@ -4,7 +4,8 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computeBoardLayout, BOARD_TITLES } = await import('../public/modules/office.js');
+const { computeBoardLayout, BOARD_TITLES, BOARD_STATES, countBoardJobs, boardPostPlan } =
+  await import('../public/modules/office.js');
 const { COLUMNS } = await import('../public/modules/jobs.js');
 const { JOB_STATES } = await import('../lib/jobs.js');
 
@@ -81,5 +82,45 @@ describe('job board titles', () => {
 
   it('cover every job state except done, in order', () => {
     expect(COLUMNS.map((c) => c.state)).toEqual(JOB_STATES.filter((s) => s !== 'done'));
+  });
+});
+
+// Each whiteboard pins one paper per real job in its column, so the canvas
+// mirrors the board tab's job counts instead of a fixed decoration.
+describe('job board post sync', () => {
+  it('maps the same states as the board tab columns, in order', () => {
+    expect(BOARD_STATES).toEqual(COLUMNS.map((c) => c.state));
+  });
+
+  it('counts jobs per column and ignores done, unknown, and malformed jobs', () => {
+    const counts = countBoardJobs([
+      { state: 'todo' }, { state: 'todo' },
+      { state: 'in-progress' },
+      { state: 'review' }, { state: 'review' }, { state: 'review' },
+      { state: 'done' },
+      { state: 'bogus' }, {}, null,
+    ]);
+    expect(counts).toEqual([2, 1, 3]);
+  });
+
+  it('accepts the production shape — a Map values() iterator', () => {
+    const jobs = new Map([['job-1', { state: 'todo' }], ['job-2', { state: 'review' }]]);
+    expect(countBoardJobs(jobs.values())).toEqual([1, 0, 1]);
+  });
+
+  it('handles an empty board', () => {
+    expect(countBoardJobs([])).toEqual([0, 0, 0]);
+    expect(boardPostPlan(0)).toEqual({ shown: 0, overflow: 0 });
+  });
+
+  it('caps posts at the pin slots and reports the overflow', () => {
+    // The cap itself: shown saturates while overflow picks up the rest. The
+    // slot count is asserted indirectly so adding a slot doesn't break this.
+    const cap = boardPostPlan(100).shown;
+    expect(cap).toBeGreaterThan(0);
+    expect(boardPostPlan(3)).toEqual({ shown: 3, overflow: 0 });
+    expect(boardPostPlan(cap)).toEqual({ shown: cap, overflow: 0 });
+    expect(boardPostPlan(cap + 1)).toEqual({ shown: cap, overflow: 1 });
+    expect(boardPostPlan(cap + 3)).toEqual({ shown: cap, overflow: 3 });
   });
 });

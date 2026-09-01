@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.16.0] - 2026-08-31
+
+### Changed
+
+- The whiteboards in the pixel office now show the real job board: each board
+  pins one paper per job in its column (To do, In progress, Review), updates
+  the moment the board changes, and notes "+N" when more jobs are queued than
+  fit on the board. An empty column shows a clean board instead of decorative
+  paper.
+
 ## [0.3.15.0] - 2026-08-31
 
 ### Added
