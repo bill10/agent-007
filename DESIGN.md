@@ -158,7 +158,8 @@ Three-panel layout with per-panel headers:
 
 ## Pixel Office
 
-Canvas-rendered pixel art workstations at Z=3 scale factor.
+Canvas-rendered pixel art workstations at Z=3 scale factor (character sprites
+draw at 2x — 16px art in a 32px-tile office).
 
 ### Workstation grid
 - Cell: 32w x 36h pixels (96 x 108 screen px)
@@ -173,7 +174,8 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 4. **Character** — sprite-based (pixel-agents sheets `char_0.png`–`char_5.png`,
    16x32 frames drawn at 2x; variant picked by hashing the session id so an
    agent keeps its look across renders). State-dependent pose, anchored at sy+13:
-   - WORKING: seated back-facing, 2-frame typing cycle
+   - WORKING: seated back-facing, 2-frame typing cycle (static under
+     `prefers-reduced-motion`)
    - WAITING/MESSAGE: seated front-facing (turned around toward the viewer)
    - IDLE: standing, facing the viewer
    - DISCONNECTED: pixel art X pattern, no character
