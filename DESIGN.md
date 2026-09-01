@@ -164,7 +164,7 @@ draw at 2x — 16px art in a 32px-tile office).
 The canvas is sized from its own CSS box (`flex: 1` under the office header,
 `min-height: 0`), never from the panel: the panel height includes the header,
 so a panel-sized canvas hung below the panel edge and clipped the sofa and
-corner plants (fixed in v0.3.21.1). `renderOffice`, click-to-focus, and the
+corner plants (fixed in v0.3.21.2). `renderOffice`, click-to-focus, and the
 walk-out animation all lay out against that same box, and the last real size
 is kept while the diff viewer hides the canvas so nothing captured meanwhile
 lays out against a 0x0 room.
