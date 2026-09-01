@@ -478,7 +478,9 @@ function onMessage(msg) {
     case 'file-diff': handleFileDiff(msg); break;
     case 'full-tree': handleFullTree(msg); break;
     case 'orphans-list': handleOrphansList(msg); break;
-    case 'jobs-list': handleJobsList(msg); break;
+    // The office canvas pins one paper per job, so a jobs-list broadcast has
+    // to repaint it too — the animation loop skips frames with no live agent.
+    case 'jobs-list': handleJobsList(msg); renderOffice(); break;
     case 'upload-complete': handleUploadComplete(msg); break;
     case 'notification': handleNotification(msg); break;
     case 'repo-error':
