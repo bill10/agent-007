@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
+import { existsSync } from 'node:fs';
 
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement, computeWallDecor } =
+const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -180,17 +181,14 @@ describe('pod layout', () => {
     for (const k of new Set(kinds)) expect(kinds.filter(x => x === k).length, k).toBeLessThanOrEqual(2);
   });
 
-  it('wall hangings sit beside their board when the section has room, else above it', () => {
-    // Wide panel: every hanging hangs on the plaster at window height
-    const wide = computeWallDecor(W);
-    expect(wide.map(h => h.key)).toEqual(['painting1', 'clock', 'painting2']);
-    for (const h of wide) expect(h.y).toBe(2 * Z);
-    // Default 440px panel: boards fill their sections, so hangings move above them
-    const narrow = computeWallDecor(440);
-    expect(narrow).toHaveLength(3);
-    for (const h of narrow) expect(h.y).toBeLessThan(0);
-    // Too narrow for a board: nothing hangs
-    expect(computeWallDecor(120)).toEqual([]);
+  it('the lounge is a side-view sofa (16px art) beside a 32px coffee table, both table-high', () => {
+    const lounge = computeDecorPlacement([], W, H).find(s => s.kind === 'lounge');
+    expect(lounge.w).toBe((16 + 32) * 2 + 4); // sofa + table at 2x, plus the 4px gap
+    expect(lounge.h).toBe(32 * 2);
+  });
+
+  it('every sprite path points at a file that exists (a missing one silently drops its decor group)', () => {
+    for (const [key, path] of Object.entries(SPRITE_PATHS)) expect(existsSync('public/' + path), key).toBe(true);
   });
 
   it('decor spots never overlap each other, even on a narrow panel', () => {

@@ -260,16 +260,12 @@ lays out against a 0x0 room.
 - **Windows:** Two windows with day/night cycle based on local time
 - **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them). Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test. Since v0.3.16.0 the pinned posts are live: each board pins one paper per job in its column (a fixed grid of pin slots, filled left to right then top to bottom), draws a "+N" corner chip for jobs beyond the slots, shows a clean board when its column is empty, and repaints on every `jobs-list` broadcast
 - **Plants:** One plant per window — a cactus and a leafy plant, not clones.
-  No plant sprite appears more than twice in the room
-- **Wall hangings:** A small painting beside each outer job board and a clock
-  beside the middle one, on the board's window side when the wall section has
-  room, else centred above the board (the default 440px panel). Nothing hangs
-  when the panel is too narrow for boards at all (`computeWallDecor`). Sprites
-  are pixel-agents 16px-tile art drawn at the
-  character scale (2x), so a plant stands as tall as a person like upstream
+  No plant sprite appears more than twice in the room. Sprites are pixel-agents
+  16px-tile art drawn at the character scale (2x), so a plant stands as tall
+  as a person like upstream
 - **Ambient decor:** Since v0.3.18.0, leftover floor space fills from a fixed
-  candidate list — a break-room corner bottom-left (sofa, coffee table, coffee
-  pot), a tall floor plant bottom-right, small potted plants in the top
+  candidate list — a break-room corner bottom-left (a side-view sofa facing a
+  coffee table with a coffee pot on it), a tall floor plant bottom-right, small potted plants in the top
   corners. A candidate only draws when it clears every pod rug by a margin
   (`computeDecorPlacement`), so decor yields and disappears as desks crowd the
   room
