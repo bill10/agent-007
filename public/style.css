@@ -1416,7 +1416,7 @@ body {
   display: flex;
   gap: 1px;
   flex: 1;
-  min-height: 0; /* else the h*dpr height attribute becomes the flex minimum and the canvas grows every frame on HiDPI */
+  min-height: 0;
   background: var(--border);
 }
 
@@ -1469,7 +1469,7 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
-  min-height: 0; /* else the h*dpr height attribute becomes the flex minimum and the canvas grows every frame on HiDPI */
+  min-height: 0;
   background: var(--bg-panel);
 }
 .job-finished-header {
