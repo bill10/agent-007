@@ -46,7 +46,7 @@ describe('pod layout', () => {
     expect(computePodLayout(agentsOn(['a', '/r/one']), W, FLOOR_TOP).positions.get('a').y).toBe(FLOOR_TOP);
   });
 
-  it('a single repo lays out as a centered front-facing grid, wrapping after maxCols', () => {
+  it('a single repo lays out as a top-anchored front-facing grid, wrapping after maxCols', () => {
     const infos = agentsOn(['a', '/r/one'], ['b', '/r/one'], ['c', '/r/one'], ['d', '/r/one'], ['e', '/r/one']);
     const { pods, positions } = computePodLayout(infos, W, H);
     expect(pods).toHaveLength(1);
