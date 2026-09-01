@@ -37,6 +37,7 @@ const SPRITE_PATHS = {
   plant:   'assets/furniture/plant_big.png',        // 32×32 potted office plant (Antea CC-BY 4.0)
   desk:    'assets/furniture/desk.png',             // 32×32 computer desk with monitor
   desk2:   'assets/furniture/desk2.png',            // 32×32 alt desk layout
+  pcback:  'assets/furniture/pc_back.png',          // 16×32 monitor seen from behind (pixel-agents, MIT)
   char0:   'assets/characters/char_0.png',
   char1:   'assets/characters/char_1.png',
   char2:   'assets/characters/char_2.png',
@@ -132,10 +133,16 @@ const RUG_PAD_TOP = 7;     // Z units above the desks — the repo label sits he
 const RUG_PAD_BOTTOM = 12; // Z units below — covers the agent name labels
 
 // Pure layout: agentInfos is [{ id, repoPath, slug }] in spawn (map) order.
-// Returns { pods, positions } — positions maps id -> top-left px of its desk,
-// pods carry the desk-block rect in px plus the repo label. Agents with no
-// repo land in a final unlabeled pod. Within a pod agents keep their input
-// order, so an unrelated spawn/exit never reshuffles desks inside a pod.
+// Returns { pods, positions } — positions maps id -> { x, y, flip } (top-left
+// px of its desk); pods carry the desk-block rect in px plus the repo label.
+// Agents with no repo land in a final unlabeled pod. Within a pod agents keep
+// their input order, so an unrelated spawn/exit never reshuffles desks inside
+// a pod.
+// Desks pair up face-to-face like a real office: agent 2p takes the top desk
+// of pair p, turned toward the viewer (flip: true — screen toward the shared
+// aisle), and agent 2p+1 sits across from them at a default desk. Pairs flow
+// left-to-right into rows. A lone agent, or the unpaired last agent of an odd
+// pod, keeps the default orientation.
 export function computePodLayout(agentInfos, panelWidth, panelHeight) {
   const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z + WS_GAP_X) / (WS_W + WS_GAP_X))));
 
@@ -152,8 +159,9 @@ export function computePodLayout(agentInfos, panelWidth, panelHeight) {
 
   const pods = keys.map(key => {
     const g = groups.get(key);
-    const cols = Math.min(g.ids.length, maxCols);
-    const rows = Math.ceil(g.ids.length / cols);
+    const pairs = Math.ceil(g.ids.length / 2);
+    const cols = Math.min(pairs, maxCols);
+    const rows = g.ids.length === 1 ? 1 : Math.ceil(pairs / cols) * 2;
     return {
       repoPath: key || null, label: key ? g.label : null, ids: g.ids, cols,
       w: cols * WS_W + (cols - 1) * WS_GAP_X,
@@ -185,9 +193,12 @@ export function computePodLayout(agentInfos, panelWidth, panelHeight) {
     let x = Math.floor((panelWidth - rowWpx) / 2);
     for (const pod of podRows[ri]) {
       pod.ids.forEach((id, i) => {
+        const pair = i >> 1, top = i % 2 === 0;
+        const row = pod.ids.length === 1 ? 0 : Math.floor(pair / pod.cols) * 2 + (top ? 0 : 1);
         positions.set(id, {
-          x: x + (i % pod.cols) * (WS_W + WS_GAP_X) * Z,
-          y: y + Math.floor(i / pod.cols) * (WS_H + WS_GAP_Y) * Z,
+          x: x + (pair % pod.cols) * (WS_W + WS_GAP_X) * Z,
+          y: y + row * (WS_H + WS_GAP_Y) * Z,
+          flip: top && i + 1 < pod.ids.length,
         });
       });
       outPods.push({ repoPath: pod.repoPath, label: pod.label, x, y, w: pod.w * Z, h: pod.h * Z });
@@ -837,7 +848,9 @@ function drawDeskItems(ctx, sx, sy) {
 }
 
 // --- Sprite-based workstation (edgeless monitor + desk sprite bottom half) ---
-function drawWorkstation(ctx, sx, sy, state, theme, idx, agent) {
+// flip: desk turned toward the viewer — the character sits behind it and the
+// monitor shows its back (pc_back sprite), so the screen faces the aisle.
+function drawWorkstation(ctx, sx, sy, state, theme, idx, agent, flip) {
   const z = Z;
   const deskSprite = idx % 2 === 0 ? SPRITES.desk : SPRITES.desk2;
 
@@ -856,9 +869,25 @@ function drawWorkstation(ctx, sx, sy, state, theme, idx, agent) {
     sx, sy + DESK_CROP_Y * z, 32 * z, cropH * z  // dest: position below monitor
   );
 
+  const monX = idx % 2 === 0 ? DESK_MON_X : DESK2_MON_X;
+  if (flip) {
+    // Monitor back on the desk, screen toward the aisle. Centered where the
+    // front-facing monitor would be; sits on the desk surface.
+    const cx = sx + (monX + 7) * z;
+    if (SPRITES.pcback) {
+      ctx.drawImage(SPRITES.pcback, cx - CHAR_FRAME_W, sy + 6 * z,
+        CHAR_FRAME_W * 2, CHAR_FRAME_H * 2);
+    } else {
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(cx - 5 * z, sy + 10 * z, 10 * z, 8 * z);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(cx - 2 * z, sy + 18 * z, 4 * z, z);
+    }
+    return;
+  }
+
   // --- Modern edgeless monitor (procedural, positioned where sprite monitor was) ---
   const mw = 14, mh = 9;  // monitor outer size in Z-units
-  const monX = idx % 2 === 0 ? DESK_MON_X : DESK2_MON_X;
   const mx = sx + monX * z;  // align with sprite's original monitor position
   const my = sy + 3 * z;     // above desk surface
 
@@ -1238,33 +1267,41 @@ export function renderOffice() {
     const readOnly = !canControlAgent(agent);
     if (readOnly) ctx.globalAlpha = 0.5;
 
-    drawWorkstation(ctx, sx, sy, state, theme, idx, agent);
-    drawMonitorGlow(ctx, sx, sy, state, theme);
-
+    const flip = !!pos.flip;
     const charX = sx + (idx % 2 === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z;
     // Fall back to sheet 0 if this variant's PNG failed to load
     const sheet = SPRITES['char' + charVariant(sessionId)] || SPRITES.char0;
-    if (alive && sheet) {
+    const drawCharacter = () => {
+      if (!alive || !sheet) return;
       let row, col;
       if (state === 'WORKING') {
-        // Seated at the keyboard, back to the viewer, typing (2-frame cycle)
-        row = CHAR_ROW_UP;
+        // Seated at the keyboard, typing (2-frame cycle). At a default desk
+        // the screen is up-tile (back to the viewer); at a flipped desk it is
+        // down-tile, so the character faces the viewer over the monitor back.
+        row = flip ? CHAR_ROW_DOWN : CHAR_ROW_UP;
         col = CHAR_COL_TYPE + (prefersReducedMotion ? 0 : Math.floor(Date.now() / 300) % 2);
       } else if (state === 'IDLE') {
         row = CHAR_ROW_DOWN;
         col = CHAR_COL_STAND;
       } else {
-        // WAITING / MESSAGE: turned around in the chair, facing the viewer
+        // WAITING / MESSAGE: facing the viewer (a default desk turns the
+        // chair around; a flipped desk already points this way)
         row = CHAR_ROW_DOWN;
         col = CHAR_COL_TYPE;
       }
       ctx.drawImage(
         sheet,
         col * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H,
-        charX - 1, sy + 13 * Z,
+        charX - 1, sy + (flip ? 0 : 13 * Z),
         CHAR_FRAME_W * CHAR_SCALE, CHAR_FRAME_H * CHAR_SCALE
       );
-    }
+    };
+
+    // Flipped desks occlude the character's lower body, so draw them behind.
+    if (flip) drawCharacter();
+    drawWorkstation(ctx, sx, sy, state, theme, idx, agent, flip);
+    drawMonitorGlow(ctx, sx, sy, state, theme);
+    if (!flip) drawCharacter();
 
     if (agent.name) {
       const nameY = sy + 37 * Z;
@@ -1290,7 +1327,8 @@ export function renderOffice() {
     }
 
     if (state === 'MESSAGE') {
-      drawMessageBubble(ctx, charX + 5 * Z, sy + 5 * Z, theme);
+      // Beside the character's head — which sits at the tile top when flipped
+      drawMessageBubble(ctx, charX + 5 * Z, sy + (flip ? -5 : 5) * Z, theme);
     }
     if (state === 'DISCONNECTED') {
       ctx.fillStyle = 'rgba(0,0,0,0.35)';
