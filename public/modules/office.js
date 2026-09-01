@@ -721,20 +721,27 @@ function drawPlants(ctx, w) {
   }
 }
 
-// --- Per-pod rug + repo label (theme-tinted so both themes keep working) ---
+// Brand gold (#d4a847) as an rgb triple for rgba() tints on the canvas.
+const GOLD_RGB = '212, 168, 71';
+
+// --- Per-pod rug + repo label ---
+// The rug is a fixed gold, independent of the UI theme like the wood floor,
+// desks and sofa it sits among: the light-theme accent is nearly the same
+// colour as the floor, so a theme-tinted rug vanished in light mode. The
+// repo label keeps the theme text colour.
 function drawPodRug(ctx, pod, theme) {
   const z = Z;
   const r = podRugRect(pod);
 
-  ctx.fillStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.10)`;
+  ctx.fillStyle = `rgba(${GOLD_RGB}, 0.10)`;
   roundRect(ctx, r.x, r.y, r.w, r.h, 3 * z);
   ctx.fill();
-  ctx.strokeStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.32)`;
+  ctx.strokeStyle = `rgba(${GOLD_RGB}, 0.32)`;
   ctx.lineWidth = 1;
   roundRect(ctx, r.x, r.y, r.w, r.h, 3 * z);
   ctx.stroke();
   // Inner border (double-border rug pattern)
-  ctx.strokeStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.16)`;
+  ctx.strokeStyle = `rgba(${GOLD_RGB}, 0.16)`;
   roundRect(ctx, r.x + 2 * z, r.y + 2 * z, r.w - 4 * z, r.h - 4 * z, 2 * z);
   ctx.stroke();
 
@@ -1516,7 +1523,7 @@ export function renderOffice() {
         // Pulsing glow
         const pulse = Math.sin(Date.now() / 600) * 0.5 + 0.5;
         ctx.font = LABEL_FONT;
-        ctx.shadowColor = `rgba(212, 168, 71, ${0.4 + pulse * 0.5})`;
+        ctx.shadowColor = `rgba(${GOLD_RGB}, ${0.4 + pulse * 0.5})`;
         ctx.shadowBlur = 6 + pulse * 8;
         ctx.fillStyle = '#d4a847';
         ctx.fillText(agent.name, nameX, nameY);
