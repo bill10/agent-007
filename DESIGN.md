@@ -193,7 +193,7 @@ Canvas-rendered pixel art workstations at Z=3 scale factor.
 - **Walls:** Fixed warm cream plaster, independent of UI theme
 - **Floor:** Warm wood planks, fixed base `#4a3525`
 - **Windows:** Two windows with day/night cycle based on local time
-- **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them), each with paper job posts pinned to it. Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test. Since v0.3.15.0 the pinned posts are live: each board pins one paper per job in its column (six fixed slots, filled left to right), draws a "+N" corner chip for jobs beyond the slots, shows a clean board when its column is empty, and repaints on every `jobs-list` broadcast
+- **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them). Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test. Since v0.3.16.0 the pinned posts are live: each board pins one paper per job in its column (a fixed grid of pin slots, filled left to right then top to bottom), draws a "+N" corner chip for jobs beyond the slots, shows a clean board when its column is empty, and repaints on every `jobs-list` broadcast
 - **Plants:** Potted plants under windows
 - **Particles:** 5 ambient dust motes
 
