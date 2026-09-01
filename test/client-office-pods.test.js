@@ -29,41 +29,47 @@ describe('pod layout', () => {
     expect(pods.map(p => p.repoPath)).toEqual(['/r/one', '/r/two', null]);
     expect(pods.map(p => p.label)).toEqual(['one', 'two', null]);
     expect(positions.size).toBe(4);
-    // a and c share the pod as a facing pair: same column, one desk row apart,
-    // the top desk flipped toward the aisle and the bottom one default
-    expect(positions.get('c').x).toBe(positions.get('a').x);
-    expect(positions.get('c').y - positions.get('a').y).toBe((WS_H + WS_GAP_Y) * Z);
-    expect(positions.get('a').flip).toBe(true);
-    expect(positions.get('c').flip).toBe(false);
+    // a and c share the pod, side by side in one front-facing row
+    expect(positions.get('c').y).toBe(positions.get('a').y);
+    expect(positions.get('c').x - positions.get('a').x).toBe((WS_W + WS_GAP_X) * Z);
   });
 
-  it('a single repo lays out as centered facing pairs, unpaired last desk default', () => {
+  it('a single repo lays out as a centered front-facing grid, wrapping after maxCols', () => {
     const infos = agentsOn(['a', '/r/one'], ['b', '/r/one'], ['c', '/r/one'], ['d', '/r/one'], ['e', '/r/one']);
     const { pods, positions } = computePodLayout(infos, W, H);
     expect(pods).toHaveLength(1);
-    // 5 agents → 3 pair columns × 2 rows, centered in [FLOOR_TOP, H]
-    const cols = 3, rows = 2;
+    // 5 agents → 4 columns (maxCols) × 2 rows, centered in [FLOOR_TOP, H]
+    const cols = 4, rows = 2;
     const gridW = (cols * WS_W + (cols - 1) * WS_GAP_X) * Z;
     const gridH = (rows * WS_H + (rows - 1) * WS_GAP_Y) * Z;
     const startX = Math.floor((W - gridW) / 2);
     const startY = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (H - FLOOR_TOP - gridH) / 2));
     infos.forEach(({ id }, i) => {
-      const pair = i >> 1;
       expect(positions.get(id)).toEqual({
-        x: startX + (pair % cols) * (WS_W + WS_GAP_X) * Z,
-        y: startY + (i % 2) * (WS_H + WS_GAP_Y) * Z,
-        // even index = top desk of a pair, flipped — except 'e', the unpaired
-        // last desk, which keeps the default orientation
-        flip: i % 2 === 0 && i < 4,
+        x: startX + (i % cols) * (WS_W + WS_GAP_X) * Z,
+        y: startY + Math.floor(i / cols) * (WS_H + WS_GAP_Y) * Z,
       });
     });
   });
 
-  it('a lone agent gets a single desk in the default orientation', () => {
-    const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, H);
+  it('fills exactly maxCols in one row, and sizes a wrapped pod to its full grid', () => {
+    const four = agentsOn(['a', '/r/one'], ['b', '/r/one'], ['c', '/r/one'], ['d', '/r/one']);
+    const full = computePodLayout(four, W, H);
+    // 4 agents on a 4-col panel: one row, no empty second row reserved
+    expect(full.pods[0].w).toBe((4 * WS_W + 3 * WS_GAP_X) * Z);
+    expect(full.pods[0].h).toBe(WS_H * Z);
+    expect(new Set(four.map(({ id }) => full.positions.get(id).y)).size).toBe(1);
+
+    // A fifth agent wraps: the rug grows by exactly one row plus the aisle
+    const { pods } = computePodLayout([...four, ...agentsOn(['e', '/r/one'])], W, H);
+    expect(pods[0].w).toBe((4 * WS_W + 3 * WS_GAP_X) * Z);
+    expect(pods[0].h).toBe((2 * WS_H + WS_GAP_Y) * Z);
+  });
+
+  it('a lone agent gets a single desk', () => {
+    const { pods } = computePodLayout(agentsOn(['a', '/r/one']), W, H);
     expect(pods[0].w).toBe(WS_W * Z);
     expect(pods[0].h).toBe(WS_H * Z); // one desk: no aisle, no second row
-    expect(positions.get('a').flip).toBe(false);
   });
 
   it('wraps pods to a new row when they do not fit, and rugs never overlap', () => {
@@ -110,10 +116,10 @@ describe('pod layout', () => {
     expect(pods[0].w).toBe(WS_W * Z); // one column
     const xs = new Set(infos.map(({ id }) => positions.get(id).x));
     expect(xs.size).toBe(1); // all stacked vertically
-    // Pair 1 wraps below pair 0: b faces a, c lands two desk rows down
+    // One desk per row, a full aisle between rows
     expect(positions.get('b').y - positions.get('a').y).toBe((WS_H + WS_GAP_Y) * Z);
     expect(positions.get('c').y - positions.get('a').y).toBe(2 * (WS_H + WS_GAP_Y) * Z);
-    // The unpaired desk never reserves an empty facing row under the rug
+    // The rug ends at the last desk row
     const lastDeskBottom = Math.max(...infos.map(({ id }) => positions.get(id).y)) + WS_H * Z;
     expect(pods[0].y + pods[0].h).toBe(lastDeskBottom);
     for (const { id } of infos) {
