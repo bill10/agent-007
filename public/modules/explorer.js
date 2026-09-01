@@ -13,7 +13,14 @@ let fullTreeCache = new Map();     // sessionId -> full tree data
 let fullTreePending = new Set();   // in-flight full tree requests
 let expandedDirs = new Set();      // "sessionId:dir/path" expanded directories (collapsed by default)
 const COLLAPSED_KEY = 'agent007-collapsed-repos';
-let collapsedRepos = new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) || '[]'));  // repoPaths with collapsed sections
+let collapsedRepos = loadCollapsedRepos();  // repoPaths with collapsed sections
+
+function loadCollapsedRepos() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(COLLAPSED_KEY));
+    return new Set(Array.isArray(saved) ? saved : []);
+  } catch { return new Set(); }
+}
 
 export function setupExplorer() {
   document.getElementById('btn-toggle-explorer').onclick = toggleExplorer;
