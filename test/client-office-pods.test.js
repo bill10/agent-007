@@ -10,6 +10,7 @@ const { computePodLayout, podRugRect, computeDecorPlacement, computeWallDecor } 
 const Z = 3;
 const WS_W = 32, WS_H = 36, WS_GAP_X = 12, WS_GAP_Y = 18;
 const FLOOR_TOP = (36 * Z + 2 * Z) + 26 * Z; // WALL_BOTTOM + 26 Z
+const TOP_MARGIN = (8 + 7) * Z; // POD_TOP_MARGIN + RUG_PAD_TOP: desk y when the floor has room
 
 const W = 900, H = 700;
 
@@ -34,16 +35,27 @@ describe('pod layout', () => {
     expect(positions.get('c').x - positions.get('a').x).toBe((WS_W + WS_GAP_X) * Z);
   });
 
-  it('a single repo lays out as a centered front-facing grid, wrapping after maxCols', () => {
+  it('anchors a sparse office near the top of the floor, but still centers a full one', () => {
+    const one = computePodLayout(agentsOn(['a', '/r/one']), W, H);
+    expect(one.positions.get('a').y).toBe(FLOOR_TOP + TOP_MARGIN);
+    expect(podRugRect(one.pods[0]).y).toBe(FLOOR_TOP + 8 * Z);
+    // Floor exactly one desk-block tall plus a hair: centering offset < margin wins.
+    const shortH = FLOOR_TOP + WS_H * Z + 2 * Z;
+    expect(computePodLayout(agentsOn(['a', '/r/one']), W, shortH).positions.get('a').y).toBe(FLOOR_TOP + Z);
+    // Overflowing floor: never above FLOOR_TOP.
+    expect(computePodLayout(agentsOn(['a', '/r/one']), W, FLOOR_TOP).positions.get('a').y).toBe(FLOOR_TOP);
+  });
+
+  it('a single repo lays out as a top-anchored front-facing grid, wrapping after maxCols', () => {
     const infos = agentsOn(['a', '/r/one'], ['b', '/r/one'], ['c', '/r/one'], ['d', '/r/one'], ['e', '/r/one']);
     const { pods, positions } = computePodLayout(infos, W, H);
     expect(pods).toHaveLength(1);
-    // 5 agents → 4 columns (maxCols) × 2 rows, centered in [FLOOR_TOP, H]
+    // 5 agents → 4 columns (maxCols) × 2 rows, anchored near the top of the floor
     const cols = 4, rows = 2;
     const gridW = (cols * WS_W + (cols - 1) * WS_GAP_X) * Z;
     const gridH = (rows * WS_H + (rows - 1) * WS_GAP_Y) * Z;
     const startX = Math.floor((W - gridW) / 2);
-    const startY = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (H - FLOOR_TOP - gridH) / 2));
+    const startY = Math.max(FLOOR_TOP, FLOOR_TOP + Math.min(TOP_MARGIN, Math.floor((H - FLOOR_TOP - gridH) / 2)));
     infos.forEach(({ id }, i) => {
       expect(positions.get(id)).toEqual({
         x: startX + (i % cols) * (WS_W + WS_GAP_X) * Z,

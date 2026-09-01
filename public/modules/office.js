@@ -131,10 +131,10 @@ function getWindowColors(tod) {
   }
 }
 
-// --- Pod layout: per-repo desk clusters, centered on the open floor (below
-// the windows + job board zone). Agents on the same repo sit together in a
-// pod on a shared rug; different repos are separated by extra gap. A single
-// repo yields exactly the old centered uniform grid. ---
+// --- Pod layout: per-repo desk clusters anchored near the top of the open
+// floor (below the windows + job board zone). Agents on the same repo sit
+// together in a pod on a shared rug; different repos are separated by extra
+// gap. A single repo yields exactly the old uniform grid. ---
 // The boards end well short of FLOOR_TOP (their shadows reach 8 Z below the
 // baseboard); the rest is walking room before the first row of desks.
 const FLOOR_TOP = WALL_BOTTOM + 26 * Z;
@@ -143,6 +143,7 @@ const POD_GAP_Y = 26;      // Z units between pod rows (vs WS_GAP_Y=18 within)
 const RUG_PAD_X = 4;       // Z units the rug extends past the desks each side
 const RUG_PAD_TOP = 7;     // Z units above the desks — the repo label sits here
 const RUG_PAD_BOTTOM = 12; // Z units below — covers the agent name labels
+const POD_TOP_MARGIN = 8;  // Z units of bare floor between FLOOR_TOP and the first rug
 
 // Pure layout: agentInfos is [{ id, repoPath, slug }] in spawn (map) order.
 // Returns { pods, positions } — positions maps id -> { x, y } (top-left px of
@@ -193,10 +194,14 @@ export function computePodLayout(agentInfos, panelWidth, panelHeight) {
     else { podRows[podRows.length - 1].push(pod); rowW = need; }
   }
 
-  // Center the arrangement in [FLOOR_TOP, panelHeight]; never start above the floor.
+  // Anchor the arrangement near the top of the floor: centering is capped so a
+  // sparse office leaves its empty wood at the bottom (decor lives there)
+  // instead of as a dead band under the job boards. A nearly-full floor still
+  // centers; never start above the floor.
   const rowHs = podRows.map(r => Math.max(0, ...r.map(p => p.h)));
   const totalH = (rowHs.reduce((a, b) => a + b, 0) + (podRows.length - 1) * POD_GAP_Y) * Z;
-  let y = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (panelHeight - FLOOR_TOP - totalH) / 2));
+  const centerOff = Math.floor((panelHeight - FLOOR_TOP - totalH) / 2);
+  let y = Math.max(FLOOR_TOP, FLOOR_TOP + Math.min((POD_TOP_MARGIN + RUG_PAD_TOP) * Z, centerOff));
 
   const outPods = [];
   const positions = new Map();
