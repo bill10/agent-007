@@ -38,7 +38,8 @@ export const SPRITE_PATHS = {
   desk:    'assets/furniture/desk.png',             // 32×32 computer desk with monitor
   desk2:   'assets/furniture/desk2.png',            // 32×32 alt desk layout
   // Ambient decor from pixel-agents (MIT). 16px-tile art, drawn at CHAR_SCALE
-  // like the characters so a plant stands as tall as a person, as upstream.
+  // like the characters — except the plants, drawn at PLANT_SCALE so they read
+  // as desk-side decor rather than person-sized furniture.
   cactus:     'assets/furniture/cactus.png',           // 16×32
   plant2:     'assets/furniture/plant_2.png',          // 16×32
   largeplant: 'assets/furniture/large_plant.png',      // 32×48
@@ -238,10 +239,12 @@ export function podRugRect(pod) {
 // for a given agent set. ---
 const DECOR_MARGIN = 6 * Z;
 // All decor sizes below are in px. pixel-agents decor is 16px-tile art drawn
-// at DECOR_SCALE like the characters; plant_big is 32px art drawn at 16 Z.
+// at DECOR_SCALE like the characters; every plant (plant_big included) is
+// drawn at PLANT_SCALE, an integer so the pixels stay crisp.
 const DECOR_SCALE = CHAR_SCALE;
-const DECOR_PLANT_W = 16 * Z, DECOR_PLANT_H = 16 * Z;
-const LARGE_PLANT_W = 32 * DECOR_SCALE, LARGE_PLANT_H = 48 * DECOR_SCALE;
+const PLANT_SCALE = 1;
+const DECOR_PLANT_W = 32 * PLANT_SCALE, DECOR_PLANT_H = 32 * PLANT_SCALE;
+const LARGE_PLANT_W = 32 * PLANT_SCALE, LARGE_PLANT_H = 48 * PLANT_SCALE;
 const SOFA_W = 16 * DECOR_SCALE, SOFA_H = 32 * DECOR_SCALE; // side view, as tall as the table
 const TABLE_W = 32 * DECOR_SCALE, TABLE_H = 32 * DECOR_SCALE;
 const LOUNGE_GAP = 4; // between sofa and table
@@ -250,7 +253,7 @@ export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
   const candidates = [
     // Break-room corner, bottom-left: a sofa facing a coffee table with the coffee pot on it
     { kind: 'lounge', x: 3 * z, y: panelHeight - TABLE_H - 3 * z, w: SOFA_W + LOUNGE_GAP + TABLE_W, h: TABLE_H },
-    // A tall floor plant bottom-right, small potted plants in the top corners
+    // A floor plant bottom-right, small potted plants in the top corners
     { kind: 'largeplant', x: panelWidth - LARGE_PLANT_W - 3 * z, y: panelHeight - LARGE_PLANT_H - 3 * z, w: LARGE_PLANT_W, h: LARGE_PLANT_H },
     { kind: 'plant', x: 3 * z, y: FLOOR_TOP, w: pw, h: ph },
     { kind: 'plant', x: panelWidth - pw - 3 * z, y: FLOOR_TOP, w: pw, h: ph },
@@ -466,10 +469,8 @@ const BOARD_W = 26;      // Z units — outer frame width (capped to the wall se
 const BOARD_H = 19;      // Z units — outer frame height
 const BOARD_LEG_H = 9;   // Z units — frame bottom down to the feet
 const BOARD_FRAME = 1;   // Z units — frame thickness around the writable surface
-// Z units below the baseboard where the feet land. Almost against the wall,
-// but level with the fronts of the plant pots (which sit 6 Z deep): the boards
-// are drawn over the plants, and the room's 3/4 view reads lower as nearer, so
-// feet any higher would paint a board over a pot that is closer to the viewer.
+// Z units below the baseboard where the feet land: almost against the wall,
+// level with the fronts of the wall plants' pots.
 const BOARD_FOOT_OFFSET = 6;
 const BOARD_MIN_W = 8;   // Z units — below this the section is too narrow to draw into
 const BOARD_BRACE_H = 3; // Z units — brace (and centre-post foot) above the feet
@@ -725,17 +726,27 @@ function drawSprite(ctx, key, x, y, scale = DECOR_SCALE) {
   if (img) ctx.drawImage(img, x, y, img.naturalWidth * scale, img.naturalHeight * scale);
 }
 
-// --- One plant per window: a cactus left of the first, a leafy plant right of
-// the second. Pots stand just off the baseboard, level with the board feet. ---
+// --- One plant per board gap: a cactus between TO DO and IN PROGRESS, a leafy
+// plant between IN PROGRESS and REVIEW, each centred in the gap so neither
+// overlaps a board at any panel width. All three boards share one width, so
+// the gap's midpoint is the midpoint of the two board centres. Pots stand just
+// off the baseboard, a hair above the board feet. No boards, no plants.
+// Pure; exported for the placement test. ---
+const WALL_PLANT_W = 16 * PLANT_SCALE, WALL_PLANT_H = 32 * PLANT_SCALE;
+export function computeWallPlants(panelWidth) {
+  const board = computeBoardLayout(panelWidth);
+  if (!board.visible) return [];
+  const [s1, s2, s3] = board.sections;
+  const y = WALL_BOTTOM + 5 * Z - WALL_PLANT_H;
+  const between = (a, b) => Math.floor((a.centerX + b.centerX) / 2 - WALL_PLANT_W / 2);
+  return [
+    { key: 'cactus', x: between(s1, s2), y, w: WALL_PLANT_W, h: WALL_PLANT_H },
+    { key: 'plant2', x: between(s2, s3), y, w: WALL_PLANT_W, h: WALL_PLANT_H },
+  ];
+}
+
 function drawPlants(ctx, w) {
-  const z = Z;
-  const layout = computeWallLayout(w);
-  const plantH = 32 * DECOR_SCALE, plantW = 16 * DECOR_SCALE;
-  const plantY = WALL_BOTTOM + 5 * z - plantH;
-  const c1 = (layout.window1X + layout.windowW / 2) * z;
-  const c2 = (layout.window2X + layout.windowW / 2) * z;
-  drawSprite(ctx, 'cactus', Math.floor(c1 - 6 * z - plantW), plantY);
-  drawSprite(ctx, 'plant2', Math.floor(c2 + 6 * z), plantY);
+  for (const p of computeWallPlants(w)) drawSprite(ctx, p.key, p.x, p.y, PLANT_SCALE);
 }
 
 // Brand gold (#d4a847) as an rgb triple for rgba() tints on the canvas.
@@ -773,8 +784,6 @@ function drawPodRug(ctx, pod, theme) {
 }
 
 function drawDecor(ctx, spots) {
-  const plant = SPRITES.plant;
-  const plantW = DECOR_PLANT_W;
   for (const spot of spots) {
     if (spot.kind === 'lounge') {
       // Sofa (side view, facing right) and table share a floor line; the coffee pot sits on the table top.
@@ -786,10 +795,8 @@ function drawDecor(ctx, spots) {
       const tx = spot.x + SOFA_W + LOUNGE_GAP;
       drawSprite(ctx, 'table', tx, spot.y);
       drawSprite(ctx, 'coffee', tx + 8 * DECOR_SCALE, spot.y + 7 * DECOR_SCALE);
-    } else if (spot.kind === 'largeplant') {
-      drawSprite(ctx, 'largeplant', spot.x, spot.y);
-    } else if (plant) {
-      ctx.drawImage(plant, spot.x, spot.y, plantW, Math.floor(plant.naturalHeight * plantW / plant.naturalWidth));
+    } else {
+      drawSprite(ctx, spot.kind, spot.x, spot.y, PLANT_SCALE);  // 'plant' or 'largeplant'
     }
   }
 }
@@ -1455,10 +1462,9 @@ export function renderOffice() {
   drawWalls(ctx, w);
   // Layer 3: Windows (2 windows with day/night + light beams)
   drawWindows(ctx, w, theme);
-  // Layer 5: Potted plants (against the wall, under the windows)
+  // Layer 5: Potted plants (against the wall, in the gaps between the boards)
   drawPlants(ctx, w);
-  // Layer 5b: Job boards — their feet stand level with the plant pots' fronts,
-  // so where a board meets a plant at a section edge the board wins
+  // Layer 5b: Job boards
   drawJobBoardEasels(ctx, w);
   // Layer 6: Ambient particles
   drawParticles(ctx, w, h);
