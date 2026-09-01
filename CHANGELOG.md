@@ -5,6 +5,23 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.21.0] - 2026-09-01
+
+### Changed
+
+- Every desk in the pixel office now faces front again. Desks inside a repo's
+  pod sit in a plain classroom grid (up to four across, wrapping into rows
+  with a full aisle between them), so every monitor screen stays readable and
+  an agent's facing always tells you its state: back to you means working,
+  facing you means idle or waiting. A narrow panel drops to fewer columns
+  instead of turning desks around.
+
+### Removed
+
+- The face-to-face desk pairs from v0.3.19.0, along with the monitor-back
+  sprite and the facing-pair screenshots. A turned desk hid its screen and
+  made a typing agent face the same way as a waiting one.
+
 ## [0.3.20.0] - 2026-09-01
 
 ### Added
