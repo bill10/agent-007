@@ -192,8 +192,9 @@ lays out against a 0x0 room.
   `FLOOR_TOP`, `POD_TOP_MARGIN`) so a sparse office leaves its empty wood at
   the bottom for decor. A nearly-full floor still centers, clamped to
   `FLOOR_TOP` (pure layout in `computePodLayout`, `public/modules/office.js`)
-- Screenshots: `docs/office-pods-before.png`, `docs/office-pods-after.png`,
-  `docs/office-pods-sparse.png`
+- Screenshots: `docs/office-pods-sparse.png` shows the top-anchored layout;
+  `docs/office-pods-before.png` and `docs/office-pods-after.png` predate
+  v0.3.21.2, so `after` still shows the pods vertically centered on the floor
 
 ### Desk grid (all desks face front)
 - Within a pod, desks sit in a plain classroom grid, every one in the default
