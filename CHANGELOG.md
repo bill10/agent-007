@@ -5,6 +5,23 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.22.0] - 2026-09-01
+
+### Changed
+
+- The pixel office no longer repeats one potted plant everywhere. Each window
+  now gets a single plant of its own — a cactus by the first, a leafy plant by
+  the second — and no plant sprite appears more than twice in the room.
+- The bottom-left corner is a small break room: a real sofa sprite next to a
+  coffee table with a coffee pot on it, replacing the drawn-by-hand sofa. A tall
+  floor plant stands in the bottom-right corner. As before, the decor yields to
+  desk pods as the office fills up.
+- The back wall carries a clock and two small paintings beside the job boards
+  (above them on the default narrow panel), so the plaster is no longer bare
+  between the windows.
+- Sprites come from the pixel-agents project (MIT) and are attributed in the
+  README; a sprite that fails to load is simply skipped.
+
 ## [0.3.21.2] - 2026-09-01
 
 ### Fixed
