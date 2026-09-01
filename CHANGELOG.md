@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.21.2] - 2026-09-01
+
+### Fixed
+
+- The sofa and the corner plants along the bottom of the office are no longer
+  cut off mid-sprite. The canvas was being sized to the whole office panel,
+  header included, so its bottom band hung below the panel edge and was
+  clipped; it now fills exactly the area under the "+ Agent" / "+ Job" bar.
+  Desks sit correctly centred in that space and click-to-focus, panel
+  resizing, and the agent walk-out animation all measure the same box.
+- Opening the diff viewer no longer disturbs the office behind it: agents who
+  leave while a diff is open still walk out from their own desk, and dispatch
+  papers already in flight are not dropped.
+
 ## [0.3.21.1] - 2026-09-01
 
 ### Fixed
