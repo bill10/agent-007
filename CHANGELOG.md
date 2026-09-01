@@ -12,8 +12,8 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 - The pixel office now seats agents in per-repo pods: agents working on the
   same repo share a rug labeled with the repo name, and separate repos sit
   visibly apart. Agents without a repo (bash terminals) get their own
-  unlabeled pod. With a single repo the desk layout is unchanged; the old
-  per-desk carpets are replaced by one shared labeled rug.
+  unlabeled pod. With a single repo the desk layout is unchanged — the
+  shared labeled rug is the only addition.
 - Leftover floor space fills with ambient furniture — a sofa-and-plant
   corner and potted plants — that yields and disappears as desks crowd
   the room.

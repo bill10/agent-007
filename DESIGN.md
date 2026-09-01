@@ -161,7 +161,7 @@ Three-panel layout with per-panel headers:
 Canvas-rendered pixel art workstations at Z=3 scale factor (character sprites
 draw at 2x — 16px art in a 32px-tile office).
 
-### Per-repo pods (since v0.3.17.0)
+### Per-repo pods (since v0.3.18.0)
 - Desks are grouped into pods, one per repo, each on its own rug with the repo
   name above it; agents with no repo (bash terminals) share a final unlabeled
   pod. Within a pod agents keep spawn order, so an unrelated spawn/exit never
@@ -211,7 +211,7 @@ draw at 2x — 16px art in a 32px-tile office).
 - **Windows:** Two windows with day/night cycle based on local time
 - **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them). Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test. Since v0.3.16.0 the pinned posts are live: each board pins one paper per job in its column (a fixed grid of pin slots, filled left to right then top to bottom), draws a "+N" corner chip for jobs beyond the slots, shows a clean board when its column is empty, and repaints on every `jobs-list` broadcast
 - **Plants:** Potted plants under windows
-- **Ambient decor:** Since v0.3.17.0, leftover floor space fills from a fixed
+- **Ambient decor:** Since v0.3.18.0, leftover floor space fills from a fixed
   candidate list — a sofa-and-plant corner bottom-left, lone potted plants in
   the other open corners. A candidate only draws when it clears every pod rug
   by a margin (`computeDecorPlacement`), so decor yields and disappears as

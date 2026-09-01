@@ -12,7 +12,7 @@
   a capacity limit — nothing tells the user the room is over-full.
 - **Effort:** M (human: ~1 day / CC: ~30 min once the design is chosen)
 - **Priority:** P3
-- **Depends on:** Per-repo pods (v0.3.17.0)
+- **Depends on:** Per-repo pods (v0.3.18.0)
 - **Context:** Raised by the adversarial review during /ship (2026-08-31).
   Deferred rather than guessed: all three remedies change the room's look,
   which is a taste decision.
