@@ -1,5 +1,22 @@
 # TODOS
 
+## Office canvas has no vertical overflow handling for many pods
+- **What:** `computePodLayout` clamps only the top of the arrangement; enough
+  pods (e.g. many single-agent repos) flow past `panelHeight`, so those desks
+  render off-canvas and their click targets are unreachable, with no
+  indicator. The old uniform grid had the same failure class (~19 agents on a
+  700px panel); per-repo pods reach it with fewer agents when repos are
+  diverse. Needs a design call: shrink desks, scroll the floor, or an
+  overflow badge.
+- **Why:** Agents silently vanishing from the office is the worst way to hit
+  a capacity limit — nothing tells the user the room is over-full.
+- **Effort:** M (human: ~1 day / CC: ~30 min once the design is chosen)
+- **Priority:** P3
+- **Depends on:** Per-repo pods (v0.3.18.0)
+- **Context:** Raised by the adversarial review during /ship (2026-08-31).
+  Deferred rather than guessed: all three remedies change the room's look,
+  which is a taste decision.
+
 ## A scheduled run that never goes quiet starves its schedule silently
 - **What:** A scheduled run only ends on agent exit or WAITING past the quiet
   window, so an agent wedged producing output (a spinner, a loop) holds the

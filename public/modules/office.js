@@ -7,6 +7,8 @@ const Z = 3;
 const WALL_H = 36 * Z;
 const WALL_BOTTOM = WALL_H + 2 * Z;
 const WS_W = 32, WS_H = 36, WS_GAP_X = 12, WS_GAP_Y = 18;
+// Shared by the agent name labels and the pod rug labels so they stay in step.
+const LABEL_FONT = 'bold 11px monospace';
 
 // Persistent dust mote positions (stable across frames)
 const DUST_MOTES = [
@@ -116,37 +118,132 @@ function getWindowColors(tod) {
   }
 }
 
-// --- Grid layout: center workstations horizontally, and vertically within
-// the open floor (below the windows + job board zone). Centering in the FULL
-// panel height left the desks floating mid-canvas with a large dead band of
-// empty floor below them when only a few agents were running. ---
+// --- Pod layout: per-repo desk clusters, centered on the open floor (below
+// the windows + job board zone). Agents on the same repo sit together in a
+// pod on a shared rug; different repos are separated by extra gap. A single
+// repo yields exactly the old centered uniform grid. ---
 // The boards end well short of FLOOR_TOP (their shadows reach 8 Z below the
 // baseboard); the rest is walking room before the first row of desks.
 const FLOOR_TOP = WALL_BOTTOM + 26 * Z;
-function computeGridLayout(agentCount, panelWidth, panelHeight) {
+const POD_GAP_X = 20;      // Z units between pods in a row (vs WS_GAP_X=12 within)
+const POD_GAP_Y = 26;      // Z units between pod rows (vs WS_GAP_Y=18 within)
+const RUG_PAD_X = 4;       // Z units the rug extends past the desks each side
+const RUG_PAD_TOP = 7;     // Z units above the desks — the repo label sits here
+const RUG_PAD_BOTTOM = 12; // Z units below — covers the agent name labels
+
+// Pure layout: agentInfos is [{ id, repoPath, slug }] in spawn (map) order.
+// Returns { pods, positions } — positions maps id -> top-left px of its desk,
+// pods carry the desk-block rect in px plus the repo label. Agents with no
+// repo land in a final unlabeled pod. Within a pod agents keep their input
+// order, so an unrelated spawn/exit never reshuffles desks inside a pod.
+export function computePodLayout(agentInfos, panelWidth, panelHeight) {
   const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z + WS_GAP_X) / (WS_W + WS_GAP_X))));
-  const count = Math.max(1, agentCount);
-  const cols = Math.min(count, maxCols);
-  const rows = Math.ceil(count / cols);
 
-  const gridW = (cols * WS_W + (cols - 1) * WS_GAP_X) * Z;
-  const gridH = (rows * WS_H + (rows - 1) * WS_GAP_Y) * Z;
+  // Group by repo, first-appearance order; no-repo pod goes last.
+  const groups = new Map();
+  for (const a of agentInfos) {
+    const key = a.repoPath || '';
+    // filter(Boolean) survives trailing slashes; slice caps fillText re-shaping cost
+    if (!groups.has(key)) groups.set(key, { label: String(a.slug || (key ? key.split('/').filter(Boolean).pop() : '') || '').slice(0, 40) || null, ids: [] });
+    groups.get(key).ids.push(a.id);
+  }
+  const keys = [...groups.keys()].filter(k => k !== '');
+  if (groups.has('')) keys.push('');
 
-  const startX = Math.floor((panelWidth - gridW) / 2);
+  const pods = keys.map(key => {
+    const g = groups.get(key);
+    const cols = Math.min(g.ids.length, maxCols);
+    const rows = Math.ceil(g.ids.length / cols);
+    return {
+      repoPath: key || null, label: key ? g.label : null, ids: g.ids, cols,
+      w: cols * WS_W + (cols - 1) * WS_GAP_X,
+      h: rows * WS_H + (rows - 1) * WS_GAP_Y,
+    };
+  });
 
-  // Center within [FLOOR_TOP, panelHeight]; never start above the floor.
-  const startY = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (panelHeight - FLOOR_TOP - gridH) / 2));
+  // Flow pods left-to-right, wrap when the row (rug padding included) would
+  // overflow the panel — without the padding allowance the outermost rug
+  // borders clip at the panel edges on an exactly-full row.
+  const panelZ = Math.floor(panelWidth / Z) - 2 * RUG_PAD_X;
+  const podRows = [[]];
+  let rowW = 0;
+  for (const pod of pods) {
+    const need = rowW === 0 ? pod.w : rowW + POD_GAP_X + pod.w;
+    if (rowW > 0 && need > panelZ) { podRows.push([pod]); rowW = pod.w; }
+    else { podRows[podRows.length - 1].push(pod); rowW = need; }
+  }
 
-  return { startX, startY, cols };
+  // Center the arrangement in [FLOOR_TOP, panelHeight]; never start above the floor.
+  const rowHs = podRows.map(r => Math.max(0, ...r.map(p => p.h)));
+  const totalH = (rowHs.reduce((a, b) => a + b, 0) + (podRows.length - 1) * POD_GAP_Y) * Z;
+  let y = Math.max(FLOOR_TOP, Math.floor(FLOOR_TOP + (panelHeight - FLOOR_TOP - totalH) / 2));
+
+  const outPods = [];
+  const positions = new Map();
+  for (let ri = 0; ri < podRows.length; ri++) {
+    const rowWpx = (podRows[ri].reduce((a, p) => a + p.w, 0) + (podRows[ri].length - 1) * POD_GAP_X) * Z;
+    let x = Math.floor((panelWidth - rowWpx) / 2);
+    for (const pod of podRows[ri]) {
+      pod.ids.forEach((id, i) => {
+        positions.set(id, {
+          x: x + (i % pod.cols) * (WS_W + WS_GAP_X) * Z,
+          y: y + Math.floor(i / pod.cols) * (WS_H + WS_GAP_Y) * Z,
+        });
+      });
+      outPods.push({ repoPath: pod.repoPath, label: pod.label, x, y, w: pod.w * Z, h: pod.h * Z });
+      x += pod.w * Z + POD_GAP_X * Z;
+    }
+    y += (rowHs[ri] + POD_GAP_Y) * Z;
+  }
+  return { pods: outPods, positions };
 }
 
-function getWsScreenPos(idx, layout) {
-  const col = idx % layout.cols;
-  const row = Math.floor(idx / layout.cols);
+// The rug drawn under a pod: desk block plus padding for the repo label above
+// and the agent name labels below. Also the keep-out zone for ambient decor.
+export function podRugRect(pod) {
   return {
-    x: layout.startX + col * (WS_W + WS_GAP_X) * Z,
-    y: layout.startY + row * (WS_H + WS_GAP_Y) * Z,
+    x: pod.x - RUG_PAD_X * Z,
+    y: pod.y - RUG_PAD_TOP * Z,
+    w: pod.w + 2 * RUG_PAD_X * Z,
+    h: pod.h + (RUG_PAD_TOP + RUG_PAD_BOTTOM) * Z,
   };
+}
+
+// --- Ambient decor in leftover floor space. Fixed candidate spots (corners
+// of the open floor); a spot is kept only if it clears every rug by a margin
+// wide enough to also clear the monitor-glow halos (shadowBlur 15px < 6 Z).
+// Pure function of the rug rects + panel size, so placement is deterministic
+// for a given agent set. ---
+const DECOR_MARGIN = 6 * Z;
+const SOFA_W = 26, SOFA_H = 15;   // Z units
+const DECOR_PLANT_W = 16, DECOR_PLANT_H = 16;
+export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
+  const z = Z, pw = DECOR_PLANT_W * z, ph = DECOR_PLANT_H * z;
+  const candidates = [
+    // Sofa + plant corner, bottom-left
+    { kind: 'sofa', x: 3 * z, y: panelHeight - (SOFA_H + 3) * z, w: (SOFA_W + DECOR_PLANT_W + 2) * z, h: SOFA_H * z },
+    // Lone plants in the remaining corners of the open floor
+    { kind: 'plant', x: panelWidth - pw - 3 * z, y: panelHeight - ph - 3 * z, w: pw, h: ph },
+    { kind: 'plant', x: 3 * z, y: FLOOR_TOP, w: pw, h: ph },
+    { kind: 'plant', x: panelWidth - pw - 3 * z, y: FLOOR_TOP, w: pw, h: ph },
+  ];
+  const apart = (c, r) =>
+    c.x >= r.x + r.w + DECOR_MARGIN || c.x + c.w <= r.x - DECOR_MARGIN ||
+    c.y >= r.y + r.h + DECOR_MARGIN || c.y + c.h <= r.y - DECOR_MARGIN;
+  const placed = [];
+  for (const c of candidates) {
+    if (c.x >= 0 && c.y >= FLOOR_TOP && c.x + c.w <= panelWidth && c.y + c.h <= panelHeight &&
+        rugRects.every(r => apart(c, r)) && placed.every(p => apart(c, p))) {
+      placed.push(c);
+    }
+  }
+  return placed;
+}
+
+// The live agents map (spawn/tab order) → pod layout for this panel size.
+function computeOfficeLayout(panelWidth, panelHeight) {
+  const infos = [...agents].map(([id, a]) => ({ id, repoPath: a.repoPath, slug: a.repoSlug }));
+  return computePodLayout(infos, panelWidth, panelHeight);
 }
 
 // --- Wall layout: 2 windows divide wall into 3 equal bookshelf sections ---
@@ -615,26 +712,79 @@ function drawPlants(ctx, w) {
   }
 }
 
-// --- Per-workstation carpet ---
-function drawWorkstationCarpet(ctx, sx, sy, theme) {
+// --- Per-pod rug + repo label (theme-tinted so both themes keep working) ---
+function drawPodRug(ctx, pod, theme) {
   const z = Z;
-  const carpetW = 38 * z;  // wider than workstation (32), covers full area
-  const carpetH = 38 * z;  // tall enough to cover desk + character + name
-  const cx = sx + Math.floor((WS_W * z - carpetW) / 2);
-  const cy = sy - z;  // start slightly above workstation top
+  const r = podRugRect(pod);
 
-  // Fill
-  ctx.fillStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.22)`;
-  ctx.fillRect(cx, cy, carpetW, carpetH);
-
-  // Outer border
-  ctx.strokeStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.40)`;
+  ctx.fillStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.10)`;
+  roundRect(ctx, r.x, r.y, r.w, r.h, 3 * z);
+  ctx.fill();
+  ctx.strokeStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.32)`;
   ctx.lineWidth = 1;
-  ctx.strokeRect(cx, cy, carpetW, carpetH);
+  roundRect(ctx, r.x, r.y, r.w, r.h, 3 * z);
+  ctx.stroke();
+  // Inner border (double-border rug pattern)
+  ctx.strokeStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.16)`;
+  roundRect(ctx, r.x + 2 * z, r.y + 2 * z, r.w - 4 * z, r.h - 4 * z, 2 * z);
+  ctx.stroke();
 
-  // Inner border (double-border pattern)
-  ctx.strokeStyle = `rgba(${theme.ar}, ${theme.ag}, ${theme.ab}, 0.18)`;
-  ctx.strokeRect(cx + 2 * z, cy + 2 * z, carpetW - 4 * z, carpetH - 4 * z);
+  if (pod.label) {
+    // Styled like the agent name labels below the desks.
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(${theme.tr}, ${theme.tg}, ${theme.tb}, 0.7)`;
+    ctx.fillText(pod.label, r.x + r.w / 2, r.y + 5 * z, r.w - 4 * z);
+    ctx.textAlign = 'start';
+  }
+}
+
+// --- Ambient sofa (procedural — the old sofa sprite is gone; fixed warm
+// palette like the floor and desks, independent of UI theme) ---
+function drawSofa(ctx, x, y) {
+  const z = Z;
+  // Contact shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.13)';
+  ctx.fillRect(x + z, y + (SOFA_H - 1) * z, (SOFA_W - 2) * z, z);
+  // Back rest
+  ctx.fillStyle = '#8a5a3a';
+  ctx.fillRect(x + 2 * z, y, (SOFA_W - 4) * z, 5 * z);
+  ctx.fillStyle = '#9a6a48';
+  ctx.fillRect(x + 2 * z, y, (SOFA_W - 4) * z, z);
+  // Armrests
+  ctx.fillStyle = '#7a4e32';
+  ctx.fillRect(x, y + 2 * z, 3 * z, 10 * z);
+  ctx.fillRect(x + (SOFA_W - 3) * z, y + 2 * z, 3 * z, 10 * z);
+  // Seat cushions with a split line
+  ctx.fillStyle = '#a4744e';
+  ctx.fillRect(x + 3 * z, y + 5 * z, (SOFA_W - 6) * z, 5 * z);
+  ctx.fillStyle = 'rgba(0,0,0,0.12)';
+  ctx.fillRect(x + Math.floor(SOFA_W / 2) * z, y + 5 * z, 1, 5 * z);
+  // Front skirt + feet
+  ctx.fillStyle = '#7a4e32';
+  ctx.fillRect(x + 3 * z, y + 10 * z, (SOFA_W - 6) * z, 3 * z);
+  ctx.fillStyle = '#4a3828';
+  ctx.fillRect(x + 2 * z, y + 13 * z, 2 * z, z);
+  ctx.fillRect(x + (SOFA_W - 4) * z, y + 13 * z, 2 * z, z);
+}
+
+function drawDecor(ctx, spots) {
+  const z = Z;
+  const plant = SPRITES.plant;
+  const plantW = DECOR_PLANT_W * z;
+  const drawPlant = (px, py) => {
+    if (!plant) return;
+    const s = plantW / plant.naturalWidth;
+    ctx.drawImage(plant, px, py, plantW, Math.floor(plant.naturalHeight * s));
+  };
+  for (const spot of spots) {
+    if (spot.kind === 'sofa') {
+      drawSofa(ctx, spot.x, spot.y);
+      drawPlant(spot.x + (SOFA_W + 2) * z, spot.y - z);
+    } else {
+      drawPlant(spot.x, spot.y);
+    }
+  }
 }
 
 // --- Ambient dust motes (E) ---
@@ -1071,12 +1221,16 @@ export function renderOffice() {
   // Layer 6: Ambient particles
   drawParticles(ctx, w, h);
 
-  // Compute centered grid layout
-  const layout = computeGridLayout(agents.size, w, h);
+  // Per-repo pod layout, then ambient decor in whatever floor is left over
+  const layout = computeOfficeLayout(w, h);
+  drawDecor(ctx, computeDecorPlacement(layout.pods.map(podRugRect), w, h));
+  for (const pod of layout.pods) drawPodRug(ctx, pod, theme);
 
   let idx = 0;
   for (const [sessionId, agent] of agents) {
-    const { x: sx, y: sy } = getWsScreenPos(idx, layout);
+    const pos = layout.positions.get(sessionId);
+    if (!pos) { idx++; continue; }  // never let one miss blank the office every frame
+    const { x: sx, y: sy } = pos;
     const isActive = sessionId === activeSessionId;
     const state = agent.state;
     const alive = state !== 'DISCONNECTED';
@@ -1118,13 +1272,13 @@ export function renderOffice() {
       ctx.textAlign = 'center';
 
       if (!isActive) {
-        ctx.font = 'bold 11px monospace';
+        ctx.font = LABEL_FONT;
         ctx.fillStyle = `rgba(${theme.tr}, ${theme.tg}, ${theme.tb}, 0.7)`;
         ctx.fillText(agent.name, nameX, nameY);
       } else {
         // Pulsing glow
         const pulse = Math.sin(Date.now() / 600) * 0.5 + 0.5;
-        ctx.font = 'bold 11px monospace';
+        ctx.font = LABEL_FONT;
         ctx.shadowColor = `rgba(212, 168, 71, ${0.4 + pulse * 0.5})`;
         ctx.shadowBlur = 6 + pulse * 8;
         ctx.fillStyle = '#d4a847';
@@ -1177,17 +1331,16 @@ export function setupOfficeClick() {
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    const layout = computeGridLayout(agents.size, rect.width, rect.height);
-    let idx = 0;
+    const layout = computeOfficeLayout(rect.width, rect.height);
     for (const [sessionId] of agents) {
-      const pos = getWsScreenPos(idx, layout);
+      const pos = layout.positions.get(sessionId);
+      if (!pos) continue;
       const sw = WS_W * Z, sh = (WS_H + 6) * Z;
       if (x >= pos.x - Z && x <= pos.x + sw + Z &&
           y >= pos.y - Z && y <= pos.y + sh + Z) {
         switchToSession(sessionId);
         return;
       }
-      idx++;
     }
   });
 }

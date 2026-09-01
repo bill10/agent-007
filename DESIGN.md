@@ -161,11 +161,22 @@ Three-panel layout with per-panel headers:
 Canvas-rendered pixel art workstations at Z=3 scale factor (character sprites
 draw at 2x — 16px art in a 32px-tile office).
 
-### Workstation grid
-- Cell: 32w x 36h pixels (96 x 108 screen px)
-- Gap: 12px horizontal, 18px vertical
-- Max 4 columns, responsive to panel width
-- **Centered placement** — grid is vertically centered on full canvas height
+### Per-repo pods (since v0.3.18.0)
+- Desks are grouped into pods, one per repo, each on its own rug with the repo
+  name above it; agents with no repo (bash terminals) share a final unlabeled
+  pod. Within a pod agents keep spawn order, so an unrelated spawn/exit never
+  reshuffles desks inside a pod.
+- Cell: 32w x 36h Z units (96 x 108 screen px); gap within a pod: 12 x 18;
+  gap between pods: 20 x 26
+- Max 4 columns per pod, responsive to panel width
+- Rug pads the desk block by 4 Z units each side, 7 above (repo label) and
+  12 below (agent name tags); rug rects double as the keep-out zone for
+  ambient decor
+- Pods flow left-to-right and wrap when a row would overflow the panel; the
+  arrangement is vertically centered on the floor, clamped to `FLOOR_TOP`
+  (pure layout in `computePodLayout`, `public/modules/office.js`)
+- Screenshots: `docs/office-pods-before.png`, `docs/office-pods-after.png`,
+  `docs/office-pods-sparse.png`
 
 ### Workstation anatomy (back-to-front draw order)
 1. **Monitor** — 14w x 9h, 1px uniform bezel, content varies by state
@@ -200,6 +211,11 @@ draw at 2x — 16px art in a 32px-tile office).
 - **Windows:** Two windows with day/night cycle based on local time
 - **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them). Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test. Since v0.3.16.0 the pinned posts are live: each board pins one paper per job in its column (a fixed grid of pin slots, filled left to right then top to bottom), draws a "+N" corner chip for jobs beyond the slots, shows a clean board when its column is empty, and repaints on every `jobs-list` broadcast
 - **Plants:** Potted plants under windows
+- **Ambient decor:** Since v0.3.18.0, leftover floor space fills from a fixed
+  candidate list — a sofa-and-plant corner bottom-left, lone potted plants in
+  the other open corners. A candidate only draws when it clears every pod rug
+  by a margin (`computeDecorPlacement`), so decor yields and disappears as
+  desks crowd the room
 - **Particles:** 5 ambient dust motes
 
 ## Job Board

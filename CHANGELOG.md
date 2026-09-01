@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.18.0] - 2026-08-31
+
+### Changed
+
+- The pixel office now seats agents in per-repo pods: agents working on the
+  same repo share a rug labeled with the repo name, and separate repos sit
+  visibly apart. Agents without a repo (bash terminals) get their own
+  unlabeled pod. With a single repo the desk layout is unchanged — the
+  shared labeled rug is the only addition.
+- Leftover floor space fills with ambient furniture — a sofa-and-plant
+  corner and potted plants — that yields and disappears as desks crowd
+  the room.
+
 ## [0.3.17.0] - 2026-08-31
 
 ### Changed
