@@ -180,7 +180,7 @@ draw at 2x — 16px art in a 32px-tile office).
 - Screenshots: `docs/office-pods-before.png`, `docs/office-pods-after.png`,
   `docs/office-pods-sparse.png`
 
-### Facing pairs (since v0.3.18.0)
+### Facing pairs (since v0.3.19.0)
 - Within a pod, desks pair up face-to-face across a shared aisle: agent `2p`
   takes the top desk of pair `p`, flipped toward the viewer (`flip: true` in
   the position map — the monitor's back faces the aisle), and agent `2p+1`
