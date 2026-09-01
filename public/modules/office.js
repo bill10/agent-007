@@ -50,8 +50,9 @@ export const CHAR_VARIANTS = Object.keys(SPRITE_PATHS).filter((k) => k.startsWit
 const CHAR_FRAME_W = 16, CHAR_FRAME_H = 32;
 const PCBACK_FRAME_W = 16, PCBACK_FRAME_H = 32; // pc_back.png frame, drawn at 2x like characters
 const CHAR_SCALE = 2; // 16px art in a 32px-tile office — 2x keeps pixels square
-const CHAR_ROW_DOWN = 0, CHAR_ROW_UP = 1;
+const CHAR_ROW_DOWN = 0, CHAR_ROW_UP = 1, CHAR_ROW_RIGHT = 2;
 const CHAR_COL_STAND = 1, CHAR_COL_TYPE = 3, CHAR_COL_READ = 5;
+const CHAR_W = CHAR_FRAME_W * CHAR_SCALE, CHAR_H = CHAR_FRAME_H * CHAR_SCALE;
 
 // Deterministic variant per agent id, stable across renders and reorders.
 export function charVariant(id) {
@@ -67,6 +68,7 @@ const DESK_MON_X = 3;    // Desk.png: monitor at x=3-16, center ~9
 const DESK2_MON_X = 13;  // Desk-2.png: monitor at x=13-26, center ~19
 const DESK_CHAR_X = 5;   // character X offset for Desk.png (centered on keyboard)
 const DESK2_CHAR_X = 15; // character X offset for Desk-2.png
+const DESK_CHAR_Y = 13;  // character Y offset below the workstation top (both desks)
 const SPRITES = {};
 let spritesLoaded = false;
 
@@ -1242,6 +1244,230 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
+// --- Transient motion: dispatch papers and walk in/out ---
+// Purely client-side, time-based state. Every animation self-expires on its
+// start timestamp, so a backgrounded tab (where rAF pauses) wakes up to find
+// them finished rather than replaying a queued burst.
+const WALK_SPEED = 130;       // px/s along the walk path
+const WALK_FRAME_MS = 150;    // walk-cycle frame time
+const PAPER_MS = 900;         // paper flight time
+const PAPER_FADE_MS = 250;    // fade-out after landing
+
+// null until the first jobs-list, which the server sends last in the initial
+// connect sync — session-created replays before it are pre-existing agents
+// and must render seated, not walk in.
+let prevJobStates = null;     // jobId -> { state, agentSessionId }
+const paperAnims = [];        // { sessionId, col, start }
+const walkAnims = new Map();  // sessionId -> { dir: 'in'|'out', start, queuedAt, fromX, fromY, variant }
+
+function motionEnabled() {
+  // Live query (not the module-load const): flipping the OS reduce-motion
+  // setting mid-session should affect the next animation, not the next reload.
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  return !reduced && !document.hidden;
+}
+
+export function hasMotion() {
+  return paperAnims.length > 0 || walkAnims.size > 0;
+}
+
+// Entrance: the middle of the bottom edge — the character appears there,
+// walks across to its desk column, then up to the chair.
+export function entryPoint(w, h) {
+  return { x: Math.round(w / 2 - CHAR_W / 2), y: h - CHAR_H };
+}
+
+// L-shaped route between two points. Walking in goes across first, then up to
+// the desk; walking out goes down from the desk first, then across to the
+// entrance — verticalFirst picks which.
+export function walkPath(from, to, verticalFirst) {
+  const legs = [];
+  const bend = verticalFirst ? { x: from.x, y: to.y } : { x: to.x, y: from.y };
+  for (const [a, b] of [[from, bend], [bend, to]]) {
+    if (a.x !== b.x || a.y !== b.y) legs.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y });
+  }
+  const total = legs.reduce((s, l) => s + Math.abs(l.x1 - l.x0) + Math.abs(l.y1 - l.y0), 0);
+  return { from, legs, total };
+}
+
+// Point and heading a given distance along the path. Clamps to the endpoints.
+export function pointAlongPath(path, dist) {
+  let d = Math.max(0, Math.min(dist, path.total));
+  for (let i = 0; i < path.legs.length; i++) {
+    const l = path.legs[i];
+    const len = Math.abs(l.x1 - l.x0) + Math.abs(l.y1 - l.y0);
+    if (d <= len || i === path.legs.length - 1) {
+      const t = len ? Math.min(1, d / len) : 1;
+      return {
+        x: Math.round(l.x0 + (l.x1 - l.x0) * t),
+        y: Math.round(l.y0 + (l.y1 - l.y0) * t),
+        dx: Math.sign(l.x1 - l.x0),
+        dy: Math.sign(l.y1 - l.y0),
+      };
+    }
+    d -= len;
+  }
+  return { x: path.from.x, y: path.from.y, dx: 0, dy: 0 };
+}
+
+// Jobs that just moved into in-progress under a fresh agent — the dispatches.
+// A manual review -> in-progress move keeps its agentSessionId, so it does not
+// register. fromState names the column the paper launches from.
+export function detectDispatches(prev, jobList) {
+  const out = [];
+  for (const job of jobList) {
+    if (!job || job.state !== 'in-progress' || !job.agentSessionId) continue;
+    const p = prev.get(job.id);
+    if (p && p.agentSessionId === job.agentSessionId) continue;
+    out.push({ jobId: job.id, sessionId: job.agentSessionId, fromState: p ? p.state : 'todo' });
+  }
+  return out;
+}
+
+// Called after every jobs-list broadcast. The first call is the baseline (and
+// marks the connect sync complete); later calls diff against it for dispatches.
+export function noteJobsUpdate() {
+  const list = [...jobs.values()];
+  if (prevJobStates !== null && motionEnabled()) {
+    for (const d of detectDispatches(prevJobStates, list)) {
+      const col = Math.max(0, BOARD_STATES.indexOf(d.fromState));
+      paperAnims.push({ sessionId: d.sessionId, col, start: performance.now() });
+    }
+  }
+  prevJobStates = new Map(list.map(j => [j.id, { state: j.state, agentSessionId: j.agentSessionId || null }]));
+}
+
+// A session-created for a session not yet in the agent map. Ignored during the
+// initial connect sync: those agents already existed and render seated.
+export function noteAgentArrival(sessionId) {
+  if (prevJobStates === null || !motionEnabled()) return;
+  walkAnims.set(sessionId, {
+    dir: 'in', start: null, queuedAt: performance.now(), variant: charVariant(sessionId),
+  });
+}
+
+// An agent is about to leave (session-ended, or the user closing the tab).
+// Captures the desk position now — the tile may be gone next frame.
+export function noteAgentDeparture(sessionId) {
+  if (!motionEnabled()) return;
+  const agent = agents.get(sessionId);
+  if (!agent || agent.state === 'DISCONNECTED') return;
+  const panel = document.getElementById('office-panel');
+  if (!panel) return;
+  const layout = computeOfficeLayout(panel.offsetWidth, panel.offsetHeight);
+  const pos = deskCharPos(sessionId, layout);
+  if (!pos) return;
+  walkAnims.set(sessionId, {
+    dir: 'out', start: performance.now(),
+    fromX: pos.x, fromY: pos.y,
+    variant: charVariant(sessionId),
+  });
+}
+
+function deskCharPos(sessionId, layout) {
+  const pos = layout.positions.get(sessionId);
+  if (!pos) return null;
+  // Same variant and flip rules as the seated pass: desk style keys on the
+  // agent id, and a flipped desk seats its character at the tile top.
+  const deskVariant = charVariant(sessionId) % 2;
+  return {
+    x: pos.x + (deskVariant === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z - 1,
+    y: pos.y + (pos.flip ? 0 : DESK_CHAR_Y * Z),
+  };
+}
+
+function drawWalker(ctx, variant, pt, now) {
+  const sheet = SPRITES['char' + variant] || SPRITES.char0;
+  if (!sheet) return;
+  const col = Math.floor(now / WALK_FRAME_MS) % 3;
+  let row = CHAR_ROW_RIGHT, flip = false;
+  if (pt.dy < 0) row = CHAR_ROW_UP;
+  else if (pt.dy > 0) row = CHAR_ROW_DOWN;
+  else if (pt.dx < 0) flip = true; // sheet has no left row — mirror the right one
+  ctx.save();
+  if (flip) {
+    ctx.translate(pt.x + CHAR_W, pt.y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(sheet, col * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H, 0, 0, CHAR_W, CHAR_H);
+  } else {
+    ctx.drawImage(sheet, col * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H, pt.x, pt.y, CHAR_W, CHAR_H);
+  }
+  ctx.restore();
+}
+
+// A small flying job sheet, drawn like the pinned posts on the boards.
+function drawFlyingPaper(ctx, x, y, alpha) {
+  const z = Z;
+  const pw = 4 * z, ph = 5 * z;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = 'rgba(0,0,0,0.14)';
+  ctx.fillRect(x + 1, y + 1, pw, ph);
+  ctx.fillStyle = '#f6f3ea';
+  ctx.fillRect(x, y, pw, ph);
+  ctx.fillStyle = 'rgba(45, 50, 58, 0.75)';
+  ctx.fillRect(x + z, y + z, 2 * z, 2);
+  ctx.fillStyle = 'rgba(70, 76, 86, 0.45)';
+  ctx.fillRect(x + z, y + Math.round(2.5 * z), Math.round(2.5 * z), 1);
+  ctx.fillRect(x + z, y + Math.round(3.5 * z), 2 * z, 1);
+  ctx.restore();
+}
+
+// Drawn on top of everything each frame. Targets resolve fresh from the
+// current layout, so a grid reflow retargets mid-flight instead of leaving an
+// animation aimed at a stale desk.
+function drawMotion(ctx, w, h, layout) {
+  if (!hasMotion()) return;
+  const now = performance.now();
+
+  const board = paperAnims.length ? computeBoardLayout(w) : null;
+  for (let i = paperAnims.length - 1; i >= 0; i--) {
+    const p = paperAnims[i];
+    const elapsed = now - p.start;
+    if (elapsed > PAPER_MS + PAPER_FADE_MS || !board.visible) { paperAnims.splice(i, 1); continue; }
+    const sec = board.sections[p.col] || board.sections[0];
+    const from = { x: sec.centerX, y: board.boardTop + Math.round(board.boardH / 2) };
+    const to = deskCharPos(p.sessionId, layout)
+      || { x: Math.round(w / 2), y: Math.round((FLOOR_TOP + h) / 2) };
+    const t = Math.min(1, elapsed / PAPER_MS);
+    const e = t * t * (3 - 2 * t); // smoothstep ease
+    // Quadratic arc with the control point lifted above the launch
+    const cx = (from.x + to.x) / 2, cy = Math.min(from.y, to.y) - 12 * Z;
+    const u = 1 - e;
+    const x = u * u * from.x + 2 * u * e * cx + e * e * to.x;
+    const y = u * u * from.y + 2 * u * e * cy + e * e * to.y;
+    const alpha = elapsed <= PAPER_MS ? 1 : 1 - (elapsed - PAPER_MS) / PAPER_FADE_MS;
+    drawFlyingPaper(ctx, Math.round(x), Math.round(y), alpha);
+  }
+
+  const entry = entryPoint(w, h);
+  for (const [sid, anim] of walkAnims) {
+    let path;
+    if (anim.dir === 'in') {
+      const to = deskCharPos(sid, layout);
+      if (!to) {
+        // session-created seen, but the async terminal handler hasn't put the
+        // agent in the map yet — wait briefly, then give up.
+        if (now - anim.queuedAt > 4000) walkAnims.delete(sid);
+        continue;
+      }
+      if (anim.start === null) anim.start = now;
+      path = walkPath(entry, to, false);
+    } else {
+      path = walkPath({ x: anim.fromX, y: anim.fromY }, entry, true);
+    }
+    const dist = ((now - anim.start) / 1000) * WALK_SPEED;
+    if (dist >= path.total) {
+      // The seated pass already skipped this frame, so hold the walker on its
+      // endpoint once more or the character blinks out for a frame on arrival.
+      if (anim.dir === 'in') drawWalker(ctx, anim.variant, pointAlongPath(path, path.total), now);
+      walkAnims.delete(sid);
+      continue;
+    }
+    drawWalker(ctx, anim.variant, pointAlongPath(path, dist), now);
+  }
+}
+
 export function renderOffice() {
   const canvas = document.getElementById('office-canvas');
   const panel = document.getElementById('office-panel');
@@ -1295,8 +1521,11 @@ export function renderOffice() {
     const charX = sx + (deskVariant === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z;
     // Fall back to sheet 0 if this variant's PNG failed to load
     const sheet = SPRITES['char' + charVariant(sessionId)] || SPRITES.char0;
+    // While a walk anim exists, the overlay pass draws the character instead —
+    // covers walk-ins, and a session re-emitted while its walk-out still plays.
+    const walking = walkAnims.has(sessionId);
     const drawCharacter = () => {
-      if (!alive || !sheet) return;
+      if (!alive || !sheet || walking) return;
       let row, col;
       if (state === 'WORKING') {
         // Seated at the keyboard, typing (2-frame cycle). At a default desk
@@ -1317,7 +1546,7 @@ export function renderOffice() {
       ctx.drawImage(
         sheet,
         col * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H,
-        charX - 1, sy + (flip ? 0 : 13 * Z),
+        charX - 1, sy + (flip ? 0 : DESK_CHAR_Y * Z),
         CHAR_FRAME_W * CHAR_SCALE, CHAR_FRAME_H * CHAR_SCALE
       );
     };
@@ -1387,6 +1616,9 @@ export function renderOffice() {
     }
     ctx.globalAlpha = 1;
   }
+
+  // Transient overlays: flying dispatch papers, characters walking in/out
+  drawMotion(ctx, w, h, layout);
 }
 
 export function setupOfficeClick() {
@@ -1412,7 +1644,8 @@ export function setupOfficeClick() {
 export function startAnimationLoop() {
   function loop() {
     const hasLiving = [...agents.values()].some(a => a.state !== 'DISCONNECTED');
-    if (hasLiving) renderOffice();
+    // hasMotion keeps the walk-out of the last departing agent rendering
+    if (hasLiving || hasMotion()) renderOffice();
     requestAnimationFrame(loop);
   }
   loop();

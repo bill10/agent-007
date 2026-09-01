@@ -5,6 +5,9 @@ import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
 import { stopVoice } from './voice.js';
 import { showJobBoard, hideJobBoard } from './jobs.js';
+// Circular with office.js (it imports switchToSession), which is fine: both
+// sides only call the other's functions at event time, never during load.
+import { noteAgentDeparture } from './office.js';
 
 function waitForXterm() {
   return new Promise((resolve) => {
@@ -296,6 +299,7 @@ export function removeSession(sessionId) {
   // guard would be bypassed and the mic would stay hot over the empty state.
   if (sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent closed' });
   if (agent.state !== 'DISCONNECTED') {
+    noteAgentDeparture(sessionId); // walk out before the tile disappears
     send({ type: 'kill', sessionId });
   }
   agent.term.dispose();
