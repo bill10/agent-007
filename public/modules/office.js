@@ -296,8 +296,10 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
   const bandTop = Math.max(FLOOR_TOP,
     ...rugRects.map(r => r.y + r.h),
     ...spareDesks.map(d => d.y + WS_H * Z));
-  const bandBottom = Math.min(panelHeight - 3 * Z,
-    ...decorSpots.filter(s => s.kind === 'chat').map(s => s.y));
+  // Every decor spot bounds the band, not just the chats: today the divider
+  // plants sit below the chat tops so this changes nothing, but if the chats
+  // ever yield while the plants place, the set must not land on the plants.
+  const bandBottom = Math.min(panelHeight - 3 * Z, ...decorSpots.map(s => s.y));
   if (panelWidth < CONF_SET_W || bandBottom - bandTop < CONF_SET_H + 2 * DECOR_MARGIN) return null;
   const tx = Math.floor((panelWidth - CONF_TABLE_W) / 2);
   const ty = bandTop + Math.floor((bandBottom - bandTop - CONF_SET_H) / 2) + 18;
@@ -1365,9 +1367,21 @@ export function entryPoint(w, h) {
 // being the table itself, and only brushes the table's leg row on the last
 // step). The initial descent can still cross a lower pod row, exactly like
 // the walk in/out verticals always have. Reversed for the walk back.
+// The vertical lanes just outside the chair columns — descending a seat's
+// own column would clip through the chair above it, so side and foot seats
+// are approached down the nearest outer lane instead. Clamped for the
+// narrowest panel the set can place on.
+function confLanes(conf) {
+  return { left: Math.max(2, conf.table.x - 78), right: conf.table.x + conf.table.w + 46 };
+}
+
 function wanderRoute(desk, seat, conf, toSeat) {
   const yMid = conf.table.y - 24;
-  const laneX = seat.row === CHAR_ROW_UP ? conf.table.x - 34 : seat.x;
+  const lanes = confLanes(conf);
+  // Only the head seat (the sole down-facing one) is approached down its own
+  // column — it sits above the table, so that column is clear.
+  const laneX = seat.row === CHAR_ROW_DOWN ? seat.x
+    : seat.x < conf.table.x + conf.table.w / 2 ? lanes.left : lanes.right;
   const pts = [desk, { x: desk.x, y: yMid }, { x: laneX, y: yMid }];
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
   pts.push(seat);
@@ -1384,9 +1398,17 @@ function entryRoute(point, entry, conf, inbound) {
   if (!conf) return inbound ? walkPath(entry, point, false) : walkPath(point, entry, true);
   const t = conf.table;
   const yMid = t.y - 24;
-  const climb = point.x + CHAR_W > t.x && point.x < t.x + t.w && point.y > t.y
-    ? [{ x: t.x - 34, y: point.y }, { x: t.x - 34, y: yMid }]
-    : [{ x: point.x, y: yMid }];
+  const lanes = confLanes(conf);
+  // A start below the corridor inside the set's footprint — chair overhang
+  // included — climbs out via the nearest outer lane; anywhere else its own
+  // column is already clear.
+  let climb;
+  if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 && point.y > t.y) {
+    const laneX = point.x < t.x + t.w / 2 ? lanes.left : lanes.right;
+    climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
+  } else {
+    climb = [{ x: point.x, y: yMid }];
+  }
   const pts = [{ x: point.x, y: point.y }, ...climb, { x: entry.x, y: yMid }, { x: entry.x, y: entry.y }];
   if (inbound) pts.reverse();
   return pathThrough(pts);
