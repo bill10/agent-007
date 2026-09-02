@@ -398,7 +398,7 @@ describe('pod layout', () => {
 
   it('on a panel too tight for a clear row the conference route still clears the chairs', () => {
     // 1000px tall: the set places with only its 6 Z margins, so no band fits a
-    // whole character and the route falls back to the corridor above the table
+    // whole character and the route crosses on the widest gap it can find
     const T = 1000;
     const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
     const rugs = pods.map(podRugRect);
@@ -406,7 +406,6 @@ describe('pod layout', () => {
     const spares = computeSpareDesks(pods, decor, W, T);
     const conf = computeConference(rugs, spares, decor, W, T);
     const obstacles = walkObstacles(rugs, decor, spares, conf);
-    expect(corridorY(obstacles, T, positions.get('a').y)).toBeNull();
     const chairs = conf.chairs.map(c => ({ ...c, w: 16 * Z, h: 16 * Z }));
     for (const inbound of [true, false]) {
       const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
@@ -414,6 +413,29 @@ describe('pod layout', () => {
         for (const c of chairs) expect(overlaps(sweptLeg(l), c), `${inbound ? 'in' : 'out'}: chair at ${c.x},${c.y}`).toBe(false);
       const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
       expect(across.y0).toBeLessThan(conf.table.y);
+    }
+  });
+
+  it('a packed panel still keeps the crossing off the chat furniture', () => {
+    // 900x700 with one agent: rug, spare row and chats leave gaps of 24, 18, 54
+    // and 9px against a 64px character, so nothing fits. The old fallback put
+    // the crossing on the bottom edge — straight through both sofa areas.
+    const T = 700;
+    const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
+    expect(conf).toBeNull();
+    const obstacles = walkObstacles(rugs, decor, spares, conf);
+    const chats = decor.filter(s => s.kind === 'chat');
+    expect(chats.length).toBe(2);
+    for (const inbound of [true, false]) {
+      const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
+      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      expect(across.y0).not.toBe(T - 32 * 2);
+      for (const c of chats)
+        expect(overlaps(sweptLeg(across), c), `${inbound ? 'in' : 'out'}: chat at ${c.x},${c.y}`).toBe(false);
     }
   });
 

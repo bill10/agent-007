@@ -58,8 +58,18 @@ describe('corridor rows', () => {
     expect(corridorY(mid, H, 350)).toBe(420);
   });
 
-  it('has no row to offer on a floor with no gaps', () => {
-    expect(corridorY([{ x: 0, y: 0, w: 900, h: H }], H, 400)).toBeNull();
+  it('takes the widest gap when none fits a whole character, feet on its floor', () => {
+    // 40px above the chat, 54px below the rug: the walker stands in the wider
+    // one with its feet at the bottom, overlapping the furniture above it.
+    const tight = [{ x: 0, y: FLOOR_TOP + 40, w: 900, h: 200 },
+                   { x: 0, y: FLOOR_TOP + 294, w: 900, h: H }];
+    expect(corridorY(tight, H, 500)).toBe(FLOOR_TOP + 294 - CHAR_H);
+    // Never the bottom edge, which is where the chat furniture lives
+    expect(corridorY(tight, H, 500)).not.toBe(H - CHAR_H);
+  });
+
+  it('stands on the desk row when the floor is furniture end to end', () => {
+    expect(corridorY([{ x: 0, y: 0, w: 900, h: H }], H, 400)).toBe(400);
   });
 });
 
@@ -108,10 +118,12 @@ describe('walk in/out routing', () => {
     }
   });
 
-  it('falls back to the old corridor when no row is clear', () => {
+  it('crosses on the desk row, not the bottom edge, when no row is clear', () => {
     const full = [{ x: 0, y: 0, w: W, h: H }];
     const p = entryRoute(desk, null, false, H, full);
-    expect(p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1).y0).toBe(H - CHAR_H);
+    const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+    expect(across.y0).toBe(desk.y);
+    expect(across.y0).not.toBe(H - CHAR_H); // the chat furniture lives there
   });
 });
 

@@ -249,16 +249,20 @@ lays out against a 0x0 room.
   near the bottom, and no leg ever runs along the left edge to reach it. The
   row is picked from the frame's furniture rects (`walkObstacles`: pod rugs,
   spare desks, decor and the conference set with its chair overhang): their
-  vertical spans inverted into the gaps between them, gaps too narrow for a
-  character dropped, the nearest remaining one to the desk chosen
-  (`corridorY`). Spans count full width, so a rug half-way across still rules
-  its rows out — a scan, not a search. A panel with no clear row left (the
-  conference set placed on its minimum margins) falls back to the old fixed
-  corridor: above the set, or the bottom edge with no set. The desk column leg
-  is the approach and still crosses whatever rows lie between the corridor and
-  the desk. Spare desks drop a column and the conference set yields rather
-  than reach into the entry strip (`ENTRY_STRIP_W`), keeping the left edge
-  walkable on narrow panels. A departing agent walks out the
+  vertical spans inverted into the gaps between them, the gap nearest the desk
+  that fits a whole character winning (`corridorY`). Spans count full width, so
+  a rug half-way across still rules its rows out — a scan, not a search. This
+  office is dense enough that on most panels no gap fits: between the rugs, the
+  spare row and the chat areas they run 18-54px against a 64px character. So
+  when none fits, the widest gap takes it and the walker's feet ride its floor,
+  its body overlapping the furniture above — drawn in front of that furniture,
+  and never down on the chat areas the way the old bottom-edge fallback was.
+  With no gap at all (a pod grid that overflows the panel) it crosses on the
+  desk's own row. The desk column leg is the approach and still crosses
+  whatever rows lie between the corridor and the desk. Spare desks drop a
+  column and the conference set yields rather than reach into the entry strip
+  (`ENTRY_STRIP_W`) — a leftover from the fixed-door entrance, since the row
+  scan ignores x and already clears the crossing. A departing agent walks out the
   same way before its desk disappears — from its conference seat, or from
   its current point mid-wander, if it was away from the desk. While a walk
   plays, the motion overlay draws the character instead of the seated pass.

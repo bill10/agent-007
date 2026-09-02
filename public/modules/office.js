@@ -1407,23 +1407,34 @@ export function walkObstacles(rugs, decor, spares, conf) {
   return rects;
 }
 
-// The clear corridor row nearest y: the obstacles' vertical spans, inverted
-// into the gaps between them, gaps too narrow for a character dropped, the
-// rest ranked by how close to y a walker can stand in them. Spans count full
-// width — a rug half-way across still rules its rows out, which is what keeps
-// this a scan rather than a search. null when nothing is clear.
+// The corridor row nearest y: the obstacles' vertical spans, inverted into the
+// gaps between them, ranked by how close to y a walker can stand in them. Spans
+// count full width — a rug half-way across still rules its rows out, which is
+// what keeps this a scan rather than a search.
+//
+// This office is dense: between the pod rugs, the spare row and the chat areas
+// the gaps are usually 18-54px against a 64px character, so a gap wide enough
+// to stand in clear of everything often does not exist. Rather than give up
+// (the old null sent the route to the bottom edge, straight through the sofas)
+// the widest gap wins when none fits, and the walker's feet ride its bottom —
+// overlapping the furniture above it, drawn in front of it, never the chats.
 export function corridorY(obstacles, panelHeight, y) {
   const spans = obstacles.map(r => [r.y, r.y + r.h]).sort((a, b) => a[0] - b[0]);
   spans.push([panelHeight, panelHeight]);
-  let top = FLOOR_TOP, best = null;
+  const gaps = [];
+  let top = FLOOR_TOP;
   for (const [s, e] of spans) {
-    if (s - top >= CHAR_H) {
-      const cand = Math.round(Math.min(Math.max(y, top), s - CHAR_H));
-      if (best === null || Math.abs(cand - y) < Math.abs(best - y)) best = cand;
-    }
+    if (s > top) gaps.push([top, s]);
     top = Math.max(top, e);
   }
-  return best;
+  // Where a walker stands in a gap: as near y as it reaches, feet on the floor
+  // the gap ends at when the gap is shorter than the character.
+  const row = ([a, b]) => Math.round(Math.min(Math.max(y, a), b - CHAR_H));
+  const fitting = gaps.filter(([a, b]) => b - a >= CHAR_H);
+  if (fitting.length) return fitting.map(row).reduce((p, c) => Math.abs(c - y) < Math.abs(p - y) ? c : p);
+  if (gaps.length) return row(gaps.reduce((p, c) => (c[1] - c[0] > p[1] - p[0] ? c : p)));
+  // Nothing but furniture from FLOOR_TOP down: stand on the desk's own row.
+  return Math.round(Math.min(Math.max(y, FLOOR_TOP), panelHeight - CHAR_H));
 }
 
 // Walk in/out routes: in at the left edge on the empty floor row nearest the
@@ -1433,11 +1444,9 @@ export function corridorY(obstacles, panelHeight, y) {
 // starting inside the conference set (a foot-seat sitter) steps out via the
 // nearest outer lane first. The desk column leg is the approach: it crosses
 // whatever rows lie between the corridor and the desk, exactly as the
-// verticals always have. With no clear row at all (a packed panel) it falls
-// back to the old fixed corridor.
+// verticals always have.
 export function entryRoute(point, conf, inbound, panelHeight, obstacles = []) {
-  const yMid = corridorY(obstacles, panelHeight, point.y)
-    ?? (conf ? conf.table.y - 24 : panelHeight - CHAR_H);
+  const yMid = corridorY(obstacles, panelHeight, point.y);
   // A start inside the set's footprint — chair overhang included — steps out
   // via the nearest outer lane; anywhere else its own column is already clear.
   let climb = [{ x: point.x, y: yMid }];

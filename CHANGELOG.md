@@ -16,8 +16,10 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   desk. The row is picked from the furniture on the floor that frame — pod
   rugs, spare desks, the chat areas and plants, and the conference set with its
   chairs — so the walk no longer cuts through the sofas along the bottom edge.
-  On a floor with no row wide enough to walk (a conference set placed on its
-  minimum margins) the old corridor still applies.
+  Most panels are too dense for a row that clears a whole character (the gaps
+  run 18-54px against a 64px sprite), so when none fits the widest gap takes
+  the crossing and the walker's feet ride its floor. Only a pod grid that
+  already overflows the panel falls back to the desk's own row.
 
 ## [0.3.26.1] - 2026-09-02
 
