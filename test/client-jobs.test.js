@@ -37,6 +37,9 @@ const BOARD_HTML = `
           <input type="text" id="job-schedule">
         </div>
         <textarea id="job-detail"></textarea>
+        <button id="btn-job-attach"></button>
+        <input type="file" id="job-attach-input">
+        <div id="job-attachments"></div>
         <button id="btn-job-save"></button>
         <button id="btn-job-cancel"></button>
         <div id="job-form-error" style="display:none"></div>
@@ -301,8 +304,49 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '',
+      jobType: 'one-time', schedule: '', attachments: [],
     });
+  });
+
+  // A screenshot pasted into Details becomes a named base64 attachment on the
+  // create message, and the terminal's own paste handler (mocked here) is not
+  // what receives it.
+  it('sends a pasted screenshot as an attachment, once it has been read', async () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Fix header';
+    const file = new File([new Uint8Array([1, 2, 3])], 'image.png', { type: 'image/png' });
+    const e = new Event('paste', { bubbles: true, cancelable: true });
+    e.clipboardData = { files: [file] };
+    document.getElementById('job-detail').dispatchEvent(e);
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.querySelectorAll('.job-attachment')).toHaveLength(1);
+    // FileReader is async: a save before it finishes is refused, not sent half-read.
+    document.getElementById('btn-job-save').click();
+    expect(send).not.toHaveBeenCalled();
+    expect(document.getElementById('job-form-error').textContent).toMatch(/still reading/i);
+    await new Promise(r => setTimeout(r, 50));
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'job-create',
+      attachments: [{ name: expect.stringMatching(/^screenshot-\d+\.png$/), data: 'AQID' }],
+    }));
+  });
+
+  it('an edit that removes the last chip sends an empty list so the server deletes the file', () => {
+    handleJobsList({ jobs: [JOB({ attachments: [{ name: 'shot.png', path: '/cfg/x/shot.png' }] })], settings: {} });
+    const edit = [...cards()[0].querySelectorAll('.job-card-btn')].find(b => b.textContent === 'Edit');
+    edit.click();
+    expect(document.querySelectorAll('.job-attachment')).toHaveLength(1);
+    document.querySelector('.job-attachment-remove').click();
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', attachments: [] }));
+  });
+
+  it('links each attachment on the card to the download route', () => {
+    handleJobsList({ jobs: [JOB({ attachments: [{ name: 'a b.png', path: '/cfg/x/a b.png' }] })], settings: {} });
+    const link = cards()[0].querySelector('.job-card-attachment');
+    expect(link.getAttribute('href')).toBe('/api/jobs/job-1/attachments/a%20b.png');
+    expect(link.rel).toContain('noopener');
   });
 
   it('refuses an empty title instead of posting', () => {
