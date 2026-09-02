@@ -5,6 +5,25 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.25.0] - 2026-09-01
+
+### Added
+
+- A conference table in the open floor between the desks and the chat areas:
+  a vertical boardroom table with cushioned chairs at thirds down both sides,
+  one at the foot and a free seat at the head (sprites from pixel-agents,
+  MIT). Idle agents wander over — with the existing walk animation — and sit
+  there until their state changes, then walk back to their desks; a departing
+  sitter walks out from its seat. The set only places while the band fits it,
+  so it yields on short panels just like the rest of the decor.
+
+### Changed
+
+- The bottom decor: the single centred chat area is now a chat area in each
+  bottom corner, with the leafy plant stacked above the cactus between them
+  as a small divider drawn at 1.25x (down from 2x). The walk-in entrance
+  moves to the bottom-left corner strip the chat margin leaves free.
+
 ## [0.3.24.0] - 2026-09-01
 
 ### Added
