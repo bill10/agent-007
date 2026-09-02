@@ -5,6 +5,29 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.26.0] - 2026-09-02
+
+### Added
+
+- Attach screenshots and files to a job. The job form has an **Attach files**
+  button, and pasting an image into Details attaches it as a screenshot.
+  Files are kept outside the repository, so nothing can end up committed by
+  accident, and the dispatched agent is told where to read them. Each card
+  lists its attachments as links that open in a sandboxed tab. Up to 20
+  files, 10MB each and 50MB in total; a file that cannot be stored is
+  refused with a message rather than silently dropped.
+
+### Changed
+
+- Attachments can only be changed while a card is in To do, the same rule
+  that already applied to its repository: an agent mid-run was handed those
+  paths when it started.
+- An edit that is refused (a bad schedule, an oversized file) now changes
+  nothing at all, instead of leaving the text edits half-applied.
+- Terminal uploads and job attachments share one file-name sanitiser, which
+  now also prefixes Windows device names (CON, NUL, COM1) so a file can
+  never be written to a device.
+
 ## [0.3.25.0] - 2026-09-01
 
 ### Added
