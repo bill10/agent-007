@@ -19,31 +19,24 @@ const DUST_MOTES = [
   { baseX: 0.85, baseY: 0.20, phaseX: 5.0, phaseY: 1.5 },
 ];
 
-// Book spine color palette (fixed, theme-independent)
-const BOOK_COLORS = [
-  '#8b4513', '#2d5a2d', '#4a3a6a', '#6a3030',
-  '#2a4a6a', '#6a5a2a', '#4a4a4a', '#d4c8b0',
-];
-
 const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
 
 // --- Furniture + character sprites ---
-// Desk/Plant: Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
+// Desks/bookshelf: Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
 // Characters: pixel-agents (MIT), based on JIK-A-4 "Metro City" pack (CC0).
 // Each char sheet is 112×96: 7 columns × 3 rows of 16×32 frames.
 // Rows: 0 = facing down (viewer), 1 = facing up (back), 2 = facing right.
 // Columns: 0-2 walk cycle (1 = standing), 3-4 seated typing, 5-6 reading.
 export const SPRITE_PATHS = {
-  plant:   'assets/furniture/plant_big.png',        // 32×32 potted office plant (Antea CC-BY 4.0)
   desk:    'assets/furniture/desk.png',             // 32×32 computer desk with monitor
   desk2:   'assets/furniture/desk2.png',            // 32×32 alt desk layout
+  bookshelf: 'assets/furniture/bookshelf.png',      // 16×16 short bookcase, art in x 2–14 (Antea CC-BY 4.0)
   // Ambient decor from pixel-agents (MIT). 16px-tile art, drawn at CHAR_SCALE
-  // like the characters — except the plants, drawn at PLANT_SCALE so they read
-  // as desk-side decor rather than person-sized furniture.
+  // like the characters.
   cactus:     'assets/furniture/cactus.png',           // 16×32
   plant2:     'assets/furniture/plant_2.png',          // 16×32
-  largeplant: 'assets/furniture/large_plant.png',      // 32×48
   sofa:       'assets/furniture/sofa_side.png',        // 16×32, side view facing right
+  sofafront:  'assets/furniture/sofa_front.png',       // 32×16, front view facing down
   table:      'assets/furniture/coffee_table.png',     // 32×32
   coffee:     'assets/furniture/coffee.png',           // 16×16, art in the top-right 8×7
   char0:   'assets/characters/char_0.png',
@@ -153,10 +146,14 @@ const POD_TOP_MARGIN = 8;  // Z units of bare floor between FLOOR_TOP and the fi
 // visible to the viewer and the character's facing reads as state (back to
 // viewer = working). Agent i takes col i % cols, row floor(i / cols); the row
 // pitch keeps a full aisle so a back row never occludes the one in front.
+// The rug-padding allowance mirrors panelZ in computePodLayout, so a
+// max-width pod's rug borders don't clip at the panel edges.
+function maxColsFor(panelWidth) {
+  return Math.max(1, Math.min(4, Math.floor((panelWidth / Z - 2 * RUG_PAD_X + WS_GAP_X) / (WS_W + WS_GAP_X))));
+}
+
 export function computePodLayout(agentInfos, panelWidth, panelHeight) {
-  // The rug-padding allowance mirrors panelZ below, so a max-width pod's rug
-  // borders don't clip at the panel edges.
-  const maxCols = Math.max(1, Math.min(4, Math.floor((panelWidth / Z - 2 * RUG_PAD_X + WS_GAP_X) / (WS_W + WS_GAP_X))));
+  const maxCols = maxColsFor(panelWidth);
 
   // Group by repo, first-appearance order; no-repo pod goes last.
   const groups = new Map();
@@ -232,35 +229,36 @@ export function podRugRect(pod) {
   };
 }
 
-// --- Ambient decor in leftover floor space. Fixed candidate spots (corners
-// of the open floor); a spot is kept only if it clears every rug by a margin
-// wide enough to also clear the monitor-glow halos (shadowBlur 15px < 6 Z).
-// Pure function of the rug rects + panel size, so placement is deterministic
-// for a given agent set. ---
+// --- Ambient decor along the bottom of the floor: a centred chat area and a
+// plant in each bottom corner. A spot is kept only if it clears every rug by
+// a margin wide enough to also clear the monitor-glow halos (shadowBlur 15px
+// < 6 Z), so the decor simply disappears as pod rows grow downward. Pure
+// function of the rug rects + panel size, so placement is deterministic for a
+// given agent set. ---
 const DECOR_MARGIN = 6 * Z;
-// All decor sizes below are in px. pixel-agents decor is 16px-tile art drawn
-// at DECOR_SCALE like the characters; every plant (plant_big included) is
-// drawn at PLANT_SCALE, an integer so the pixels stay crisp.
+// True when rect c clears rect r by DECOR_MARGIN on some side.
+const apart = (c, r) =>
+  c.x >= r.x + r.w + DECOR_MARGIN || c.x + c.w <= r.x - DECOR_MARGIN ||
+  c.y >= r.y + r.h + DECOR_MARGIN || c.y + c.h <= r.y - DECOR_MARGIN;
+// All decor sizes below are in px: 16px-tile pixel-agents art drawn at
+// DECOR_SCALE like the characters.
 const DECOR_SCALE = CHAR_SCALE;
-const PLANT_SCALE = 1;
-const DECOR_PLANT_W = 32 * PLANT_SCALE, DECOR_PLANT_H = 32 * PLANT_SCALE;
-const LARGE_PLANT_W = 32 * PLANT_SCALE, LARGE_PLANT_H = 48 * PLANT_SCALE;
+const PLANT_W = 16 * DECOR_SCALE, PLANT_H = 32 * DECOR_SCALE;
 const SOFA_W = 16 * DECOR_SCALE, SOFA_H = 32 * DECOR_SCALE; // side view, as tall as the table
 const TABLE_W = 32 * DECOR_SCALE, TABLE_H = 32 * DECOR_SCALE;
-const LOUNGE_GAP = 4; // between sofa and table
+const SOFA_FRONT_H = 16 * DECOR_SCALE;
+// Chat area: a pod-style rug holding a side sofa each side of the coffee
+// table (the right one mirrored to face it) and a front-facing sofa above it.
+const CHAT_PAD_X = 13, CHAT_PAD_TOP = 14, CHAT_PAD_BOTTOM = 12, CHAT_GAP = 8;
+const CHAT_W = 2 * CHAT_PAD_X + 2 * SOFA_W + 2 * CHAT_GAP + TABLE_W;             // 170
+const CHAT_H = CHAT_PAD_TOP + SOFA_FRONT_H + CHAT_GAP + TABLE_H + CHAT_PAD_BOTTOM; // 130
 export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
-  const z = Z, pw = DECOR_PLANT_W, ph = DECOR_PLANT_H;
+  const z = Z;
   const candidates = [
-    // Break-room corner, bottom-left: a sofa facing a coffee table with the coffee pot on it
-    { kind: 'lounge', x: 3 * z, y: panelHeight - TABLE_H - 3 * z, w: SOFA_W + LOUNGE_GAP + TABLE_W, h: TABLE_H },
-    // A floor plant bottom-right, small potted plants in the top corners
-    { kind: 'largeplant', x: panelWidth - LARGE_PLANT_W - 3 * z, y: panelHeight - LARGE_PLANT_H - 3 * z, w: LARGE_PLANT_W, h: LARGE_PLANT_H },
-    { kind: 'plant', x: 3 * z, y: FLOOR_TOP, w: pw, h: ph },
-    { kind: 'plant', x: panelWidth - pw - 3 * z, y: FLOOR_TOP, w: pw, h: ph },
+    { kind: 'chat', x: Math.floor((panelWidth - CHAT_W) / 2), y: panelHeight - CHAT_H - 3 * z, w: CHAT_W, h: CHAT_H },
+    { kind: 'plant2', x: 4 * z, y: panelHeight - PLANT_H - 3 * z, w: PLANT_W, h: PLANT_H },
+    { kind: 'cactus', x: panelWidth - PLANT_W - 4 * z, y: panelHeight - PLANT_H - 3 * z, w: PLANT_W, h: PLANT_H },
   ];
-  const apart = (c, r) =>
-    c.x >= r.x + r.w + DECOR_MARGIN || c.x + c.w <= r.x - DECOR_MARGIN ||
-    c.y >= r.y + r.h + DECOR_MARGIN || c.y + c.h <= r.y - DECOR_MARGIN;
   const placed = [];
   for (const c of candidates) {
     if (c.x >= 0 && c.y >= FLOOR_TOP && c.x + c.w <= panelWidth && c.y + c.h <= panelHeight &&
@@ -269,6 +267,29 @@ export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
     }
   }
   return placed;
+}
+
+// --- Spare desks: when the office has a single row of real pods, one row of
+// empty workstations sits on the pod grid one row-pitch below it, so a sparse
+// office reads as unassigned seats rather than bare floor. Like the decor they
+// vanish as the office fills: only while every pod is on one row and the spare
+// row clears the placed decor and the panel bottom by DECOR_MARGIN. Pure;
+// returns [{ x, y, variant }] top-left px per desk. ---
+const SPARE_DESKS = 3;
+export function computeSpareDesks(pods, decorSpots, panelWidth, panelHeight) {
+  if (!pods.length || pods.some(p => p.y !== pods[0].y || p.h !== WS_H * Z)) return [];
+  const n = Math.min(SPARE_DESKS, maxColsFor(panelWidth));
+  const pitch = (WS_W + WS_GAP_X) * Z;
+  const rowW = (n * WS_W + (n - 1) * WS_GAP_X) * Z;
+  // On the real row's column grid when it is one pod (centred on it, to the
+  // nearest column); a multi-pod row has no single grid, so centre on the panel.
+  // Fall back to centring when the aligned row would run off the panel.
+  const cols = Math.round((pods[0].w + WS_GAP_X * Z) / pitch);
+  let x = pods.length === 1 ? pods[0].x + Math.round((cols - n) / 2) * pitch : Math.floor((panelWidth - rowW) / 2);
+  if (x < 0 || x + rowW > panelWidth) x = Math.floor((panelWidth - rowW) / 2);
+  const row = { x, y: pods[0].y + (WS_H + WS_GAP_Y) * Z, w: rowW, h: WS_H * Z };
+  if (row.x < 0 || row.y + row.h + DECOR_MARGIN > panelHeight || !decorSpots.every(s => apart(row, s))) return [];
+  return Array.from({ length: n }, (_, i) => ({ x: row.x + i * pitch, y: row.y, variant: i % 2 }));
 }
 
 // The live agents map (spawn/tab order) → pod layout for this panel size.
@@ -398,67 +419,6 @@ function drawWindows(ctx, w, theme) {
     ctx.fillRect(glassX + 2 * colW, glassY, 1, glassH);   // vertical 2/3
     ctx.fillRect(glassX, wy + Math.floor(wh / 2) - 1, glassW, 1); // horizontal center
 
-  }
-}
-
-// --- Bookshelves in 3 wall sections (C) ---
-function drawBookshelves(ctx, w) {
-  const z = Z;
-  const layout = computeWallLayout(w);
-  const shelfStartY = 2 * z;   // 2Z below ceiling
-  const shelfH = 24 * z;       // 24 Z-units tall (fills most of wall)
-  const shelfRows = 6;         // 6 horizontal shelves
-  const rowH = Math.floor(shelfH / shelfRows);
-
-  const sections = [
-    { x: layout.shelf1X, w: layout.shelfW },
-    { x: layout.shelf2X, w: layout.shelfW },
-    { x: layout.shelf3X, w: layout.shelfW },
-  ];
-
-  const shelfPad = 2 * z; // spacing around each bookshelf section
-  for (let si = 0; si < sections.length; si++) {
-    const sec = sections[si];
-    const sx = sec.x * z + shelfPad;
-    const sw = sec.w * z - 2 * shelfPad;
-    if (sw < 4 * z) continue; // too narrow to draw
-
-    // Back panel (slightly darker than wall for depth)
-    ctx.fillStyle = 'rgba(0,0,0,0.08)';
-    ctx.fillRect(sx, shelfStartY, sw, shelfH);
-
-    // Side frames
-    ctx.fillStyle = '#5a4030';
-    ctx.fillRect(sx, shelfStartY, z, shelfH);
-    ctx.fillRect(sx + sw - z, shelfStartY, z, shelfH);
-
-    // Shelves + books
-    for (let row = 0; row < shelfRows; row++) {
-      const ry = shelfStartY + row * rowH;
-
-      // Shelf line
-      ctx.fillStyle = '#5a4030';
-      ctx.fillRect(sx, ry + rowH - z, sw, z);
-
-      // Books between shelves — pack left to right with variety
-      const bookAreaW = sw - 2 * z;
-      const bookH = rowH - z - 1;
-      let bx = sx + z;
-      const seed = si * 31 + row * 7; // deterministic variety per section+row
-      let bi = 0;
-      while (bx < sx + sw - 2 * z) {
-        const bookW = (((seed + bi * 13) % 3) + 2) * z; // 2-4 Z-units wide
-        if (bx + bookW > sx + sw - z) break;
-        ctx.fillStyle = BOOK_COLORS[((seed + bi * 7) % BOOK_COLORS.length)];
-        ctx.fillRect(bx, ry + 1, bookW - 1, bookH);
-        bx += bookW;
-        bi++;
-      }
-    }
-
-    // Top shelf line
-    ctx.fillStyle = '#5a4030';
-    ctx.fillRect(sx, shelfStartY, sw, z);
   }
 }
 
@@ -721,32 +681,47 @@ function drawJobPost(ctx, x, y, w, h, lines, idx) {
 }
 
 // Draw a sprite at an integer scale; no-op if its PNG failed to load.
-function drawSprite(ctx, key, x, y, scale = DECOR_SCALE) {
+// mirror flips it horizontally in place (same bounding box).
+function drawSprite(ctx, key, x, y, scale = DECOR_SCALE, mirror = false) {
   const img = SPRITES[key];
-  if (img) ctx.drawImage(img, x, y, img.naturalWidth * scale, img.naturalHeight * scale);
+  if (!img) return;
+  const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+  if (!mirror) { ctx.drawImage(img, x, y, w, h); return; }
+  ctx.save();
+  ctx.translate(x + w, y);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, 0, 0, w, h);
+  ctx.restore();
 }
 
-// --- One plant per board gap: a cactus between TO DO and IN PROGRESS, a leafy
-// plant between IN PROGRESS and REVIEW, each centred in the gap so neither
-// overlaps a board at any panel width. All three boards share one width, so
-// the gap's midpoint is the midpoint of the two board centres. Pots stand just
-// off the baseboard, a hair above the board feet. No boards, no plants.
-// Pure; exported for the placement test. ---
-const WALL_PLANT_W = 16 * PLANT_SCALE, WALL_PLANT_H = 32 * PLANT_SCALE;
-export function computeWallPlants(panelWidth) {
-  const board = computeBoardLayout(panelWidth);
-  if (!board.visible) return [];
-  const [s1, s2, s3] = board.sections;
-  const y = WALL_BOTTOM + 5 * Z - WALL_PLANT_H;
-  const between = (a, b) => Math.floor((a.centerX + b.centerX) / 2 - WALL_PLANT_W / 2);
-  return [
-    { key: 'cactus', x: between(s1, s2), y, w: WALL_PLANT_W, h: WALL_PLANT_H },
-    { key: 'plant2', x: between(s2, s3), y, w: WALL_PLANT_W, h: WALL_PLANT_H },
-  ];
+// --- A low bookshelf run under each window: three short bookcase units
+// tiled edge-to-edge, centred on the window and narrower than it, backs tight
+// against the wall. The 16×16 frame's art spans x 2–14, so units step by the
+// art width and the first is pulled left by the transparent margin. No
+// boards (panel too narrow), no shelves. Pure; exported for the placement test. ---
+const SHELF_SCALE = DECOR_SCALE;
+const SHELF_UNITS = 3, SHELF_ART_X = 2, SHELF_ART_W = 12, SHELF_FRAME = 16;
+const SHELF_UNIT_W = SHELF_ART_W * SHELF_SCALE, SHELF_H = SHELF_FRAME * SHELF_SCALE;
+export function computeBookshelfRuns(panelWidth) {
+  if (!computeBoardLayout(panelWidth).visible) return [];
+  const layout = computeWallLayout(panelWidth);
+  const w = SHELF_UNITS * SHELF_UNIT_W;
+  return [layout.window1X, layout.window2X].map((wx) => ({
+    x: Math.floor((wx + layout.windowW / 2) * Z - w / 2),
+    y: WALL_BOTTOM + Z - SHELF_H,
+    w, h: SHELF_H,
+  }));
 }
 
-function drawPlants(ctx, w) {
-  for (const p of computeWallPlants(w)) drawSprite(ctx, p.key, p.x, p.y, PLANT_SCALE);
+function drawBookshelves(ctx, w) {
+  if (!SPRITES.bookshelf) return; // no orphan shadows under a missing sprite
+  for (const run of computeBookshelfRuns(w)) {
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.fillRect(run.x, run.y + run.h, run.w, Z); // contact shadow under the feet
+    for (let i = 0; i < SHELF_UNITS; i++) {
+      drawSprite(ctx, 'bookshelf', run.x + i * SHELF_UNIT_W - SHELF_ART_X * SHELF_SCALE, run.y, SHELF_SCALE);
+    }
+  }
 }
 
 // Brand gold (#d4a847) as an rgb triple for rgba() tints on the canvas.
@@ -758,8 +733,11 @@ const GOLD_RGB = '212, 168, 71';
 // colour as the floor, so a theme-tinted rug vanished in light mode. The
 // repo label keeps the theme text colour.
 function drawPodRug(ctx, pod, theme) {
+  drawRug(ctx, podRugRect(pod), pod.label, theme);
+}
+
+function drawRug(ctx, r, label, theme) {
   const z = Z;
-  const r = podRugRect(pod);
 
   ctx.fillStyle = `rgba(${GOLD_RGB}, 0.10)`;
   roundRect(ctx, r.x, r.y, r.w, r.h, 3 * z);
@@ -773,30 +751,34 @@ function drawPodRug(ctx, pod, theme) {
   roundRect(ctx, r.x + 2 * z, r.y + 2 * z, r.w - 4 * z, r.h - 4 * z, 2 * z);
   ctx.stroke();
 
-  if (pod.label) {
+  if (label) {
     // Styled like the agent name labels below the desks.
     ctx.font = LABEL_FONT;
     ctx.textAlign = 'center';
     ctx.fillStyle = `rgba(${theme.tr}, ${theme.tg}, ${theme.tb}, 0.7)`;
-    ctx.fillText(pod.label, r.x + r.w / 2, r.y + 5 * z, r.w - 4 * z);
+    ctx.fillText(label, r.x + r.w / 2, r.y + 5 * z, r.w - 4 * z);
     ctx.textAlign = 'start';
   }
 }
 
-function drawDecor(ctx, spots) {
+function drawDecor(ctx, spots, theme) {
   for (const spot of spots) {
-    if (spot.kind === 'lounge') {
-      // Sofa (side view, facing right) and table share a floor line; the coffee pot sits on the table top.
-      // Skip the whole group rather than draw a pot floating over a missing table.
-      if (!SPRITES.sofa || !SPRITES.table) continue;
-      // The sofa's feet fill its last art row while the table's stop one row
-      // short, so lift the sofa one art pixel to share the table's floor line.
-      drawSprite(ctx, 'sofa', spot.x, spot.y + TABLE_H - SOFA_H - DECOR_SCALE);
-      const tx = spot.x + SOFA_W + LOUNGE_GAP;
-      drawSprite(ctx, 'table', tx, spot.y);
-      drawSprite(ctx, 'coffee', tx + 8 * DECOR_SCALE, spot.y + 7 * DECOR_SCALE);
+    if (spot.kind === 'chat') {
+      // Skip the whole group rather than draw a rug and pot around missing furniture.
+      if (!SPRITES.sofa || !SPRITES.sofafront || !SPRITES.table) continue;
+      drawRug(ctx, spot, null, theme);
+      const tx = spot.x + CHAT_PAD_X + SOFA_W + CHAT_GAP;
+      const ty = spot.y + CHAT_PAD_TOP + SOFA_FRONT_H + CHAT_GAP;
+      drawSprite(ctx, 'sofafront', tx, spot.y + CHAT_PAD_TOP);
+      // The side sofas' feet fill their last art row while the table's stop one
+      // row short, so lift them one art pixel to share the table's floor line.
+      const sy = ty + TABLE_H - SOFA_H - DECOR_SCALE;
+      drawSprite(ctx, 'sofa', spot.x + CHAT_PAD_X, sy);
+      drawSprite(ctx, 'table', tx, ty);
+      drawSprite(ctx, 'coffee', tx + 8 * DECOR_SCALE, ty + 7 * DECOR_SCALE);
+      drawSprite(ctx, 'sofa', tx + TABLE_W + CHAT_GAP, sy, DECOR_SCALE, true);
     } else {
-      drawSprite(ctx, spot.kind, spot.x, spot.y, PLANT_SCALE);  // 'plant' or 'largeplant'
+      drawSprite(ctx, spot.kind, spot.x, spot.y);  // 'plant2' or 'cactus'
     }
   }
 }
@@ -1233,10 +1215,12 @@ export function hasMotion() {
   return paperAnims.length > 0 || walkAnims.size > 0;
 }
 
-// Entrance: the middle of the bottom edge — the character appears there,
-// walks across to its desk column, then up to the chair.
+// Entrance: the bottom edge, just right of the corner plant — the bottom
+// centre is the chat area now, so a character appearing there would stand on
+// the coffee table. It walks along the bottom (in front of the chat
+// furniture) to its desk column, then up to the chair.
 export function entryPoint(w, h) {
-  return { x: Math.round(w / 2 - CHAR_W / 2), y: h - CHAR_H };
+  return { x: 4 * Z + PLANT_W + DECOR_MARGIN, y: h - CHAR_H };
 }
 
 // L-shaped route between two points. Walking in goes across first, then up to
@@ -1462,17 +1446,20 @@ export function renderOffice() {
   drawWalls(ctx, w);
   // Layer 3: Windows (2 windows with day/night + light beams)
   drawWindows(ctx, w, theme);
-  // Layer 5: Potted plants (against the wall, in the gaps between the boards)
-  drawPlants(ctx, w);
-  // Layer 5b: Job boards
+  // Layer 4: Bookshelf runs under the windows (before the boards so easels overlap shelves)
+  drawBookshelves(ctx, w);
+  // Layer 5: Job boards
   drawJobBoardEasels(ctx, w);
   // Layer 6: Ambient particles
   drawParticles(ctx, w, h);
 
   // Per-repo pod layout, then ambient decor in whatever floor is left over
   const layout = computeOfficeLayout(w, h);
-  drawDecor(ctx, computeDecorPlacement(layout.pods.map(podRugRect), w, h));
+  const decor = computeDecorPlacement(layout.pods.map(podRugRect), w, h);
+  drawDecor(ctx, decor, theme);
   for (const pod of layout.pods) drawPodRug(ctx, pod, theme);
+  // Empty workstations on the row below a sparse office: dark screens, no one seated
+  for (const d of computeSpareDesks(layout.pods, decor, w, h)) drawWorkstation(ctx, d.x, d.y, 'DISCONNECTED', theme, d.variant, null);
 
   for (const [sessionId, agent] of agents) {
     const pos = layout.positions.get(sessionId);

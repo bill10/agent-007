@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeWallPlants, computeBoardLayout } =
+const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, entryPoint } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -174,46 +174,104 @@ describe('pod layout', () => {
     expect(computeDecorPlacement(rugs, W, H)).toEqual(spots);
   });
 
-  it('an empty office never repeats a plant sprite more than twice', () => {
-    const kinds = computeDecorPlacement([], W, H).map(s => s.kind);
-    expect(kinds).toContain('lounge');
-    expect(kinds).toContain('largeplant');
-    for (const k of new Set(kinds)) expect(kinds.filter(x => x === k).length, k).toBeLessThanOrEqual(2);
+  it('an empty office gets a centred bottom chat area and a different plant in each bottom corner', () => {
+    const spots = computeDecorPlacement([], W, H);
+    expect(spots.map(s => s.kind).sort()).toEqual(['cactus', 'chat', 'plant2']);
+    const chat = spots.find(s => s.kind === 'chat');
+    expect(chat.w).toBe(170); // two side sofas, the table, gaps and padding
+    expect(chat.h).toBe(130); // front sofa above the table
+    expect(Math.abs((chat.x + chat.w / 2) - W / 2)).toBeLessThanOrEqual(1);
+    expect(chat.y + chat.h).toBe(H - 3 * Z);
+    const left = spots.find(s => s.kind === 'plant2'), right = spots.find(s => s.kind === 'cactus');
+    expect(left.x).toBe(4 * Z);
+    expect(right.x + right.w).toBe(W - 4 * Z);
+    for (const p of [left, right]) {
+      expect(p.w).toBe(16 * 2); expect(p.h).toBe(32 * 2); // CHAR_SCALE
+      expect(p.y + p.h).toBe(H - 3 * Z);
+    }
   });
 
-  it('the lounge is a side-view sofa (16px art) beside a 32px coffee table, both table-high', () => {
-    const lounge = computeDecorPlacement([], W, H).find(s => s.kind === 'lounge');
-    expect(lounge.w).toBe((16 + 32) * 2 + 4); // sofa + table at 2x, plus the 4px gap
-    expect(lounge.h).toBe(32 * 2);
+  it('the chat area yields to a pod row that reaches down into it', () => {
+    const chat = computeDecorPlacement([], W, H).find(s => s.kind === 'chat');
+    const rug = { x: chat.x, y: chat.y - 6 * Z, w: chat.w, h: 10 }; // just inside the margin
+    expect(computeDecorPlacement([rug], W, H).map(s => s.kind)).toEqual(['plant2', 'cactus']);
+    const clear = { ...rug, y: chat.y - 6 * Z - 10 };
+    expect(computeDecorPlacement([clear], W, H).map(s => s.kind)).toContain('chat');
   });
 
   it('every sprite path points at a file that exists (a missing one silently drops its decor group)', () => {
     for (const [key, path] of Object.entries(SPRITE_PATHS)) expect(existsSync('public/' + path), key).toBe(true);
   });
 
-  it('wall plants are centred in the gaps between the boards and stand shorter than them', () => {
+  it('a bookshelf run sits centred under each window, feet tight against the wall', () => {
+    const WINDOW_W = 28 * Z;
     for (const w of [280, 440, 600, W]) {
       const board = computeBoardLayout(w);
-      const half = Math.floor(board.boardW / 2);
-      const plants = computeWallPlants(w);
-      expect(plants.map(p => p.key)).toEqual(['cactus', 'plant2']);
-      plants.forEach((p, i) => {
-        const gapL = board.sections[i].centerX + half;      // right edge of the board on the left
-        const gapR = board.sections[i + 1].centerX - half;  // left edge of the board on the right
-        expect(p.x, `panel ${w}`).toBeGreaterThanOrEqual(gapL);
-        expect(p.x + p.w, `panel ${w}`).toBeLessThanOrEqual(Math.min(gapR, w));
-        expect(Math.abs((p.x - gapL) - (gapR - p.x - p.w)), `panel ${w} centred`).toBeLessThanOrEqual(1);
-        expect(p.h).toBeLessThan(board.boardH);
-        // Pot bottoms sit just off the baseboard, a hair above the board feet
-        expect(p.y + p.h).toBe(board.wallBottom + 5 * Z);
-        expect(p.y + p.h).toBeLessThan(board.footY);
+      const runs = computeBookshelfRuns(w);
+      expect(runs.length, `panel ${w}`).toBe(2);
+      // Windows sit between the board sections: section i's right edge + 1Z gap
+      runs.forEach((r, i) => {
+        const winX = board.sections[i].right + Z;
+        expect(r.w).toBe(3 * 12 * 2); // three 12px-wide units at 2x
+        expect(r.x, `panel ${w}`).toBeGreaterThanOrEqual(winX);
+        expect(r.x + r.w, `panel ${w}`).toBeLessThanOrEqual(winX + WINDOW_W);
+        expect(Math.abs((r.x - winX) - (winX + WINDOW_W - r.x - r.w)), `panel ${w} centred`).toBeLessThanOrEqual(1);
+        expect(r.y + r.h).toBe(board.wallBottom + Z);
+        expect(r.y + r.h).toBeLessThan(board.footY);
       });
     }
-    // Too narrow for a board: no plants either
-    expect(computeWallPlants(120)).toEqual([]);
-    // The floor plant is decor too, not furniture: shorter than a board
-    const large = computeDecorPlacement([], W, H).find(s => s.kind === 'largeplant');
-    expect(large.h).toBeLessThan(computeBoardLayout(W).boardH);
+    // Too narrow for a board: no shelves either
+    expect(computeBookshelfRuns(120)).toEqual([]);
+  });
+
+  it('spare desks fill the row below a single pod row and vanish as the office fills', () => {
+    const one = computePodLayout(agentsOn(['a', '/r/one'], ['b', '/r/two']), W, H);
+    const decor = computeDecorPlacement(one.pods.map(podRugRect), W, H);
+    const spare = computeSpareDesks(one.pods, decor, W, H);
+    expect(spare.length).toBe(3);
+    expect(spare.map(d => d.variant)).toEqual([0, 1, 0]);
+    // One row-pitch below the real row, on the desk grid, centred
+    for (const d of spare) expect(d.y).toBe(one.pods[0].y + (WS_H + WS_GAP_Y) * Z);
+    expect(spare[1].x - spare[0].x).toBe((WS_W + WS_GAP_X) * Z);
+    expect(Math.abs((spare[0].x + spare[2].x + WS_W * Z) / 2 - W / 2)).toBeLessThanOrEqual(1);
+    // Clear of the chat area and the panel bottom
+    const chat = decor.find(s => s.kind === 'chat');
+    expect(spare[0].y + WS_H * Z + 6 * Z).toBeLessThanOrEqual(chat.y);
+    // One pod: the spare desks share the real desks' columns
+    const solo = computePodLayout(agentsOn(['a', '/r/one'], ['b', '/r/one']), W, H);
+    const soloSpare = computeSpareDesks(solo.pods, [], W, H);
+    const colOf = (x) => ((x - solo.pods[0].x) % ((WS_W + WS_GAP_X) * Z) + (WS_W + WS_GAP_X) * Z) % ((WS_W + WS_GAP_X) * Z);
+    for (const d of soloSpare) expect(colOf(d.x)).toBe(0);
+
+    // Two rows of real pods: none
+    const two = computePodLayout(agentsOn(['a', '/r/one'], ['b', '/r/one'], ['c', '/r/one'], ['d', '/r/one'], ['e', '/r/one']), W, H);
+    expect(two.pods[0].h).toBeGreaterThan(WS_H * Z);
+    expect(computeSpareDesks(two.pods, computeDecorPlacement(two.pods.map(podRugRect), W, H), W, H)).toEqual([]);
+    // Two pod rows (wrapped): none
+    const wrapped = computePodLayout(agentsOn(['a', '/r/one'], ['b', '/r/two']), 2 * (WS_W + 4) * Z, H);
+    expect(new Set(wrapped.pods.map(p => p.y)).size).toBe(2);
+    expect(computeSpareDesks(wrapped.pods, [], 2 * (WS_W + 4) * Z, H)).toEqual([]);
+    // Short panel: the spare row would intrude on the chat area
+    const short = computePodLayout(agentsOn(['a', '/r/one']), W, 600);
+    const shortDecor = computeDecorPlacement(short.pods.map(podRugRect), W, 600);
+    expect(shortDecor.map(s => s.kind)).toContain('chat');
+    expect(computeSpareDesks(short.pods, shortDecor, W, 600)).toEqual([]);
+    // Empty office: no real row to sit below
+    expect(computeSpareDesks([], computeDecorPlacement([], W, H), W, H)).toEqual([]);
+    // Narrow panel: only as many spare desks as columns fit (300px → 2)
+    const narrow = computePodLayout(agentsOn(['a', '/r/one']), 300, H);
+    expect(computeSpareDesks(narrow.pods, [], 300, H).length).toBe(2);
+    // No decor at all, but the row would run into the panel bottom: none
+    const shallow = computePodLayout(agentsOn(['a', '/r/one']), W, 500);
+    expect(computeSpareDesks(shallow.pods, [], W, 500)).toEqual([]);
+  });
+
+  it('the walk-in entrance stands on bare floor, clear of the bottom decor', () => {
+    for (const w of [440, 458, W]) {
+      const e = entryPoint(w, H);
+      const walker = { x: e.x, y: e.y, w: 16 * 2, h: 32 * 2 };
+      for (const s of computeDecorPlacement([], w, H)) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
+    }
   });
 
   it('decor spots never overlap each other, even on a narrow panel', () => {
