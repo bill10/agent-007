@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, computeConference, entryPoint } =
+const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, computeConference, entryPoint, entryRoute } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -328,11 +328,86 @@ describe('pod layout', () => {
     expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
   });
 
-  it('the walk-in entrance stands on bare floor, clear of the bottom decor', () => {
+  it('the walk-in entrance stands on bare floor, clear of the decor and the conference chairs', () => {
     for (const w of [440, 458, W]) {
       const e = entryPoint(w, H);
       const walker = { x: e.x, y: e.y, w: 16 * 2, h: 32 * 2 };
-      for (const s of computeDecorPlacement([], w, H)) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
+      const decor = computeDecorPlacement([], w, H);
+      for (const s of decor) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
+      const conf = computeConference([], [], decor, w, H);
+      for (const c of conf.chairs) expect(overlaps(walker, { ...c, w: 16 * Z, h: 16 * Z }), `panel ${w}: chair`).toBe(false);
+    }
+  });
+
+  it('the walk in/out route around a conference set clears the chairs and crosses above the table', () => {
+    // 1000px tall: one pod row plus the spare desks still leave the set room to place
+    const T = 1000;
+    const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const conf = computeConference(rugs, computeSpareDesks(pods, decor, W, T), decor, W, T);
+    expect(conf).not.toBeNull();
+    const entry = entryPoint(W, T);
+    const desk = positions.get('a');
+    const chairs = conf.chairs.map(c => ({ ...c, w: 16 * Z, h: 16 * Z }));
+    for (const inbound of [true, false]) {
+      const p = entryRoute(desk, entry, conf, inbound);
+      const [start, end] = inbound ? [entry, desk] : [desk, entry];
+      expect(p.from).toEqual(start);
+      const last = p.legs[p.legs.length - 1];
+      expect({ x: last.x1, y: last.y1 }).toEqual(end);
+      for (const l of p.legs) {
+        expect(l.x0 === l.x1 || l.y0 === l.y1, 'axis-aligned leg').toBe(true);
+        const swept = { x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
+          w: Math.abs(l.x1 - l.x0) + 16 * 2, h: Math.abs(l.y1 - l.y0) + 32 * 2 };
+        for (const c of chairs) expect(overlaps(swept, c), `${inbound ? 'in' : 'out'}: chair at ${c.x},${c.y}`).toBe(false);
+      }
+      // The crossing leg is the corridor above the table, not through it
+      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      expect(across.y0).toBeLessThan(conf.table.y);
+    }
+  });
+
+  it('spare desks and the conference set keep out of the entry strip on narrow panels', () => {
+    const STRIP = Z + 16 * 2;
+    // Spare rows that would centre into the strip drop a desk instead of sitting on the entrance
+    for (const [w, ids] of [[420, ['a', 'b', 'c']], [260, ['a']]]) {
+      const { pods } = computePodLayout(agentsOn(...ids.map(id => [id, '/r/one'])), w, H);
+      const spares = computeSpareDesks(pods, computeDecorPlacement(pods.map(podRugRect), w, H), w, H);
+      expect(spares.length, `panel ${w}`).toBeGreaterThan(0);
+      for (const d of spares) expect(d.x, `panel ${w}`).toBeGreaterThanOrEqual(STRIP);
+    }
+    // The set yields while its left chairs would overhang the strip, and clears it once placed
+    expect(computeConference([], [], [], 297, 1100)).toBeNull();
+    for (const w of [298, 320, 440]) {
+      const conf = computeConference([], [], [], w, 1100);
+      expect(conf, `panel ${w}`).not.toBeNull();
+      for (const c of conf.chairs) expect(c.x, `panel ${w}`).toBeGreaterThanOrEqual(STRIP);
+    }
+  });
+
+  it('with no conference set the walk in/out corridors along the bottom edge, not through mid-floor desks', () => {
+    // 8 agents on a 700px panel: two pod rows, no room for the set
+    const ids = Array.from({ length: 8 }, (_, i) => [`s${i}`, '/r/one']);
+    const { pods, positions } = computePodLayout(agentsOn(...ids), 700, 800);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, 700, 800);
+    expect(computeConference(rugs, computeSpareDesks(pods, decor, 700, 800), decor, 700, 800)).toBeNull();
+    const entry = entryPoint(700, 800), desk = positions.get('s7');
+    for (const inbound of [true, false]) {
+      const p = entryRoute(desk, entry, null, inbound, 800);
+      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      expect(across.y0).toBe(800 - 32 * 2);
+      // Only the destination's own desk is touched: every other desk is clear of every leg
+      for (const [id, d] of positions) {
+        if (id === 's7') continue;
+        const desk = { x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z };
+        for (const l of p.legs) {
+          const swept = { x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
+            w: Math.abs(l.x1 - l.x0) + 16 * 2, h: Math.abs(l.y1 - l.y0) + 32 * 2 };
+          expect(overlaps(swept, desk), `${inbound ? 'in' : 'out'}: desk ${id}`).toBe(false);
+        }
+      }
     }
   });
 
