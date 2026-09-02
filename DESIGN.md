@@ -243,10 +243,15 @@ lays out against a 0x0 room.
 
 ### Transient motion
 - **Walk in/out:** a newly spawned agent walks in from the entrance
-  (the bottom-left corner strip the chat margin leaves free) to its desk;
-  with a conference set on the floor the route climbs the clear left-edge
-  strip, crosses the corridor above the set, then takes the desk column
-  (`entryRoute`) — a plain L-path otherwise. A departing agent walks out the
+  (the middle of the left edge of the floor, on the strip the chat margin
+  and the conference chairs leave free) to its desk; with a conference set
+  on the floor the route follows the clear left-edge strip to the corridor
+  above the set, crosses it, then takes the desk column (`entryRoute`);
+  with no set the corridor is the bottom edge, in front of the chat
+  furniture. Spare desks drop a column and the conference set yields rather
+  than reach into the entry strip (`ENTRY_STRIP_W`), so the entrance and its
+  strip stay clear of everything that can move; a full-width pod row can
+  still overlap it, like the verticals always could. A departing agent walks out the
   same way before its desk disappears — from its conference seat, or from
   its current point mid-wander, if it was away from the desk. While a walk
   plays, the motion overlay draws the character instead of the seated pass.

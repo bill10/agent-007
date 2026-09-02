@@ -56,6 +56,9 @@ const CHAR_SCALE = 2; // 16px art in a 32px-tile office — 2x keeps pixels squa
 const CHAR_ROW_DOWN = 0, CHAR_ROW_UP = 1, CHAR_ROW_RIGHT = 2;
 const CHAR_COL_STAND = 1, CHAR_COL_TYPE = 3;
 const CHAR_W = CHAR_FRAME_W * CHAR_SCALE, CHAR_H = CHAR_FRAME_H * CHAR_SCALE;
+// The left-edge lane the walk in/out entrance and its strip occupy: furniture
+// that can yield (spare desks, the conference set) keeps out of it.
+const ENTRY_STRIP_W = Z + CHAR_W;
 
 // Deterministic variant per agent id, stable across renders and reorders.
 export function charVariant(id) {
@@ -300,7 +303,8 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
   // plants sit below the chat tops so this changes nothing, but if the chats
   // ever yield while the plants place, the set must not land on the plants.
   const bandBottom = Math.min(panelHeight - 3 * Z, ...decorSpots.map(s => s.y));
-  if (panelWidth < CONF_SET_W || bandBottom - bandTop < CONF_SET_H + 2 * DECOR_MARGIN) return null;
+  // The chair overhang must also clear the entry strip on the left.
+  if (panelWidth < CONF_SET_W + 2 * ENTRY_STRIP_W || bandBottom - bandTop < CONF_SET_H + 2 * DECOR_MARGIN) return null;
   const tx = Math.floor((panelWidth - CONF_TABLE_W) / 2);
   const ty = bandTop + Math.floor((bandBottom - bandTop - CONF_SET_H) / 2) + 18;
   const chairs = [
@@ -335,17 +339,22 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
 const SPARE_DESKS = 3;
 export function computeSpareDesks(pods, decorSpots, panelWidth, panelHeight) {
   if (!pods.length || pods.some(p => p.y !== pods[0].y || p.h !== WS_H * Z)) return [];
-  const n = Math.min(SPARE_DESKS, maxColsFor(panelWidth));
   const pitch = (WS_W + WS_GAP_X) * Z;
-  const rowW = (n * WS_W + (n - 1) * WS_GAP_X) * Z;
+  const cols = Math.round((pods[0].w + WS_GAP_X * Z) / pitch);
   // On the real row's column grid when it is one pod (centred on it, to the
   // nearest column); a multi-pod row has no single grid, so centre on the panel.
-  // Fall back to centring when the aligned row would run off the panel.
-  const cols = Math.round((pods[0].w + WS_GAP_X * Z) / pitch);
-  let x = pods.length === 1 ? pods[0].x + Math.round((cols - n) / 2) * pitch : Math.floor((panelWidth - rowW) / 2);
-  if (x < 0 || x + rowW > panelWidth) x = Math.floor((panelWidth - rowW) / 2);
+  // Fall back to centring when the aligned row would run off the panel. A row
+  // that would reach into the entry strip drops a desk until it clears.
+  let n = Math.min(SPARE_DESKS, maxColsFor(panelWidth)), x, rowW;
+  for (; n > 0; n--) {
+    rowW = (n * WS_W + (n - 1) * WS_GAP_X) * Z;
+    x = pods.length === 1 ? pods[0].x + Math.round((cols - n) / 2) * pitch : Math.floor((panelWidth - rowW) / 2);
+    if (x < 0 || x + rowW > panelWidth) x = Math.floor((panelWidth - rowW) / 2);
+    if (x >= ENTRY_STRIP_W) break;
+  }
+  if (n === 0) return [];
   const row = { x, y: pods[0].y + (WS_H + WS_GAP_Y) * Z, w: rowW, h: WS_H * Z };
-  if (row.x < 0 || row.y + row.h + DECOR_MARGIN > panelHeight || !decorSpots.every(s => apart(row, s))) return [];
+  if (row.y + row.h + DECOR_MARGIN > panelHeight || !decorSpots.every(s => apart(row, s))) return [];
   return Array.from({ length: n }, (_, i) => ({ x: row.x + i * pitch, y: row.y, variant: i % 2 }));
 }
 
@@ -1352,12 +1361,11 @@ export function hasMotion() {
   return paperAnims.length > 0 || walkAnims.size > 0 || wanderAnims.size > 0;
 }
 
-// Entrance: the bottom-left corner, in the strip the chat margin leaves free
-// — the rest of the bottom edge belongs to the chat areas and the divider
-// plants. The character walks along the bottom (in front of the chat
-// furniture) to its desk column, then up to the chair.
+// Entrance: the middle of the left edge of the floor, on the clear strip the
+// chat margin and the conference chairs both leave free. Routes join it via
+// that strip (entryRoute), so the walker never starts on furniture.
 export function entryPoint(w, h) {
-  return { x: Z, y: h - CHAR_H };
+  return { x: Z, y: Math.round((FLOOR_TOP + h - CHAR_H) / 2) };
 }
 
 // Multi-leg route between a desk and a conference seat that stays off the
@@ -1389,25 +1397,25 @@ function wanderRoute(desk, seat, conf, toSeat) {
   return pathThrough(pts);
 }
 
-// Walk in/out routes bend around the conference set the same way: up the
-// clear left-edge strip (the chat margin keeps it free), across the corridor
-// above the set, then the desk column. A walk-out whose start column would
-// ascend through the table (a foot-seat sitter) detours via the left lane
-// first. Plain L-path when there is no conference set on the floor.
-function entryRoute(point, entry, conf, inbound) {
-  if (!conf) return inbound ? walkPath(entry, point, false) : walkPath(point, entry, true);
-  const t = conf.table;
-  const yMid = t.y - 24;
-  const lanes = confLanes(conf);
+// Walk in/out routes bend around the conference set the same way: along the
+// clear left-edge strip (the chat margin keeps it free) from the entrance to
+// the corridor above the set, across, then the desk column. A walk-out whose
+// start column would ascend through the table (a foot-seat sitter) detours
+// via the left lane first. With no conference set on the floor the corridor
+// is the bottom edge instead (in front of the chat furniture), so the
+// crossing never runs through a mid-floor desk row.
+export function entryRoute(point, entry, conf, inbound, panelHeight) {
+  const yMid = conf ? conf.table.y - 24 : panelHeight - CHAR_H;
   // A start below the corridor inside the set's footprint — chair overhang
   // included — climbs out via the nearest outer lane; anywhere else its own
   // column is already clear.
-  let climb;
-  if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 && point.y > t.y) {
-    const laneX = point.x < t.x + t.w / 2 ? lanes.left : lanes.right;
-    climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
-  } else {
-    climb = [{ x: point.x, y: yMid }];
+  let climb = [{ x: point.x, y: yMid }];
+  if (conf) {
+    const t = conf.table;
+    if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 && point.y > t.y) {
+      const laneX = point.x < t.x + t.w / 2 ? confLanes(conf).left : confLanes(conf).right;
+      climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
+    }
   }
   const pts = [{ x: point.x, y: point.y }, ...climb, { x: entry.x, y: yMid }, { x: entry.x, y: entry.y }];
   if (inbound) pts.reverse();
@@ -1424,9 +1432,9 @@ function pathThrough(pts) {
   return { from: { x: pts[0].x, y: pts[0].y }, legs, total };
 }
 
-// L-shaped route between two points. Walking in goes across first, then up to
-// the desk; walking out goes down from the desk first, then across to the
-// entrance — verticalFirst picks which.
+// L-shaped route between two points; verticalFirst picks which leg comes
+// first. No longer on the walk in/out path (entryRoute always corridors);
+// kept exported for its tests and any plain-bend caller.
 export function walkPath(from, to, verticalFirst) {
   const legs = [];
   const bend = verticalFirst ? { x: from.x, y: to.y } : { x: to.x, y: from.y };
@@ -1613,9 +1621,9 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = entryRoute(to, entry, currentConf, true);
+      path = entryRoute(to, entry, currentConf, true, h);
     } else {
-      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false);
+      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false, h);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {

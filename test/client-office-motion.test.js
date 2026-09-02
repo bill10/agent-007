@@ -10,12 +10,12 @@ const { entryPoint, walkPath, pointAlongPath, detectDispatches } =
 describe('walk path', () => {
   const from = { x: 100, y: 200 }, to = { x: 40, y: 80 };
 
-  it('entry point sits inside the bottom edge of the panel', () => {
-    const e = entryPoint(600, 400);
+  it('entry point sits on the left edge, halfway down the floor', () => {
+    const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_H = 64;
+    const e = entryPoint(600, 800);
     expect(e.x).toBeGreaterThan(0);
-    expect(e.x).toBeLessThan(600);
-    expect(e.y).toBeLessThan(400);
-    expect(e.y).toBeGreaterThan(400 - 100);
+    expect(e.x).toBeLessThan(40);
+    expect(e.y).toBe(Math.round((FLOOR_TOP + 800 - CHAR_H) / 2));
   });
 
   it('is L-shaped with total equal to the manhattan distance', () => {
@@ -263,5 +263,44 @@ describe('idle wander', () => {
     state.agents.set('si', { state: 'IDLE', repoPath: '/r', repoSlug: 'r' });
     office.noteAgentDeparture('si');
     expect(office.hasMotion()).toBe(true); // walk-out, from the seat
+  });
+});
+
+// Walk in/out: drawn through renderOffice on the same 1000px-tall canvas as
+// the wander, so the route bends around a placed conference set.
+describe('walk in/out', () => {
+  const later = (ms) => { const t0 = performance.now(); return vi.spyOn(performance, 'now').mockReturnValue(t0 + ms); };
+
+  it('walks a new agent in to its desk, and gives up on one that never reaches the floor', async () => {
+    const { office, state } = await freshMotion();
+    canvasDom(600, 1000);
+    office.noteJobsUpdate(); // connect sync complete
+    office.noteAgentArrival('s1');
+    office.noteAgentArrival('ghost');
+    office.renderOffice(); // no desks yet — both walks wait for the agent map
+    expect(office.hasMotion()).toBe(true);
+    state.agents.set('s1', { state: 'WORKING', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice(); // s1's route resolves and the walk starts
+    expect(office.hasMotion()).toBe(true);
+    const spy = later(60000);
+    office.renderOffice(); // s1 arrived; ghost waited past its 4s grace
+    spy.mockRestore();
+    expect(office.hasMotion()).toBe(false);
+  });
+
+  it('walks a departing agent out to the entrance and clears the floor', async () => {
+    const { office, state } = await freshMotion();
+    canvasDom(600, 1000);
+    office.noteJobsUpdate();
+    state.agents.set('sa', { state: 'WORKING', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice(); // seated at its desk, conference set placed
+    office.noteAgentDeparture('sa');
+    state.agents.delete('sa'); // desk gone; the walk-out keeps its captured start
+    office.renderOffice();
+    expect(office.hasMotion()).toBe(true);
+    const spy = later(60000);
+    office.renderOffice();
+    spy.mockRestore();
+    expect(office.hasMotion()).toBe(false);
   });
 });
