@@ -260,7 +260,8 @@ lays out against a 0x0 room.
   table leaves late idlers at their desks, pre-existing idle agents render
   seated on connect (no replay walk), read-only colleagues stay at their
   desks (where their dimming and owner label live), and the whole thing
-  clears if the conference set vanishes on resize (`updateWander`).
+  clears if the conference set vanishes on resize (`updateWander`). Clicking
+  a seated character switches to its terminal, same as clicking its desk.
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
 - All motion is client-side and time-based: animations never replay on page
