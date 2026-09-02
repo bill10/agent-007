@@ -616,9 +616,12 @@ the same shape as the terminal's upload, and land under
   (`lib/helpers.js`) is the one sanitiser for every client-supplied name,
   terminal uploads included; it also prefixes Windows device names.
 - **Freed at Done.** A card is a few lines of JSON and stays forever; its
-  files can be megabytes and were inputs to a run that is now over. The moment
-  a card reaches Done — by hand or by the merge sweep — its files and their
-  links are removed. Deleting a card earlier removes its directory too.
+  files can be megabytes and were inputs to a run that is now over. When a
+  card reaches Done — by hand or by the merge sweep — its files and their
+  links are removed, except while a live agent is still attached (a re-adopted
+  Review agent keeps the paths its prompt named). The merge sweep retries
+  stragglers every scan, so a deferred or OS-refused removal is reclaimed
+  later instead of leaking. Deleting a card earlier removes its directory too.
 
 ## Interactive Behaviors
 

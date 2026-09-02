@@ -410,6 +410,27 @@ describe('checkMergedPullRequests', () => {
     expect(existsSync(join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id))).toBe(false);
   });
 
+  it('keeps the files while a re-adopted agent is live, frees them on a later sweep once it exits', async () => {
+    const job = await inReview();
+    // A live agent re-adopted onto the Review card: the sweep deliberately
+    // does not retire it, so its prompt's file paths must stay readable.
+    sessions.set('s-live', { id: 's-live', exited: false, branchName: job.branchName, repoPath: REPO });
+    job.agentSessionId = 's-live';
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: merged({ url: 'https://gh/o/r/pull/5', number: 5, mergedAt: '2026-08-28T10:00:00Z' }),
+    });
+    expect(job.state).toBe('done');
+    expect(job.attachments).toHaveLength(1);
+    const dir = join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id);
+    expect(existsSync(dir)).toBe(true);
+    // Once the session ends, the next sweep's retry pass reclaims the disk —
+    // even though the done card is no longer a merge candidate.
+    sessions.get('s-live').exited = true;
+    await checkMergedPullRequests(noopBroadcast, { findMerged: merged(null) });
+    expect(job.attachments).toEqual([]);
+    expect(existsSync(dir)).toBe(false);
+  });
+
   it('leaves a job in review while its PR is still open', async () => {
     const job = await inReview();
     await checkMergedPullRequests(noopBroadcast, { findMerged: merged(null) });

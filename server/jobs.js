@@ -207,17 +207,44 @@ export function attachmentPath(jobId, name) {
 // and were inputs to a run that is now over. Done is terminal, so the moment a
 // card gets there — by hand or by the merge sweep — the disk comes back. The
 // records go with the files: an archive card full of 404 links says less than
-// none. On a failure the list is kept, so the files stay owned by the card and
-// still go when it is deleted.
+// none. On a failure (or a path the containment check refuses) the list is
+// kept, so the files stay owned by the card and still go when it is deleted.
+// Returns whether anything changed, so callers know to persist.
 function clearAttachments(job) {
-  if (!(job.attachments || []).length) return;
+  if (!(job.attachments || []).length) return false;
   const dir = attachmentDir(job.id);
+  if (!insideAttachments(dir)) return false;
   try {
-    if (insideAttachments(dir)) rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true });
     job.attachments = [];
+    return true;
   } catch (err) {
     console.error(`Failed to remove attachments for finished job "${job.title}":`, err.message);
+    return false;
   }
+}
+
+// True while a live agent may still be reading this card's files: its prompt
+// named their absolute paths at dispatch — the same hazard updateJob's To-do
+// gate exists for — and the merge sweep deliberately keeps a re-adopted
+// Review agent running when its PR lands.
+function attachmentsInUse(job) {
+  const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
+  return !!session && !session.exited;
+}
+
+// Done cards whose files are still on disk: a clear the OS refused (a file
+// open in a browser tab on Windows), or one deferred while the card's agent
+// was still alive. Done is terminal, so without this per-sweep retry a single
+// failure would leak the directory for as long as the archive keeps the card.
+function clearFinishedAttachments() {
+  let cleared = false;
+  for (const job of allJobs()) {
+    if (job.state === 'done' && (job.attachments || []).length && !attachmentsInUse(job)) {
+      if (clearAttachments(job)) cleared = true;
+    }
+  }
+  return cleared;
 }
 
 // --- CRUD ---
@@ -1108,9 +1135,15 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   // Scheduled cards are excluded for the same reason checkPullRequests skips
   // them, only more so: done is terminal, so a scheduled run whose work merged
   // would leave the board for good instead of re-arming for its next run.
+  // Before the early return, so a card with nothing left to merge still gets
+  // its straggler files freed.
+  const recleared = clearFinishedAttachments();
   const candidates = allJobs().filter(j =>
     (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && !isScheduled(j));
-  if (candidates.length === 0) return [];
+  if (candidates.length === 0) {
+    if (recleared) persist(broadcast);
+    return [];
+  }
   const finished = [];
   let noted = false;   // a PR-check failure was recorded on some card
   for (const job of candidates) {
@@ -1155,7 +1188,6 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
     if (pr.url) job.prUrl = pr.url;
     if (pr.number != null) job.prNumber = pr.number;
     if (!job.reviewAt) job.reviewAt = job.doneAt;
-    clearAttachments(job);
     finished.push(job);
 
     // Leaving in-progress is what the cap counts, so that agent goes — same
@@ -1163,6 +1195,10 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
     const closed = askedState === 'in-progress'
       ? await retireAgentForJob(job, askedBranch, askedSessionId, killSession)
       : false;
+    // After the retire, so a just-killed agent no longer counts as in use.
+    // A card whose live agent was kept holds its files; the retry pass at the
+    // top of this sweep frees them once that session exits.
+    if (!attachmentsInUse(job)) clearAttachments(job);
     if (broadcast) {
       broadcast({
         type: 'notification', level: 'info',
@@ -1171,7 +1207,7 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
       });
     }
   }
-  if (finished.length > 0 || noted) persist(broadcast);
+  if (finished.length > 0 || noted || recleared) persist(broadcast);
   return finished;
 }
 
