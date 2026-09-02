@@ -100,6 +100,11 @@ export async function handleSessionCreated(msg) {
 
   const term = new Terminal({
     theme: getTerminalTheme(),
+    // Agents inside the PTY (e.g. Claude Code) pick their own truecolor text
+    // for prompts and can't see the browser theme — dark-on-dark otherwise.
+    // xterm nudges any foreground below WCAG AA toward readable, live, in
+    // both themes, without touching colors that already pass.
+    minimumContrastRatio: 4.5,
     fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace",
     fontSize: 13,
     cursorBlink: true,
