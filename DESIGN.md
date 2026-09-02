@@ -243,11 +243,13 @@ lays out against a 0x0 room.
 
 ### Transient motion
 - **Walk in/out:** a newly spawned agent walks in from the entrance
-  (the bottom-left corner strip the chat margin leaves free) to its desk along
-  an L-shaped path, across first so it passes in front of the chat furniture;
-  a departing agent walks out the same way before its desk disappears — from
-  its conference seat instead if it was sitting there. While a walk plays,
-  the motion overlay draws the character instead of the seated pass.
+  (the bottom-left corner strip the chat margin leaves free) to its desk;
+  with a conference set on the floor the route climbs the clear left-edge
+  strip, crosses the corridor above the set, then takes the desk column
+  (`entryRoute`) — a plain L-path otherwise. A departing agent walks out the
+  same way before its desk disappears — from its conference seat, or from
+  its current point mid-wander, if it was away from the desk. While a walk
+  plays, the motion overlay draws the character instead of the seated pass.
 - **Idle wander:** an IDLE agent claims a free conference seat, walks over
   and sits there — facing the viewer at the head, sideways on the side
   chairs, away at the foot — until its state changes, then walks back to its

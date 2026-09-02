@@ -1372,6 +1372,27 @@ function wanderRoute(desk, seat, conf, toSeat) {
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
   pts.push(seat);
   if (!toSeat) pts.reverse();
+  return pathThrough(pts);
+}
+
+// Walk in/out routes bend around the conference set the same way: up the
+// clear left-edge strip (the chat margin keeps it free), across the corridor
+// above the set, then the desk column. A walk-out whose start column would
+// ascend through the table (a foot-seat sitter) detours via the left lane
+// first. Plain L-path when there is no conference set on the floor.
+function entryRoute(point, entry, conf, inbound) {
+  if (!conf) return inbound ? walkPath(entry, point, false) : walkPath(point, entry, true);
+  const t = conf.table;
+  const yMid = t.y - 24;
+  const climb = point.x + CHAR_W > t.x && point.x < t.x + t.w && point.y > t.y
+    ? [{ x: t.x - 34, y: point.y }, { x: t.x - 34, y: yMid }]
+    : [{ x: point.x, y: yMid }];
+  const pts = [{ x: point.x, y: point.y }, ...climb, { x: entry.x, y: yMid }, { x: entry.x, y: entry.y }];
+  if (inbound) pts.reverse();
+  return pathThrough(pts);
+}
+
+function pathThrough(pts) {
   const legs = [];
   for (let i = 1; i < pts.length; i++) {
     const a = pts[i - 1], b = pts[i];
@@ -1570,9 +1591,9 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = walkPath(entry, to, false);
+      path = entryRoute(to, entry, currentConf, true);
     } else {
-      path = walkPath({ x: anim.fromX, y: anim.fromY }, entry, true);
+      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
