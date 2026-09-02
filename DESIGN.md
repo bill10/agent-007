@@ -243,8 +243,10 @@ lays out against a 0x0 room.
 
 ### Transient motion
 - **Walk in/out:** a newly spawned agent walks in from the entrance
-  (bottom-center) to its desk along an L-shaped path; a departing agent walks
-  out the same way before its desk disappears. While a walk plays, the motion
+  (bottom-left, just right of the corner plant, since the bottom centre is the
+  chat area) to its desk along an L-shaped path, across first so it passes in
+  front of the chat furniture; a departing agent walks out the same way before
+  its desk disappears. While a walk plays, the motion
   overlay draws the character instead of the seated pass.
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
