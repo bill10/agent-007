@@ -1315,6 +1315,7 @@ const walkAnims = new Map();  // sessionId -> { dir: 'in'|'out', start, queuedAt
 const confSeats = new Map();   // sessionId -> seat index (walking there, or seated)
 const wanderAnims = new Map(); // sessionId -> { dir: 'seat'|'desk', start, variant, fromX, fromY }
 let currentConf = null;        // this frame's computeConference result, for drawMotion + departures
+let currentObstacles = [];     // this frame's furniture rects, for the walk routes
 
 function updateWander(conf) {
   if (!conf) { confSeats.clear(); wanderAnims.clear(); return; }
@@ -1397,22 +1398,54 @@ function wanderRoute(desk, seat, conf, toSeat) {
   return pathThrough(pts);
 }
 
-// Walk in/out routes bend around the conference set the same way: along the
-// clear left-edge strip (the chat margin keeps it free) from the entrance to
-// the corridor above the set, across, then the desk column. A walk-out whose
-// start column would ascend through the table (a foot-seat sitter) detours
-// via the left lane first. With no conference set on the floor the corridor
-// is the bottom edge instead (in front of the chat furniture), so the
-// crossing never runs through a mid-floor desk row.
-export function entryRoute(point, entry, conf, inbound, panelHeight) {
-  const yMid = conf ? conf.table.y - 24 : panelHeight - CHAR_H;
-  // A start below the corridor inside the set's footprint — chair overhang
-  // included — climbs out via the nearest outer lane; anywhere else its own
-  // column is already clear.
+// Every rect a walk route must not cross, in one list: pod rugs, spare desks,
+// decor (chat areas + plants) and the conference set with its chair overhang.
+export function walkObstacles(rugs, decor, spares, conf) {
+  const rects = [...rugs, ...decor, ...spares.map(d => ({ x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z }))];
+  if (conf) {
+    const t = conf.table;
+    rects.push({ x: t.x - 42, y: t.y - 18, w: t.w + 84, h: t.h + 50 });
+  }
+  return rects;
+}
+
+// The clear corridor row nearest y: the obstacles' vertical spans, inverted
+// into the gaps between them, gaps too narrow for a character dropped, the
+// rest ranked by how close to y a walker can stand in them. Spans count full
+// width — a rug half-way across still rules its rows out, which is what keeps
+// this a scan rather than a search. null when nothing is clear.
+export function corridorY(obstacles, panelHeight, y) {
+  const spans = obstacles.map(r => [r.y, r.y + r.h]).sort((a, b) => a[0] - b[0]);
+  spans.push([panelHeight, panelHeight]);
+  let top = FLOOR_TOP, best = null;
+  for (const [s, e] of spans) {
+    if (s - top >= CHAR_H) {
+      const cand = Math.round(Math.min(Math.max(y, top), s - CHAR_H));
+      if (best === null || Math.abs(cand - y) < Math.abs(best - y)) best = cand;
+    }
+    top = Math.max(top, e);
+  }
+  return best;
+}
+
+// Walk in/out routes: from the fixed door at the middle of the left edge,
+// along the clear left-edge strip (the chat margin and the conference chairs
+// both keep it free) to the empty floor row nearest the desk, across it, then
+// up or down the desk column. A walk-out starting inside the conference set
+// (a foot-seat sitter) steps out via the nearest outer lane first. The desk
+// column leg is the approach: it crosses whatever rows lie between the
+// corridor and the desk, exactly as the verticals always have. With no clear
+// row at all (a packed panel) it falls back to the old fixed corridor.
+export function entryRoute(point, entry, conf, inbound, panelHeight, obstacles = []) {
+  const yMid = corridorY(obstacles, panelHeight, point.y)
+    ?? (conf ? conf.table.y - 24 : panelHeight - CHAR_H);
+  // A start inside the set's footprint — chair overhang included — steps out
+  // via the nearest outer lane; anywhere else its own column is already clear.
   let climb = [{ x: point.x, y: yMid }];
   if (conf) {
     const t = conf.table;
-    if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 && point.y > t.y) {
+    if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 &&
+        point.y + CHAR_H > t.y - 18 && point.y < t.y + t.h + 32) {
       const laneX = point.x < t.x + t.w / 2 ? confLanes(conf).left : confLanes(conf).right;
       climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
     }
@@ -1430,19 +1463,6 @@ function pathThrough(pts) {
   }
   const total = legs.reduce((s, l) => s + Math.abs(l.x1 - l.x0) + Math.abs(l.y1 - l.y0), 0);
   return { from: { x: pts[0].x, y: pts[0].y }, legs, total };
-}
-
-// L-shaped route between two points; verticalFirst picks which leg comes
-// first. No longer on the walk in/out path (entryRoute always corridors);
-// kept exported for its tests and any plain-bend caller.
-export function walkPath(from, to, verticalFirst) {
-  const legs = [];
-  const bend = verticalFirst ? { x: from.x, y: to.y } : { x: to.x, y: from.y };
-  for (const [a, b] of [[from, bend], [bend, to]]) {
-    if (a.x !== b.x || a.y !== b.y) legs.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y });
-  }
-  const total = legs.reduce((s, l) => s + Math.abs(l.x1 - l.x0) + Math.abs(l.y1 - l.y0), 0);
-  return { from, legs, total };
 }
 
 // Point and heading a given distance along the path. Clamps to the endpoints.
@@ -1621,9 +1641,9 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = entryRoute(to, entry, currentConf, true, h);
+      path = entryRoute(to, entry, currentConf, true, h, currentObstacles);
     } else {
-      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false, h);
+      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false, h, currentObstacles);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
@@ -1711,6 +1731,7 @@ export function renderOffice() {
   for (const d of spares) drawWorkstation(ctx, d.x, d.y, 'DISCONNECTED', theme, d.variant, null);
   // Conference table in the open band below them; idle agents wander over
   currentConf = computeConference(rugs, spares, decor, w, h);
+  currentObstacles = walkObstacles(rugs, decor, spares, currentConf);
   updateWander(currentConf);
   if (currentConf) drawConference(ctx, currentConf);
 
