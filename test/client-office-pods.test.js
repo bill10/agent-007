@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS } =
+const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeWallPlants, computeBoardLayout } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -189,6 +189,31 @@ describe('pod layout', () => {
 
   it('every sprite path points at a file that exists (a missing one silently drops its decor group)', () => {
     for (const [key, path] of Object.entries(SPRITE_PATHS)) expect(existsSync('public/' + path), key).toBe(true);
+  });
+
+  it('wall plants are centred in the gaps between the boards and stand shorter than them', () => {
+    for (const w of [280, 440, 600, W]) {
+      const board = computeBoardLayout(w);
+      const half = Math.floor(board.boardW / 2);
+      const plants = computeWallPlants(w);
+      expect(plants.map(p => p.key)).toEqual(['cactus', 'plant2']);
+      plants.forEach((p, i) => {
+        const gapL = board.sections[i].centerX + half;      // right edge of the board on the left
+        const gapR = board.sections[i + 1].centerX - half;  // left edge of the board on the right
+        expect(p.x, `panel ${w}`).toBeGreaterThanOrEqual(gapL);
+        expect(p.x + p.w, `panel ${w}`).toBeLessThanOrEqual(Math.min(gapR, w));
+        expect(Math.abs((p.x - gapL) - (gapR - p.x - p.w)), `panel ${w} centred`).toBeLessThanOrEqual(1);
+        expect(p.h).toBeLessThan(board.boardH);
+        // Pot bottoms sit just off the baseboard, a hair above the board feet
+        expect(p.y + p.h).toBe(board.wallBottom + 5 * Z);
+        expect(p.y + p.h).toBeLessThan(board.footY);
+      });
+    }
+    // Too narrow for a board: no plants either
+    expect(computeWallPlants(120)).toEqual([]);
+    // The floor plant is decor too, not furniture: shorter than a board
+    const large = computeDecorPlacement([], W, H).find(s => s.kind === 'largeplant');
+    expect(large.h).toBeLessThan(computeBoardLayout(W).boardH);
   });
 
   it('decor spots never overlap each other, even on a narrow panel', () => {

@@ -259,13 +259,19 @@ lays out against a 0x0 room.
 - **Floor:** Warm wood planks, fixed base `#4a3525`
 - **Windows:** Two windows with day/night cycle based on local time
 - **Job boards:** Three freestanding whiteboards on A-frame stands (not wall-mounted), standing almost against the back wall, one in each wall section (either side of the windows and between them). Titled TO DO / IN PROGRESS / REVIEW after the columns of the `## Job Board` feature below, and kept in step with `JOB_STATES` by a test. Since v0.3.16.0 the pinned posts are live: each board pins one paper per job in its column (a fixed grid of pin slots, filled left to right then top to bottom), draws a "+N" corner chip for jobs beyond the slots, shows a clean board when its column is empty, and repaints on every `jobs-list` broadcast
-- **Plants:** One plant per window — a cactus and a leafy plant, not clones.
-  No plant sprite appears more than twice in the room. Sprites are pixel-agents
-  16px-tile art drawn at the character scale (2x), so a plant stands as tall
-  as a person like upstream
+- **Plants:** One plant per gap between the job boards — a cactus between
+  TO DO and IN PROGRESS, a leafy plant between IN PROGRESS and REVIEW — each
+  centred between its two boards' centres (`computeWallPlants`), so neither
+  overlaps a board at any panel width; none when the panel is too narrow for
+  boards. Every plant is drawn at `PLANT_SCALE` (1x) so it reads as desk-side
+  decor, shorter than a board, not person-sized furniture — a deliberately
+  finer pixel grid than the 2x characters and lounge, since 1x is the only
+  integer scale that gets a 16×32 tile under board height. No plant sprite
+  appears more than twice in the room. `docs/office-decor.png` shows the empty
+  office's decor at the default 440px panel
 - **Ambient decor:** Since v0.3.18.0, leftover floor space fills from a fixed
   candidate list — a break-room corner bottom-left (a side-view sofa facing a
-  coffee table with a coffee pot on it), a tall floor plant bottom-right, small potted plants in the top
+  coffee table with a coffee pot on it), a floor plant bottom-right, small potted plants in the top
   corners. A candidate only draws when it clears every pod rug by a margin
   (`computeDecorPlacement`), so decor yields and disappears as desks crowd the
   room
