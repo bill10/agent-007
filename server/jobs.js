@@ -9,12 +9,13 @@
 // forms a cycle with ws.js or server.js.
 
 import { execFile } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
-import { basename, dirname, join, resolve } from 'path';
-import { config, sessions } from './state.js';
+import { basename, dirname, join, resolve, sep } from 'path';
+import { config, sessions, CONFIG_DIR } from './state.js';
 import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
+import { safeFilename } from '../lib/helpers.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
@@ -102,11 +103,116 @@ function clearPrCheckError(job) {
   return true;
 }
 
+// --- Attachments ---
+
+// Files posted with a card live under the config dir, never in the repo, so
+// the agent reads them by absolute path and nothing can end up committed. They
+// arrive inline on the job message as base64, the same shape as the terminal's
+// upload-file, so the id is known before anything touches the disk.
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 20;
+// Per save, not per card: one message is one WebSocket frame, and ws drops
+// the socket (not the message) past its 100MiB default. Bounded well under
+// that, base64 included, so the failure a user sees is a form error rather
+// than a vanished card.
+const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
+const ATTACHMENTS_DIR = resolve(CONFIG_DIR, 'attachments');
+
+function attachmentDir(jobId) {
+  return join(ATTACHMENTS_DIR, jobId);
+}
+
+// Stored paths and ids come from config.json, which a person (or an agent
+// running as the same user) can edit by hand, so nothing is served or deleted
+// through one unless it resolves inside the attachments dir.
+function insideAttachments(path) {
+  return resolve(String(path || '')).startsWith(ATTACHMENTS_DIR + sep);
+}
+
+// The full list the card should have: { name } keeps an existing file, { name,
+// data } writes a new one, and anything on disk that is not named is removed.
+// Split in two so updateJob can refuse before it has touched the job: plan
+// decodes and validates without side effects, apply writes. Returns null when
+// the message did not mention attachments at all.
+function planAttachments(job, list) {
+  if (!Array.isArray(list)) return null;
+  if (list.length > MAX_ATTACHMENTS) return { error: `At most ${MAX_ATTACHMENTS} files per job` };
+  const dir = attachmentDir(job.id);
+  if (!insideAttachments(dir)) return { error: 'Job id cannot hold attachments' };
+  const stored = job.attachments || [];
+  const kept = [];
+  const writes = [];
+  let total = 0;
+  for (const item of list) {
+    // No separator survives the sanitiser and a name with no letter or digit
+    // is refused, so join() cannot climb out of the job's dir. Every refusal
+    // is an error, not a silent drop: the user attached the file on purpose.
+    const name = safeFilename(item?.name).slice(0, 120);
+    if (!/[a-zA-Z0-9]/.test(name)) return { error: `Unusable file name "${String(item?.name || '')}"` };
+    // Case-insensitive: macOS and Windows would store Shot.png and shot.png
+    // as one file that two records then fight over.
+    if (kept.some(a => a.name.toLowerCase() === name.toLowerCase())) return { error: `Two files would be stored as "${name}"` };
+    const path = join(dir, name);
+    if (typeof item.data === 'string') {
+      const buf = Buffer.from(item.data, 'base64');
+      if (buf.length > MAX_ATTACHMENT_BYTES) return { error: `${name} is too large (max 10MB)` };
+      total += buf.length;
+      if (total > MAX_ATTACHMENT_TOTAL_BYTES) return { error: 'Attachments add up to more than 50MB' };
+      writes.push({ path, buf });
+      kept.push({ name, path });
+      continue;
+    }
+    // A { name } keeps what the card already has, record and all: a file
+    // that has gone missing from disk stays listed (its link 404s, which
+    // says so) rather than turning an unrelated title edit into a change
+    // the in-progress gate below refuses.
+    const old = stored.find(a => a.name === name);
+    if (old) kept.push(old);
+  }
+  const before = stored.map(a => a.name).join('\n');
+  const changed = writes.length > 0 || kept.map(a => a.name).join('\n') !== before;
+  return { dir, kept, writes, changed };
+}
+
+function applyAttachments(job, plan) {
+  // Written beside the final name and renamed into place only once every
+  // write has succeeded, so a write that fails (disk full) leaves the files
+  // the card already had as they were. The suffix holds a character the
+  // sanitiser strips, so it can never be a real attachment's name.
+  // ponytail: the rename loop itself is not atomic as a set; a rename that
+  // fails mid-loop (Windows EPERM on an open file) leaves earlier ones done.
+  const parts = plan.writes.map(w => ({ ...w, part: `${w.path}~part` }));
+  try {
+    if (parts.length) mkdirSync(plan.dir, { recursive: true });
+    for (const w of parts) writeFileSync(w.part, w.buf);
+    for (const w of parts) renameSync(w.part, w.path);
+  } catch (err) {
+    for (const w of parts) rmSync(w.part, { force: true });
+    return { error: `Could not save attachments: ${err.message}` };
+  }
+  for (const old of job.attachments || []) {
+    if (!plan.kept.some(a => a.name === old.name) && insideAttachments(old.path)) rmSync(old.path, { force: true });
+  }
+  return { attachments: plan.kept };
+}
+
+// For the download route: the stored path, or null if the card has no such file.
+export function attachmentPath(jobId, name) {
+  const job = allJobs().find(j => j.id === jobId);
+  const hit = job && (job.attachments || []).find(a => a.name === name);
+  return hit && insideAttachments(hit.path) ? hit.path : null;
+}
+
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent }, broadcast) {
+export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
   const result = createJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
+  const plan = planAttachments(result.job, attachments);
+  if (plan?.error) return plan;
+  const written = plan ? applyAttachments(result.job, plan) : null;
+  if (written?.error) return written;
+  if (written) result.job.attachments = written.attachments;
   allJobs().push(result.job);
   persist(broadcast);
   return { job: result.job };
@@ -210,22 +316,28 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
 export function updateJob(jobId, fields, broadcast) {
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
-  if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, MAX_TITLE_LEN);
-  if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
-  // The repo is only editable while the job is still unassigned — once an agent
-  // is working in a worktree, repointing the card would misattribute the work.
-  if (fields.repoPath && job.state === 'todo') job.repoPath = fields.repoPath;
+  // Everything that can be refused is checked before anything on the job is
+  // touched, or an error reply would leave the card half-edited in memory for
+  // the next unrelated persist to write out.
+  const plan = planAttachments(job, fields.attachments);
+  if (plan?.error) return plan;
+  // The agent was handed these paths in its prompt at dispatch; pulling a file
+  // out from under it mid-run is the same misattribution repoPath guards.
+  if (plan?.changed && job.state !== 'todo') {
+    return { error: 'Attachments can only change while the card is in To do' };
+  }
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
-  // rejected as a pair. Nothing is written until the pair validates, or a bad
-  // cron would half-apply — the type switched, the schedule refused.
+  // rejected as a pair.
+  let resolved = null;
+  let changes = false;
   if (fields.type !== undefined || fields.schedule !== undefined) {
-    const resolved = resolveJobType({
+    resolved = resolveJobType({
       type: fields.type !== undefined ? fields.type : jobType(job),
       schedule: fields.schedule !== undefined ? fields.schedule : job.schedule,
     });
     if (resolved.error) return { error: resolved.error };
-    const changes = resolved.type !== jobType(job)
+    changes = resolved.type !== jobType(job)
       || (resolved.schedule || null) !== (job.schedule || null);
     // Changing what a card IS is only allowed while it sits in To do, for the
     // same reason repoPath is: flipping an in-flight one-time card to
@@ -237,6 +349,18 @@ export function updateJob(jobId, fields, broadcast) {
     if (changes && job.state !== 'todo') {
       return { error: 'Type and schedule can only change while the card is in To do' };
     }
+  }
+  // The disk write is the last thing that can fail, and it happens before the
+  // first field changes.
+  const written = plan ? applyAttachments(job, plan) : null;
+  if (written?.error) return written;
+  if (written) job.attachments = written.attachments;
+  if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, MAX_TITLE_LEN);
+  if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
+  // The repo is only editable while the job is still unassigned — once an agent
+  // is working in a worktree, repointing the card would misattribute the work.
+  if (fields.repoPath && job.state === 'todo') job.repoPath = fields.repoPath;
+  if (resolved) {
     job.type = resolved.type;
     job.schedule = resolved.schedule;
     // Recompute only on a real change: the old due time belongs to the old
@@ -258,6 +382,16 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   if (idx === -1) return { error: 'Job not found' };
   const [removed] = jobs.splice(idx, 1);
   persist(broadcast);
+  // After persist, so a file the OS will not let go of (open in a browser tab
+  // on Windows) cannot leave a card that is gone from memory but back on the
+  // next restart. The id is checked the same way a path is: it too is
+  // config.json text.
+  const dir = attachmentDir(removed.id);
+  if (insideAttachments(dir)) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch (err) {
+      console.error(`Failed to remove attachments for deleted job "${removed.title}":`, err.message);
+    }
+  }
   // Both the live agent and a scheduled card's kept last-run agent: with the
   // card gone, nothing else would ever retire either of them.
   for (const sessionId of [removed.agentSessionId, removed.lastRunSessionId]) {

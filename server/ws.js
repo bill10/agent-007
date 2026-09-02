@@ -11,7 +11,7 @@ import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, load
 import { saveActiveSession, syncOrphansToConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
-import { parseGitStatus, buildFileTree } from '../lib/helpers.js';
+import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob,
@@ -340,7 +340,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           if (buf.length > 10 * 1024 * 1024) { ws.send(JSON.stringify({ type: 'notification', level: 'error', message: 'File too large (max 10MB)' })); break; }
           const uploadsDir = join(session.worktreePath, '.uploads');
           mkdirSync(uploadsDir, { recursive: true });
-          let finalName = msg.filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+          let finalName = safeFilename(msg.filename);
           if (existsSync(join(uploadsDir, finalName))) {
             const ext = finalName.includes('.') ? '.' + finalName.split('.').pop() : '';
             const base = finalName.includes('.') ? finalName.slice(0, finalName.lastIndexOf('.')) : finalName;
@@ -363,7 +363,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'job-create': {
           const result = addJob({
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
-            type: msg.jobType, schedule: msg.schedule,
+            type: msg.jobType, schedule: msg.schedule, attachments: msg.attachments,
             postedBy: ws.user ? ws.user.id : null,
             postedByName: ws.user ? ws.user.displayName : null,
           }, broadcast);
@@ -373,7 +373,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'job-update': {
           const result = updateJob(msg.jobId, {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
-            type: msg.jobType, schedule: msg.schedule,
+            type: msg.jobType, schedule: msg.schedule, attachments: msg.attachments,
           }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;

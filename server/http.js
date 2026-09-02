@@ -9,7 +9,7 @@ import {
   authEnabled, resolveToken, resolveAgentToken,
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
-import { postJobForAgent } from './jobs.js';
+import { postJobForAgent, attachmentPath } from './jobs.js';
 import { handleMcpMessage } from './mcp.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -133,6 +133,29 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
 
   // --- People only, from here down ---
   app.use('/api', requireUser);
+
+  // A card's attached file, for the link on the card. Served sandboxed: an
+  // uploaded HTML file must not run as this origin, where the token lives.
+  // The link carries the token in its query, so no-referrer keeps a page
+  // that loads an outside image from handing that URL on (sandbox alone does
+  // not stop subresource loads or a <meta name=referrer>). dotfiles: 'allow'
+  // is load-bearing: with no root, send checks EVERY segment of the absolute
+  // path for a leading dot, and the default config dir is ~/.agent-007 — the
+  // default 'ignore' would 404 every attachment in production (the test
+  // config dir has no dot segment, so the suite cannot catch that). It also
+  // lets a ".env" attachment through.
+  app.get('/api/jobs/:id/attachments/:name', (req, res) => {
+    const path = attachmentPath(req.params.id, req.params.name);
+    if (!path) return res.status(404).json({ error: 'No such attachment' });
+    res.sendFile(resolve(path), {
+      dotfiles: 'allow',
+      headers: {
+        'Content-Security-Policy': 'sandbox',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+      },
+    }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Attachment missing on disk' }); });
+  });
 
   app.get('/api/browse', (req, res) => {
     try {

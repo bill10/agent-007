@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync } from 'fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob } from '../server/jobs.js';
+import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
+import { buildJobCommand as buildCommand } from '../lib/jobs.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
 const REPO = mkdtempSync(join(tmpdir(), 'a007-jobrepo-'));
@@ -39,6 +40,90 @@ function fakeCreateSession(calls, { fail = false } = {}) {
     return { session };
   };
 }
+
+describe('attachments', () => {
+  beforeEach(resetBoard);
+
+  const png = Buffer.from('not really a png').toString('base64');
+
+  it('writes posted files under the config dir, keeps or drops them on edit, and removes them with the card', async () => {
+    const { job } = addJob({
+      title: 'Fix the header', repoPath: REPO,
+      attachments: [{ name: 'shot.png', data: png }, { name: '../evil/../../x.txt', data: png }],
+    }, noopBroadcast);
+    expect(job.attachments.map(a => a.name)).toEqual(['shot.png', '.._evil_.._.._x.txt']);
+    const shot = job.attachments[0].path;
+    expect(shot).toBe(join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id, 'shot.png'));
+    expect(readFileSync(shot, 'utf8')).toBe('not really a png');
+    expect(attachmentPath(job.id, 'shot.png')).toBe(shot);
+    expect(attachmentPath(job.id, 'nope.png')).toBeNull();
+    expect(parseCommand(job && buildCommand(job)).args[2]).toContain(shot);
+
+    // An edit that names only one file keeps that one and deletes the other;
+    // an edit that says nothing about attachments leaves them alone.
+    updateJob(job.id, { title: 'Fix the header (v2)' }, noopBroadcast);
+    expect(allJobs()[0].attachments).toHaveLength(2);
+    updateJob(job.id, { attachments: [{ name: 'shot.png' }] }, noopBroadcast);
+    expect(allJobs()[0].attachments.map(a => a.name)).toEqual(['shot.png']);
+    expect(existsSync(join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id, '.._evil_.._.._x.txt'))).toBe(false);
+    expect(existsSync(shot)).toBe(true);
+
+    expect(addJob({ title: 'Big', repoPath: REPO, attachments: [{ name: 'big.bin', data: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64') }] }, noopBroadcast).error).toMatch(/too large/);
+
+    await deleteJob(job.id, noopBroadcast);
+    expect(existsSync(shot)).toBe(false);
+  });
+
+  it('refuses rather than silently drops, leaves a half-edit unapplied, and never deletes outside its dir', async () => {
+    const many = Array.from({ length: 21 }, (_, i) => ({ name: `f${i}.txt`, data: png }));
+    expect(addJob({ title: 'Many', repoPath: REPO, attachments: many }, noopBroadcast).error).toMatch(/at most 20/i);
+    expect(addJob({ title: 'Dots', repoPath: REPO, attachments: [{ name: '...', data: png }] }, noopBroadcast).error).toMatch(/unusable/i);
+    expect(addJob({ title: 'Case', repoPath: REPO, attachments: [{ name: 'A.png', data: png }, { name: 'a.png', data: png }] }, noopBroadcast).error).toMatch(/stored as/i);
+    expect(addJob({ title: 'Dev', repoPath: REPO, attachments: [{ name: 'CON.png', data: png }] }, noopBroadcast).job.attachments[0].name).toBe('_CON.png');
+    expect(allJobs()).toHaveLength(1);
+
+    // A kept entry with no file behind it is dropped from a new card.
+    const { job } = addJob({ title: 'Ghost', repoPath: REPO, attachments: [{ name: 'ghost.png' }, { name: 'real.png', data: png }] }, noopBroadcast);
+    expect(job.attachments.map(a => a.name)).toEqual(['real.png']);
+
+    // A refused save changes nothing, not even the title.
+    const big = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64');
+    expect(updateJob(job.id, { title: 'Renamed', attachments: [{ name: 'real.png' }, { name: 'big.bin', data: big }] }, noopBroadcast).error).toMatch(/too large/);
+    const stored = () => allJobs().find(j => j.id === job.id);
+    expect(stored().title).toBe('Ghost');
+    expect(existsSync(join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id, 'big.bin'))).toBe(false);
+
+    // A hand-edited path outside the job's dir is left alone when dropped,
+    // and is never served.
+    const outside = join(REPO, 'keep-me.txt');
+    writeFileSync(outside, 'x');
+    job.attachments.push({ name: 'keep-me.txt', path: outside });
+    expect(attachmentPath(job.id, 'keep-me.txt')).toBeNull();
+    updateJob(job.id, { attachments: [{ name: 'real.png' }] }, noopBroadcast);
+    expect(existsSync(outside)).toBe(true);
+    expect(stored().attachments.map(a => a.name)).toEqual(['real.png']);
+
+    // The agent already holds these paths once dispatched.
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    expect(stored().state).toBe('in-progress');
+    expect(updateJob(job.id, { attachments: [] }, noopBroadcast).error).toMatch(/To do/);
+    expect(updateJob(job.id, { title: 'Still fine', attachments: [{ name: 'real.png' }] }, noopBroadcast).error).toBeUndefined();
+    expect(stored().attachments).toHaveLength(1);
+    // A file that vanished from disk stays on the record, so the same plain
+    // edit still goes through.
+    rmSync(stored().attachments[0].path);
+    expect(updateJob(job.id, { title: 'Still fine 2', attachments: [{ name: 'real.png' }] }, noopBroadcast).error).toBeUndefined();
+    expect(stored().attachments.map(a => a.name)).toEqual(['real.png']);
+    expect(stored().title).toBe('Still fine 2');
+  });
+
+  it('replaces a file in place and leaves no staging file behind', () => {
+    const { job } = addJob({ title: 'Swap', repoPath: REPO, attachments: [{ name: 'a.txt', data: Buffer.from('one').toString('base64') }] }, noopBroadcast);
+    updateJob(job.id, { attachments: [{ name: 'a.txt', data: Buffer.from('two').toString('base64') }] }, noopBroadcast);
+    expect(readFileSync(job.attachments[0].path, 'utf8')).toBe('two');
+    expect(existsSync(job.attachments[0].path + '~part')).toBe(false);
+  });
+});
 
 describe('dispatchOnce', () => {
   beforeEach(resetBoard);
