@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, computeConference, entryPoint, entryRoute } =
+const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, computeConference, entryRoute, walkObstacles, corridorY } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -22,6 +22,12 @@ function agentsOn(...repoLists) {
 
 const overlaps = (a, b) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+// A route leg's swept area: the walker box dragged from one end to the other.
+const sweptLeg = l => ({
+  x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
+  w: Math.abs(l.x1 - l.x0) + 16 * 2, h: Math.abs(l.y1 - l.y0) + 32 * 2,
+});
 
 describe('pod layout', () => {
   it('groups agents by repo into separate pods, no-repo agents in a final unlabeled pod', () => {
@@ -330,41 +336,106 @@ describe('pod layout', () => {
 
   it('the walk-in entrance stands on bare floor, clear of the decor and the conference chairs', () => {
     for (const w of [440, 458, W]) {
-      const e = entryPoint(w, H);
-      const walker = { x: e.x, y: e.y, w: 16 * 2, h: 32 * 2 };
       const decor = computeDecorPlacement([], w, H);
-      for (const s of decor) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
       const conf = computeConference([], [], decor, w, H);
+      const obstacles = walkObstacles([], decor, [], conf);
+      // Wherever the route puts the entrance, the walker standing there is clear
+      const e = entryRoute({ x: 200, y: FLOOR_TOP }, conf, true, H, obstacles).from;
+      const walker = { x: e.x, y: e.y, w: 16 * 2, h: 32 * 2 };
+      for (const s of decor) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
       for (const c of conf.chairs) expect(overlaps(walker, { ...c, w: 16 * Z, h: 16 * Z }), `panel ${w}: chair`).toBe(false);
     }
   });
 
-  it('the walk in/out route around a conference set clears the chairs and crosses above the table', () => {
-    // 1000px tall: one pod row plus the spare desks still leave the set room to place
-    const T = 1000;
+  it('the walk in/out route around a conference set corridors along a clear row', () => {
+    // 1400px tall: the set places with room to spare, so the bands above and
+    // below it are wide enough to walk
+    const T = 1400;
     const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
     const rugs = pods.map(podRugRect);
     const decor = computeDecorPlacement(rugs, W, T);
-    const conf = computeConference(rugs, computeSpareDesks(pods, decor, W, T), decor, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
     expect(conf).not.toBeNull();
-    const entry = entryPoint(W, T);
+    const obstacles = walkObstacles(rugs, decor, spares, conf);
     const desk = positions.get('a');
-    const chairs = conf.chairs.map(c => ({ ...c, w: 16 * Z, h: 16 * Z }));
+    const entry = { x: Z, y: corridorY(obstacles, T, desk.y) };
     for (const inbound of [true, false]) {
-      const p = entryRoute(desk, entry, conf, inbound);
+      const p = entryRoute(desk, conf, inbound, T, obstacles);
       const [start, end] = inbound ? [entry, desk] : [desk, entry];
       expect(p.from).toEqual(start);
       const last = p.legs[p.legs.length - 1];
       expect({ x: last.x1, y: last.y1 }).toEqual(end);
-      for (const l of p.legs) {
-        expect(l.x0 === l.x1 || l.y0 === l.y1, 'axis-aligned leg').toBe(true);
-        const swept = { x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
-          w: Math.abs(l.x1 - l.x0) + 16 * 2, h: Math.abs(l.y1 - l.y0) + 32 * 2 };
-        for (const c of chairs) expect(overlaps(swept, c), `${inbound ? 'in' : 'out'}: chair at ${c.x},${c.y}`).toBe(false);
-      }
-      // The crossing leg is the corridor above the table, not through it
+      for (const l of p.legs) expect(l.x0 === l.x1 || l.y0 === l.y1, 'axis-aligned leg').toBe(true);
+      // The crossing leg is the clear row nearest the desk: it touches nothing
+      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      expect(across.y0).toBe(corridorY(obstacles, T, desk.y));
+      for (const o of obstacles) expect(overlaps(sweptLeg(across), o), `${inbound ? 'in' : 'out'}: corridor`).toBe(false);
+      // The entrance is that row's left end, so nothing walks the left strip
+      expect(p.legs.some(l => l.x0 === l.x1 && l.x0 === entry.x),
+        `${inbound ? 'in' : 'out'}: leg on the left strip`).toBe(false);
+    }
+  });
+
+  it('a walk-out from the conference foot seat steps out via the lane, never up through the table', () => {
+    const T = 1400;
+    const { pods } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
+    const obstacles = walkObstacles(rugs, decor, spares, conf);
+    const foot = conf.seats[5];
+    const p = entryRoute(foot, conf, false, T, obstacles);
+    // The sitter steps sideways out of the table's columns first
+    expect(p.legs[0].y0).toBe(p.legs[0].y1);
+    for (const l of p.legs) {
+      if (l.x0 !== l.x1) continue;
+      const clearOfTable = l.x0 + 16 * 2 <= conf.table.x || l.x0 >= conf.table.x + conf.table.w;
+      expect(clearOfTable, `vertical leg at x=${l.x0} runs through the table`).toBe(true);
+    }
+  });
+
+  it('on a panel too tight for a clear row the conference route still clears the chairs', () => {
+    // 1000px tall: the set places with only its 6 Z margins, so no band fits a
+    // whole character and the route crosses on the widest gap it can find
+    const T = 1000;
+    const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
+    const obstacles = walkObstacles(rugs, decor, spares, conf);
+    const chairs = conf.chairs.map(c => ({ ...c, w: 16 * Z, h: 16 * Z }));
+    for (const inbound of [true, false]) {
+      const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
+      for (const l of p.legs)
+        for (const c of chairs) expect(overlaps(sweptLeg(l), c), `${inbound ? 'in' : 'out'}: chair at ${c.x},${c.y}`).toBe(false);
       const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
       expect(across.y0).toBeLessThan(conf.table.y);
+    }
+  });
+
+  it('a packed panel still keeps the crossing off the chat furniture', () => {
+    // 900x700 with one agent: rug, spare row and chats leave gaps of 24, 18, 54
+    // and 9px against a 64px character, so nothing fits. The old fallback put
+    // the crossing on the bottom edge — straight through both sofa areas.
+    const T = 700;
+    const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
+    expect(conf).toBeNull();
+    const obstacles = walkObstacles(rugs, decor, spares, conf);
+    const chats = decor.filter(s => s.kind === 'chat');
+    expect(chats.length).toBe(2);
+    for (const inbound of [true, false]) {
+      const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
+      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      expect(across.y0).not.toBe(T - 32 * 2);
+      for (const c of chats)
+        expect(overlaps(sweptLeg(across), c), `${inbound ? 'in' : 'out'}: chat at ${c.x},${c.y}`).toBe(false);
     }
   });
 
@@ -386,26 +457,29 @@ describe('pod layout', () => {
     }
   });
 
-  it('with no conference set the walk in/out corridors along the bottom edge, not through mid-floor desks', () => {
+  it('with no conference set the walk in/out corridors along a clear row, not the chat furniture', () => {
     // 8 agents on a 700px panel: two pod rows, no room for the set
     const ids = Array.from({ length: 8 }, (_, i) => [`s${i}`, '/r/one']);
     const { pods, positions } = computePodLayout(agentsOn(...ids), 700, 800);
     const rugs = pods.map(podRugRect);
     const decor = computeDecorPlacement(rugs, 700, 800);
-    expect(computeConference(rugs, computeSpareDesks(pods, decor, 700, 800), decor, 700, 800)).toBeNull();
-    const entry = entryPoint(700, 800), desk = positions.get('s7');
+    const spares = computeSpareDesks(pods, decor, 700, 800);
+    expect(computeConference(rugs, spares, decor, 700, 800)).toBeNull();
+    const obstacles = walkObstacles(rugs, decor, spares, null);
+    const desk = positions.get('s7');
     for (const inbound of [true, false]) {
-      const p = entryRoute(desk, entry, null, inbound, 800);
+      const p = entryRoute(desk, null, inbound, 800, obstacles);
       const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
-      expect(across.y0).toBe(800 - 32 * 2);
+      // The old route crossed along the bottom edge — straight through the chat rugs
+      expect(across.y0).not.toBe(800 - 32 * 2);
+      expect(across.y0).toBe(corridorY(obstacles, 800, desk.y));
+      for (const o of obstacles) expect(overlaps(sweptLeg(across), o), `${inbound ? 'in' : 'out'}: corridor`).toBe(false);
       // Only the destination's own desk is touched: every other desk is clear of every leg
       for (const [id, d] of positions) {
         if (id === 's7') continue;
-        const desk = { x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z };
+        const other = { x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z };
         for (const l of p.legs) {
-          const swept = { x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
-            w: Math.abs(l.x1 - l.x0) + 16 * 2, h: Math.abs(l.y1 - l.y0) + 32 * 2 };
-          expect(overlaps(swept, desk), `${inbound ? 'in' : 'out'}: desk ${id}`).toBe(false);
+          expect(overlaps(sweptLeg(l), other), `${inbound ? 'in' : 'out'}: desk ${id}`).toBe(false);
         }
       }
     }

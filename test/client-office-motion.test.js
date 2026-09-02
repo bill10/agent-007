@@ -4,51 +4,126 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { entryPoint, walkPath, pointAlongPath, detectDispatches } =
+const { entryRoute, corridorY, pointAlongPath, detectDispatches } =
   await import('../public/modules/office.js');
 
+const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_W = 32, CHAR_H = 64;
+// A leg's swept area: the walker box dragged from one end to the other.
+const swept = l => ({
+  x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
+  w: Math.abs(l.x1 - l.x0) + CHAR_W, h: Math.abs(l.y1 - l.y0) + CHAR_H,
+});
+const overlaps = (a, b) =>
+  a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
 describe('walk path', () => {
-  const from = { x: 100, y: 200 }, to = { x: 40, y: 80 };
-
-  it('entry point sits on the left edge, halfway down the floor', () => {
-    const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_H = 64;
-    const e = entryPoint(600, 800);
-    expect(e.x).toBeGreaterThan(0);
-    expect(e.x).toBeLessThan(40);
-    expect(e.y).toBe(Math.round((FLOOR_TOP + 800 - CHAR_H) / 2));
-  });
-
-  it('is L-shaped with total equal to the manhattan distance', () => {
-    for (const verticalFirst of [false, true]) {
-      const p = walkPath(from, to, verticalFirst);
-      expect(p.legs.length).toBe(2);
-      expect(p.total).toBe(60 + 120);
-    }
-  });
-
-  it('horizontal-first and vertical-first bend at different corners', () => {
-    const h = walkPath(from, to, false);
-    const v = walkPath(from, to, true);
-    expect(h.legs[0].y1).toBe(from.y); // across first
-    expect(v.legs[0].x1).toBe(from.x); // down/up first
-  });
-
   it('walks from start to end, clamped at both ends', () => {
-    const p = walkPath(from, to, false);
-    expect(pointAlongPath(p, -5)).toMatchObject({ x: from.x, y: from.y });
-    expect(pointAlongPath(p, p.total + 5)).toMatchObject({ x: to.x, y: to.y });
-    // Mid-first-leg: moving left along y=200
-    const mid = pointAlongPath(p, 30);
-    expect(mid).toMatchObject({ x: 70, y: 200, dx: -1, dy: 0 });
-    // On the second leg: moving up along x=40
-    const late = pointAlongPath(p, 60 + 30);
-    expect(late).toMatchObject({ x: 40, y: 170, dx: 0, dy: -1 });
+    const p = { from: { x: 100, y: 200 }, total: 180,
+      legs: [{ x0: 100, y0: 200, x1: 40, y1: 200 }, { x0: 40, y0: 200, x1: 40, y1: 80 }] };
+    expect(pointAlongPath(p, -5)).toMatchObject({ x: 100, y: 200 });
+    expect(pointAlongPath(p, p.total + 5)).toMatchObject({ x: 40, y: 80 });
+    expect(pointAlongPath(p, 30)).toMatchObject({ x: 70, y: 200, dx: -1, dy: 0 });
+    expect(pointAlongPath(p, 90)).toMatchObject({ x: 40, y: 170, dx: 0, dy: -1 });
   });
 
   it('handles a zero-length path', () => {
-    const p = walkPath(from, from, false);
-    expect(p.total).toBe(0);
-    expect(pointAlongPath(p, 10)).toMatchObject({ x: from.x, y: from.y });
+    const p = { from: { x: 100, y: 200 }, legs: [], total: 0 };
+    expect(pointAlongPath(p, 10)).toMatchObject({ x: 100, y: 200 });
+  });
+});
+
+describe('corridor rows', () => {
+  const H = 800;
+  // A pod rug band and the chat furniture along the bottom: one clear row
+  // between them, the slivers above and below too narrow to walk.
+  const rug = { x: 100, y: 216, w: 400, h: 160 };
+  const chat = { x: 60, y: 660, w: 600, h: 130 };
+  const obstacles = [rug, chat];
+
+  it('picks a row clear of every obstacle, wide enough for the character', () => {
+    for (const y of [200, 300, 500, 700, 795]) {
+      const c = corridorY(obstacles, H, y);
+      const box = { x: 0, y: c, w: 1000, h: CHAR_H };
+      for (const o of obstacles) expect(overlaps(box, o), `near ${y}`).toBe(false);
+      expect(c).toBeGreaterThanOrEqual(FLOOR_TOP);
+      expect(c + CHAR_H).toBeLessThanOrEqual(H);
+    }
+  });
+
+  it('picks the clear row nearest the target, above or below it', () => {
+    const mid = [{ x: 0, y: 300, w: 500, h: 120 }];
+    expect(corridorY(mid, H, 250)).toBe(300 - CHAR_H); // the band above
+    expect(corridorY(mid, H, 600)).toBe(600);          // the band below
+    // A target on the furniture itself takes the nearer side of it
+    expect(corridorY(mid, H, 350)).toBe(420);
+  });
+
+  it('takes the widest gap when none fits a whole character, feet on its floor', () => {
+    // 40px above the chat, 54px below the rug: the walker stands in the wider
+    // one with its feet at the bottom, overlapping the furniture above it.
+    const tight = [{ x: 0, y: FLOOR_TOP + 40, w: 900, h: 200 },
+                   { x: 0, y: FLOOR_TOP + 294, w: 900, h: H }];
+    expect(corridorY(tight, H, 500)).toBe(FLOOR_TOP + 294 - CHAR_H);
+    // Never the bottom edge, which is where the chat furniture lives
+    expect(corridorY(tight, H, 500)).not.toBe(H - CHAR_H);
+  });
+
+  it('stands on the desk row when the floor is furniture end to end', () => {
+    expect(corridorY([{ x: 0, y: 0, w: 900, h: H }], H, 400)).toBe(400);
+  });
+});
+
+describe('walk in/out routing', () => {
+  const W = 900, H = 800;
+  const rug = { x: 100, y: 216, w: 400, h: 160 };
+  const chat = { x: 60, y: 660, w: 600, h: 130 };
+  const obstacles = [rug, chat];
+  const desk = { x: 300, y: 260 }; // on the rug, in the top row
+  // No door: the entrance is the left end of whatever row the walker crosses.
+  const entryFor = d => ({ x: 3, y: corridorY(obstacles, H, d.y) });
+
+  for (const inbound of [true, false]) {
+    it(`walk-${inbound ? 'in' : 'out'} enters on the left edge at its corridor row`, () => {
+      const p = entryRoute(desk, null, inbound, H, obstacles);
+      const entry = entryFor(desk);
+      const [start, end] = inbound ? [entry, desk] : [desk, entry];
+      expect(p.from).toEqual(start);
+      const last = p.legs[p.legs.length - 1];
+      expect({ x: last.x1, y: last.y1 }).toEqual(end);
+      // The corridor is the clear row below the rug, not the bottom edge the
+      // old route used — that one ran straight through the chat furniture.
+      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      expect(across.y0).toBe(corridorY(obstacles, H, desk.y));
+      expect(across.y0).not.toBe(H - CHAR_H);
+      // Only the desk column leg touches anything, and only the desk's own rug
+      for (const l of p.legs) {
+        const isDeskColumn = l.x0 === desk.x && l.x1 === desk.x;
+        for (const o of obstacles) {
+          if (isDeskColumn && o === rug) continue;
+          expect(overlaps(swept(l), o), `${inbound ? 'in' : 'out'} leg ${JSON.stringify(l)}`).toBe(false);
+        }
+      }
+    });
+  }
+
+  it('has no fixed door: the entrance rides the corridor and never runs the left strip', () => {
+    const below = { x: 300, y: 600 }; // a desk under the rug band, on the far row
+    const [a, b] = [desk, below].map(d => entryRoute(d, null, true, H, obstacles));
+    expect(a.from.x).toBe(b.from.x);            // both come in at the left edge
+    expect(a.from.y).not.toBe(b.from.y);        // at their own row, not one door
+    for (const p of [a, b]) {
+      expect(p.from).toEqual(entryFor(p === a ? desk : below));
+      // Nothing walks up or down the left edge to reach the row any more
+      expect(p.legs.some(l => l.x0 === l.x1 && l.x0 === p.from.x)).toBe(false);
+    }
+  });
+
+  it('crosses on the desk row, not the bottom edge, when no row is clear', () => {
+    const full = [{ x: 0, y: 0, w: W, h: H }];
+    const p = entryRoute(desk, null, false, H, full);
+    const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+    expect(across.y0).toBe(desk.y);
+    expect(across.y0).not.toBe(H - CHAR_H); // the chat furniture lives there
   });
 });
 

@@ -242,16 +242,27 @@ lays out against a 0x0 room.
 - Only shown for MESSAGE state (agent needs user input)
 
 ### Transient motion
-- **Walk in/out:** a newly spawned agent walks in from the entrance
-  (the middle of the left edge of the floor, on the strip the chat margin
-  and the conference chairs leave free) to its desk; with a conference set
-  on the floor the route follows the clear left-edge strip to the corridor
-  above the set, crosses it, then takes the desk column (`entryRoute`);
-  with no set the corridor is the bottom edge, in front of the chat
-  furniture. Spare desks drop a column and the conference set yields rather
-  than reach into the entry strip (`ENTRY_STRIP_W`), so the entrance and its
-  strip stay clear of everything that can move; a full-width pod row can
-  still overlap it, like the verticals always could. A departing agent walks out the
+- **Walk in/out:** a newly spawned agent walks in at the left edge of the
+  floor, straight across an empty row, then up or down its desk column
+  (`entryRoute`). There is no door: the entrance is the left end of that row,
+  so it sits at a different height for a desk in the top pod row than for one
+  near the bottom, and no leg ever runs along the left edge to reach it. The
+  row is picked from the frame's furniture rects (`walkObstacles`: pod rugs,
+  spare desks, decor and the conference set with its chair overhang): their
+  vertical spans inverted into the gaps between them, the gap nearest the desk
+  that fits a whole character winning (`corridorY`). Spans count full width, so
+  a rug half-way across still rules its rows out — a scan, not a search. This
+  office is dense enough that on most panels no gap fits: between the rugs, the
+  spare row and the chat areas they run 18-54px against a 64px character. So
+  when none fits, the widest gap takes it and the walker's feet ride its floor,
+  its body overlapping the furniture above — drawn in front of that furniture,
+  and never down on the chat areas the way the old bottom-edge fallback was.
+  With no gap at all (a pod grid that overflows the panel) it crosses on the
+  desk's own row. The desk column leg is the approach and still crosses
+  whatever rows lie between the corridor and the desk. Spare desks drop a
+  column and the conference set yields rather than reach into the entry strip
+  (`ENTRY_STRIP_W`) — a leftover from the fixed-door entrance, since the row
+  scan ignores x and already clears the crossing. A departing agent walks out the
   same way before its desk disappears — from its conference seat, or from
   its current point mid-wander, if it was away from the desk. While a walk
   plays, the motion overlay draws the character instead of the seated pass.

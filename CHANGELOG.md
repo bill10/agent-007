@@ -5,6 +5,22 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.27.0] - 2026-09-02
+
+### Fixed
+
+- Agents walking in and out of the office no longer drop to the bottom-left
+  corner first. The route now comes in at the left edge on the empty floor row
+  nearest the desk, crosses that row, and takes the desk column. There is no
+  fixed door — the entrance rides the row, so it sits higher or lower with the
+  desk. The row is picked from the furniture on the floor that frame — pod
+  rugs, spare desks, the chat areas and plants, and the conference set with its
+  chairs — so the walk no longer cuts through the sofas along the bottom edge.
+  Most panels are too dense for a row that clears a whole character (the gaps
+  run 18-54px against a 64px sprite), so when none fits the widest gap takes
+  the crossing and the walker's feet ride its floor. Only a pod grid that
+  already overflows the panel falls back to the desk's own row.
+
 ## [0.3.26.1] - 2026-09-02
 
 ### Changed
