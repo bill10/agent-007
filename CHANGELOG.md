@@ -5,6 +5,33 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.24.0] - 2026-09-01
+
+### Added
+
+- A sparse office now shows a row of empty spare desks below the real one:
+  dark screens, no chair filled, no rug, so the room reads as unassigned
+  seats rather than bare floor. They sit on the same desk grid and vanish as
+  soon as a second row of real desks is needed.
+- A centred chat area at the bottom of the floor: two side sofas either side
+  of the coffee table, a front-facing sofa above it, on its own gold rug.
+  A leafy plant stands in the bottom-left corner and a cactus bottom-right.
+  Like the old decor, all of it yields and disappears as desks fill the room.
+- A low bookshelf run under each window, tight against the wall, drawn from
+  the same Antea office set as the desks.
+
+### Changed
+
+- The wall plants between the job boards, the bottom-left lounge corner, the
+  bottom-right floor plant and the top-corner pots are gone, replaced by the
+  bookshelves, chat area and corner plants above.
+- Characters now walk in and out from the bottom-left of the floor, beside
+  the corner plant, instead of the bottom centre where the chat area is.
+
+### Removed
+
+- The unused `plant_big.png` and `large_plant.png` sprites.
+
 ## [0.3.23.2] - 2026-09-01
 
 ### Fixed
