@@ -198,8 +198,9 @@ describe('pod layout', () => {
   it('a chat area yields to a pod row that reaches down into it', () => {
     const [left] = computeDecorPlacement([], W, H).filter(s => s.kind === 'chat');
     const rug = { x: left.x, y: left.y - 6 * Z, w: left.w, h: 10 }; // just inside the margin
-    const kinds = computeDecorPlacement([rug], W, H).map(s => s.kind);
-    expect(kinds.filter(k => k === 'chat').length).toBe(1); // right one survives
+    const survivors = computeDecorPlacement([rug], W, H).filter(s => s.kind === 'chat');
+    expect(survivors.length).toBe(1);
+    expect(survivors[0].x).toBe(W - 170 - 13 * Z); // the RIGHT one survives, not the blocked left
     const clear = { ...rug, y: left.y - 6 * Z - 10 };
     expect(computeDecorPlacement([clear], W, H).filter(s => s.kind === 'chat').length).toBe(2);
   });
@@ -309,6 +310,22 @@ describe('pod layout', () => {
       expect(r.x).toBeGreaterThanOrEqual(0);
       expect(r.x + 16 * Z).toBeLessThanOrEqual(W);
     }
+  });
+
+  it('the conference table yields on a panel narrower than its chair overhang', () => {
+    expect(computeConference([], [], [], 200, 700)).toBeNull();
+  });
+
+  it('with no chat areas the conference band runs to the panel bottom', () => {
+    const SET_TOP = 18, SET_BOTTOM = 32;
+    const conf = computeConference([], [], [], W, H);
+    expect(conf).not.toBeNull();
+    // Centred between FLOOR_TOP and the bottom margin (the empty-spread
+    // Math.min must fall back to panelHeight - 3 Z, not Infinity/NaN)
+    const above = (conf.table.y - SET_TOP) - FLOOR_TOP;
+    const below = (H - 3 * Z) - (conf.table.y + 240 + SET_BOTTOM);
+    expect(above).toBeGreaterThan(0);
+    expect(Math.abs(above - below)).toBeLessThanOrEqual(1);
   });
 
   it('the walk-in entrance stands on bare floor, clear of the bottom decor', () => {

@@ -249,10 +249,15 @@ lays out against a 0x0 room.
   its conference seat instead if it was sitting there. While a walk plays,
   the motion overlay draws the character instead of the seated pass.
 - **Idle wander:** an IDLE agent claims a free conference seat, walks over
-  (down out of its pod first) and sits there — facing the viewer at the head,
-  sideways on the side chairs, away at the foot — until its state changes,
-  then walks back to its desk. Seats fill head-first, sides top-down, foot
-  last; a full table leaves late idlers at their desks, and the whole thing
+  and sits there — facing the viewer at the head, sideways on the side
+  chairs, away at the foot — until its state changes, then walks back to its
+  desk. The route (`wanderRoute`) descends the desk column to a corridor just
+  above the conference set, crosses, then descends the seat's own clear
+  column (the foot seat detours via the left lane), so walkers never cross
+  the tabletop. Seats fill head-first, sides top-down, foot last; a full
+  table leaves late idlers at their desks, pre-existing idle agents render
+  seated on connect (no replay walk), read-only colleagues stay at their
+  desks (where their dimming and owner label live), and the whole thing
   clears if the conference set vanishes on resize (`updateWander`).
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
