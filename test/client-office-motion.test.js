@@ -148,7 +148,7 @@ describe('motion state', () => {
 // The panel is a flex column with .office-header above the canvas, so a
 // panel-sized canvas overflowed the bottom and clipped the sofa and plants.
 // Both sizing paths must read the canvas's own CSS box, never the panel's.
-function canvasDom() {
+function canvasDom(w = 600, h = 400) {
   document.body.innerHTML =
     '<div id="office-panel"><div class="office-header"></div><canvas id="office-canvas"></canvas></div>';
   const panel = document.getElementById('office-panel');
@@ -157,7 +157,7 @@ function canvasDom() {
     for (const [k, v] of Object.entries(props)) Object.defineProperty(el, k, { value: v, configurable: true });
   };
   dim(panel, { offsetWidth: 900, offsetHeight: 700 });
-  dim(canvas, { clientWidth: 600, clientHeight: 400 });
+  dim(canvas, { clientWidth: w, clientHeight: h });
   // happy-dom has no 2D context; every call is a no-op that returns the ctx
   // (so chained results like createLinearGradient().addColorStop still work).
   const ctx = new Proxy({}, { get: () => () => ctx, set: () => true });
@@ -206,5 +206,62 @@ describe('canvas sizing', () => {
     Object.defineProperty(canvas, 'clientHeight', { value: 0, configurable: true });
     office.renderOffice();
     expect(canvas.width).toBe(300); // untouched default
+  });
+});
+
+// Idle wander: driven entirely through renderOffice on a canvas tall enough
+// for the conference set to place (one pod row + spares end at y≈507; the
+// set needs 326px of band above the chat areas, so 1000px works).
+describe('idle wander', () => {
+  const seatIdle = async () => {
+    const ctx = await freshMotion();
+    canvasDom(600, 1000);
+    ctx.office.noteJobsUpdate(); // connect sync complete — anims may play
+    ctx.state.agents.set('si', { state: 'IDLE', repoPath: '/r', repoSlug: 'r' });
+    ctx.office.renderOffice();
+    return ctx;
+  };
+
+  it('does not animate pre-existing idle agents during the connect replay', async () => {
+    const { office, state } = await freshMotion();
+    canvasDom(600, 1000);
+    state.agents.set('si', { state: 'IDLE', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice(); // before the first jobs-list: seat claimed silently
+    expect(office.hasMotion()).toBe(false);
+  });
+
+  it('walks an idle agent toward a conference seat after the sync', async () => {
+    const { office } = await seatIdle();
+    expect(office.hasMotion()).toBe(true); // wander anim keeps the loop alive
+  });
+
+  it('snaps back without a return walk when a job lands mid-walk', async () => {
+    const { office, state } = await seatIdle();
+    state.agents.set('si', { state: 'WORKING', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice();
+    expect(office.hasMotion()).toBe(false); // no teleport-to-seat-then-walk
+  });
+
+  it('walks a seated agent back to its desk when its state changes', async () => {
+    const { office, state } = await seatIdle();
+    const t0 = performance.now();
+    const spy = vi.spyOn(performance, 'now').mockReturnValue(t0 + 60000);
+    office.renderOffice(); // walk completes — agent is now seated
+    expect(office.hasMotion()).toBe(false);
+    state.agents.set('si', { state: 'WORKING', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice();
+    expect(office.hasMotion()).toBe(true); // walk back to the desk
+    spy.mockRestore();
+  });
+
+  it('queues a walk-out for a departing sitter', async () => {
+    const { office, state } = await seatIdle();
+    const t0 = performance.now();
+    const spy = vi.spyOn(performance, 'now').mockReturnValue(t0 + 60000);
+    office.renderOffice(); // seated
+    spy.mockRestore();
+    state.agents.set('si', { state: 'IDLE', repoPath: '/r', repoSlug: 'r' });
+    office.noteAgentDeparture('si');
+    expect(office.hasMotion()).toBe(true); // walk-out, from the seat
   });
 });

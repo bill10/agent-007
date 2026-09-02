@@ -243,11 +243,25 @@ lays out against a 0x0 room.
 
 ### Transient motion
 - **Walk in/out:** a newly spawned agent walks in from the entrance
-  (bottom-left, just right of the corner plant, since the bottom centre is the
-  chat area) to its desk along an L-shaped path, across first so it passes in
-  front of the chat furniture; a departing agent walks out the same way before
-  its desk disappears. While a walk plays, the motion
-  overlay draws the character instead of the seated pass.
+  (the bottom-left corner strip the chat margin leaves free) to its desk;
+  with a conference set on the floor the route climbs the clear left-edge
+  strip, crosses the corridor above the set, then takes the desk column
+  (`entryRoute`) — a plain L-path otherwise. A departing agent walks out the
+  same way before its desk disappears — from its conference seat, or from
+  its current point mid-wander, if it was away from the desk. While a walk
+  plays, the motion overlay draws the character instead of the seated pass.
+- **Idle wander:** an IDLE agent claims a free conference seat, walks over
+  and sits there — facing the viewer at the head, sideways on the side
+  chairs, away at the foot — until its state changes, then walks back to its
+  desk. The route (`wanderRoute`) descends the desk column to a corridor just
+  above the conference set, crosses, then descends the seat's own clear
+  column (the foot seat detours via the left lane), so walkers never cross
+  the tabletop. Seats fill head-first, sides top-down, foot last; a full
+  table leaves late idlers at their desks, pre-existing idle agents render
+  seated on connect (no replay walk), read-only colleagues stay at their
+  desks (where their dimming and owner label live), and the whole thing
+  clears if the conference set vanishes on resize (`updateWander`). Clicking
+  a seated character switches to its terminal, same as clicking its desk.
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
 - All motion is client-side and time-based: animations never replay on page
@@ -272,13 +286,20 @@ lays out against a 0x0 room.
   unassigned seats. Only when the row clears the decor and the panel bottom
   by the decor margin (`computeSpareDesks`); it vanishes as rows are added
 - **Ambient decor:** The bottom of the floor fills from a fixed candidate
-  list — a centred chat area on a label-less pod-style rug (side sofas left
-  and right of a coffee table with the coffee pot on it, the right one
-  mirrored to face it, and a front-facing sofa above), a leafy plant in the
-  bottom-left corner and a cactus bottom-right, all at the 2x character scale.
+  list — a chat area in each bottom corner on a label-less pod-style rug
+  (side sofas left and right of a coffee table with the coffee pot on it, the
+  right one mirrored to face it, and a front-facing sofa above) at the 2x
+  character scale, with the leafy plant stacked above the cactus between them
+  as a small divider (1.25x, so they read as a hedge, not sentinels).
   A candidate only draws when it clears every pod rug by a margin
   (`computeDecorPlacement`), so decor yields and disappears as desks crowd the
   room. `docs/office-decor.png` shows a one-row office at a 458px panel
+- **Conference table:** A vertical boardroom table (the pixel-agents
+  `table_front` sprite stretched taller) centred in the open band between the
+  desks — pod rugs and spare desks — and the chat areas, with cushioned
+  chairs at thirds down both sides, one at the foot, and a free seat at the
+  head. Placed only when the band fits the whole set plus the decor margin
+  (`computeConference`), so it yields on short panels just like the decor
 - **Particles:** 5 ambient dust motes
 
 ## Job Board

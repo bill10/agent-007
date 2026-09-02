@@ -5,6 +5,41 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.25.0] - 2026-09-01
+
+### Added
+
+- A conference table in the open floor between the desks and the chat areas:
+  a vertical boardroom table with cushioned chairs at thirds down both sides,
+  one at the foot and a free seat at the head (sprites from pixel-agents,
+  MIT). Idle agents wander over and sit there until their state changes,
+  then walk back to their desks. The set only places while the band fits it,
+  so it yields on short panels just like the rest of the decor.
+- Clicking a seated agent at the conference table switches to its terminal —
+  click-to-focus follows the character wherever it is.
+
+### Changed
+
+- The bottom decor: the single centred chat area is now a chat area in each
+  bottom corner, with the leafy plant stacked above the cactus between them
+  as a small divider drawn at 1.25x (down from 2x). The walk-in entrance
+  moves to the bottom-left corner strip the chat margin leaves free.
+- Walkers route around the conference set: wandering, arriving and departing
+  agents climb clear lanes and cross a corridor above the table instead of
+  driving through the tabletop or chairs.
+- Idle agents already seated when the page connects render seated — no
+  replayed commute — and colleagues' read-only agents stay at their desks,
+  where their dimming and owner label live.
+
+### Fixed
+
+- A conference sprite that fails to load can no longer make an idle agent
+  invisible: characters always draw, with or without their furniture.
+- A departing agent walks out from wherever it actually is — its conference
+  seat, or its current point mid-walk — instead of snapping to a desk first.
+- Message bubbles no longer float over an empty desk while their agent is
+  walking the floor.
+
 ## [0.3.24.0] - 2026-09-01
 
 ### Added

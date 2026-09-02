@@ -39,6 +39,9 @@ export const SPRITE_PATHS = {
   sofafront:  'assets/furniture/sofa_front.png',       // 32×16, front view facing down
   table:      'assets/furniture/coffee_table.png',     // 32×32
   coffee:     'assets/furniture/coffee.png',           // 16×16, art in the top-right 8×7
+  conftable:  'assets/furniture/table_front.png',      // 48×64 wooden table, art in rows 11–63
+  confchair:  'assets/furniture/chair_side.png',       // 16×16 cushioned chair facing right, art in x 0–11
+  confchairback: 'assets/furniture/chair_back.png',    // 16×16 cushioned chair seen from behind, art in x 2–13
   char0:   'assets/characters/char_0.png',
   char1:   'assets/characters/char_1.png',
   char2:   'assets/characters/char_2.png',
@@ -229,12 +232,12 @@ export function podRugRect(pod) {
   };
 }
 
-// --- Ambient decor along the bottom of the floor: a centred chat area and a
-// plant in each bottom corner. A spot is kept only if it clears every rug by
-// a margin wide enough to also clear the monitor-glow halos (shadowBlur 15px
-// < 6 Z), so the decor simply disappears as pod rows grow downward. Pure
-// function of the rug rects + panel size, so placement is deterministic for a
-// given agent set. ---
+// --- Ambient decor along the bottom of the floor: a chat area in each bottom
+// corner with the two plants stacked between them as a divider. A spot is kept
+// only if it clears every rug by a margin wide enough to also clear the
+// monitor-glow halos (shadowBlur 15px < 6 Z), so the decor simply disappears
+// as pod rows grow downward. Pure function of the rug rects + panel size, so
+// placement is deterministic for a given agent set. ---
 const DECOR_MARGIN = 6 * Z;
 // True when rect c clears rect r by DECOR_MARGIN on some side.
 const apart = (c, r) =>
@@ -243,7 +246,6 @@ const apart = (c, r) =>
 // All decor sizes below are in px: 16px-tile pixel-agents art drawn at
 // DECOR_SCALE like the characters.
 const DECOR_SCALE = CHAR_SCALE;
-const PLANT_W = 16 * DECOR_SCALE, PLANT_H = 32 * DECOR_SCALE;
 const SOFA_W = 16 * DECOR_SCALE, SOFA_H = 32 * DECOR_SCALE; // side view, as tall as the table
 const TABLE_W = 32 * DECOR_SCALE, TABLE_H = 32 * DECOR_SCALE;
 const SOFA_FRONT_H = 16 * DECOR_SCALE;
@@ -252,12 +254,21 @@ const SOFA_FRONT_H = 16 * DECOR_SCALE;
 const CHAT_PAD_X = 13, CHAT_PAD_TOP = 14, CHAT_PAD_BOTTOM = 12, CHAT_GAP = 8;
 const CHAT_W = 2 * CHAT_PAD_X + 2 * SOFA_W + 2 * CHAT_GAP + TABLE_W;             // 170
 const CHAT_H = CHAT_PAD_TOP + SOFA_FRONT_H + CHAT_GAP + TABLE_H + CHAT_PAD_BOTTOM; // 130
+const CHAT_MARGIN_X = 13 * Z;  // chat areas sit in from the panel edges, leaving the entry corner clear
+// The divider plants between the chat areas draw smaller than the 16px decor
+// grid so they read as a low hedge, not sentinels towering over the sofas.
+const PLANT_MID_SCALE = 1.25;
+const PLANT_MID_W = Math.round(16 * PLANT_MID_SCALE), PLANT_MID_H = Math.round(32 * PLANT_MID_SCALE);
+const PLANT_MID_GAP = DECOR_MARGIN; // floor between the leafy plant's pot and the cactus
 export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
   const z = Z;
+  const midX = Math.floor((panelWidth - PLANT_MID_W) / 2);
+  const cactusY = panelHeight - PLANT_MID_H - 3 * z;
   const candidates = [
-    { kind: 'chat', x: Math.floor((panelWidth - CHAT_W) / 2), y: panelHeight - CHAT_H - 3 * z, w: CHAT_W, h: CHAT_H },
-    { kind: 'plant2', x: 4 * z, y: panelHeight - PLANT_H - 3 * z, w: PLANT_W, h: PLANT_H },
-    { kind: 'cactus', x: panelWidth - PLANT_W - 4 * z, y: panelHeight - PLANT_H - 3 * z, w: PLANT_W, h: PLANT_H },
+    { kind: 'chat', x: CHAT_MARGIN_X, y: panelHeight - CHAT_H - 3 * z, w: CHAT_W, h: CHAT_H },
+    { kind: 'chat', x: panelWidth - CHAT_W - CHAT_MARGIN_X, y: panelHeight - CHAT_H - 3 * z, w: CHAT_W, h: CHAT_H },
+    { kind: 'cactus', x: midX, y: cactusY, w: PLANT_MID_W, h: PLANT_MID_H, scale: PLANT_MID_SCALE },
+    { kind: 'plant2', x: midX, y: cactusY - PLANT_MID_GAP - PLANT_MID_H, w: PLANT_MID_W, h: PLANT_MID_H, scale: PLANT_MID_SCALE },
   ];
   const placed = [];
   for (const c of candidates) {
@@ -267,6 +278,52 @@ export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
     }
   }
   return placed;
+}
+
+// --- Conference table: a vertical boardroom table centred in the open band
+// between the desks (rugs + spare desks) and the chat areas, with cushioned
+// chairs down both sides, one at the foot, and a free seat at the head. Idle
+// agents wander over and sit (see the wander section below). Pure function of
+// the obstructions + panel size; null when the band is too small. ---
+const CONF_TABLE_W = 48 * Z;   // sprite width at the desk scale
+const CONF_TABLE_H = 240;      // the 48×64 sprite stretched taller so it reads as a boardroom table
+const CONF_CHAIR = 16 * Z;
+// Set bbox: side chairs overhang the table 42px each side; the head seat's
+// character rises 18px above the tabletop and the foot chair hangs 32px below.
+const CONF_SET_W = CONF_TABLE_W + 2 * 42;
+const CONF_SET_H = CONF_TABLE_H + 18 + 32;
+export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, panelHeight) {
+  const bandTop = Math.max(FLOOR_TOP,
+    ...rugRects.map(r => r.y + r.h),
+    ...spareDesks.map(d => d.y + WS_H * Z));
+  // Every decor spot bounds the band, not just the chats: today the divider
+  // plants sit below the chat tops so this changes nothing, but if the chats
+  // ever yield while the plants place, the set must not land on the plants.
+  const bandBottom = Math.min(panelHeight - 3 * Z, ...decorSpots.map(s => s.y));
+  if (panelWidth < CONF_SET_W || bandBottom - bandTop < CONF_SET_H + 2 * DECOR_MARGIN) return null;
+  const tx = Math.floor((panelWidth - CONF_TABLE_W) / 2);
+  const ty = bandTop + Math.floor((bandBottom - bandTop - CONF_SET_H) / 2) + 18;
+  const chairs = [
+    { x: tx - 42, y: ty + 70, kind: 'confchair' },
+    { x: tx - 42, y: ty + 145, kind: 'confchair' },
+    { x: tx + CONF_TABLE_W - 6, y: ty + 70, kind: 'confchair', mirror: true },
+    { x: tx + CONF_TABLE_W - 6, y: ty + 145, kind: 'confchair', mirror: true },
+    { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_H - 16, kind: 'confchairback' },
+  ];
+  // Seats in fill order: head, then alternating sides top-down, foot last.
+  // Head and foot sit on the table's centreline; side sitters centre on their
+  // chairs. drawConference picks its draw passes by seat index (0 = head,
+  // 5 = foot), so this order is load-bearing.
+  const cx = tx + Math.floor((CONF_TABLE_W - CHAR_W) / 2);
+  const seats = [
+    { x: cx, y: ty - 18, row: CHAR_ROW_DOWN },
+    { x: chairs[0].x + 8, y: chairs[0].y - 12, row: CHAR_ROW_RIGHT },
+    { x: chairs[2].x + 8, y: chairs[2].y - 12, row: CHAR_ROW_RIGHT, mirror: true },
+    { x: chairs[1].x + 8, y: chairs[1].y - 12, row: CHAR_ROW_RIGHT },
+    { x: chairs[3].x + 8, y: chairs[3].y - 12, row: CHAR_ROW_RIGHT, mirror: true },
+    { x: cx, y: ty + CONF_TABLE_H - 38, row: CHAR_ROW_UP },
+  ];
+  return { table: { x: tx, y: ty, w: CONF_TABLE_W, h: CONF_TABLE_H }, chairs, seats };
 }
 
 // --- Spare desks: when the office has a single row of real pods, one row of
@@ -778,9 +835,45 @@ function drawDecor(ctx, spots, theme) {
       drawSprite(ctx, 'coffee', tx + 8 * DECOR_SCALE, ty + 7 * DECOR_SCALE);
       drawSprite(ctx, 'sofa', tx + TABLE_W + CHAT_GAP, sy, DECOR_SCALE, true);
     } else {
-      drawSprite(ctx, spot.kind, spot.x, spot.y);  // 'plant2' or 'cactus'
+      drawSprite(ctx, spot.kind, spot.x, spot.y, spot.scale || DECOR_SCALE);  // 'plant2' or 'cactus'
     }
   }
+}
+
+// One character in a standing frame, facing a given row; mirror turns the
+// right-facing row into a left-facing one (the sheet has no left row).
+function drawStanding(ctx, variant, x, y, row, mirror) {
+  const sheet = SPRITES['char' + variant] || SPRITES.char0;
+  if (!sheet) return;
+  ctx.save();
+  if (mirror) { ctx.translate(x + CHAR_W, y); ctx.scale(-1, 1); x = 0; y = 0; }
+  ctx.drawImage(sheet, CHAR_COL_STAND * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H, x, y, CHAR_W, CHAR_H);
+  ctx.restore();
+}
+
+// The conference set plus whoever is currently sitting at it. Sitters draw
+// interleaved with the furniture so the head seat's feet tuck under the
+// table's top rim and the foot chair's back covers its sitter's legs.
+function drawConference(ctx, conf) {
+  // Furniture is skipped when its sprites failed to load (like drawDecor),
+  // but sitters ALWAYS draw: seats are claimed in updateWander regardless,
+  // and a missing chair PNG must never make a character invisible.
+  const furniture = SPRITES.conftable && SPRITES.confchair && SPRITES.confchairback;
+  const sitters = new Map(); // seat index -> variant, arrived sitters only
+  for (const [sid, seat] of confSeats) if (!wanderAnims.has(sid)) sitters.set(seat, charVariant(sid));
+  const sitter = (i) => {
+    if (sitters.has(i)) drawStanding(ctx, sitters.get(i), conf.seats[i].x, conf.seats[i].y, conf.seats[i].row, conf.seats[i].mirror);
+  };
+  if (furniture) for (const c of conf.chairs) if (c.kind === 'confchair') drawSprite(ctx, c.kind, c.x, c.y, Z, c.mirror);
+  sitter(0); // head, before the table so their feet sit behind the top rim
+  if (furniture) {
+    const t = conf.table;
+    ctx.drawImage(SPRITES.conftable, t.x, t.y, t.w, t.h);
+    drawSprite(ctx, 'coffee', t.x + Math.floor(t.w / 2) - 12 * DECOR_SCALE, t.y + 50);
+  }
+  for (let i = 1; i <= 4; i++) sitter(i); // side sitters over their chairs
+  sitter(5); // foot, before the chair-back so it covers their legs
+  if (furniture) drawSprite(ctx, conf.chairs[4].kind, conf.chairs[4].x, conf.chairs[4].y, Z);
 }
 
 // --- Ambient dust motes (E) ---
@@ -1204,6 +1297,50 @@ let prevJobStates = null;     // jobId -> { state, agentSessionId }
 const paperAnims = [];        // { sessionId, col, start }
 const walkAnims = new Map();  // sessionId -> { dir: 'in'|'out', start, queuedAt, fromX, fromY, variant }
 
+// --- Idle wander: an IDLE agent leaves its desk, walks to a free conference
+// seat and sits there until its state changes, then walks back. Client-side
+// and time-based like the walk in/out anims. confSeats holds the seat claim
+// from the moment the walk starts; the character renders seated once its
+// wander anim finishes. Everything clears if the conference set vanishes
+// (resize) — characters simply render at their desks again next frame.
+const confSeats = new Map();   // sessionId -> seat index (walking there, or seated)
+const wanderAnims = new Map(); // sessionId -> { dir: 'seat'|'desk', start, variant, fromX, fromY }
+let currentConf = null;        // this frame's computeConference result, for drawMotion + departures
+
+function updateWander(conf) {
+  if (!conf) { confSeats.clear(); wanderAnims.clear(); return; }
+  const taken = new Set(confSeats.values());
+  for (const [sid, agent] of agents) {
+    // Read-only colleagues keep their desks: the desk pass carries their
+    // dimming and owner label, which the conference pass has no room for.
+    const idle = agent.state === 'IDLE' && canControlAgent(agent);
+    if (idle && !confSeats.has(sid) && !wanderAnims.has(sid) && !walkAnims.has(sid)) {
+      const seat = conf.seats.findIndex((_, i) => !taken.has(i));
+      if (seat === -1) continue; // table full — stay at the desk
+      confSeats.set(sid, seat);
+      taken.add(seat);
+      // No walk during the connect replay (prevJobStates === null): like the
+      // walk-ins, pre-existing idle agents render seated, not mid-commute.
+      if (motionEnabled() && prevJobStates !== null) {
+        wanderAnims.set(sid, { dir: 'seat', start: performance.now(), variant: charVariant(sid) });
+      }
+    } else if (!idle && confSeats.has(sid)) {
+      const seatPos = conf.seats[confSeats.get(sid)];
+      const midWalk = wanderAnims.get(sid)?.dir === 'seat';
+      confSeats.delete(sid);
+      wanderAnims.delete(sid);
+      // Fully seated: walk back to the desk. Still walking over: snap back
+      // rather than teleport to the seat first.
+      if (!midWalk && motionEnabled()) {
+        wanderAnims.set(sid, { dir: 'desk', start: performance.now(), variant: charVariant(sid), fromX: seatPos.x, fromY: seatPos.y, fromRow: seatPos.row });
+      }
+    }
+  }
+  // Deleting the current entry during Map iteration is well-defined.
+  for (const sid of confSeats.keys()) if (!agents.has(sid)) confSeats.delete(sid);
+  for (const sid of wanderAnims.keys()) if (!agents.has(sid)) wanderAnims.delete(sid);
+}
+
 function motionEnabled() {
   // Live query (not the module-load const): flipping the OS reduce-motion
   // setting mid-session should affect the next animation, not the next reload.
@@ -1212,15 +1349,79 @@ function motionEnabled() {
 }
 
 export function hasMotion() {
-  return paperAnims.length > 0 || walkAnims.size > 0;
+  return paperAnims.length > 0 || walkAnims.size > 0 || wanderAnims.size > 0;
 }
 
-// Entrance: the bottom edge, just right of the corner plant — the bottom
-// centre is the chat area now, so a character appearing there would stand on
-// the coffee table. It walks along the bottom (in front of the chat
+// Entrance: the bottom-left corner, in the strip the chat margin leaves free
+// — the rest of the bottom edge belongs to the chat areas and the divider
+// plants. The character walks along the bottom (in front of the chat
 // furniture) to its desk column, then up to the chair.
 export function entryPoint(w, h) {
-  return { x: 4 * Z + PLANT_W + DECOR_MARGIN, y: h - CHAR_H };
+  return { x: Z, y: h - CHAR_H };
+}
+
+// Multi-leg route between a desk and a conference seat that stays off the
+// furniture: down the desk column to a corridor just above the set, across,
+// then down the seat's own clear column (side and head columns are beside or
+// above the table; the foot seat detours via the left lane, its centre column
+// being the table itself, and only brushes the table's leg row on the last
+// step). The initial descent can still cross a lower pod row, exactly like
+// the walk in/out verticals always have. Reversed for the walk back.
+// The vertical lanes just outside the chair columns — descending a seat's
+// own column would clip through the chair above it, so side and foot seats
+// are approached down the nearest outer lane instead. Clamped for the
+// narrowest panel the set can place on.
+function confLanes(conf) {
+  return { left: Math.max(2, conf.table.x - 78), right: conf.table.x + conf.table.w + 46 };
+}
+
+function wanderRoute(desk, seat, conf, toSeat) {
+  const yMid = conf.table.y - 24;
+  const lanes = confLanes(conf);
+  // Only the head seat (the sole down-facing one) is approached down its own
+  // column — it sits above the table, so that column is clear.
+  const laneX = seat.row === CHAR_ROW_DOWN ? seat.x
+    : seat.x < conf.table.x + conf.table.w / 2 ? lanes.left : lanes.right;
+  const pts = [desk, { x: desk.x, y: yMid }, { x: laneX, y: yMid }];
+  if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
+  pts.push(seat);
+  if (!toSeat) pts.reverse();
+  return pathThrough(pts);
+}
+
+// Walk in/out routes bend around the conference set the same way: up the
+// clear left-edge strip (the chat margin keeps it free), across the corridor
+// above the set, then the desk column. A walk-out whose start column would
+// ascend through the table (a foot-seat sitter) detours via the left lane
+// first. Plain L-path when there is no conference set on the floor.
+function entryRoute(point, entry, conf, inbound) {
+  if (!conf) return inbound ? walkPath(entry, point, false) : walkPath(point, entry, true);
+  const t = conf.table;
+  const yMid = t.y - 24;
+  const lanes = confLanes(conf);
+  // A start below the corridor inside the set's footprint — chair overhang
+  // included — climbs out via the nearest outer lane; anywhere else its own
+  // column is already clear.
+  let climb;
+  if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 && point.y > t.y) {
+    const laneX = point.x < t.x + t.w / 2 ? lanes.left : lanes.right;
+    climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
+  } else {
+    climb = [{ x: point.x, y: yMid }];
+  }
+  const pts = [{ x: point.x, y: point.y }, ...climb, { x: entry.x, y: yMid }, { x: entry.x, y: entry.y }];
+  if (inbound) pts.reverse();
+  return pathThrough(pts);
+}
+
+function pathThrough(pts) {
+  const legs = [];
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    if (a.x !== b.x || a.y !== b.y) legs.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y });
+  }
+  const total = legs.reduce((s, l) => s + Math.abs(l.x1 - l.x0) + Math.abs(l.y1 - l.y0), 0);
+  return { from: { x: pts[0].x, y: pts[0].y }, legs, total };
 }
 
 // L-shaped route between two points. Walking in goes across first, then up to
@@ -1303,7 +1504,20 @@ export function noteAgentDeparture(sessionId) {
   const { w, h } = canvasSize(canvas);
   if (!w || !h) return;
   const layout = computeOfficeLayout(w, h);
-  const pos = deskCharPos(sessionId, layout);
+  // A sitter leaves from the conference table, and a mid-wander walker from
+  // its current point along the walk — never a snap to a spot it isn't at.
+  const desk = deskCharPos(sessionId, layout);
+  const seat = currentConf && confSeats.has(sessionId) ? currentConf.seats[confSeats.get(sessionId)] : null;
+  const anim = wanderAnims.get(sessionId);
+  let pos = seat || desk;
+  if (anim && desk && currentConf) {
+    const path = anim.dir === 'seat'
+      ? (seat ? wanderRoute(desk, seat, currentConf, true) : null)
+      : wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false);
+    if (path) pos = pointAlongPath(path, ((performance.now() - anim.start) / 1000) * WALK_SPEED);
+  }
+  confSeats.delete(sessionId);
+  wanderAnims.delete(sessionId);
   if (!pos) return;
   walkAnims.set(sessionId, {
     dir: 'out', start: performance.now(),
@@ -1399,9 +1613,9 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = walkPath(entry, to, false);
+      path = entryRoute(to, entry, currentConf, true);
     } else {
-      path = walkPath({ x: anim.fromX, y: anim.fromY }, entry, true);
+      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
@@ -1409,6 +1623,31 @@ function drawMotion(ctx, w, h, layout) {
       // endpoint once more or the character blinks out for a frame on arrival.
       if (anim.dir === 'in') drawWalker(ctx, anim.variant, pointAlongPath(path, path.total), now);
       walkAnims.delete(sid);
+      continue;
+    }
+    drawWalker(ctx, anim.variant, pointAlongPath(path, dist), now);
+  }
+
+  // Idle wanderers between desk and conference seat. Targets resolve fresh
+  // like the walk anims; wanderRoute keeps the crossing legs off the
+  // conference furniture.
+  for (const [sid, anim] of wanderAnims) {
+    let path;
+    const desk = deskCharPos(sid, layout);
+    if (!desk || !currentConf) { wanderAnims.delete(sid); continue; }
+    if (anim.dir === 'seat') {
+      const seat = currentConf.seats[confSeats.get(sid)];
+      if (!seat) { wanderAnims.delete(sid); continue; }
+      path = wanderRoute(desk, seat, currentConf, true);
+    } else {
+      path = wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false);
+    }
+    const dist = ((now - anim.start) / 1000) * WALK_SPEED;
+    if (dist >= path.total) {
+      // Hold the endpoint one frame: the seated/desk pass skipped this agent
+      // before this anim was seen finishing, so it would blink out otherwise.
+      drawWalker(ctx, anim.variant, pointAlongPath(path, path.total), now);
+      wanderAnims.delete(sid);
       continue;
     }
     drawWalker(ctx, anim.variant, pointAlongPath(path, dist), now);
@@ -1455,11 +1694,17 @@ export function renderOffice() {
 
   // Per-repo pod layout, then ambient decor in whatever floor is left over
   const layout = computeOfficeLayout(w, h);
-  const decor = computeDecorPlacement(layout.pods.map(podRugRect), w, h);
+  const rugs = layout.pods.map(podRugRect);
+  const decor = computeDecorPlacement(rugs, w, h);
   drawDecor(ctx, decor, theme);
   for (const pod of layout.pods) drawPodRug(ctx, pod, theme);
   // Empty workstations on the row below a sparse office: dark screens, no one seated
-  for (const d of computeSpareDesks(layout.pods, decor, w, h)) drawWorkstation(ctx, d.x, d.y, 'DISCONNECTED', theme, d.variant, null);
+  const spares = computeSpareDesks(layout.pods, decor, w, h);
+  for (const d of spares) drawWorkstation(ctx, d.x, d.y, 'DISCONNECTED', theme, d.variant, null);
+  // Conference table in the open band below them; idle agents wander over
+  currentConf = computeConference(rugs, spares, decor, w, h);
+  updateWander(currentConf);
+  if (currentConf) drawConference(ctx, currentConf);
 
   for (const [sessionId, agent] of agents) {
     const pos = layout.positions.get(sessionId);
@@ -1478,12 +1723,12 @@ export function renderOffice() {
     const charX = sx + (deskVariant === 0 ? DESK_CHAR_X : DESK2_CHAR_X) * Z;
     // Fall back to sheet 0 if this variant's PNG failed to load
     const sheet = SPRITES['char' + charVariant(sessionId)] || SPRITES.char0;
-    // While a walk anim exists, the overlay pass draws the character instead —
-    // covers walk-ins, and a session re-emitted while its walk-out still plays.
-    const walking = walkAnims.has(sessionId);
+    // While a walk/wander anim exists the overlay pass draws the character,
+    // and a conference sitter renders at the table — the desk stays, empty.
+    const away = walkAnims.has(sessionId) || wanderAnims.has(sessionId) || confSeats.has(sessionId);
     drawWorkstation(ctx, sx, sy, state, theme, deskVariant, agent);
     drawMonitorGlow(ctx, sx, sy, state, theme);
-    if (alive && sheet && !walking) {
+    if (alive && sheet && !away) {
       let row, col;
       if (state === 'WORKING') {
         // Seated at the keyboard, typing (2-frame cycle), back to the viewer.
@@ -1528,8 +1773,9 @@ export function renderOffice() {
       ctx.textAlign = 'start';
     }
 
-    if (state === 'MESSAGE') {
-      // Beside the character's head.
+    if (state === 'MESSAGE' && !away) {
+      // Beside the character's head — only while the character is actually
+      // at the desk; a walker's bubble would float over an empty chair.
       drawMessageBubble(ctx, charX + 5 * Z, sy + 5 * Z, theme);
     }
     if (state === 'DISCONNECTED') {
@@ -1573,6 +1819,17 @@ export function setupOfficeClick() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const layout = computeOfficeLayout(rect.width, rect.height);
+    // A seated agent's visible character is at the conference table, so the
+    // click-to-focus affordance follows it there (the empty desk still works).
+    if (currentConf) {
+      for (const [sid, seatIdx] of confSeats) {
+        const s = currentConf.seats[seatIdx];
+        if (x >= s.x - Z && x <= s.x + CHAR_W + Z && y >= s.y - Z && y <= s.y + CHAR_H + Z) {
+          switchToSession(sid);
+          return;
+        }
+      }
+    }
     for (const [sessionId] of agents) {
       const pos = layout.positions.get(sessionId);
       if (!pos) continue;
