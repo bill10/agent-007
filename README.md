@@ -152,11 +152,11 @@ server/
   config.js        Config persistence (load, save, crash recovery)
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
-  jobs.js          Job board dispatcher (scan, spawn, PR watch, scheduled runs)
+  jobs.js          Job board dispatcher (scan, spawn, PR watch, scheduled runs, attachment files)
   command-path.js  Resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
-  http.js          HTTP routes (/api/browse, /api/jobs, /mcp, origin + auth gates)
+  http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
   mcp.js           The board's MCP server (the post_job tool agents call)
   agent-mcp.js     Per-session MCP config + the flags that point `claude` at it
   auth.js          Login tokens, user accounts, agent session tokens
@@ -178,7 +178,7 @@ public/
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
 lib/
-  helpers.js       State detection, git parsing, codename/cocktail pools
+  helpers.js       State detection, git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
   cron.js          Five-field cron parser (schedules for scheduled jobs)
 ```
