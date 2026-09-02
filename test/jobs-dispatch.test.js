@@ -123,6 +123,14 @@ describe('attachments', () => {
     expect(readFileSync(job.attachments[0].path, 'utf8')).toBe('two');
     expect(existsSync(job.attachments[0].path + '~part')).toBe(false);
   });
+
+  it('frees the files, records and all, the moment the card reaches done', async () => {
+    const { job } = addJob({ title: 'Ship it', repoPath: REPO, attachments: [{ name: 'shot.png', data: png }] }, noopBroadcast);
+    const dir = join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id);
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(allJobs()[0].attachments).toEqual([]);
+    expect(existsSync(dir)).toBe(false);
+  });
 });
 
 describe('dispatchOnce', () => {
@@ -376,7 +384,7 @@ describe('checkMergedPullRequests', () => {
   // A job sitting in Review with a branch and an open PR, agent already gone —
   // exactly the state the automatic path leaves behind.
   async function inReview() {
-    addJob({ title: 'landed', repoPath: REPO }, noopBroadcast);
+    addJob({ title: 'landed', repoPath: REPO, attachments: [{ name: 'shot.png', data: Buffer.from('png').toString('base64') }] }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     await checkPullRequests(noopBroadcast, {
       findPr: async () => ({ pr: { url: 'https://gh/o/r/pull/5', number: 5 } }),
@@ -397,6 +405,9 @@ describe('checkMergedPullRequests', () => {
     // The record survives: the card is the only place the PR link lives.
     expect(job.prUrl).toBe('https://gh/o/r/pull/5');
     expect(job.prNumber).toBe(5);
+    // The files do not: the run they were input to is over.
+    expect(job.attachments).toEqual([]);
+    expect(existsSync(join(process.env.AGENT007_CONFIG_DIR, 'attachments', job.id))).toBe(false);
   });
 
   it('leaves a job in review while its PR is still open', async () => {

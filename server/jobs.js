@@ -203,6 +203,23 @@ export function attachmentPath(jobId, name) {
   return hit && insideAttachments(hit.path) ? hit.path : null;
 }
 
+// A card is a few lines of JSON and stays forever; its files can be megabytes
+// and were inputs to a run that is now over. Done is terminal, so the moment a
+// card gets there — by hand or by the merge sweep — the disk comes back. The
+// records go with the files: an archive card full of 404 links says less than
+// none. On a failure the list is kept, so the files stay owned by the card and
+// still go when it is deleted.
+function clearAttachments(job) {
+  if (!(job.attachments || []).length) return;
+  const dir = attachmentDir(job.id);
+  try {
+    if (insideAttachments(dir)) rmSync(dir, { recursive: true, force: true });
+    job.attachments = [];
+  } catch (err) {
+    console.error(`Failed to remove attachments for finished job "${job.title}":`, err.message);
+  }
+}
+
 // --- CRUD ---
 
 export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
@@ -487,7 +504,10 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // Stamped on arrival, and never cleared, because nothing leaves done. A job
   // finished by hand gets a doneAt but no prMergedAt: the board is recording
   // that the USER called it finished, which is not a claim about GitHub.
-  if (state === 'done') job.doneAt = new Date().toISOString();
+  if (state === 'done') {
+    job.doneAt = new Date().toISOString();
+    clearAttachments(job);
+  }
   // The note explaining why the board could not check this job's PR describes an
   // attempt the user is now overriding by hand, so it must not survive the move:
   // not onto a fresh To do card, where it would report a failure against work
@@ -1135,6 +1155,7 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
     if (pr.url) job.prUrl = pr.url;
     if (pr.number != null) job.prNumber = pr.number;
     if (!job.reviewAt) job.reviewAt = job.doneAt;
+    clearAttachments(job);
     finished.push(job);
 
     // Leaving in-progress is what the cap counts, so that agent goes — same

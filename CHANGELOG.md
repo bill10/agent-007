@@ -15,7 +15,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   accident, and the dispatched agent is told where to read them. Each card
   lists its attachments as links that open in a sandboxed tab. Up to 20
   files, 10MB each and 50MB in total; a file that cannot be stored is
-  refused with a message rather than silently dropped.
+  refused with a message rather than silently dropped. The files are freed
+  when the card reaches Done: the archived card keeps its record and PR
+  link, but the run its files were input to is over.
 
 ### Changed
 
