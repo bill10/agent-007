@@ -1362,12 +1362,10 @@ export function hasMotion() {
   return paperAnims.length > 0 || walkAnims.size > 0 || wanderAnims.size > 0;
 }
 
-// Entrance: the middle of the left edge of the floor, on the clear strip the
-// chat margin and the conference chairs both leave free. Routes join it via
-// that strip (entryRoute), so the walker never starts on furniture.
-export function entryPoint(w, h) {
-  return { x: Z, y: Math.round((FLOOR_TOP + h - CHAR_H) / 2) };
-}
+// Entrance: the left edge of the floor. There is no door — the walker appears
+// at whatever height its corridor row runs at (entryRoute), so the entrance
+// moves with the route instead of the route bending to reach a fixed point.
+const ENTRY_X = Z;
 
 // Multi-leg route between a desk and a conference seat that stays off the
 // furniture: down the desk column to a corridor just above the set, across,
@@ -1428,15 +1426,16 @@ export function corridorY(obstacles, panelHeight, y) {
   return best;
 }
 
-// Walk in/out routes: from the fixed door at the middle of the left edge,
-// along the clear left-edge strip (the chat margin and the conference chairs
-// both keep it free) to the empty floor row nearest the desk, across it, then
-// up or down the desk column. A walk-out starting inside the conference set
-// (a foot-seat sitter) steps out via the nearest outer lane first. The desk
-// column leg is the approach: it crosses whatever rows lie between the
-// corridor and the desk, exactly as the verticals always have. With no clear
-// row at all (a packed panel) it falls back to the old fixed corridor.
-export function entryRoute(point, entry, conf, inbound, panelHeight, obstacles = []) {
+// Walk in/out routes: in at the left edge on the empty floor row nearest the
+// desk, straight across that row, then up or down the desk column — and the
+// reverse walking out. The entrance rides on the corridor, so there is no
+// vertical leg along the left strip and no fixed door height. A walk-out
+// starting inside the conference set (a foot-seat sitter) steps out via the
+// nearest outer lane first. The desk column leg is the approach: it crosses
+// whatever rows lie between the corridor and the desk, exactly as the
+// verticals always have. With no clear row at all (a packed panel) it falls
+// back to the old fixed corridor.
+export function entryRoute(point, conf, inbound, panelHeight, obstacles = []) {
   const yMid = corridorY(obstacles, panelHeight, point.y)
     ?? (conf ? conf.table.y - 24 : panelHeight - CHAR_H);
   // A start inside the set's footprint — chair overhang included — steps out
@@ -1450,7 +1449,7 @@ export function entryRoute(point, entry, conf, inbound, panelHeight, obstacles =
       climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
     }
   }
-  const pts = [{ x: point.x, y: point.y }, ...climb, { x: entry.x, y: yMid }, { x: entry.x, y: entry.y }];
+  const pts = [{ x: point.x, y: point.y }, ...climb, { x: ENTRY_X, y: yMid }];
   if (inbound) pts.reverse();
   return pathThrough(pts);
 }
@@ -1629,7 +1628,6 @@ function drawMotion(ctx, w, h, layout) {
     drawFlyingPaper(ctx, Math.round(x), Math.round(y), alpha);
   }
 
-  const entry = entryPoint(w, h);
   for (const [sid, anim] of walkAnims) {
     let path;
     if (anim.dir === 'in') {
@@ -1641,9 +1639,9 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = entryRoute(to, entry, currentConf, true, h, currentObstacles);
+      path = entryRoute(to, currentConf, true, h, currentObstacles);
     } else {
-      path = entryRoute({ x: anim.fromX, y: anim.fromY }, entry, currentConf, false, h, currentObstacles);
+      path = entryRoute({ x: anim.fromX, y: anim.fromY }, currentConf, false, h, currentObstacles);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {

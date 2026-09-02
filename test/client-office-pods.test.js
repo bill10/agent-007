@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, computeConference, entryPoint, entryRoute, walkObstacles, corridorY } =
+const { computePodLayout, podRugRect, computeDecorPlacement, SPRITE_PATHS, computeBookshelfRuns, computeBoardLayout, computeSpareDesks, computeConference, entryRoute, walkObstacles, corridorY } =
   await import('../public/modules/office.js');
 
 const Z = 3;
@@ -336,11 +336,13 @@ describe('pod layout', () => {
 
   it('the walk-in entrance stands on bare floor, clear of the decor and the conference chairs', () => {
     for (const w of [440, 458, W]) {
-      const e = entryPoint(w, H);
-      const walker = { x: e.x, y: e.y, w: 16 * 2, h: 32 * 2 };
       const decor = computeDecorPlacement([], w, H);
-      for (const s of decor) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
       const conf = computeConference([], [], decor, w, H);
+      const obstacles = walkObstacles([], decor, [], conf);
+      // Wherever the route puts the entrance, the walker standing there is clear
+      const e = entryRoute({ x: 200, y: FLOOR_TOP }, conf, true, H, obstacles).from;
+      const walker = { x: e.x, y: e.y, w: 16 * 2, h: 32 * 2 };
+      for (const s of decor) expect(overlaps(walker, s), `panel ${w}: ${s.kind}`).toBe(false);
       for (const c of conf.chairs) expect(overlaps(walker, { ...c, w: 16 * Z, h: 16 * Z }), `panel ${w}: chair`).toBe(false);
     }
   });
@@ -356,10 +358,10 @@ describe('pod layout', () => {
     const conf = computeConference(rugs, spares, decor, W, T);
     expect(conf).not.toBeNull();
     const obstacles = walkObstacles(rugs, decor, spares, conf);
-    const entry = entryPoint(W, T);
     const desk = positions.get('a');
+    const entry = { x: Z, y: corridorY(obstacles, T, desk.y) };
     for (const inbound of [true, false]) {
-      const p = entryRoute(desk, entry, conf, inbound, T, obstacles);
+      const p = entryRoute(desk, conf, inbound, T, obstacles);
       const [start, end] = inbound ? [entry, desk] : [desk, entry];
       expect(p.from).toEqual(start);
       const last = p.legs[p.legs.length - 1];
@@ -369,9 +371,9 @@ describe('pod layout', () => {
       const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
       expect(across.y0).toBe(corridorY(obstacles, T, desk.y));
       for (const o of obstacles) expect(overlaps(sweptLeg(across), o), `${inbound ? 'in' : 'out'}: corridor`).toBe(false);
-      // And the door leg runs down the clear left strip to it
-      const down = p.legs.find(l => l.x0 === l.x1 && l.x0 === entry.x);
-      for (const o of obstacles) expect(overlaps(sweptLeg(down), o), `${inbound ? 'in' : 'out'}: entry strip`).toBe(false);
+      // The entrance is that row's left end, so nothing walks the left strip
+      expect(p.legs.some(l => l.x0 === l.x1 && l.x0 === entry.x),
+        `${inbound ? 'in' : 'out'}: leg on the left strip`).toBe(false);
     }
   });
 
@@ -384,7 +386,7 @@ describe('pod layout', () => {
     const conf = computeConference(rugs, spares, decor, W, T);
     const obstacles = walkObstacles(rugs, decor, spares, conf);
     const foot = conf.seats[5];
-    const p = entryRoute(foot, entryPoint(W, T), conf, false, T, obstacles);
+    const p = entryRoute(foot, conf, false, T, obstacles);
     // The sitter steps sideways out of the table's columns first
     expect(p.legs[0].y0).toBe(p.legs[0].y1);
     for (const l of p.legs) {
@@ -405,10 +407,9 @@ describe('pod layout', () => {
     const conf = computeConference(rugs, spares, decor, W, T);
     const obstacles = walkObstacles(rugs, decor, spares, conf);
     expect(corridorY(obstacles, T, positions.get('a').y)).toBeNull();
-    const entry = entryPoint(W, T);
     const chairs = conf.chairs.map(c => ({ ...c, w: 16 * Z, h: 16 * Z }));
     for (const inbound of [true, false]) {
-      const p = entryRoute(positions.get('a'), entry, conf, inbound, T, obstacles);
+      const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
       for (const l of p.legs)
         for (const c of chairs) expect(overlaps(sweptLeg(l), c), `${inbound ? 'in' : 'out'}: chair at ${c.x},${c.y}`).toBe(false);
       const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
@@ -443,9 +444,9 @@ describe('pod layout', () => {
     const spares = computeSpareDesks(pods, decor, 700, 800);
     expect(computeConference(rugs, spares, decor, 700, 800)).toBeNull();
     const obstacles = walkObstacles(rugs, decor, spares, null);
-    const entry = entryPoint(700, 800), desk = positions.get('s7');
+    const desk = positions.get('s7');
     for (const inbound of [true, false]) {
-      const p = entryRoute(desk, entry, null, inbound, 800, obstacles);
+      const p = entryRoute(desk, null, inbound, 800, obstacles);
       const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
       // The old route crossed along the bottom edge — straight through the chat rugs
       expect(across.y0).not.toBe(800 - 32 * 2);

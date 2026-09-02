@@ -242,24 +242,23 @@ lays out against a 0x0 room.
 - Only shown for MESSAGE state (agent needs user input)
 
 ### Transient motion
-- **Walk in/out:** a newly spawned agent walks in from the entrance
-  (the middle of the left edge of the floor, on the strip the chat margin
-  and the conference chairs leave free) to its desk. The route
-  (`entryRoute`) runs along that clear left-edge strip to a corridor row,
-  crosses it, then takes the desk column. The corridor is picked from the
-  frame's furniture rects (`walkObstacles`: pod rugs, spare desks, decor and
-  the conference set with its chair overhang): their vertical spans inverted
-  into the gaps between them, gaps too narrow for a character dropped, the
-  nearest remaining one to the desk chosen (`corridorY`). Spans count full
-  width, so a rug half-way across still rules its rows out — a scan, not a
-  search. A panel with no clear row left (the conference set placed on its
-  minimum margins) falls back to the old fixed corridor: above the set, or
-  the bottom edge with no set. The desk column leg is the approach and still
-  crosses whatever rows lie between the corridor and the desk. Spare desks
-  drop a column and the conference set yields rather
-  than reach into the entry strip (`ENTRY_STRIP_W`), so the entrance and its
-  strip stay clear of everything that can move; a full-width pod row can
-  still overlap it, like the verticals always could. A departing agent walks out the
+- **Walk in/out:** a newly spawned agent walks in at the left edge of the
+  floor, straight across an empty row, then up or down its desk column
+  (`entryRoute`). There is no door: the entrance is the left end of that row,
+  so it sits at a different height for a desk in the top pod row than for one
+  near the bottom, and no leg ever runs along the left edge to reach it. The
+  row is picked from the frame's furniture rects (`walkObstacles`: pod rugs,
+  spare desks, decor and the conference set with its chair overhang): their
+  vertical spans inverted into the gaps between them, gaps too narrow for a
+  character dropped, the nearest remaining one to the desk chosen
+  (`corridorY`). Spans count full width, so a rug half-way across still rules
+  its rows out — a scan, not a search. A panel with no clear row left (the
+  conference set placed on its minimum margins) falls back to the old fixed
+  corridor: above the set, or the bottom edge with no set. The desk column leg
+  is the approach and still crosses whatever rows lie between the corridor and
+  the desk. Spare desks drop a column and the conference set yields rather
+  than reach into the entry strip (`ENTRY_STRIP_W`), keeping the left edge
+  walkable on narrow panels. A departing agent walks out the
   same way before its desk disappears — from its conference seat, or from
   its current point mid-wander, if it was away from the desk. While a walk
   plays, the motion overlay draws the character instead of the seated pass.

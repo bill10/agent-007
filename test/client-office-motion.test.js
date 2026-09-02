@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { entryPoint, entryRoute, corridorY, pointAlongPath, detectDispatches } =
+const { entryRoute, corridorY, pointAlongPath, detectDispatches } =
   await import('../public/modules/office.js');
 
 const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_W = 32, CHAR_H = 64;
@@ -17,13 +17,6 @@ const overlaps = (a, b) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
 describe('walk path', () => {
-  it('entry point sits on the left edge, halfway down the floor', () => {
-    const e = entryPoint(600, 800);
-    expect(e.x).toBeGreaterThan(0);
-    expect(e.x).toBeLessThan(40);
-    expect(e.y).toBe(Math.round((FLOOR_TOP + 800 - CHAR_H) / 2));
-  });
-
   it('walks from start to end, clamped at both ends', () => {
     const p = { from: { x: 100, y: 200 }, total: 180,
       legs: [{ x0: 100, y0: 200, x1: 40, y1: 200 }, { x0: 40, y0: 200, x1: 40, y1: 80 }] };
@@ -75,12 +68,14 @@ describe('walk in/out routing', () => {
   const rug = { x: 100, y: 216, w: 400, h: 160 };
   const chat = { x: 60, y: 660, w: 600, h: 130 };
   const obstacles = [rug, chat];
-  const entry = entryPoint(W, H);
   const desk = { x: 300, y: 260 }; // on the rug, in the top row
+  // No door: the entrance is the left end of whatever row the walker crosses.
+  const entryFor = d => ({ x: 3, y: corridorY(obstacles, H, d.y) });
 
   for (const inbound of [true, false]) {
-    it(`walk-${inbound ? 'in' : 'out'} enters at the door and corridors along a clear row`, () => {
-      const p = entryRoute(desk, entry, null, inbound, H, obstacles);
+    it(`walk-${inbound ? 'in' : 'out'} enters on the left edge at its corridor row`, () => {
+      const p = entryRoute(desk, null, inbound, H, obstacles);
+      const entry = entryFor(desk);
       const [start, end] = inbound ? [entry, desk] : [desk, entry];
       expect(p.from).toEqual(start);
       const last = p.legs[p.legs.length - 1];
@@ -101,9 +96,21 @@ describe('walk in/out routing', () => {
     });
   }
 
+  it('has no fixed door: the entrance rides the corridor and never runs the left strip', () => {
+    const below = { x: 300, y: 600 }; // a desk under the rug band, on the far row
+    const [a, b] = [desk, below].map(d => entryRoute(d, null, true, H, obstacles));
+    expect(a.from.x).toBe(b.from.x);            // both come in at the left edge
+    expect(a.from.y).not.toBe(b.from.y);        // at their own row, not one door
+    for (const p of [a, b]) {
+      expect(p.from).toEqual(entryFor(p === a ? desk : below));
+      // Nothing walks up or down the left edge to reach the row any more
+      expect(p.legs.some(l => l.x0 === l.x1 && l.x0 === p.from.x)).toBe(false);
+    }
+  });
+
   it('falls back to the old corridor when no row is clear', () => {
     const full = [{ x: 0, y: 0, w: W, h: H }];
-    const p = entryRoute(desk, entry, null, false, H, full);
+    const p = entryRoute(desk, null, false, H, full);
     expect(p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1).y0).toBe(H - CHAR_H);
   });
 });

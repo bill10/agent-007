@@ -10,13 +10,14 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 ### Fixed
 
 - Agents walking in and out of the office no longer drop to the bottom-left
-  corner first. The route now leaves the door in the middle of the left wall,
-  follows the clear left strip to the empty floor row nearest the desk, crosses
-  there, and takes the desk column. The row is picked from the furniture on the
-  floor that frame — pod rugs, spare desks, the chat areas and plants, and the
-  conference set with its chairs — so the walk no longer cuts through the sofas
-  along the bottom edge. On a floor with no row wide enough to walk (a
-  conference set placed on its minimum margins) the old corridor still applies.
+  corner first. The route now comes in at the left edge on the empty floor row
+  nearest the desk, crosses that row, and takes the desk column. There is no
+  fixed door — the entrance rides the row, so it sits higher or lower with the
+  desk. The row is picked from the furniture on the floor that frame — pod
+  rugs, spare desks, the chat areas and plants, and the conference set with its
+  chairs — so the walk no longer cuts through the sofas along the bottom edge.
+  On a floor with no row wide enough to walk (a conference set placed on its
+  minimum margins) the old corridor still applies.
 
 ## [0.3.26.1] - 2026-09-02
 
