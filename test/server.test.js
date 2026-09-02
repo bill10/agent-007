@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { app, server, startup, sessions } from '../server.js';
 import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
+import { addJob, deleteJob } from '../server/jobs.js';
 import WebSocket from 'ws';
 import { tmpdir } from 'os';
 import { mkdirSync, existsSync, writeFileSync, rmSync } from 'fs';
@@ -124,6 +125,71 @@ describe('/api/browse', () => {
     const data = await res.json();
     const hasHidden = data.entries.some(e => e.name.startsWith('.'));
     expect(hasHidden).toBe(true);
+  });
+});
+
+// --- Job attachments ---
+
+describe('/api/jobs/:id/attachments/:name', () => {
+  let job;
+  beforeAll(() => {
+    ({ job } = addJob({
+      title: 'Shot', repoPath: tmpdir(),
+      attachments: [{ name: 'shot.png', data: Buffer.from('png!').toString('base64') }, { name: '.env', data: Buffer.from('K=1').toString('base64') }],
+    }, () => {}));
+  });
+  afterAll(async () => { await deleteJob(job.id, () => {}); });
+
+  it('serves the file sandboxed, sniff-proof, and without a referrer', async () => {
+    const res = await fetch(`${baseUrl}/api/jobs/${job.id}/attachments/shot.png`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-security-policy')).toBe('sandbox');
+    expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer');
+    expect(await res.text()).toBe('png!');
+  });
+
+  it('serves a dotfile too', async () => {
+    const res = await fetch(`${baseUrl}/api/jobs/${job.id}/attachments/.env`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe('K=1');
+  });
+
+  it('404s for a name the card does not have', async () => {
+    const res = await fetch(`${baseUrl}/api/jobs/${job.id}/attachments/other.png`);
+    expect(res.status).toBe(404);
+  });
+
+  it('404s when the file is gone from disk', async () => {
+    rmSync(job.attachments[0].path, { force: true });
+    const res = await fetch(`${baseUrl}/api/jobs/${job.id}/attachments/shot.png`);
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toMatch(/missing on disk/);
+  });
+
+  // The one call that connects the form to the disk: job-create and
+  // job-update forward `attachments`, and the broadcast carries the result.
+  it('carries attachments over the WebSocket on create and update', async () => {
+    const ws = await new Promise((resolve, reject) => {
+      const s = new WebSocket(wsUrl);
+      s.on('open', () => resolve(s));
+      s.on('error', reject);
+    });
+    const next = (pred) => new Promise((resolve) => {
+      const h = (d) => { const m = JSON.parse(d.toString()); if (pred(m)) { ws.removeListener('message', h); resolve(m); } };
+      ws.on('message', h);
+    });
+    let list = next(m => m.type === 'jobs-list' && m.jobs.some(j => j.title === 'Wire shot'));
+    ws.send(JSON.stringify({ type: 'job-create', title: 'Wire shot', repoPath: tmpdir(), attachments: [{ name: 'wire.png', data: Buffer.from('w').toString('base64') }] }));
+    const created = (await list).jobs.find(j => j.title === 'Wire shot');
+    expect(created.attachments).toEqual([{ name: 'wire.png', path: join(process.env.AGENT007_CONFIG_DIR, 'attachments', created.id, 'wire.png') }]);
+    expect(existsSync(created.attachments[0].path)).toBe(true);
+    list = next(m => m.type === 'jobs-list' && m.jobs.find(j => j.id === created.id)?.attachments.length === 0);
+    ws.send(JSON.stringify({ type: 'job-update', jobId: created.id, attachments: [] }));
+    await list;
+    expect(existsSync(created.attachments[0].path)).toBe(false);
+    ws.close();
+    await deleteJob(created.id, () => {});
   });
 });
 
@@ -333,6 +399,18 @@ describe('auth enforcement (live enable)', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(200);
+  });
+
+  // A card's attachment link is a plain <a href>, which cannot send a header,
+  // so the token rides in the query for exactly this route.
+  it('gates an attachment link on the token, in the query', async () => {
+    const { job } = addJob({ title: 'Gated', repoPath: tmpdir(), attachments: [{ name: 'g.txt', data: Buffer.from('g').toString('base64') }] }, () => {});
+    try {
+      expect((await fetch(`${baseUrl}/api/jobs/${job.id}/attachments/g.txt`)).status).toBe(401);
+      expect((await fetch(`${baseUrl}/api/jobs/${job.id}/attachments/g.txt?token=${token}`)).status).toBe(200);
+    } finally {
+      await deleteJob(job.id, () => {});
+    }
   });
 
   it('closes a WS handshake without a token (code 4401)', async () => {

@@ -553,6 +553,9 @@ function setupClipboardPaste() {
   // Use capture phase to intercept before xterm.js handles paste
   document.addEventListener('paste', (e) => {
     if (!activeSessionId) return;
+    // A screenshot pasted into the job form is a card attachment, not an
+    // upload to whichever agent happens to be selected.
+    if (e.target.closest?.('#job-form')) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const item of items) {

@@ -14,7 +14,7 @@
 
 import { agents, jobs, boardSettings, setBoardSettings, boardActive, setBoardActive, activeSessionId, repos } from './state.js';
 import { send } from './ws.js';
-import { escapeHtml } from './auth.js';
+import { escapeHtml, getToken } from './auth.js';
 import { switchToSession } from './terminal.js';
 
 // The columns, in board order. `done` deliberately has none: a job whose PR
@@ -31,6 +31,9 @@ export const COLUMNS = [
 const STALLED_AFTER_MS = 3 * 60 * 1000;
 
 let editingJobId = null;
+// Files waiting in the form: { name } for one the card already has, { name,
+// data } (base64) for a new one, `reading` while the FileReader is still busy.
+let pendingAttachments = [];
 // Which of the two views the board is showing. The columns and the finished
 // list share the same space rather than stacking, so the finished archive can
 // never push the live work off the screen.
@@ -304,6 +307,21 @@ function renderCard(job) {
     card.appendChild(detail);
   }
 
+  if (Array.isArray(job.attachments) && job.attachments.length) {
+    const files = document.createElement('div');
+    files.className = 'job-card-attachments';
+    for (const a of job.attachments) {
+      const link = document.createElement('a');
+      link.className = 'job-card-attachment';
+      link.href = attachmentUrl(job.id, a.name);
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = a.name;
+      files.appendChild(link);
+    }
+    card.appendChild(files);
+  }
+
   // Who worked on it, and where the work is (requirement 3). Rendered whenever
   // EITHER is known: the branch is a fact about the job, not about the agent,
   // and gating it on the name left a finished card showing nothing at all once
@@ -486,6 +504,70 @@ function renderToolbar() {
   if (document.activeElement !== cap) cap.value = boardSettings.maxPerRepo;
 }
 
+// --- Attachments ---
+
+// Mirrors the server's limits in server/jobs.js (public/ cannot import it).
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 20;
+const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
+// Pasted screenshots carry a MIME type, not a name.
+const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/svg+xml': 'svg' };
+
+// A plain link cannot send a bearer header, so the token rides in the query,
+// which the server accepts for exactly this case.
+function attachmentUrl(jobId, name) {
+  const token = getToken();
+  return `/api/jobs/${encodeURIComponent(jobId)}/attachments/${encodeURIComponent(name)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+}
+
+function renderAttachments() {
+  const box = document.getElementById('job-attachments');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const a of pendingAttachments) {
+    const chip = document.createElement('span');
+    chip.className = 'job-attachment';
+    chip.textContent = a.name;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'job-attachment-remove';
+    rm.textContent = '\u00d7';
+    rm.title = `Remove ${a.name}`;
+    rm.onclick = () => { pendingAttachments = pendingAttachments.filter(x => x !== a); renderAttachments(); };
+    chip.appendChild(rm);
+    box.appendChild(chip);
+  }
+}
+
+function addAttachments(files, fallbackName) {
+  for (const file of files) {
+    if (file.size > MAX_ATTACHMENT_BYTES) { showFormError(`${file.name} is too large (max 10MB)`); continue; }
+    // A pasted screenshot arrives as "image.png" every time; a timestamp keeps
+    // the second one from replacing the first.
+    const name = fallbackName && /^image\.\w+$/i.test(file.name || 'image.png')
+      ? `${fallbackName}-${Date.now()}.${IMAGE_EXT[file.type] || file.type.split('/')[1] || 'png'}`
+      : file.name;
+    const others = pendingAttachments.filter(a => a.name !== name);
+    // The same limits the server enforces, caught here while the file picker
+    // is still open rather than as a toast after the form has closed.
+    if (others.length >= MAX_ATTACHMENTS) { showFormError(`At most ${MAX_ATTACHMENTS} files per job`); continue; }
+    if (others.reduce((n, a) => n + (a.size || 0), 0) + file.size > MAX_ATTACHMENT_TOTAL_BYTES) { showFormError('Attachments add up to more than 50MB'); continue; }
+    const entry = { name, size: file.size, reading: true };
+    pendingAttachments = [...others, entry];
+    const reader = new FileReader();
+    reader.onload = () => { entry.data = String(reader.result).split(',')[1]; delete entry.reading; };
+    // A file that vanished or cannot be read must not leave a chip that
+    // blocks every save with "still reading".
+    reader.onerror = reader.onabort = () => {
+      pendingAttachments = pendingAttachments.filter(a => a !== entry);
+      showFormError(`Could not read ${name}`);
+      renderAttachments();
+    };
+    reader.readAsDataURL(file);
+  }
+  renderAttachments();
+}
+
 // --- Form ---
 
 // The cron box only means anything for a scheduled job, so it is hidden rather
@@ -556,6 +638,8 @@ function openForm(jobId) {
   if (job) repoEl.value = job.repoPath;
   typeEl.value = job && isScheduled(job) ? 'scheduled' : 'one-time';
   scheduleEl.value = job && job.schedule ? job.schedule : '';
+  pendingAttachments = job && Array.isArray(job.attachments) ? job.attachments.map(a => ({ name: a.name })) : [];
+  renderAttachments();
   syncScheduleField();
   saveBtn.textContent = job ? 'Save' : 'Post job';
   clearFormError();
@@ -592,7 +676,11 @@ function saveForm() {
   if (jobType === 'scheduled' && !looksLikeCron(schedule)) {
     return showFormError('That does not look like a cron schedule — five fields (minute hour day month weekday), or @daily / @hourly / @weekly.');
   }
-  const fields = { title, detail, repoPath, jobType, schedule };
+  if (pendingAttachments.some(a => a.reading)) return showFormError('Still reading an attached file — try again in a moment.');
+  // The form always holds the complete list; an empty one on an edit means
+  // "none left".
+  const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
+  const fields = { title, detail, repoPath, jobType, schedule, attachments };
   if (editingJobId) send({ type: 'job-update', jobId: editingJobId, ...fields });
   else send({ type: 'job-create', ...fields });
   closeForm();
@@ -667,6 +755,18 @@ export function setupJobBoard() {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveForm(); }
     if (e.key === 'Escape') closeForm();
   });
+  document.getElementById('job-detail').addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files || [])];
+    if (!files.length) return;
+    e.preventDefault();
+    addAttachments(files, 'screenshot');
+  });
+  const attachBtn = document.getElementById('btn-job-attach');
+  const attachInput = document.getElementById('job-attach-input');
+  if (attachBtn && attachInput) {
+    attachBtn.onclick = () => attachInput.click();
+    attachInput.onchange = () => { addAttachments(attachInput.files); attachInput.value = ''; };
+  }
 
   document.getElementById('btn-dispatcher-toggle').onclick = () => {
     send({ type: 'job-settings', running: !boardSettings.running });

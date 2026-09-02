@@ -180,6 +180,19 @@ describe('buildJobCommand', () => {
     expect(prompt).toContain('Only a title');
     expect(prompt).toContain('/ship');
   });
+
+  it('lists attached files by absolute path, before the ship instruction', () => {
+    const prompt = buildJobPrompt(job({ attachments: [{ name: 'shot.png', path: '/cfg/attachments/j1/shot.png' }] }));
+    expect(prompt).toMatch(/Attached files[^\n]*\n  \/cfg\/attachments\/j1\/shot\.png/);
+    expect(prompt.indexOf('shot.png')).toBeLessThan(prompt.indexOf('/ship'));
+    expect(buildJobPrompt(job({ attachments: [] }))).not.toContain('Attached files');
+  });
+
+  it('grants the agent the attachments dir with --add-dir, after the prompt', () => {
+    const parsed = parseCommand(buildJobCommand(job({ attachments: [{ name: 'a.png', path: '/cfg/attachments/j1/a.png' }, { name: 'b.png', path: '/cfg/attachments/j1/b.png' }] })));
+    expect(parsed.args.slice(3)).toEqual(['--add-dir', '/cfg/attachments/j1']);
+    expect(parseCommand(buildJobCommand(job())).args).toHaveLength(3);
+  });
 });
 
 // --- Live status ---

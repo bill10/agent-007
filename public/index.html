@@ -156,6 +156,12 @@
               </label>
             </div>
             <label>Details<textarea id="job-detail" rows="5" placeholder="Everything the agent needs to know. It runs unattended, so be explicit about scope and acceptance criteria."></textarea></label>
+            <div class="job-form-attach">
+              <button type="button" id="btn-job-attach" class="secondary" title="Attach screenshots or files. The agent is told where to find them.">Attach files</button>
+              <span class="job-form-hint">or paste a screenshot into Details · 10MB each</span>
+              <input type="file" id="job-attach-input" multiple style="display:none">
+              <div class="job-form-attachments" id="job-attachments"></div>
+            </div>
             <div class="job-form-actions">
               <button id="btn-job-save">Post job</button>
               <button id="btn-job-cancel" class="secondary">Cancel</button>

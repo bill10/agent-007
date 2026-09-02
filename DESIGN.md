@@ -588,6 +588,41 @@ may share a title, so collisions walk `-2`, `-3`; names taken on the remote coun
 as collisions too, since a finished job leaves its remote branch alive (that is
 the open PR).
 
+### Attachments
+A card can carry screenshots and files: picked with **Attach files**, or pasted
+into Details (a paste that lands in the job form is the form's, not the active
+terminal's). They ride inline on the `job-create`/`job-update` message as base64,
+the same shape as the terminal's upload, and land under
+`<config dir>/attachments/<job id>/`.
+
+- **Outside the repository, by construction.** The agent is handed absolute
+  paths in its prompt, so nothing can be committed by accident; the spawn
+  command adds `--add-dir` for that directory so an unattended Claude Code job
+  does not stop at a permission prompt on its first screenshot.
+- **Served sandboxed, to people only.** `/api/jobs/:id/attachments/:name` sits
+  below the `requireUser` gate and sends `Content-Security-Policy: sandbox`,
+  `nosniff` and `no-referrer`: an uploaded HTML file must not run as this
+  origin, where the token lives. A card link cannot send a header, so the
+  token rides in the query for exactly this route.
+- **Only changeable in To do**, the same rule as the repo, type and schedule:
+  a running agent was handed those paths at dispatch.
+- **Refused, never silently dropped.** An unusable name, two names that one
+  filesystem would fold together, more than 20 files, more than 10MB each or
+  50MB per save all fail the whole edit, and a refused edit changes nothing,
+  title included. New files are written to `~part` and renamed into place only
+  once every write succeeded.
+- **Paths from `config.json` are not trusted.** A stored path is served or
+  deleted only if it resolves inside the attachments dir. `safeFilename`
+  (`lib/helpers.js`) is the one sanitiser for every client-supplied name,
+  terminal uploads included; it also prefixes Windows device names.
+- **Freed at Done.** A card is a few lines of JSON and stays forever; its
+  files can be megabytes and were inputs to a run that is now over. When a
+  card reaches Done — by hand or by the merge sweep — its files and their
+  links are removed, except while a live agent is still attached (a re-adopted
+  Review agent keeps the paths its prompt named). The merge sweep retries
+  stragglers every scan, so a deferred or OS-refused removal is reclaimed
+  later instead of leaking. Deleting a card earlier removes its directory too.
+
 ## Interactive Behaviors
 
 ### Icon buttons
@@ -629,6 +664,8 @@ the open PR).
 ### Clipboard paste
 - Cmd+V with image data in clipboard uploads as screenshot
 - Uses capture phase to intercept before xterm.js
+- Skips a paste that lands in the job form, which becomes a card attachment
+  instead (see Job Board, Attachments)
 
 ### New agent spawning
 - Preset buttons at the top of the spawn dialog (Claude Code, Codex, Gemini,
