@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
+import { safeFilename,
   createCodenamePool, createCocktailPool, createColorCycler,
   stripAnsiComplete, detectState, parseGitStatus, buildFileTree,
   createRingBuffer, repoDirName, parseCommand,
@@ -510,5 +510,15 @@ describe('repoDirName', () => {
 
   it('should produce consistent output for same input', () => {
     expect(repoDirName('/foo/bar')).toBe(repoDirName('/foo/bar'));
+  });
+});
+
+describe('safeFilename', () => {
+  it('strips separators and prefixes Windows device names', () => {
+    expect(safeFilename('../a b/c.png')).toBe('.._a_b_c.png');
+    expect(safeFilename('CON.txt')).toBe('_CON.txt');
+    expect(safeFilename('nul')).toBe('_nul');
+    expect(safeFilename('console.log')).toBe('console.log');
+    expect(safeFilename(undefined)).toBe('');
   });
 });
