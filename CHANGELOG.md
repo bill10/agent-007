@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.26.1] - 2026-09-02
+
+### Changed
+
+- Agents now enter and leave the office through the middle of the left wall
+  instead of the bottom-left corner. A new agent walks in from the left edge,
+  halfway down the floor, and a departing one walks out the same way along
+  the clear left strip and the corridor above the conference table (or the
+  bottom edge when there is no table). Spare desks and the conference set
+  now keep that strip clear on narrow panels.
+
 ## [0.3.26.0] - 2026-09-02
 
 ### Added
