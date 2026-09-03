@@ -479,3 +479,72 @@ describe('walk in/out', () => {
     expect(office.hasMotion()).toBe(false);
   });
 });
+
+// A walk's route is frozen when it starts: an unrelated agent spawning
+// mid-stride changes the obstacles, and recomputing the path every frame
+// re-projected the walker (distance advances on wall-clock time, so a longer
+// route moves it a desk over) instead of leaving it where it was walking.
+describe('frozen walk routes', () => {
+  // drawWalker bails without a loaded sheet, so make sprites load instantly
+  // and read the walker's position back off drawImage.
+  const walkingOffice = async () => {
+    vi.resetModules();
+    vi.stubGlobal('Image', class { set src(v) { this.src_ = v; this.onload?.(); } });
+    const office = await import('../public/modules/office.js');
+    const state = await import('../public/modules/state.js');
+    const { canvas } = canvasDom(900, 800);
+    const drawn = [];
+    const ctx = new Proxy({}, {
+      get: (_t, k) => k === 'drawImage'
+        ? (img, ...a) => { if (String(img.src_).includes('char')) drawn.push({ x: a[4], y: a[5] }); }
+        : () => ctx,
+      set: () => true,
+    });
+    canvas.getContext = () => ctx;
+    // The walker is drawn last (the overlay pass runs after the seated one),
+    // so the final char sprite of a frame is the one walking.
+    const frameAt = (ms) => {
+      drawn.length = 0;
+      const spy = vi.spyOn(performance, 'now').mockReturnValue(ms);
+      office.renderOffice();
+      spy.mockRestore();
+      return drawn.at(-1);
+    };
+    return { office, state, frameAt };
+  };
+
+  it('keeps a walker on its route when other agents spawn mid-walk', async () => {
+    const { office, state, frameAt } = await walkingOffice();
+    office.noteJobsUpdate(); // connect sync complete
+    office.noteAgentArrival('a2');
+    state.agents.set('a1', { state: 'WORKING', repoPath: '/r1', repoSlug: 'r1' });
+    state.agents.set('a2', { state: 'WORKING', repoPath: '/r2', repoSlug: 'r2' });
+    frameAt(0); // the route resolves and the walk starts
+    const before = frameAt(1000);
+    expect(before).toBeDefined();
+
+    // Six more agents across both repos: the pods reflow, the obstacle set
+    // grows and the corridor row and approach column both move.
+    for (let i = 3; i <= 8; i++) {
+      state.agents.set('a' + i, { state: 'WORKING', repoPath: i % 2 ? '/r1' : '/r2', repoSlug: i % 2 ? 'r1' : 'r2' });
+    }
+    expect(frameAt(1000)).toEqual(before); // same elapsed time, same spot
+    expect(office.hasMotion()).toBe(true); // still mid-walk, not clamped at the end
+  });
+
+  it('rebuilds the route when the canvas resizes mid-walk', async () => {
+    const { office, state, frameAt } = await walkingOffice();
+    office.noteJobsUpdate();
+    office.noteAgentArrival('a2');
+    state.agents.set('a1', { state: 'WORKING', repoPath: '/r1', repoSlug: 'r1' });
+    state.agents.set('a2', { state: 'WORKING', repoPath: '/r2', repoSlug: 'r2' });
+    frameAt(0);
+    const before = frameAt(1000);
+
+    const canvas = document.getElementById('office-canvas');
+    Object.defineProperty(canvas, 'clientHeight', { value: 1000, configurable: true });
+    const after = frameAt(1000);
+    expect(after).toBeDefined();
+    expect(after).not.toEqual(before); // the room really did change — relay out
+  });
+});

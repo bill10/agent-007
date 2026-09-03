@@ -1613,12 +1613,9 @@ export function noteAgentDeparture(sessionId) {
   const seat = currentConf && confSeats.has(sessionId) ? currentConf.seats[confSeats.get(sessionId)] : null;
   const anim = wanderAnims.get(sessionId);
   let pos = seat || desk;
-  if (anim && desk && currentConf) {
-    const path = anim.dir === 'seat'
-      ? (seat ? wanderRoute(desk, seat, currentConf, true, currentObstacles, w) : null)
-      : wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w);
-    if (path) pos = pointAlongPath(path, ((performance.now() - anim.start) / 1000) * WALK_SPEED);
-  }
+  // The frozen route the wander is actually walking, so the walk-out starts
+  // where the character is drawn rather than on a freshly recomputed path.
+  if (anim && anim.path) pos = pointAlongPath(anim.path, ((performance.now() - anim.start) / 1000) * WALK_SPEED);
   confSeats.delete(sessionId);
   wanderAnims.delete(sessionId);
   if (!pos) return;
@@ -1677,12 +1674,26 @@ function drawFlyingPaper(ctx, x, y, alpha) {
   ctx.restore();
 }
 
-// Drawn on top of everything each frame. Targets resolve fresh from the
-// current layout, so a grid reflow retargets mid-flight instead of leaving an
-// animation aimed at a stale desk.
+// Drawn on top of everything each frame. Paper targets resolve fresh from the
+// current layout, so a grid reflow retargets a flying sheet mid-flight instead
+// of leaving it aimed at a stale desk. Walk routes do not — see routeOf.
 function drawMotion(ctx, w, h, layout) {
   if (!hasMotion()) return;
   const now = performance.now();
+
+  // A walker's route is built once and kept on the anim. Rebuilding it from
+  // live obstacles every frame re-projected the walker along a different path
+  // whenever an unrelated spawn or exit changed the layout mid-stride — the
+  // distance advances on wall-clock time, so a longer `total` moves it a desk
+  // over. Only a canvas resize rebuilds: the room genuinely changes then.
+  const routeOf = (anim, build) => {
+    if (!anim.path || anim.pathW !== w || anim.pathH !== h) {
+      anim.path = build();
+      anim.pathW = w;
+      anim.pathH = h;
+    }
+    return anim.path;
+  };
 
   const board = paperAnims.length ? computeBoardLayout(w) : null;
   for (let i = paperAnims.length - 1; i >= 0; i--) {
@@ -1715,9 +1726,11 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = entryRoute(to, currentConf, true, h, currentObstacles, w);
+      // Built on the first frame the desk resolves, not the first frame of
+      // the anim — the walk-in waits for the async terminal handler.
+      path = routeOf(anim, () => entryRoute(to, currentConf, true, h, currentObstacles, w));
     } else {
-      path = entryRoute({ x: anim.fromX, y: anim.fromY }, currentConf, false, h, currentObstacles, w);
+      path = routeOf(anim, () => entryRoute({ x: anim.fromX, y: anim.fromY }, currentConf, false, h, currentObstacles, w));
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
@@ -1730,9 +1743,9 @@ function drawMotion(ctx, w, h, layout) {
     drawWalker(ctx, anim.variant, pointAlongPath(path, dist), now);
   }
 
-  // Idle wanderers between desk and conference seat. Targets resolve fresh
-  // like the walk anims; wanderRoute keeps the crossing legs off the
-  // conference furniture.
+  // Idle wanderers between desk and conference seat. Routes freeze like the
+  // walk anims; wanderRoute keeps the crossing legs off the conference
+  // furniture.
   for (const [sid, anim] of wanderAnims) {
     let path;
     const desk = deskCharPos(sid, layout);
@@ -1740,9 +1753,9 @@ function drawMotion(ctx, w, h, layout) {
     if (anim.dir === 'seat') {
       const seat = currentConf.seats[confSeats.get(sid)];
       if (!seat) { wanderAnims.delete(sid); continue; }
-      path = wanderRoute(desk, seat, currentConf, true, currentObstacles, w);
+      path = routeOf(anim, () => wanderRoute(desk, seat, currentConf, true, currentObstacles, w));
     } else {
-      path = wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w);
+      path = routeOf(anim, () => wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w));
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
