@@ -337,6 +337,18 @@ describe('detectState', () => {
       }, { now }), line).toBe('MESSAGE');
   });
 
+  it('still reads the confirm footer, and not a lookalike that wants no answer', () => {
+    const now = 50000;
+    // The alternation was widened, not swapped: "confirm" must keep working,
+    // and a footer that is merely dismissable must not start reading as a
+    // question -- that would pin a resting agent as MESSAGE forever.
+    const state = (line) => detectState({
+      ...BASE, lastOutputAt: 0, isTUI: true, lastStrippedLine: line,
+    }, { now });
+    expect(state('Enter to confirm \u00b7 Esc to cancel')).toBe('MESSAGE');
+    expect(state('Enter to continue \u00b7 Esc to cancel')).toBe('WAITING');
+  });
+
   it('should return IDLE when nothing matches and not TUI', () => {
     const now = 50000;
     expect(detectState({

@@ -35,9 +35,9 @@ export const SPRITE_PATHS = {
   // like the characters.
   cactus:     'assets/furniture/cactus.png',           // 16×32
   plant2:     'assets/furniture/plant_2.png',          // 16×32
-  sofa:       'assets/furniture/sofa_side.png',        // 16×32, side view facing right
-  sofafront:  'assets/furniture/sofa_front.png',       // 32×16, front view facing down
-  table:      'assets/furniture/coffee_table.png',     // 32×32
+  sofa:       'assets/furniture/sofa_side.png',        // 16×32, side view facing right, art in x 0–12, y 1–31
+  sofafront:  'assets/furniture/sofa_front.png',       // 32×16, front view facing down, art fills the box
+  table:      'assets/furniture/coffee_table.png',     // 32×32, art in x 2–29, y 6–30
   coffee:     'assets/furniture/coffee.png',           // 16×16, art in the top-right 8×7
   conftable:  'assets/furniture/table_front.png',      // 48×64 wooden table, art in rows 11–63
   confchair:  'assets/furniture/chair_side.png',       // 16×16 cushioned chair facing right, art in x 0–11
@@ -299,9 +299,8 @@ export function chatSeats(spot) {
   // A whole character above the rug, not the conference set's 24px: a walker
   // standing 24px up still overlaps by 40 of its 64, so the crossing leg would
   // sweep the sofas it is heading for -- and the other chat area on the way.
-  // Just above the rug, the same idiom the conference set uses. corridorY turns
-  // it into a row a walker actually fits in: a fixed offset does not, since a
-  // 64px character standing 24px up still overlaps the sofas by 40.
+  // Just above the rug, the same 24px idiom the conference set uses; corridorY
+  // is what turns the preference into a row a walker actually fits in.
   const yPref = spot.y - 24;
   const seat = (x, y, row, mirror) => ({ x, y, row, mirror, kind: 'chat', lane: x, yPref });
   return [
@@ -922,8 +921,13 @@ function drawConference(ctx, conf) {
   // but sitters ALWAYS draw: seats are claimed in updateWander regardless,
   // and a missing chair PNG must never make a character invisible.
   const furniture = SPRITES.conftable && SPRITES.confchair && SPRITES.confchairback && SPRITES.confchairfront;
-  const sitters = new Map(); // seat index -> variant, arrived sitters only
-  for (const [sid, seat] of confSeats) if (!wanderAnims.has(sid)) sitters.set(seat, charVariant(sid));
+  // Keyed by CONFERENCE seat index, not the pooled one: a claim indexes
+  // currentSeats, and a sofa claim would otherwise alias onto a chair here.
+  const sitters = new Map(); // conf seat index -> variant, arrived sitters only
+  for (const [sid, i] of seatClaims) {
+    const seat = currentSeats[i];
+    if (seat?.kind === 'conf' && !wanderAnims.has(sid)) sitters.set(seat.confIndex, charVariant(sid));
+  }
   const sitter = (i) => {
     if (sitters.has(i)) drawStanding(ctx, sitters.get(i), conf.seats[i].x, conf.seats[i].y, conf.seats[i].row, conf.seats[i].mirror);
   };
@@ -947,7 +951,7 @@ function drawConference(ctx, conf) {
 // sitter simply covers the one they are on. Sitters draw even when the sofa
 // sprites failed to load, for the same reason the conference ones do.
 function drawChatSitters(ctx) {
-  for (const [sid, i] of confSeats) {
+  for (const [sid, i] of seatClaims) {
     const seat = currentSeats[i];
     if (!seat || seat.kind !== 'chat' || wanderAnims.has(sid)) continue;
     drawStanding(ctx, charVariant(sid), seat.x, seat.y, seat.row, seat.mirror);
@@ -1375,25 +1379,37 @@ let prevJobStates = null;     // jobId -> { state, agentSessionId }
 const paperAnims = [];        // { sessionId, col, start }
 const walkAnims = new Map();  // sessionId -> { dir: 'in'|'out', start, queuedAt, fromX, fromY, variant }
 
-// --- Idle wander: an IDLE agent leaves its desk, walks to a free conference
-// seat and sits there until its state changes, then walks back. Client-side
-// and time-based like the walk in/out anims. confSeats holds the seat claim
-// from the moment the walk starts; the character renders seated once its
-// wander anim finishes. Everything clears if the conference set vanishes
-// (resize) — characters simply render at their desks again next frame.
-const confSeats = new Map();   // sessionId -> seat index (walking there, or seated)
+// --- Idle wander: an agent at rest (IDLE, or WAITING — which is where every
+// TUI agent actually sits) leaves its desk, walks to a free seat and sits there
+// until its state changes, then walks back. Seats come from wanderSeats: the
+// conference set when it places, plus the chat-area sofas, which are the seats
+// that exist at every canvas size. Client-side and time-based like the walk
+// in/out anims. The claim is held from the moment the walk starts; the
+// character renders seated once its wander anim finishes. Claims clear whenever
+// the pool changes shape — characters simply render at their desks again.
+const seatClaims = new Map();   // sessionId -> index into currentSeats (NOT conf.seats)
 const wanderAnims = new Map(); // sessionId -> { dir: 'seat'|'desk', start, variant, fromX, fromY }
 let currentConf = null;        // this frame's computeConference result, for drawMotion + departures
-let currentSeats = [];         // this frame's wanderSeats() pool, indexed by confSeats
-let lastSeatCount = 0;         // seat-list shape, to drop stale claims when it changes
+let currentSeats = [];         // this frame's wanderSeats() pool, what a claim indexes
+// The pool's shape, to drop stale claims when it changes. Length alone is not
+// the shape: a conference set with both chat areas suppressed is 6 seats, and
+// no conference set with both chat areas placed is also 6 — crossing between
+// them would leave every claim pointing at unrelated furniture. The pool always
+// lists conference seats first, so the first seat's kind separates the two.
+let lastSeatCount = 0;
+let lastSeatKind = '';
 let currentObstacles = [];     // this frame's furniture rects, for the walk routes
 
 function updateWander(seats) {
   // Seat indices address this list, so a change to its shape (the conference
   // set placing or vanishing on resize) invalidates every claim in flight.
-  if (seats.length !== lastSeatCount) { confSeats.clear(); wanderAnims.clear(); lastSeatCount = seats.length; }
+  const kind = seats.length ? seats[0].kind : '';
+  if (seats.length !== lastSeatCount || kind !== lastSeatKind) {
+    seatClaims.clear(); wanderAnims.clear();
+    lastSeatCount = seats.length; lastSeatKind = kind;
+  }
   if (!seats.length) return;
-  const taken = new Set(confSeats.values());
+  const taken = new Set(seatClaims.values());
   for (const [sid, agent] of agents) {
     // Read-only colleagues keep their desks: the desk pass carries their
     // dimming and owner label, which the conference pass has no room for.
@@ -1401,20 +1417,21 @@ function updateWander(seats) {
     // short-circuits to WAITING in detectState, so IDLE is unreachable for the
     // agents this board actually spawns and the wander never fired for them.
     const idle = (agent.state === 'IDLE' || agent.state === 'WAITING') && canControlAgent(agent);
-    if (idle && !confSeats.has(sid) && !wanderAnims.has(sid) && !walkAnims.has(sid)) {
+    if (idle && !seatClaims.has(sid) && !wanderAnims.has(sid) && !walkAnims.has(sid)) {
+      if (taken.size >= seats.length) continue; // every seat taken — stay at the desk
       const seat = seats.findIndex((_, i) => !taken.has(i));
-      if (seat === -1) continue; // table full — stay at the desk
-      confSeats.set(sid, seat);
+      if (seat === -1) continue;
+      seatClaims.set(sid, seat);
       taken.add(seat);
       // No walk during the connect replay (prevJobStates === null): like the
       // walk-ins, pre-existing idle agents render seated, not mid-commute.
       if (motionEnabled() && prevJobStates !== null) {
         wanderAnims.set(sid, { dir: 'seat', start: performance.now(), variant: charVariant(sid) });
       }
-    } else if (!idle && confSeats.has(sid)) {
-      const seatPos = seats[confSeats.get(sid)];
+    } else if (!idle && seatClaims.has(sid)) {
+      const seatPos = seats[seatClaims.get(sid)];
       const midWalk = wanderAnims.get(sid)?.dir === 'seat';
-      confSeats.delete(sid);
+      seatClaims.delete(sid);
       wanderAnims.delete(sid);
       // Fully seated: walk back to the desk. Still walking over: snap back
       // rather than teleport to the seat first.
@@ -1424,7 +1441,7 @@ function updateWander(seats) {
     }
   }
   // Deleting the current entry during Map iteration is well-defined.
-  for (const sid of confSeats.keys()) if (!agents.has(sid)) confSeats.delete(sid);
+  for (const sid of seatClaims.keys()) if (!agents.has(sid)) seatClaims.delete(sid);
   for (const sid of wanderAnims.keys()) if (!agents.has(sid)) wanderAnims.delete(sid);
 }
 
@@ -1684,16 +1701,17 @@ export function noteAgentDeparture(sessionId) {
   const { w, h } = canvasSize(canvas);
   if (!w || !h) return;
   const layout = computeOfficeLayout(w, h);
-  // A sitter leaves from the conference table, and a mid-wander walker from
-  // its current point along the walk — never a snap to a spot it isn't at.
+  // A sitter leaves from wherever it is seated — conference table or sofa —
+  // and a mid-wander walker from its current point along the walk, never a
+  // snap to a spot it isn't at.
   const desk = deskCharPos(sessionId, layout);
-  const seat = confSeats.has(sessionId) ? currentSeats[confSeats.get(sessionId)] ?? null : null;
+  const seat = seatClaims.has(sessionId) ? currentSeats[seatClaims.get(sessionId)] ?? null : null;
   const anim = wanderAnims.get(sessionId);
   let pos = seat || desk;
   // The frozen route the wander is actually walking, so the walk-out starts
   // where the character is drawn rather than on a freshly recomputed path.
   if (anim && anim.path) pos = pointAlongPath(anim.path, ((performance.now() - anim.start) / 1000) * WALK_SPEED);
-  confSeats.delete(sessionId);
+  seatClaims.delete(sessionId);
   wanderAnims.delete(sessionId);
   if (!pos) return;
   walkAnims.set(sessionId, {
@@ -1828,7 +1846,7 @@ function drawMotion(ctx, w, h, layout) {
     const desk = deskCharPos(sid, layout);
     if (!desk) { wanderAnims.delete(sid); continue; }
     if (anim.dir === 'seat') {
-      const seat = currentSeats[confSeats.get(sid)];
+      const seat = currentSeats[seatClaims.get(sid)];
       if (!seat) { wanderAnims.delete(sid); continue; }
       path = routeOf(anim, () => wanderRoute(desk, seat, currentConf, true, currentObstacles, w, h));
     } else {
@@ -1922,7 +1940,7 @@ export function renderOffice() {
     const sheet = SPRITES['char' + charVariant(sessionId)] || SPRITES.char0;
     // While a walk/wander anim exists the overlay pass draws the character,
     // and a conference sitter renders at the table — the desk stays, empty.
-    const away = walkAnims.has(sessionId) || wanderAnims.has(sessionId) || confSeats.has(sessionId);
+    const away = walkAnims.has(sessionId) || wanderAnims.has(sessionId) || seatClaims.has(sessionId);
     drawWorkstation(ctx, sx, sy, state, theme, deskVariant, agent);
     drawMonitorGlow(ctx, sx, sy, state, theme);
     if (alive && sheet && !away) {
@@ -2016,15 +2034,16 @@ export function setupOfficeClick() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const layout = computeOfficeLayout(rect.width, rect.height);
-    // A seated agent's visible character is at the conference table, so the
-    // click-to-focus affordance follows it there (the empty desk still works).
-    if (currentConf) {
-      for (const [sid, seatIdx] of confSeats) {
-        const s = currentConf.seats[seatIdx];
-        if (x >= s.x - Z && x <= s.x + CHAR_W + Z && y >= s.y - Z && y <= s.y + CHAR_H + Z) {
-          switchToSession(sid);
-          return;
-        }
+    // A seated agent's visible character is at the conference table or on a
+    // sofa, so click-to-focus follows it there (the empty desk still works).
+    // The claim indexes the pooled seat list, NOT conf.seats — a sofa claim is
+    // past the end of conf.seats, which read undefined and threw here.
+    for (const [sid, seatIdx] of seatClaims) {
+      const s = currentSeats[seatIdx];
+      if (!s) continue;
+      if (x >= s.x - Z && x <= s.x + CHAR_W + Z && y >= s.y - Z && y <= s.y + CHAR_H + Z) {
+        switchToSession(sid);
+        return;
       }
     }
     for (const [sessionId] of agents) {
