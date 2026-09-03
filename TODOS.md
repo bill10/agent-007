@@ -38,7 +38,11 @@
   terminal output, so a repo whose agent's last line matches a dialog pattern
   pins its card just as effectively. v0.3.30.0 widened that pattern set, so the
   surface is slightly larger. The ceiling fixes both routes at once; anchoring
-  individual patterns only ever chases one.
+  individual patterns only ever chases one. And it is not adversary-only:
+  `/approve|deny|allow|reject/i` matches those words ANYWHERE in any of the
+  last five lines, so a git log, a LICENSE, a CI transcript or a dependency
+  changelog can flip a quiet agent to MESSAGE by accident — which argues for
+  treating this as ordinary-operation breakage rather than a hardening task.
 
 ## Back off the merge check on long-lived Review cards
 - **What:** Record a `lastMergeCheckAt` on each job and let `checkMergedPullRequests`
@@ -217,6 +221,28 @@
 - **Priority:** P3
 - **Depends on:** To-do-only editing (v0.3.29.0)
 - **Context:** Raised by the adversarial review during /ship (2026-09-03).
+
+## A wander claim is an index into an array rebuilt every frame
+
+- **What:** `seatClaims` maps a session to an INDEX into `currentSeats`, which
+  `renderOffice` rebuilds from scratch on every frame. Any reader that indexes
+  a different list, or any frame where the pool's composition shifts without
+  tripping the invalidation key, silently re-points a claim at unrelated
+  furniture. Storing the seat object (or a stable id) on the claim instead of
+  its position deletes the whole class.
+- **Why:** Three separate bugs of exactly this shape surfaced in one review:
+  `setupOfficeClick` indexing `conf.seats` with a pooled index (a live crash),
+  `drawConference` doing the same (latent, correct only by an ordering
+  accident), and count-only invalidation aliasing a 6-seat conference pool onto
+  a 6-seat sofa pool. The current key (length + conference-seat count) still
+  cannot separate a left-chat-only pool from a right-chat-only one — both are 9
+  seats with 6 conference seats — so a sitter could teleport across the room.
+  Narrow to reach, but the third instance of a class is a design signal.
+- **Effort:** S (human: ~3h / CC: ~30 min)
+- **Priority:** P3
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-03),
+  after two instances had already been fixed in the same round.
 
 ## Sofa sitter placement has never been checked against a render
 

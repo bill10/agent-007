@@ -9,15 +9,18 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Added
 
-- Agents that go quiet now get up from their desks, walk over to the sofas in
-  the lounge areas and sit down until there is work for them again. The office
-  has had an idle-wander since the conference table landed, but nobody had ever
-  seen it: it only triggered on a state no Claude agent can actually reach, and
-  the conference table it walked to only exists on a canvas about 970px tall,
-  which is taller than the office panel on a normal laptop. Both are fixed, and
-  the sofas are always there, so a quiet office now has agents milling about in
-  it at any window size. A sitter is still one click away — clicking the
-  character on the sofa focuses its terminal, same as clicking its desk.
+- Agents that have been quiet for a few minutes now get up from their desks,
+  walk over to the sofas in the lounge areas and sit down until there is work
+  for them again. The office has had an idle-wander since the conference table
+  landed, but nobody had ever seen it: it only triggered on a state no Claude
+  agent can actually reach, and the conference table it walked to only exists
+  on a canvas about 970px tall, which is taller than the office panel on a
+  normal laptop. Both are fixed, and the sofas are always there, so a quiet
+  office now has agents milling about in it at any window size. An agent that
+  has merely paused to think stays at its desk — the walk takes longer than
+  that pause, so it would only turn around halfway. A sitter is still one click
+  away: clicking the character on the sofa focuses its terminal, same as
+  clicking its desk.
 
 ### Fixed
 
@@ -25,8 +28,13 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   of wandering off mid-question. The board reads a terminal to tell what an
   agent is doing, and the footer those questions print ("Enter to select ...
   Esc to cancel") was not recognised, so the agent looked like it was simply
-  resting. It also no longer takes a noticeable pause to read a very long line
-  of terminal output.
+  resting.
+- A single agent printing one very long line no longer slows the whole board
+  down. Reading a terminal to work out what its agent is doing means matching
+  a handful of patterns against the last few lines, once a second per agent,
+  and on a line tens of thousands of characters wide that match took seconds —
+  stalling every other agent's terminal, the job board and the web UI along
+  with it. Those lines are now trimmed before they are examined.
 
 ## [0.3.29.3] - 2026-09-03
 
