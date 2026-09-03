@@ -405,6 +405,18 @@ describe('idle wander', () => {
     expect(office.hasMotion()).toBe(false);
   });
 
+  it('walks a WAITING agent too, not just an IDLE one', async () => {
+    // Every TUI agent short-circuits to WAITING in detectState, so gating the
+    // wander on IDLE alone meant it never fired for the agents this board
+    // actually spawns.
+    const { office, state } = await freshMotion();
+    canvasDom(600, 1000);
+    office.noteJobsUpdate();
+    state.agents.set('si', { state: 'WAITING', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice();
+    expect(office.hasMotion()).toBe(true);
+  });
+
   it('walks an idle agent toward a conference seat after the sync', async () => {
     const { office } = await seatIdle();
     expect(office.hasMotion()).toBe(true); // wander anim keeps the loop alive

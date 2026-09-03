@@ -326,6 +326,17 @@ describe('detectState', () => {
     }, { now })).toBe('WAITING');
   });
 
+  it('should return MESSAGE for a multiple-choice prompt waiting on an answer', () => {
+    const now = 50000;
+    // The AskUserQuestion footer says "select", not "confirm". Without that
+    // alternation a TUI agent blocking on a question falls through to WAITING
+    // and reads as resting -- which is what lets it wander off to the table.
+    for (const line of ['Enter to select \u00b7 Esc to cancel', 'Entertoselect\u00b7Esctocancel'])
+      expect(detectState({
+        ...BASE, lastOutputAt: 0, isTUI: true, lastStrippedLine: line,
+      }, { now }), line).toBe('MESSAGE');
+  });
+
   it('should return IDLE when nothing matches and not TUI', () => {
     const now = 50000;
     expect(detectState({

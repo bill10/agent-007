@@ -1342,7 +1342,10 @@ function updateWander(conf) {
   for (const [sid, agent] of agents) {
     // Read-only colleagues keep their desks: the desk pass carries their
     // dimming and owner label, which the conference pass has no room for.
-    const idle = agent.state === 'IDLE' && canControlAgent(agent);
+    // WAITING, not just IDLE: every TUI agent (claude, aider, codex, gemini)
+    // short-circuits to WAITING in detectState, so IDLE is unreachable for the
+    // agents this board actually spawns and the wander never fired for them.
+    const idle = (agent.state === 'IDLE' || agent.state === 'WAITING') && canControlAgent(agent);
     if (idle && !confSeats.has(sid) && !wanderAnims.has(sid) && !walkAnims.has(sid)) {
       const seat = conf.seats.findIndex((_, i) => !taken.has(i));
       if (seat === -1) continue; // table full — stay at the desk
