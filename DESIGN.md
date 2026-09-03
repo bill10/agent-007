@@ -258,8 +258,14 @@ lays out against a 0x0 room.
   its body overlapping the furniture above — drawn in front of that furniture,
   and never down on the chat areas the way the old bottom-edge fallback was.
   With no gap at all (a pod grid that overflows the panel) it crosses on the
-  desk's own row. The desk column leg is the approach and still crosses
-  whatever rows lie between the corridor and the desk. Spare desks drop a
+  desk's own row. The vertical leg is the approach, and it picks its column
+  (`approachX`): the desk's own when the band between it and the corridor is
+  clear, else the nearest column clear of everything but the rect the walker
+  is headed into (its own pod rug), reached by a sidestep along the desk's own
+  row — so a descent from a distant corridor drops down an aisle instead of
+  stepping over the rugs, plants and sofas in between. Candidates are the
+  blocking rects' own edges, a scan like the row pick; when none is clear on
+  both legs it falls back to the desk's own column. Spare desks drop a
   column and the conference set yields rather than reach into the entry strip
   (`ENTRY_STRIP_W`) — a leftover from the fixed-door entrance, since the row
   scan ignores x and already clears the crossing. A departing agent walks out the
@@ -269,8 +275,8 @@ lays out against a 0x0 room.
 - **Idle wander:** an IDLE agent claims a free conference seat, walks over
   and sits there — facing the viewer at the head, sideways on the side
   chairs, away at the foot — until its state changes, then walks back to its
-  desk. The route (`wanderRoute`) descends the desk column to a corridor just
-  above the conference set, crosses, then descends the seat's own clear
+  desk. The route (`wanderRoute`) descends `approachX`'s clear column to a
+  corridor just above the conference set, crosses, then descends the seat's own clear
   column (the foot seat detours via the left lane), so walkers never cross
   the tabletop. Seats fill head-first, sides top-down, foot last; a full
   table leaves late idlers at their desks, pre-existing idle agents render
