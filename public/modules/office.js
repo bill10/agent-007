@@ -42,6 +42,7 @@ export const SPRITE_PATHS = {
   conftable:  'assets/furniture/table_front.png',      // 48×64 wooden table, art in rows 11–63
   confchair:  'assets/furniture/chair_side.png',       // 16×16 cushioned chair facing right, art in x 0–11
   confchairback: 'assets/furniture/chair_back.png',    // 16×16 cushioned chair seen from behind, art in x 2–13
+  confchairfront: 'assets/furniture/chair_front.png',  // 16×16 the same chair from the front: lit seat below the back, art in x 2–13
   char0:   'assets/characters/char_0.png',
   char1:   'assets/characters/char_1.png',
   char2:   'assets/characters/char_2.png',
@@ -291,12 +292,14 @@ export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
 const CONF_TABLE_W = 48 * Z;   // sprite width at the desk scale
 const CONF_TABLE_H = 240;      // the 48×64 sprite stretched taller so it reads as a boardroom table
 const CONF_CHAIR = 16 * Z;
-// Set bbox: side chairs overhang the table 42px each side; the head chair rises
-// CONF_HEAD_RISE above the tabletop and the foot chair hangs 32px below. The
-// rise is 22 rather than the head sitter's own 18 so a little of the chair
-// clears their head — 22 is the last value the band check places as often as 18
-// did, and 24 starts costing the whole set on tighter panels.
-const CONF_HEAD_RISE = 22;
+// The table sprite's top 11 of 64 rows are empty, so the tabletop's painted edge
+// is this far below the set's y — both end chairs tuck against that edge, not
+// against the sprite box, or they float in the open floor above it.
+const CONF_TABLE_ART_TOP = Math.round(11 / 64 * CONF_TABLE_H);
+// Set bbox: side chairs overhang the table 42px each side; nothing rises above
+// the tabletop but the head sitter's own 18px, and the foot chair hangs 32px
+// below. Both end chairs sit inside those bounds.
+const CONF_HEAD_RISE = 18;
 const CONF_SET_W = CONF_TABLE_W + 2 * 42;
 const CONF_SET_H = CONF_TABLE_H + CONF_HEAD_RISE + 32;
 export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, panelHeight) {
@@ -318,9 +321,9 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
     { x: tx + CONF_TABLE_W - 6, y: ty + 145, kind: 'confchair', mirror: true },
     { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_H - 16, kind: 'confchairback' },
     // Head chair, last so the indices above stay put. Its sitter faces us, so
-    // the chair goes behind them: it has to clear the tabletop by more than the
-    // sitter does or their head hides it completely.
-    { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty - CONF_HEAD_RISE, kind: 'confchairback' },
+    // this is the chair's front, and it tucks under the tabletop's near edge by
+    // the same 16px the foot chair tucks under its far one.
+    { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_ART_TOP - (CONF_CHAIR - 16), kind: 'confchairfront' },
   ];
   // Seats in fill order: head, then alternating sides top-down, foot last.
   // Head and foot sit on the table's centreline; side sitters centre on their
@@ -876,7 +879,7 @@ function drawConference(ctx, conf) {
   // Furniture is skipped when its sprites failed to load (like drawDecor),
   // but sitters ALWAYS draw: seats are claimed in updateWander regardless,
   // and a missing chair PNG must never make a character invisible.
-  const furniture = SPRITES.conftable && SPRITES.confchair && SPRITES.confchairback;
+  const furniture = SPRITES.conftable && SPRITES.confchair && SPRITES.confchairback && SPRITES.confchairfront;
   const sitters = new Map(); // seat index -> variant, arrived sitters only
   for (const [sid, seat] of confSeats) if (!wanderAnims.has(sid)) sitters.set(seat, charVariant(sid));
   const sitter = (i) => {
@@ -884,7 +887,7 @@ function drawConference(ctx, conf) {
   };
   if (furniture) for (const c of conf.chairs) if (c.kind === 'confchair') drawSprite(ctx, c.kind, c.x, c.y, Z, c.mirror);
   // The head chair goes down before its sitter — they face us, so the chair is
-  // behind them — and the table then covers all but its top rail.
+  // behind them — and the table then covers its lower half.
   if (furniture) drawSprite(ctx, conf.chairs[5].kind, conf.chairs[5].x, conf.chairs[5].y, Z);
   sitter(0); // head, before the table so their feet sit behind the top rim
   if (furniture) {
