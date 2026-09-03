@@ -248,7 +248,8 @@ lays out against a 0x0 room.
   so it sits at a different height for a desk in the top pod row than for one
   near the bottom, and no leg ever runs along the left edge to reach it. The
   row is picked from the frame's furniture rects (`walkObstacles`: pod rugs,
-  spare desks, decor and the conference set with its chair overhang): their
+  occupied and spare desks, decor and the conference set with its chair
+  overhang): their
   vertical spans inverted into the gaps between them, the gap nearest the desk
   that fits a whole character winning (`corridorY`). Spans count full width, so
   a rug half-way across still rules its rows out — a scan, not a search. This
@@ -260,12 +261,20 @@ lays out against a 0x0 room.
   With no gap at all (a pod grid that overflows the panel) it crosses on the
   desk's own row. The vertical leg is the approach, and it picks its column
   (`approachX`): the desk's own when the band between it and the corridor is
-  clear, else the nearest column clear of everything but the rect the walker
-  is headed into (its own pod rug), reached by a sidestep along the desk's own
-  row — so a descent from a distant corridor drops down an aisle instead of
-  stepping over the rugs, plants and sofas in between. Candidates are the
-  blocking rects' own edges, a scan like the row pick; when none is clear on
-  both legs it falls back to the desk's own column. Spare desks drop a
+  clear, else the nearest column clear of everything but the rects the walker
+  is standing in — its own pod rug and its own desk — reached by a sidestep
+  along the desk's own row, so a descent from a distant corridor drops down an
+  aisle instead of stepping over the rugs, plants and sofas in between. The
+  occupied desks are in the obstacle list for that sidestep's sake: the rug is
+  one rect over the whole pod, so without them the leg along the desk row would
+  sweep across the colleagues seated in it. Candidates are the blocking rects'
+  own edges, a scan like the row pick, ranked by what the detour costs — out to
+  the column and on to wherever the crossing leg is headed, so of two equal
+  columns the one the walker does not double back over wins — and clamped to
+  columns the character fits inside on both edges of the panel. When none is
+  clear on both legs it falls back to the desk's own column: swept over 6,825
+  desk positions that is 12% of them, against 40% fewer furniture crossings and
+  48% fewer walked-over colleagues than the straight-column route. Spare desks drop a
   column and the conference set yields rather than reach into the entry strip
   (`ENTRY_STRIP_W`) — a leftover from the fixed-door entrance, since the row
   scan ignores x and already clears the crossing. A departing agent walks out the
