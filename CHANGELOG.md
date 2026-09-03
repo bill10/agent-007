@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.29.2] - 2026-09-03
+
+### Fixed
+
+- An agent leaving a seat at the conference table now checks that the way out
+  is actually clear. It steps out sideways from between the chairs, as before,
+  but that step-out column was picked from the table's shape alone: if anything
+  stood between the conference set and the corridor — a plant, a spare desk —
+  the agent walked straight down over it. The column is now vetted against the
+  furniture the same way every other walk is, and the agent steps a little
+  wider when it is blocked. On the open floor the set usually sits in, the
+  route is unchanged.
+
 ## [0.3.29.1] - 2026-09-03
 
 ### Fixed

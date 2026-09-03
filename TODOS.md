@@ -174,21 +174,6 @@
 - **Depends on:** Multiplayer phase 1 (identity & auth) — shipped.
 - **Context:** Raised by adversarial + security review of the phase 1 auth PR (2026-07-18). Accepted as a known limitation for now: the app itself doesn't log request URLs and deployment is behind Tailscale, so exposure is bounded. Revisit when auth hardens further (phase 2+).
 
-## The conference walk-out lane skips the clear-column check
-
-- **What:** `entryRoute`'s conference branch sends a foot-seat sitter down
-  `confLanes(conf).left/right` chosen by table geometry alone, bypassing
-  `approachX` entirely, so that one leg still descends over whatever lies
-  between the set and the corridor — the exact defect `approachX` was added to
-  fix, left in the branch that does not use it.
-- **Why:** The conference set sits in open floor, so the lane is usually clear
-  and nothing has been seen crossing furniture in practice. It is a correctness
-  hole rather than an observed bug: nothing checks it.
-- **Effort:** S (human: ~1h / CC: ~10 min)
-- **Priority:** P4
-- **Depends on:** Walk route aisles (v0.3.28.0)
-- **Context:** Raised by the adversarial review during /ship (2026-09-02).
-
 ## A card edited in the window dispatchOnce awaits in runs the old prompt
 
 - **What:** `dispatchOnce` builds the command, branch and repo from the card,
@@ -228,6 +213,23 @@
 - **Context:** Raised by the adversarial review during /ship (2026-09-03).
 
 ## Completed
+
+## The conference walk-out lane skips the clear-column check
+
+- **What:** `entryRoute`'s conference branch sends a foot-seat sitter down
+  `confLanes(conf).left/right` chosen by table geometry alone, bypassing
+  `approachX` entirely, so that one leg still descends over whatever lies
+  between the set and the corridor — the exact defect `approachX` was added to
+  fix, left in the branch that does not use it.
+- **Why:** The conference set sits in open floor, so the lane is usually clear
+  and nothing has been seen crossing furniture in practice. It is a correctness
+  hole rather than an observed bug: nothing checks it.
+- **Effort:** S (human: ~1h / CC: ~10 min)
+- **Priority:** P4
+- **Depends on:** Walk route aisles (v0.3.28.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-02).
+
+**Completed:** v0.3.29.2 (2026-09-03)
 
 ## Walk routes are recomputed every frame, so a spawn can teleport a walker
 

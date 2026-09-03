@@ -1516,7 +1516,13 @@ export function entryRoute(point, conf, inbound, panelHeight, obstacles = [], pa
     const t = conf.table;
     if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 &&
         point.y + CHAR_H > t.y - 18 && point.y < t.y + t.h + 32) {
-      const laneX = point.x < t.x + t.w / 2 ? confLanes(conf).left : confLanes(conf).right;
+      const lane = point.x < t.x + t.w / 2 ? confLanes(conf).left : confLanes(conf).right;
+      // The lane only knows the table's geometry, so it can point straight at
+      // whatever else stands between the set and the corridor. approachX vets
+      // it from the lane rather than from the seat — measured from the seat
+      // the set is the walker's own floor and every column reads clear — and
+      // steps wider when the lane's column is not.
+      const laneX = approachX(obstacles, { x: lane, y: point.y }, yMid, panelWidth, ENTRY_X);
       climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
     }
   }

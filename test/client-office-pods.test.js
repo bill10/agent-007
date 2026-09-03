@@ -428,6 +428,32 @@ describe('pod layout', () => {
     }
   });
 
+  it('a walk-out from the conference set steps around what blocks the lane', () => {
+    const T = 1400;
+    const { pods } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
+    const obstacles = walkObstacles(rugs, decor, spares, conf);
+    const foot = conf.seats[5];
+    // The lane the clear floor picks, then something parked in its column
+    // between the set and the corridor — a plant, a spare desk, anything the
+    // table's geometry cannot see.
+    const clear = entryRoute(foot, conf, false, T, obstacles);
+    const descent = clear.legs.find(l => l.x0 === l.x1);
+    const blocker = { x: descent.x0 - 20, y: descent.y1 + 31, w: 80, h: 60 };
+    const p = entryRoute(foot, conf, false, T, [...obstacles, blocker], W);
+    for (const l of p.legs)
+      expect(overlaps(sweptLeg(l), blocker), `leg ${l.x0},${l.y0}-${l.x1},${l.y1} crosses the blocker`).toBe(false);
+    // Still out sideways first, and still never down through the table
+    expect(p.legs[0].y0).toBe(p.legs[0].y1);
+    for (const l of p.legs)
+      if (l.x0 === l.x1)
+        expect(l.x0 + 16 * 2 <= conf.table.x || l.x0 >= conf.table.x + conf.table.w,
+          `vertical leg at x=${l.x0} runs through the table`).toBe(true);
+  });
+
   it('on a panel too tight for a clear row the conference route still clears the chairs', () => {
     // 1000px tall: the set places with only its 6 Z margins, so no band fits a
     // whole character and the route crosses on the widest gap it can find
