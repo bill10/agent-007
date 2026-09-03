@@ -237,8 +237,11 @@ describe('editing and moving a scheduled card', () => {
   });
 
   it('refuses a type or schedule change while the run is in flight', async () => {
-    // Flipping an in-flight one-time card to scheduled would free its cap slot
-    // while its agent still runs, and hand the run to finishScheduledRuns.
+    // One of the reasons a dispatched card is closed to edits at all: flipping
+    // an in-flight one-time card to scheduled would free its cap slot while its
+    // agent still runs, and hand the run to finishScheduledRuns. The refusal is
+    // now the general To-do gate rather than a type-and-schedule-specific one,
+    // so this asserts the hazard is still covered, not that a special case is.
     addJob({ title: 'One-timer', repoPath: REPO }, noopBroadcast);
     const job = allJobs()[0];
     Object.assign(job, { state: 'in-progress', branchName: 'bill/x', agentSessionId: 's1' });

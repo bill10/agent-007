@@ -164,14 +164,11 @@ function planAttachments(job, list) {
     }
     // A { name } keeps what the card already has, record and all: a file
     // that has gone missing from disk stays listed (its link 404s, which
-    // says so) rather than turning an unrelated title edit into a change
-    // the in-progress gate below refuses.
+    // says so) rather than being dropped from the card by an unrelated edit.
     const old = stored.find(a => a.name === name);
     if (old) kept.push(old);
   }
-  const before = stored.map(a => a.name).join('\n');
-  const changed = writes.length > 0 || kept.map(a => a.name).join('\n') !== before;
-  return { dir, kept, writes, changed };
+  return { dir, kept, writes };
 }
 
 function applyAttachments(job, plan) {
@@ -303,6 +300,14 @@ export function resolveRepoRef(ref) {
 // Not ownership-gated, matching the WebSocket `job-create` handler: the board is
 // shared workspace state, and postedBy/postedByAgent are attribution rather than
 // access control.
+// Said the same way at both doors: an agent that passed a JSON number or an
+// object meant to schedule something, and deserves the same answer either way.
+function scheduleTypeError(schedule) {
+  return schedule != null && typeof schedule !== 'string'
+    ? 'schedule must be a string — a five-field cron expression or an @shorthand'
+    : null;
+}
+
 export function postJobForAgent({ title, detail, repo, schedule, type, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
@@ -313,9 +318,8 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
   // error, not a silent one-time card: the plain HTTP door has no schema in
   // front of it, the caller asked for a scheduled job, and every other bad
   // input here is answered with a message the caller can act on.
-  if (schedule != null && typeof schedule !== 'string') {
-    return { error: 'schedule must be a string — a five-field cron expression or an @shorthand' };
-  }
+  const badSchedule = scheduleTypeError(schedule);
+  if (badSchedule) return { error: badSchedule };
   if (type != null && typeof type !== 'string') {
     return { error: 'type must be a string — "one-time" or "scheduled"' };
   }
@@ -372,11 +376,11 @@ function jobSummary(job) {
     id: job.id,
     title: job.title,
     state: job.state,
-    stateLabel: STATE_LABELS[job.state] || job.state,
     type: jobType(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
     repo: basename(job.repoPath || ''),
+    editedByAgent: job.editedByAgent || null,
     // Derived fresh, never stored: it describes a PTY that exists right now.
     status: deriveJobStatus(job, session),
     agentName: job.agentName || null,
@@ -392,6 +396,12 @@ export function listJobsForAgent({ state, repo } = {}) {
   if (wanted && !JOB_STATES.includes(wanted)) {
     return { error: `Unknown state "${wanted}" — expected one of: ${JOB_STATES.join(', ')}` };
   }
+  // Narrowing arguments must narrow or refuse, never widen: a non-string repo
+  // used to fall through to "every repository", which is the opposite of what
+  // the caller asked for. postJobForAgent refuses the same shape.
+  if (repo != null && typeof repo !== 'string') {
+    return { error: 'repo must be a string — a full path or a folder name' };
+  }
   let repoPath = null;
   if (typeof repo === 'string' && repo.trim()) {
     const resolved = resolveRepoRef(repo);
@@ -401,7 +411,10 @@ export function listJobsForAgent({ state, repo } = {}) {
   // Finished cards are the archive behind the board's toolbar, not a column, so
   // an unfiltered list answers with the board — asking for `done` reaches them.
   const jobs = allJobs().filter(job => (wanted ? job.state === wanted : job.state !== 'done')
-    && (!repoPath || job.repoPath === repoPath));
+    && (!repoPath || job.repoPath === repoPath))
+    // Oldest first, the order the board's own columns are sorted in, so an
+    // agent describes the board the user is looking at rather than a shuffle.
+    .sort((a, b) => String(a.postedAt || '').localeCompare(String(b.postedAt || '')));
   return {
     jobs: jobs.map(jobSummary),
     state: wanted,
@@ -419,13 +432,14 @@ export function readJobForAgent(jobId) {
     job: {
       ...jobSummary(job),
       detail: job.detail || '',
-      repoPath: job.repoPath || null,
+      // Basename only, deliberately — resolveRepoRef reports repos the same
+      // way. An absolute repo or worktree path is the layout of the user's
+      // disk, and this reply goes to whatever agent called the tool, about
+      // every card on the board including other people's.
       branchName: job.branchName || null,
-      worktreePath: job.worktreePath || null,
       startedAt: job.startedAt || null,
-      reviewAt: job.reviewAt || null,
       prMergedAt: job.prMergedAt || null,
-      doneAt: job.doneAt || null,
+      editedAt: job.editedAt || null,
       lastRunAt: job.lastRunAt || null,
       runCount: job.runCount || 0,
       // Both, and separately: the board keeps them apart because a card can be
@@ -440,11 +454,31 @@ export function readJobForAgent(jobId) {
 // The same edit, asked for by an agent. It refuses ahead of updateJob rather
 // than after it so a no-op edit to a dispatched card answers with the rule that
 // actually stopped it, not "nothing to change".
-export function editJobForAgent({ id, title, detail, repo, schedule, type }, broadcast) {
+//
+// Two guards here that the board's own form does not need. A To do card's
+// detail IS the next agent's prompt — buildJobPrompt hands it over verbatim to
+// an unattended `claude --permission-mode auto` — and every board-dispatched
+// agent holds one of these tokens, so an agent working a hostile repo could
+// otherwise rewrite a card queued for a different repo and have the board run
+// its text. So: an agent may not touch a card another person queued, matching
+// the ownership rule ws.js already applies to terminals; and an edit that does
+// land says so out loud and leaves its name on the card, because the whole
+// hazard is an edit nobody sees. Reading stays board-wide — every browser
+// already sees every card — but writing does not.
+export function editJobForAgent({ id, title, detail, repo, schedule, session, user }, broadcast) {
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No job with id "${id}" — list the board to see the ids.` };
   const gate = editableInPlace(job);
   if (gate) return gate;
+  // Null on a single-player board (no users file), on both sides, so this only
+  // ever bites once identities exist.
+  const asker = user ? user.id : null;
+  if (job.postedBy && job.postedBy !== asker) {
+    return {
+      error: `"${job.title}" was queued by ${job.postedByName || 'someone else'}, so this agent cannot edit it. `
+        + 'Ask them, or post a new card.',
+    };
+  }
 
   const fields = {};
   const changed = [];
@@ -464,18 +498,16 @@ export function editJobForAgent({ id, title, detail, repo, schedule, type }, bro
     if (resolved.path !== job.repoPath) { fields.repoPath = resolved.path; changed.push('repo'); }
   }
   if (schedule !== undefined) {
-    if (schedule != null && typeof schedule !== 'string') {
-      return { error: 'schedule must be a string — a five-field cron expression or an @shorthand' };
-    }
+    const bad = scheduleTypeError(schedule);
+    if (bad) return { error: bad };
     const text = String(schedule || '').trim();
     // An empty schedule is the way back to a one-time card: without naming the
     // type too, resolveJobType would read "scheduled with no cron" and refuse.
+    // The tool exposes no `type` of its own — the schedule is the whole of what
+    // a card IS, and two fields that can disagree is a bug waiting to be filed.
     fields.schedule = text;
-    fields.type = typeof type === 'string' && type ? type : (text ? 'scheduled' : 'one-time');
+    fields.type = text ? 'scheduled' : 'one-time';
     if (text !== (job.schedule || '')) changed.push('schedule');
-  } else if (type !== undefined) {
-    fields.type = type;
-    changed.push('type');
   }
 
   if (!changed.length) {
@@ -483,6 +515,15 @@ export function editJobForAgent({ id, title, detail, repo, schedule, type }, bro
   }
   const result = updateJob(job.id, fields, broadcast);
   if (result.error) return result;
+  // Stamped before the repaint that carries it to every open board.
+  job.editedByAgent = session ? session.name : null;
+  job.editedAt = new Date().toISOString();
+  if (session && broadcast) {
+    broadcast({
+      type: 'notification', level: 'info',
+      message: `${session.name} edited a job: "${result.job.title}"`,
+    });
+  }
   return { job: jobSummary(result.job), changed };
 }
 

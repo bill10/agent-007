@@ -173,10 +173,16 @@ const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, messag
 // error would surface to the agent as "the tool is broken" instead.
 const toolText = (text, isError = false) => ({ content: [{ type: 'text', text }], isError });
 
-// When a card fired, in the reader's own clock. The stored value is ISO; an
+// A stored time as the server's clock reads it (agents talk to this board over
+// loopback, so that is the reader's clock too). The stored value is ISO; an
 // agent reporting "next 2026-09-04T09:00:00.000Z" to a person is making them do
 // the conversion.
 const when = (iso) => (iso ? new Date(iso).toLocaleString() : null);
+
+// The cron and its next firing, built once: four builders used to spell this
+// out with three different separators, so the same fact read three ways.
+const scheduleText = (job, sep = ', next ') =>
+  `${job.schedule}${job.nextRunAt ? `${sep}${when(job.nextRunAt)}` : ''}`;
 
 // One line per card: what it is, and the id needed to read or edit it. Kept
 // lean deliberately — who posted it and the whole detail body are what read_job
@@ -185,7 +191,7 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : null);
 function summaryLine(job) {
   const bits = [job.repo];
   if (job.type === 'scheduled') {
-    bits.push(`scheduled ${job.schedule}${job.nextRunAt ? `, next ${when(job.nextRunAt)}` : ''}`);
+    bits.push(`scheduled ${scheduleText(job)}`);
   }
   // The live state of the agent working it, when there is one, is the part a
   // person actually asks about ("is it stuck?").
@@ -210,9 +216,7 @@ const CALLS = {
     // A cron expression is easy to get subtly wrong ("0 0 * * 0" is not weekly
     // to everyone), and a concrete next-run time is what makes the mistake
     // visible while the user is still in the conversation to correct it.
-    const fires = result.job.schedule
-      ? ` on a schedule (${result.job.schedule}${result.job.nextRunAt ? `, next ${when(result.job.nextRunAt)}` : ''})`
-      : '';
+    const fires = result.job.schedule ? ` on a schedule (${scheduleText(result.job)})` : '';
     const column = result.job.schedule ? '' : ' (To do)';
     const line = `Posted "${result.job.title}"${where}${fires} to the Agent 007 job board${column}.`;
     // The dispatcher note matters: with the board stopped the card sits there
@@ -257,10 +261,10 @@ const CALLS = {
     const lines = [
       `${job.title}`,
       `id: ${job.id}`,
-      `column: ${job.stateLabel}${job.status ? ` (${job.status})` : ''}`,
-      `repo: ${job.repo}${job.repoPath && job.repoPath !== job.repo ? ` — ${job.repoPath}` : ''}`,
+      `column: ${STATE_LABELS[job.state] || job.state}${job.status ? ` (${job.status})` : ''}`,
+      `repo: ${job.repo}`,
       job.type === 'scheduled'
-        ? `schedule: ${job.schedule}${job.nextRunAt ? ` — next ${when(job.nextRunAt)}` : ''}`
+        ? `schedule: ${scheduleText(job, ' — next ')}`
           + `${job.runCount ? ` — run ${job.runCount} time(s), last ${when(job.lastRunAt)}` : ''}`
         : 'schedule: runs once',
       `posted: ${when(job.postedAt)}`
@@ -268,13 +272,17 @@ const CALLS = {
         + `${job.postedByAgent ? ` (typed by ${job.postedByAgent})` : ''}`,
       job.agentName ? `agent: ${job.agentName}, started ${when(job.startedAt)}` : null,
       job.branchName ? `branch: ${job.branchName}` : null,
-      job.worktreePath ? `worktree: ${job.worktreePath}` : null,
       job.prUrl ? `pull request: ${job.prUrl}${job.prMergedAt ? ` (merged ${when(job.prMergedAt)})` : ''}` : null,
       job.attachments.length ? `attachments: ${job.attachments.join(', ')}` : null,
+      // Whoever last changed the text, so a card an agent rewrote never reads
+      // as if the person who queued it wrote what is there now.
+      job.editedByAgent ? `edited by ${job.editedByAgent}${job.editedAt ? ` on ${when(job.editedAt)}` : ''}` : null,
       // Surfaced, not swallowed: a card that failed to dispatch looks identical
       // to one waiting its turn unless the reason is said out loud.
       job.lastError ? `last error: ${job.lastError}` : null,
       job.prCheckError ? `pull request check: ${job.prCheckError}` : null,
+      // Kept in step by hand with editableInPlace in server/jobs.js and with
+      // EDIT_JOB_TOOL's description above: three statements of one rule.
       job.state === 'todo' ? null : 'This card has left To do, so edit_job can no longer change it.',
       '',
       job.detail || '(no detail on this card)',
@@ -292,9 +300,7 @@ const CALLS = {
     });
     if (result.error) return toolText(result.error, true);
     const job = result.job;
-    const fires = job.type === 'scheduled'
-      ? ` It runs ${job.schedule}${job.nextRunAt ? `, next ${when(job.nextRunAt)}` : ''}.`
-      : '';
+    const fires = job.type === 'scheduled' ? ` It runs ${scheduleText(job)}.` : '';
     return toolText(
       `Updated ${result.changed.join(', ')} on "${job.title}" (${job.repo}), still in To do.${fires}`,
     );
@@ -331,9 +337,15 @@ export function handleMcpMessage(msg, ctx = {}) {
   if (method === 'tools/list') return ok(id, { tools: TOOLS });
 
   if (method === 'tools/call') {
-    const handler = CALLS[params?.name];
-    if (!handler) return fail(id, -32602, `Unknown tool: ${params?.name}`);
-    return ok(id, handler(params?.arguments || {}, ctx));
+    // hasOwn, not truthiness: a plain object inherits Object.prototype, so a
+    // call naming "valueOf" or "toString" would otherwise find a function on
+    // the chain and run it — a 500 for the first, and a result of
+    // "[object Undefined]" for the second, neither of them a tool.
+    const name = params?.name;
+    if (typeof name !== 'string' || !Object.hasOwn(CALLS, name)) {
+      return fail(id, -32602, `Unknown tool: ${name}`);
+    }
+    return ok(id, CALLS[name](params?.arguments || {}, ctx));
   }
 
   // Everything else, including the client's own discovery probes. JSON-RPC says

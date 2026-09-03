@@ -30,7 +30,8 @@ export function checkOrigin(req, res, next) {
 //
 //   req.user          a person, from users.json. Can do anything.
 //   req.agentSession  one live agent terminal this app spawned. Can post a job
-//                     to the board, and nothing else.
+//                     to the board, read the board back, and edit a To do card
+//                     its own owner queued — and nothing else.
 //
 // Identity is resolved for every /api request; *authorisation* is then two
 // separate gates, and the ordering in setupRoutes is what makes agent access
@@ -97,11 +98,15 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
     const reply = handleMcpMessage(req.body, {
       session: req.agentSession,
       postJob: (fields) => postJobForAgent({ ...fields, user: userById(req.agentSession.ownerId) }, broadcast),
-      listJobs: (fields) => listJobsForAgent(fields),
-      readJob: (id) => readJobForAgent(id),
-      // Broadcast, like posting: an edit repaints every open board, and the
-      // user watching the card change is how they see the agent did as asked.
-      editJob: (fields) => editJobForAgent(fields, broadcast),
+      listJobs: listJobsForAgent,
+      readJob: readJobForAgent,
+      // The session and its owner, like postJob: an edit is refused on another
+      // person's card and stamped with the agent's name when it lands.
+      editJob: (fields) => editJobForAgent({
+        ...fields,
+        session: req.agentSession,
+        user: userById(req.agentSession.ownerId),
+      }, broadcast),
     });
     // A notification gets no body. 202 is what the MCP HTTP transport expects.
     if (!reply) return res.status(202).end();

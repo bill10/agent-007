@@ -107,20 +107,37 @@ describe('attachments', () => {
     // retitle goes through untouched.
     expect(updateJob(job.id, { title: 'Still fine', attachments: [{ name: 'real.png' }] }, noopBroadcast).error).toBeUndefined();
     expect(stored().attachments).toHaveLength(1);
-    // A file that vanished from disk stays on the record, so that same plain
-    // edit still goes through.
+    // A file that vanished from disk stays on the record rather than being
+    // dropped from the card by an edit that never mentioned it.
     rmSync(stored().attachments[0].path);
     expect(updateJob(job.id, { title: 'Still fine 2', attachments: [{ name: 'real.png' }] }, noopBroadcast).error).toBeUndefined();
     expect(stored().attachments.map(a => a.name)).toEqual(['real.png']);
     expect(stored().title).toBe('Still fine 2');
 
     // Once dispatched the card is closed to edits of every kind: the agent
-    // holds these paths, and the title and detail it was handed.
+    // holds these paths, and the title and detail it was handed. The board's
+    // own form is the caller here (ws.js job-update), not an agent.
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     expect(stored().state).toBe('in-progress');
     expect(updateJob(job.id, { attachments: [] }, noopBroadcast).error).toMatch(/To do/);
     expect(updateJob(job.id, { title: 'Too late' }, noopBroadcast).error).toMatch(/To do/);
+    // Before this gate, a repoPath sent post-dispatch was silently dropped
+    // rather than refused (only applied `state === 'todo'`); it now refuses
+    // like every other field.
+    expect(updateJob(job.id, { repoPath: REPO2 }, noopBroadcast).error).toMatch(/To do/);
+    expect(stored().repoPath).toBe(REPO);
     expect(stored().title).toBe('Still fine 2');
+  });
+
+  it('refuses a board-form save in every column past To do, not just in progress', () => {
+    // The gate is one function for the form and for an agent, but only the
+    // form can reach a card sitting in Review or in the finished archive.
+    for (const state of ['in-progress', 'review', 'done']) {
+      const { job } = addJob({ title: `Sitting in ${state}`, repoPath: REPO }, noopBroadcast);
+      job.state = state;
+      expect(updateJob(job.id, { title: 'Rewritten' }, noopBroadcast).error, state).toMatch(/To do/);
+      expect(job.title, state).toBe(`Sitting in ${state}`);
+    }
   });
 
   it('replaces a file in place and leaves no staging file behind', () => {

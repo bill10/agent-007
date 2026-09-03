@@ -259,6 +259,13 @@ function renderCard(job) {
     job.postedByName ? escapeHtml(job.postedByName) : null,
     job.postedByAgent ? `<span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>` : null,
     relativeTime(job.postedAt),
+    // An agent can rewrite a To do card through the board's edit_job tool, and
+    // that text becomes the next agent's prompt. The card would otherwise still
+    // read as the work of whoever queued it, so the rewrite says so on the card
+    // and not only in the toast that has already scrolled away.
+    job.editedByAgent
+      ? `<span class="job-card-via">edited by ${escapeHtml(job.editedByAgent)} ${relativeTime(job.editedAt)}</span>`
+      : null,
   ].filter(Boolean).join(' · ');
   meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);

@@ -131,6 +131,18 @@ describe('tools/call post_job', () => {
     expect(reply.result.content[0].text).toMatch(/five fields/);
   });
 
+  it('does not answer to a name it inherited from Object.prototype', () => {
+    // The dispatch table is a plain object, so a truthiness lookup would find
+    // valueOf and toString on the chain: the first throws (a 500 to the
+    // agent), the second answers "[object Undefined]" as if it were a result.
+    for (const name of ['valueOf', 'toString', 'constructor', 'hasOwnProperty']) {
+      const reply = handleMcpMessage(
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name } }, {});
+      expect(reply.error?.code, name).toBe(-32602);
+      expect(reply.result, name).toBeUndefined();
+    }
+  });
+
   it('rejects an unknown tool name', () => {
     const reply = handleMcpMessage(
       { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'delete_everything', arguments: {} } },
@@ -151,7 +163,7 @@ describe('tools/call post_job', () => {
 
 // Stand-ins for the read side, shaped like server/jobs.js returns.
 const CARD = {
-  id: 'job-1', title: 'Add rate limiting', state: 'todo', stateLabel: 'To do',
+  id: 'job-1', title: 'Add rate limiting', state: 'todo',
   type: 'one-time', schedule: null, nextRunAt: null, repo: 'alpha', status: 'queued',
   agentName: null, prUrl: null, postedByName: 'Bill', postedByAgent: 'Onyx',
   postedAt: '2026-09-03T09:00:00.000Z',
@@ -226,7 +238,7 @@ describe('reading one card', () => {
 
   it('warns when the card has left To do and can no longer be edited', () => {
     const reply = callTool('read_job', { id: 'job-1' }, {
-      readJob: () => ({ job: { ...full, state: 'review', stateLabel: 'Review' } }),
+      readJob: () => ({ job: { ...full, state: 'review' } }),
     });
     expect(textOf(reply)).toMatch(/edit_job can no longer change it/);
     expect(textOf(callTool('read_job', { id: 'job-1' }, { readJob: () => ({ job: full }) })))
@@ -237,7 +249,9 @@ describe('reading one card', () => {
     const reply = callTool('read_job', { id: 'job-1' }, {
       readJob: () => ({ job: { ...full, type: 'scheduled', schedule: '@daily', nextRunAt: '2026-09-04T09:00:00.000Z' } }),
     });
-    expect(textOf(reply)).toContain('schedule: @daily');
+    // Both halves: a time IS rendered, and it is not the raw ISO. Asserting
+    // only the absence passed even when the next run was dropped entirely.
+    expect(textOf(reply)).toContain(`schedule: @daily — next ${new Date('2026-09-04T09:00:00.000Z').toLocaleString()}`);
     expect(textOf(reply)).not.toContain('2026-09-04T09:00:00.000Z');
   });
 
