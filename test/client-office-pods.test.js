@@ -505,6 +505,30 @@ describe('pod layout', () => {
     expect(last.x0).toBe(head.x); // straight down, no sidestep at the seat row
   });
 
+  it('the wander to the head seat holds its own column in a room too tight to spare one', () => {
+    // 990px: the set barely places, and the furniture around it blocks the head
+    // seat's own column. Vetting that column like the side lanes moved the
+    // descent a few px off the table's left edge, where its swept box clipped
+    // the tabletop corner and needed a sidestep at the seat row to get back in.
+    const T = 990;
+    const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
+    const rugs = pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, W, T);
+    const spares = computeSpareDesks(pods, decor, W, T);
+    const conf = computeConference(rugs, spares, decor, W, T);
+    const obstacles = walkObstacles(rugs, decor, spares, conf, [...positions.values()]);
+    const head = conf.seats[0];
+    const p = wanderRoute(positions.get('a'), head, conf, true, obstacles, W, T);
+    const last = p.legs[p.legs.length - 1];
+    expect(last.x0, 'the last leg is a sidestep, not the descent').toBe(last.x1);
+    expect(last.x0, 'the head descent left its own column').toBe(head.x);
+    // Every leg but that final descent (which lands on the seat, and the head
+    // sitter overlaps the tabletop by design) stays off the table.
+    for (const l of p.legs.slice(0, -1))
+      expect(overlaps(sweptLeg(l), conf.table),
+        `leg ${l.x0},${l.y0}-${l.x1},${l.y1} clips the tabletop`).toBe(false);
+  });
+
   it('on a panel too tight for a clear row the conference route still clears the chairs', () => {
     // 1000px tall: the set places with only its 6 Z margins, so no band fits a
     // whole character and the route crosses on the widest gap it can find
