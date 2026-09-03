@@ -5,6 +5,24 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.27.3] - 2026-09-02
+
+### Fixed
+
+- The chair at the head of the conference table faced the wrong way and sat in
+  the wrong place. It showed the back of a chair, as if its occupant had turned
+  away from the table, and it floated in the open floor above the table rather
+  than tucking into it. Both came from measuring against the table sprite's box
+  instead of the tabletop it paints: the sprite's top sixth is empty, so the
+  painted edge is well below where the chair was placed. The head chair now
+  faces the room and tucks under the near edge by the same amount the foot chair
+  tucks under the far one, and it uses a new front-facing chair sprite whose
+  seat cushion catches the light the way the side chairs' do.
+- Sparser offices get their conference table back. The previous release grew the
+  set to make the misplaced head chair visible, which pushed the table out of
+  the room entirely on smaller panels. Tucking the chair where it belongs needs
+  no extra height, so those layouts seat again.
+
 ## [0.3.27.2] - 2026-09-02
 
 ### Added
