@@ -721,6 +721,23 @@ describe('sofa wander', () => {
     expect(frameAt(3000).at(-1)).toEqual(desk);
   });
 
+  it('waits for an agent to be quiet a while before sending it off', async () => {
+    // WAITING is not "at rest": detectState flips WORKING -> WAITING after 3s
+    // of silence, and a walk to a seat takes 7-11s at WALK_SPEED. Without a
+    // dwell window an agent that paused to think starts a walk, gets output,
+    // and snaps back to its desk -- jittering forever and never arriving.
+    const { office, state, frameAt } = await sofaOffice();
+    office.noteJobsUpdate();
+    state.agents.set('si', { state: 'WAITING', repoPath: '/r', repoSlug: 'r', lastOutputAt: Date.now() });
+    frameAt(0);
+    expect(office.hasMotion(), 'a briefly-quiet agent left its desk').toBe(false);
+
+    // Quiet past the window the board already calls "stalled": now it goes.
+    state.agents.get('si').lastOutputAt = Date.now() - 4 * 60 * 1000;
+    frameAt(0);
+    expect(office.hasMotion(), 'a long-quiet agent stayed put').toBe(true);
+  });
+
   it('leaves an agent blocked on a question, or gone, at its desk', async () => {
     // The whole reason lib/helpers.js widens MESSAGE_PATTERNS in this same
     // change: a question-blocked agent must read MESSAGE, not WAITING, or it
@@ -805,8 +822,11 @@ describe('sofa wander', () => {
       expect(back.from).toEqual({ x: seat.x, y: seat.y });
       expect(back.legs).toEqual(
         [...there.legs].reverse().map(l => ({ x0: l.x1, y0: l.y1, x1: l.x0, y1: l.y0 })));
-      expect(() => wanderRoute(desk, { x: seat.x, y: seat.y, row: seat.row }, null, false, decor, W, H))
-        .toThrow(); // the lane and row really are load-bearing, not decoration
+      // Load-bearing, not decoration: strip them and the route changes. It must
+      // NOT throw, though — wanderRoute is called from inside the rAF loop, so
+      // a TypeError here takes the whole office render down, not one walker.
+      const stripped = wanderRoute(desk, { x: seat.x, y: seat.y, row: seat.row }, null, false, decor, W, H);
+      expect(stripped.legs).not.toEqual(back.legs);
     }
   });
 

@@ -69,8 +69,15 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     const recentResize = (Date.now() - (session.lastResizeAt || 0)) < 2000;
     if (hasContent && !recentResize) session.lastOutputAt = Date.now();
     if (lines.length > 0) {
-      session.lastStrippedLine = lines[lines.length - 1].trim();
-      session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(l => l.trim())].slice(-5);
+      // Capped: these lines are matched against MESSAGE_PATTERNS/PROMPT_PATTERNS
+      // on every chunk AND on a 1s per-session interval, and several of those
+      // patterns are quadratic on a long line (`/Allow .+ to (read|edit|...)/`
+      // measured 2s on one 180KB line, which pegs the event loop for every
+      // session). An agent controls this text, and no prompt footer is 400
+      // chars, so bound it here rather than hardening one regex at a time.
+      const cap = l => l.trim().slice(0, 400);
+      session.lastStrippedLine = cap(lines[lines.length - 1]);
+      session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(cap)].slice(-5);
     }
     broadcast({ type: 'pty-output', sessionId, data: Buffer.from(data).toString('base64') });
     updateState(session, broadcast);

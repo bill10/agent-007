@@ -1368,6 +1368,8 @@ function roundRect(ctx, x, y, w, h, r) {
 // start timestamp, so a backgrounded tab (where rAF pauses) wakes up to find
 // them finished rather than replaying a queued burst.
 const WALK_SPEED = 130;       // px/s along the walk path
+// Mirrors STALLED_AFTER_MS in lib/jobs.js, like public/modules/jobs.js does.
+const STALLED_AFTER_MS = 3 * 60 * 1000;
 const WALK_FRAME_MS = 150;    // walk-cycle frame time
 const PAPER_MS = 900;         // paper flight time
 const PAPER_FADE_MS = 250;    // fade-out after landing
@@ -1418,7 +1420,14 @@ function updateWander(seats) {
     // WAITING, not just IDLE: every TUI agent (claude, aider, codex, gemini)
     // short-circuits to WAITING in detectState, so IDLE is unreachable for the
     // agents this board actually spawns and the wander never fired for them.
-    const idle = (agent.state === 'IDLE' || agent.state === 'WAITING') && canControlAgent(agent);
+    // Quiet for a while, not merely quiet: detectState flips WORKING -> WAITING
+    // after 3s of silence, but a walk to a seat takes 7-11s at WALK_SPEED, so
+    // an agent that just paused to think would start a walk, get output, and
+    // teleport back to its desk -- jittering on a 3s cycle and never arriving.
+    // Same window the board already uses to call a quiet WAITING "stalled".
+    const resting = agent.state === 'IDLE'
+      || (agent.state === 'WAITING' && Date.now() - (agent.lastOutputAt || 0) > STALLED_AFTER_MS);
+    const idle = resting && canControlAgent(agent);
     if (idle && !seatClaims.has(sid) && !wanderAnims.has(sid) && !walkAnims.has(sid)) {
       if (taken.size >= seats.length) continue; // every seat taken — stay at the desk
       const seat = seats.findIndex((_, i) => !taken.has(i));
@@ -1485,8 +1494,10 @@ export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth
   // conference set), a conference seat derives them from the table. Only the
   // head seat (the sole down-facing one) prefers its own column — it sits
   // above the table. Both are preferences; the vetting below is what decides.
-  const yPref = seat.yPref ?? (conf.table.y - 24);
-  const lane = seat.lane ?? (seat.row === CHAR_ROW_DOWN ? seat.x
+  // conf-guarded: drawMotion no longer bails on a null currentConf, and a
+  // walk-back anim from a conference seat carries no yPref of its own.
+  const yPref = seat.yPref ?? (conf ? conf.table.y - 24 : 0);
+  const lane = seat.lane ?? (!conf || seat.row === CHAR_ROW_DOWN ? seat.x
     : seat.x < conf.table.x + conf.table.w / 2 ? confLanes(conf).left : confLanes(conf).right);
   // The row just above the furniture, but a row a walker can stand in: the
   // crossing leg runs its whole width, so it takes the same scan the walk
