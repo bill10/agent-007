@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.27.1] - 2026-09-02
+
+### Changed
+
+- The chairs around the conference table are slate blue instead of bright
+  green, so the meeting area sits with the rest of the office instead of
+  jumping out of it. The chair sprite only ever shipped in one colour, so the
+  two 16x16 PNGs are recoloured in place onto the same blue-grey ramp the
+  desks use (`#595d79` / `#4a4e68` / `#3a3e55`). Pixel shapes and transparency
+  are unchanged, so nothing about the office layout moves.
+
 ## [0.3.27.0] - 2026-09-02
 
 ### Fixed
