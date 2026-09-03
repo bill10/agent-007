@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { entryRoute, corridorY, pointAlongPath, detectDispatches } =
+const { entryRoute, corridorY, pointAlongPath, detectDispatches, approachX, wanderRoute } =
   await import('../public/modules/office.js');
 
 const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_W = 32, CHAR_H = 64;
@@ -13,6 +13,10 @@ const swept = l => ({
   x: Math.min(l.x0, l.x1), y: Math.min(l.y0, l.y1),
   w: Math.abs(l.x1 - l.x0) + CHAR_W, h: Math.abs(l.y1 - l.y0) + CHAR_H,
 });
+// The leg that crosses the room: the horizontal one running to the entrance.
+// A blocked descent adds a sidestep along the desk's own row, which is not it.
+const crossingLeg = p => p.legs.find(l => l.y0 === l.y1 && (l.x0 === 3 || l.x1 === 3));
+
 const overlaps = (a, b) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -92,7 +96,7 @@ describe('walk in/out routing', () => {
       expect({ x: last.x1, y: last.y1 }).toEqual(end);
       // The corridor is the clear row below the rug, not the bottom edge the
       // old route used — that one ran straight through the chat furniture.
-      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      const across = crossingLeg(p);
       expect(across.y0).toBe(corridorY(obstacles, H, desk.y));
       expect(across.y0).not.toBe(H - CHAR_H);
       // Only the desk column leg touches anything, and only the desk's own rug
@@ -118,10 +122,106 @@ describe('walk in/out routing', () => {
     }
   });
 
+  it('drops down a clear aisle instead of stepping over the rug in between', () => {
+    // Only one gap fits a character, and it is below the second rug: the old
+    // route came straight down the desk column, over that rug.
+    const top = { x: 100, y: 200, w: 400, h: 160 };
+    const lower = { x: 60, y: 380, w: 500, h: 160 };
+    const d = { x: 300, y: 240 }; // on the top rug
+    for (const inbound of [true, false]) {
+      const p = entryRoute(d, null, inbound, H, [top, lower]);
+      for (const l of p.legs)
+        expect(overlaps(swept(l), lower), `${inbound ? 'in' : 'out'} leg ${JSON.stringify(l)}`).toBe(false);
+    }
+  });
+
+  it('falls back to the desk column when no aisle is clear on both legs', () => {
+    // A blocker sitting on the desk's own row and in every candidate column:
+    // no sidestep is clean, so the route keeps the old straight-down column.
+    const dest = { x: 100, y: 200, w: 400, h: 160 };
+    const across = { x: 290, y: 230, w: 60, h: 300 };
+    const d = { x: 300, y: 240 };
+    const p = entryRoute(d, null, false, H, [dest, across]);
+    for (const l of p.legs) expect(l.x0 === d.x || l.y0 === l.y1).toBe(true);
+  });
+
+  it('approachX finds a clear aisle even when the point sits off any obstacle', () => {
+    // approachX's dest lookup can come up empty (the point has no rug of its
+    // own) — the candidate list is then just the blockers' edges, no dest.
+    const blocker = { x: 280, y: 250, w: 60, h: 100 };
+    const point = { x: 300, y: 100 };
+    expect(approachX([blocker], point, 400)).toBe(340);
+  });
+
+  it('approachX never lands a candidate left of the entry edge', () => {
+    // The nearest edge candidate can fall off the left of the floor (a wide
+    // obstacle hugging x=0) — ENTRY_X filters it out before scoring, even
+    // though it would otherwise win on distance.
+    const blocker = { x: -2, y: 250, w: 100, h: 100 };
+    const point = { x: 5, y: 100 };
+    expect(approachX([blocker], point, 400)).toBe(98);
+  });
+
+  it('the sidestep keeps off the colleagues sharing the pod rug', () => {
+    // The rug is one rect over the whole pod, so it is the walker's own floor
+    // and cannot block. The desks in it can, and must: with only the rug in
+    // the list the nearest clear column is 168, and stepping there sweeps the
+    // pod row straight across the colleague sitting at 116.
+    const rug = { x: 100, y: 200, w: 400, h: 160 };
+    const mine = { x: 236, y: 216, w: 96, h: 108 };
+    const mate = { x: 116, y: 216, w: 96, h: 108 };
+    const lower = { x: 200, y: 380, w: 360, h: 160 };
+    const d = { x: 250, y: 240 };
+    const p = entryRoute(d, null, false, H, [rug, mine, mate, lower]);
+    // A real detour (it goes the other way, to 560), not the straight-down
+    // fallback: nothing on the route touches the colleague or the far rug.
+    expect(p.legs.length).toBe(3);
+    for (const l of p.legs)
+      for (const [name, box] of [['colleague', mate], ['rug below', lower]])
+        expect(overlaps(swept(l), box), `${name}, leg ${JSON.stringify(l)}`).toBe(false);
+    // The other half of that rule: the walker's OWN desk is floor it is
+    // standing on, so with the way below clear it walks straight down rather
+    // than sidestepping around its own chair.
+    expect(approachX([rug, mine], d, 500)).toBe(d.x);
+  });
+
+  it('never picks a column that hangs the walker off the right edge', () => {
+    // The candidate edges come from the obstacles, so a rug reaching the panel
+    // edge offers a column with no room for the 32px walker beside it.
+    const rug = { x: 100, y: 200, w: 400, h: 160 };
+    const lower = { x: 60, y: 380, w: 480, h: 160 }; // ends at 540, panel is 560
+    const d = { x: 300, y: 240 };
+    expect(approachX([rug, lower], d, 600, 560) + CHAR_W).toBeLessThanOrEqual(560);
+    expect(approachX([rug, lower], d, 600)).toBe(540); // unclamped, for contrast
+  });
+
+  it('breaks a tie toward wherever the crossing leg is headed', () => {
+    // Two clear columns the same distance out; the walker leaves at the left
+    // edge, so stepping right means walking back over the same ground.
+    const blocker = { x: 268, y: 300, w: 64, h: 100 };
+    const d = { x: 284, y: 100 };
+    expect(approachX([blocker], d, 500, Infinity, 3)).toBe(236);      // toward the entrance
+    expect(approachX([blocker], d, 500, Infinity, 900)).toBe(332);    // toward a right-hand lane
+  });
+
+  it('the wander route to a conference seat takes the same clear aisle', () => {
+    // The descent to the table used the desk column too, with the same result:
+    // straight over whatever sat between the desk and the conference corridor.
+    const conf = { table: { x: 300, y: 500, w: 200, h: 100 } };
+    const blocker = { x: 60, y: 330, w: 500, h: 90 };
+    const desk = { x: 300, y: 240 };
+    const seat = { x: 250, y: 520, row: 99 }; // a side seat, not the head
+    for (const toSeat of [true, false]) {
+      const p = wanderRoute(desk, seat, conf, toSeat, [blocker]);
+      for (const l of p.legs)
+        expect(overlaps(swept(l), blocker), `${toSeat ? 'to' : 'from'} leg ${JSON.stringify(l)}`).toBe(false);
+    }
+  });
+
   it('crosses on the desk row, not the bottom edge, when no row is clear', () => {
     const full = [{ x: 0, y: 0, w: W, h: H }];
     const p = entryRoute(desk, null, false, H, full);
-    const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+    const across = crossingLeg(p);
     expect(across.y0).toBe(desk.y);
     expect(across.y0).not.toBe(H - CHAR_H); // the chat furniture lives there
   });

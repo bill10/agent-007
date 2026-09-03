@@ -174,6 +174,43 @@
 - **Depends on:** Multiplayer phase 1 (identity & auth) — shipped.
 - **Context:** Raised by adversarial + security review of the phase 1 auth PR (2026-07-18). Accepted as a known limitation for now: the app itself doesn't log request URLs and deployment is behind Tailscale, so exposure is bounded. Revisit when auth hardens further (phase 2+).
 
+## Walk routes are recomputed every frame, so a spawn can teleport a walker
+
+- **What:** `drawMotion` rebuilds each walker's path from live obstacles every
+  frame while its distance advances on wall-clock time, so any change to
+  `path.total` re-projects the walker somewhere else along a different route.
+  Measured at 900x800 with 2 repos: agent `a2`'s desk does not move between 7
+  and 8 agents, but its approach column jumps 66px and its path grows 132px, so
+  an unrelated spawn mid-walk snaps it sideways. Fix is to freeze the path on
+  the anim when it starts (and rebuild only on resize), not to make the pickers
+  stabler.
+- **Why:** Pre-existing — `corridorY` always had this property — but `approachX`
+  adds a second discontinuous decision and the sidestep adds real length to
+  `total`, so a jump that used to be invisible now moves the walker a desk
+  over. Only visible when an agent spawns or exits during someone else's 2-5s
+  walk, which is exactly what a busy board does.
+- **Effort:** S (human: ~2h / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Walk route aisles (v0.3.28.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-02),
+  measured but not fixed: freezing the path changes how resize behaves
+  mid-walk, which wants its own look.
+
+## The conference walk-out lane skips the clear-column check
+
+- **What:** `entryRoute`'s conference branch sends a foot-seat sitter down
+  `confLanes(conf).left/right` chosen by table geometry alone, bypassing
+  `approachX` entirely, so that one leg still descends over whatever lies
+  between the set and the corridor — the exact defect `approachX` was added to
+  fix, left in the branch that does not use it.
+- **Why:** The conference set sits in open floor, so the lane is usually clear
+  and nothing has been seen crossing furniture in practice. It is a correctness
+  hole rather than an observed bug: nothing checks it.
+- **Effort:** S (human: ~1h / CC: ~10 min)
+- **Priority:** P4
+- **Depends on:** Walk route aisles (v0.3.28.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-02).
+
 ## Completed
 
 (Nothing yet — completed items move here with their shipped version.)

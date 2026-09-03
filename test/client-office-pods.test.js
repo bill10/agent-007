@@ -20,6 +20,11 @@ function agentsOn(...repoLists) {
   return repoLists.map(([id, repo]) => ({ id, repoPath: repo, slug: repo ? repo.split('/').pop() : null }));
 }
 
+// The leg that crosses the room: the horizontal one running to the entrance.
+// A blocked descent adds a second horizontal — the sidestep along the desk's
+// own row — so "the first horizontal leg" is not the crossing any more.
+const crossingLeg = p => p.legs.find(l => l.y0 === l.y1 && (l.x0 === Z || l.x1 === Z));
+
 const overlaps = (a, b) =>
   a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 
@@ -395,7 +400,7 @@ describe('pod layout', () => {
       expect({ x: last.x1, y: last.y1 }).toEqual(end);
       for (const l of p.legs) expect(l.x0 === l.x1 || l.y0 === l.y1, 'axis-aligned leg').toBe(true);
       // The crossing leg is the clear row nearest the desk: it touches nothing
-      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      const across = crossingLeg(p);
       expect(across.y0).toBe(corridorY(obstacles, T, desk.y));
       for (const o of obstacles) expect(overlaps(sweptLeg(across), o), `${inbound ? 'in' : 'out'}: corridor`).toBe(false);
       // The entrance is that row's left end, so nothing walks the left strip
@@ -438,7 +443,7 @@ describe('pod layout', () => {
       const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
       for (const l of p.legs)
         for (const c of chairs) expect(overlaps(sweptLeg(l), c), `${inbound ? 'in' : 'out'}: chair at ${c.x},${c.y}`).toBe(false);
-      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      const across = crossingLeg(p);
       expect(across.y0).toBeLessThan(conf.table.y);
     }
   });
@@ -459,7 +464,7 @@ describe('pod layout', () => {
     expect(chats.length).toBe(2);
     for (const inbound of [true, false]) {
       const p = entryRoute(positions.get('a'), conf, inbound, T, obstacles);
-      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      const across = crossingLeg(p);
       expect(across.y0).not.toBe(T - 32 * 2);
       for (const c of chats)
         expect(overlaps(sweptLeg(across), c), `${inbound ? 'in' : 'out'}: chat at ${c.x},${c.y}`).toBe(false);
@@ -492,11 +497,13 @@ describe('pod layout', () => {
     const decor = computeDecorPlacement(rugs, 700, 800);
     const spares = computeSpareDesks(pods, decor, 700, 800);
     expect(computeConference(rugs, spares, decor, 700, 800)).toBeNull();
-    const obstacles = walkObstacles(rugs, decor, spares, null);
+    // The desks go in the list the way renderOffice passes them, so the
+    // no-desk-is-touched assertion below covers the sidestep leg too.
+    const obstacles = walkObstacles(rugs, decor, spares, null, [...positions.values()]);
     const desk = positions.get('s7');
     for (const inbound of [true, false]) {
-      const p = entryRoute(desk, null, inbound, 800, obstacles);
-      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      const p = entryRoute(desk, null, inbound, 800, obstacles, 700);
+      const across = crossingLeg(p);
       // The old route crossed along the bottom edge — straight through the chat rugs
       expect(across.y0).not.toBe(800 - 32 * 2);
       expect(across.y0).toBe(corridorY(obstacles, 800, desk.y));
