@@ -586,6 +586,25 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   implied, at the store rather than at the button — one rule, one message,
   whether a person or an agent is asking. The cost is real and accepted:
   retitling a card in Review for the archive's sake is no longer possible.
+- **An agent may read the whole board but only rewrite its owner's cards.** A To
+  do card's detail is not text about work, it IS the next agent's prompt:
+  `buildJobPrompt` hands it verbatim to an unattended `claude --permission-mode
+  auto`. Every board-dispatched agent holds one of these tokens, so without an
+  ownership rule an agent working a hostile repo could rewrite a card queued for
+  a different repo and have the board run its text there. `edit_job` therefore
+  refuses a card whose `postedBy` is not the calling session's owner, the same
+  rule `ws.js` applies to terminals, and null on a single-player board so it
+  only bites once identities exist. Reading stays board-wide: `jobsPayload`
+  already sends every card to every connected browser, and a tool that could
+  only see its own cards could not answer "what is queued?".
+- **An edit that lands says so and leaves a name.** The hazard above is an edit
+  nobody sees, so `edit_job` toasts the way `post_job` does and stamps
+  `editedByAgent`/`editedAt`, which the card renders beside "via" — a card an
+  agent rewrote must not go on reading as the work of whoever queued it.
+- **Basenames, never absolute paths.** `read_job` reports a card's repo the way
+  `resolveRepoRef`'s errors do, and does not report worktree paths at all: the
+  reply describes every card on the board, including other people's, to whatever
+  agent asked, and the layout of the user's disk is not part of the answer.
 - **`edit_job` replaces, never appends.** A tool that merged text would have an
   agent guessing at what is already on the card; the description says so, so an
   agent meaning to add to a detail reads it first.

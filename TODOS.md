@@ -211,6 +211,44 @@
 - **Depends on:** Walk route aisles (v0.3.28.0)
 - **Context:** Raised by the adversarial review during /ship (2026-09-02).
 
+## A card edited in the window dispatchOnce awaits in runs the old prompt
+
+- **What:** `dispatchOnce` builds the command, branch and repo from the card,
+  then awaits `createSession` (addRepo + `git worktree add` + PTY spawn) and
+  only re-checks `state === 'todo'` afterwards. Throughout that multi-second
+  await the card still reads `todo`, so `editableInPlace` lets an edit through:
+  the agent then runs the OLD prompt in the OLD repo while the card advertises
+  the new `repoPath`, and `branchName`/`worktreePath` are written from the old
+  repo's session. `checkPullRequests` searches the new repoPath for that branch,
+  never finds the PR, and the card sits in In progress forever. Fix belongs in
+  `dispatchOnce` — stamp the claim before the await, or re-read the fields after
+  `stillQueued` — not in the gate.
+- **Why:** The window is pre-existing (the old `if (fields.repoPath && job.state
+  === 'todo')` had it too), but it used to need a mistimed human click. With
+  `edit_job` on the board's MCP surface it is something a program can hit on
+  purpose, and the failure is silent: a card stuck in In progress with no error
+  on it.
+- **Effort:** S (human: ~2h / CC: ~20 min)
+- **Priority:** P3
+- **Depends on:** Board read/edit MCP tools (v0.3.29.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-03).
+
+## A rejected job save throws away what you typed
+
+- **What:** `saveForm` in public/modules/jobs.js sends `job-update` and calls
+  `closeForm()` unconditionally, before the server has answered. When the save
+  is refused — the card was dispatched a moment ago, an attachment is too large,
+  a cron does not parse — the toast arrives after the form and its contents are
+  gone. Keeping the form open until an ack (the ws protocol has no ack for
+  job-update today, so one has to be added) fixes all of them at once.
+- **Why:** Pre-existing for the attachment and schedule refusals, but the To-do
+  gate widens it to the common case: retitling a card the dispatcher happens to
+  pick up in the same second now loses the edit instead of applying it.
+- **Effort:** S (human: ~3h / CC: ~20 min)
+- **Priority:** P3
+- **Depends on:** To-do-only editing (v0.3.29.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-03).
+
 ## Completed
 
 (Nothing yet — completed items move here with their shipped version.)
