@@ -32,7 +32,17 @@
 - **Depends on:** Scheduled jobs (v0.3.12.0)
 - **Context:** Raised by the adversarial review during /ship (2026-08-30). A
   ceiling is policy, so it needs a knob, not a hardcoded constant — deferred
-  rather than guessed.
+  rather than guessed. Second route into the same failure, found by the
+  security review during /ship (2026-09-03): `isScheduledRunOver` also returns
+  false on `state === 'MESSAGE'`, and MESSAGE is inferred from agent-controlled
+  terminal output, so a repo whose agent's last line matches a dialog pattern
+  pins its card just as effectively. v0.3.30.0 widened that pattern set, so the
+  surface is slightly larger. The ceiling fixes both routes at once; anchoring
+  individual patterns only ever chases one. And it is not adversary-only:
+  `/approve|deny|allow|reject/i` matches those words ANYWHERE in any of the
+  last five lines, so a git log, a LICENSE, a CI transcript or a dependency
+  changelog can flip a quiet agent to MESSAGE by accident — which argues for
+  treating this as ordinary-operation breakage rather than a hardening task.
 
 ## Back off the merge check on long-lived Review cards
 - **What:** Record a `lastMergeCheckAt` on each job and let `checkMergedPullRequests`
@@ -211,6 +221,114 @@
 - **Priority:** P3
 - **Depends on:** To-do-only editing (v0.3.29.0)
 - **Context:** Raised by the adversarial review during /ship (2026-09-03).
+
+## A wander claim is an index into an array rebuilt every frame
+
+- **What:** `seatClaims` maps a session to an INDEX into `currentSeats`, which
+  `renderOffice` rebuilds from scratch on every frame. Any reader that indexes
+  a different list, or any frame where the pool's composition shifts without
+  tripping the invalidation key, silently re-points a claim at unrelated
+  furniture. Storing the seat object (or a stable id) on the claim instead of
+  its position deletes the whole class.
+- **Why:** Three separate bugs of exactly this shape surfaced in one review:
+  `setupOfficeClick` indexing `conf.seats` with a pooled index (a live crash),
+  `drawConference` doing the same (latent, correct only by an ordering
+  accident), and count-only invalidation aliasing a 6-seat conference pool onto
+  a 6-seat sofa pool. The current key (length + conference-seat count) still
+  cannot separate a left-chat-only pool from a right-chat-only one — both are 9
+  seats with 6 conference seats — so a sitter could teleport across the room.
+  Narrow to reach, but the third instance of a class is a design signal.
+- **Effort:** S (human: ~3h / CC: ~30 min)
+- **Priority:** P3
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-03),
+  after two instances had already been fixed in the same round.
+
+## Sofa sitter placement has never been checked against a render
+
+- **What:** `chatSeats` positions its three sitters from the sofa sprites' BOX
+  coordinates. `sofa_side.png` is a 16x32 box with art only in x 0-12, and the
+  right-hand sofa is drawn mirrored, so its 3px of padding flips to the other
+  side — the two side sitters sit 3px off-centre in opposite directions, a 6px
+  asymmetry. Nothing has ever rendered this: the vitest ctx is a stub with no
+  transform, so a mirrored `drawStanding` records at 0,0 and cannot be placed.
+- **Why:** Not measured as wrong, only unverified — the character (32px) is
+  wider than the painted sofa (26px) either way, so it covers the sofa
+  regardless and the error may be invisible. The art spans are now documented
+  in `SPRITE_PATHS`; the nudge itself should not be made blind, because the
+  repo has already shipped one sprite-adjacency bug (the head chair floating
+  63px clear of the table) that only a composited render caught.
+- **Effort:** S (human: ~1h / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the coverage audit and the pre-landing review during
+  /ship (2026-09-03). Needs eyes on a real canvas, not another unit test.
+
+## chatSeats restates drawDecor's sofa layout instead of reading it
+
+- **What:** The sofa positions exist three times: `drawDecor` draws them,
+  `chatSeats` re-derives the same arithmetic to seat sitters on them, and the
+  test re-derives it a third time from hardcoded literals. Nothing binds any of
+  the three, so refactoring `drawDecor`'s inline positions moves the sofas out
+  from under the sitters and only the two copies that already agree would fail.
+- **Why:** The seats and the furniture they sit on must not be able to drift
+  apart silently. The draw-recording harness (`sofaOffice`) can already read
+  real sprite draws out of a frame, so asserting seats against the sofas
+  `drawDecor` actually drew is within reach.
+- **Effort:** S (human: ~2h / CC: ~20 min)
+- **Priority:** P3
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the testing specialist during /ship (2026-09-03).
+
+## The wander's read-only-colleague guard is untested
+
+- **What:** `canControlAgent(agent)` gates the wander so a colleague's agent
+  keeps its desk (where its dimming and owner label live), but no test in the
+  motion suite sets `ownerId` — `authEnabled` is not settable from the client
+  harness. The set of states reaching that line just doubled, and WAITING is
+  now the common resting state, so a colleague-owned agent is exactly the case
+  that would walk off someone else's desk.
+- **Why:** Pre-existing gap, newly load-bearing. The clause itself is unchanged
+  by v0.3.30.0 but far more of the state space now reaches it.
+- **Effort:** S (human: ~1h / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Multiplayer phase 3 (colleague rendering)
+- **Context:** Raised independently by the coverage audit and the testing
+  specialist during /ship (2026-09-03).
+
+## The wander seat pool is rebuilt every frame
+
+- **What:** `renderOffice` calls `wanderSeats(currentConf, decor)` on every
+  animation frame, allocating a fresh pool (~12 objects, 6 arrays, 2 closures)
+  from inputs that only change on canvas resize or agent spawn/exit —
+  roughly 1,100 short-lived objects a second, all identical.
+- **Why:** Modest against the existing per-frame baseline (`computeOfficeLayout`
+  and `walkObstacles` already allocate ~3N+30 objects a frame), so this is
+  young-gen churn rather than a visible cost. `drawMotion`'s `routeOf` already
+  shows the memoization shape to copy.
+- **Effort:** S (human: ~1h / CC: ~10 min)
+- **Priority:** P4
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the performance specialist during /ship (2026-09-03).
+
+## wanderRoute carries two seat shapes discriminated by nullishness
+
+- **What:** `wanderRoute` accepts a sofa seat (carrying `lane`/`yPref`) and a
+  conference seat (needing a non-null `conf`), told apart by `??` rather than
+  by the `kind` field both already have. `conf.table.y` is dereferenced
+  unguarded, and the walk-back path reconstructs a seat from anim fields that
+  are undefined for conference seats, so the shape is carried by absence. Give
+  conference seats their `lane`/`yPref` in `wanderSeats` and both branches and
+  the `conf` parameter itself can go.
+- **Why:** Advisory, not a defect — every current caller is correct. But the
+  contract is undeclared, and the same class of undeclared contract (a claim
+  index addressing one list while a reader reached for another) is what
+  produced the click-handler crash caught in this same review.
+- **Effort:** S (human: ~2h / CC: ~20 min)
+- **Priority:** P4
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the simplification and maintainability specialists
+  during /ship (2026-09-03).
 
 ## Completed
 
