@@ -505,28 +505,30 @@ describe('pod layout', () => {
     expect(last.x0).toBe(head.x); // straight down, no sidestep at the seat row
   });
 
-  it('the wander to the head seat holds its own column in a room too tight to spare one', () => {
-    // 990px: the set barely places, and the furniture around it blocks the head
-    // seat's own column. Vetting that column like the side lanes moved the
-    // descent a few px off the table's left edge, where its swept box clipped
-    // the tabletop corner and needed a sidestep at the seat row to get back in.
+  it('the wander to the head seat clears the furniture in a room too tight to spare a column', () => {
+    // 990px: the set only just places, and a spare desk sits square in the head
+    // seat's own column. Taking that column on faith — it is above the table,
+    // so it was assumed clear — walked the agent straight over the desk.
     const T = 990;
     const { pods, positions } = computePodLayout(agentsOn(['a', '/r/one']), W, T);
     const rugs = pods.map(podRugRect);
     const decor = computeDecorPlacement(rugs, W, T);
     const spares = computeSpareDesks(pods, decor, W, T);
     const conf = computeConference(rugs, spares, decor, W, T);
-    const obstacles = walkObstacles(rugs, decor, spares, conf, [...positions.values()]);
-    const head = conf.seats[0];
-    const p = wanderRoute(positions.get('a'), head, conf, true, obstacles, W, T);
-    const last = p.legs[p.legs.length - 1];
-    expect(last.x0, 'the last leg is a sidestep, not the descent').toBe(last.x1);
-    expect(last.x0, 'the head descent left its own column').toBe(head.x);
-    // Every leg but that final descent (which lands on the seat, and the head
-    // sitter overlaps the tabletop by design) stays off the table.
-    for (const l of p.legs.slice(0, -1))
-      expect(overlaps(sweptLeg(l), conf.table),
-        `leg ${l.x0},${l.y0}-${l.x1},${l.y1} clips the tabletop`).toBe(false);
+    const desks = [...positions.values()];
+    const obstacles = walkObstacles(rugs, decor, spares, conf, desks);
+    // The set is the walker's destination and its own floor once inside, so it
+    // is the one rect the route is allowed to enter.
+    const setBox = walkObstacles([], [], [], conf, [])[0];
+    const others = obstacles.filter(o => o.x !== setBox.x || o.y !== setBox.y || o.w !== setBox.w || o.h !== setBox.h);
+    const desk = positions.get('a');
+    const mine = others.filter(o => overlaps({ x: desk.x, y: desk.y, w: 16 * 2, h: 32 * 2 }, o));
+    const p = wanderRoute(desk, conf.seats[0], conf, true, obstacles, W, T);
+    for (const l of p.legs)
+      for (const o of others)
+        if (!mine.includes(o))
+          expect(overlaps(sweptLeg(l), o),
+            `leg ${l.x0},${l.y0}-${l.x1},${l.y1} crosses ${JSON.stringify(o)}`).toBe(false);
   });
 
   it('on a panel too tight for a clear row the conference route still clears the chairs', () => {

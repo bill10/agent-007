@@ -1416,16 +1416,9 @@ export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth
   // whatever else stands between the set and the corridor. approachX vets it
   // from the lane rather than from the seat — measured from the seat the set is
   // the walker's own floor and every column reads clear — and steps wider when
-  // the lane's column is not.
-  //
-  // The head seat keeps its own column outright rather than being vetted:
-  // `mine` exempts the SET from that scan, but nothing else, so in a tight room
-  // a rug or spare desk still blocks the head column and pushes the descent a
-  // few px off the table's left edge — which then clips the tabletop corner on
-  // the way down and needs a sidestep at the seat row to get back. Its column
-  // sits above the table and is clear of it by construction.
-  const laneX = seat.row === CHAR_ROW_DOWN ? lane
-    : approachX(obstacles, { x: lane, y: seat.y }, yMid, panelWidth, desk.x);
+  // the lane's column is not. The head column is the seat's own, so measuring
+  // it from there keeps the set exempt and leaves that approach as it was.
+  const laneX = approachX(obstacles, { x: lane, y: seat.y }, yMid, panelWidth, desk.x);
   const deskX = approachX(obstacles, desk, yMid, panelWidth, laneX);
   const pts = [desk, { x: deskX, y: desk.y }, { x: deskX, y: yMid }, { x: laneX, y: yMid }];
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });

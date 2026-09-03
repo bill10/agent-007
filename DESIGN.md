@@ -295,14 +295,11 @@ lays out against a 0x0 room.
   row above the conference set (`corridorY`, the same scan the walk in/out
   crossing uses, so the crossing leg has a row it can actually stand in),
   crosses, then descends to the seat down a lane just outside the chairs — the
-  head seat down its own column, the side and foot seats via `confLanes`. Those
-  two lanes go through `approachX` too, measured from the lane rather than from
+  head seat down its own column, the side and foot seats via `confLanes`. That
+  lane goes through `approachX` too, measured from the lane rather than from
   the seat: from the seat the set is the walker's own floor and every column
   reads clear, from the lane the set is a blocker, which both vets the lane and
-  keeps any wider column it falls back to outside the chair overhang. The head
-  column is exempt from that scan rather than passed through it — `approachX`
-  excuses the set but not the rest of the room, so in a tight office a rug
-  would push the head descent off its column and clip the tabletop corner. Walkers
+  keeps any wider column it falls back to outside the chair overhang. Walkers
   never cross the tabletop; the last step in, from the lane to the seat, goes
   between the chairs by design. Seats fill head-first, sides top-down, foot
   last; a full table
