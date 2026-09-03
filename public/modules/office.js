@@ -1387,12 +1387,13 @@ export function hasMotion() {
 const ENTRY_X = Z;
 
 // Multi-leg route between a desk and a conference seat that stays off the
-// furniture: down the desk column to a corridor just above the set, across,
+// furniture: down the desk column to the corridor row above the set, across,
 // then down the seat's own clear column (side and head columns are beside or
 // above the table; the foot seat detours via the left lane, its centre column
 // being the table itself, and only brushes the table's leg row on the last
-// step). The initial descent runs down approachX's clear column, like the
-// walk in/out verticals. Reversed for the walk back.
+// step). Both verticals run down approachX's clear column and the crossing
+// runs along corridorY's clear row, like the walk in/out legs. Reversed for
+// the walk back.
 // The vertical lanes just outside the chair columns — descending a seat's
 // own column would clip through the chair above it, so side and foot seats
 // are approached down the nearest outer lane instead. Clamped for the
@@ -1401,13 +1402,23 @@ function confLanes(conf) {
   return { left: Math.max(2, conf.table.x - 78), right: conf.table.x + conf.table.w + 46 };
 }
 
-export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth = Infinity) {
-  const yMid = conf.table.y - 24;
+export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth = Infinity, panelHeight = Infinity) {
+  // The row just above the set, but a row a walker can stand in: the crossing
+  // leg runs its whole width, so it takes the same scan the walk in/out
+  // corridor does rather than a fixed offset off the tabletop.
+  const yMid = corridorY(obstacles, panelHeight, conf.table.y - 24);
   const lanes = confLanes(conf);
   // Only the head seat (the sole down-facing one) is approached down its own
   // column — it sits above the table, so that column is clear.
-  const laneX = seat.row === CHAR_ROW_DOWN ? seat.x
+  const lane = seat.row === CHAR_ROW_DOWN ? seat.x
     : seat.x < conf.table.x + conf.table.w / 2 ? lanes.left : lanes.right;
+  // The lane knows only the table's geometry, so it can point straight at
+  // whatever else stands between the set and the corridor. approachX vets it
+  // from the lane rather than from the seat — measured from the seat the set is
+  // the walker's own floor and every column reads clear — and steps wider when
+  // the lane's column is not. The head column is the seat's own, so measuring
+  // it from there keeps the set exempt and leaves that approach as it was.
+  const laneX = approachX(obstacles, { x: lane, y: seat.y }, yMid, panelWidth, desk.x);
   const deskX = approachX(obstacles, desk, yMid, panelWidth, laneX);
   const pts = [desk, { x: deskX, y: desk.y }, { x: deskX, y: yMid }, { x: laneX, y: yMid }];
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
@@ -1759,9 +1770,9 @@ function drawMotion(ctx, w, h, layout) {
     if (anim.dir === 'seat') {
       const seat = currentConf.seats[confSeats.get(sid)];
       if (!seat) { wanderAnims.delete(sid); continue; }
-      path = routeOf(anim, () => wanderRoute(desk, seat, currentConf, true, currentObstacles, w));
+      path = routeOf(anim, () => wanderRoute(desk, seat, currentConf, true, currentObstacles, w, h));
     } else {
-      path = routeOf(anim, () => wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w));
+      path = routeOf(anim, () => wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w, h));
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
