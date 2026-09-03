@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { entryRoute, corridorY, pointAlongPath, detectDispatches, approachX, wanderRoute } =
+const { entryRoute, corridorY, pointAlongPath, detectDispatches, approachX, wanderRoute, wanderSeats, chatSeats, computeDecorPlacement } =
   await import('../public/modules/office.js');
 
 const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_W = 32, CHAR_H = 64;
@@ -558,5 +558,76 @@ describe('frozen walk routes', () => {
     const after = frameAt(1000);
     expect(after).toBeDefined();
     expect(after).not.toEqual(before); // the room really did change — relay out
+  });
+});
+
+describe('sofa seats', () => {
+  // 1440x900 is an ordinary laptop canvas: the band between the desks and the
+  // chat areas is too short for the conference set (it needs ~972px), so the
+  // sofas are the only place an idle agent has to go.
+  const W = 1440, H = 900;
+
+  it('offers the sofas when the canvas is too short for a conference table', () => {
+    const decor = computeDecorPlacement([], W, H);
+    const chats = decor.filter(d => d.kind === 'chat');
+    expect(chats.length).toBe(2);
+    const seats = wanderSeats(null, decor);
+    expect(seats.length).toBe(6); // three per chat area
+    expect(seats.every(s => s.kind === 'chat')).toBe(true);
+  });
+
+  it('pools the sofas with the conference seats when both are there', () => {
+    const decor = computeDecorPlacement([], W, H);
+    const conf = { seats: [{ x: 1, y: 2, row: 0 }, { x: 3, y: 4, row: 2 }] };
+    const seats = wanderSeats(conf, decor);
+    expect(seats.map(s => s.kind)).toEqual(['conf', 'conf', ...Array(6).fill('chat')]);
+  });
+
+  it('sits each sitter on a sofa, not on the rug or the coffee table', () => {
+    // drawDecor's own layout math, repeated here so a change to it that moves
+    // the sofas out from under the sitters fails rather than silently drifts.
+    const D = 2, SOFA_W = 16 * D, SOFA_H = 32 * D, SOFA_FRONT_H = 16 * D, TABLE_W = 32 * D, TABLE_H = 32 * D;
+    const PAD_X = 13, PAD_TOP = 14, GAP = 8;
+    const spot = computeDecorPlacement([], W, H).find(d => d.kind === 'chat');
+    const tx = spot.x + PAD_X + SOFA_W + GAP, ty = spot.y + PAD_TOP + SOFA_FRONT_H + GAP;
+    const sy = ty + TABLE_H - SOFA_H - D;
+    const sofas = [
+      { x: tx, y: spot.y + PAD_TOP, w: TABLE_W, h: SOFA_FRONT_H },   // front, far side
+      { x: spot.x + PAD_X, y: sy, w: SOFA_W, h: SOFA_H },            // left
+      { x: tx + TABLE_W + GAP, y: sy, w: SOFA_W, h: SOFA_H },        // right
+    ];
+    const seats = chatSeats(spot);
+    seats.forEach((seat, i) => {
+      const body = { x: seat.x, y: seat.y, w: CHAR_W, h: CHAR_H };
+      expect(overlaps(body, sofas[i]), `sitter ${i} is not on its sofa`).toBe(true);
+      // Centred on it horizontally, so nobody perches on an armrest.
+      expect(seat.x + CHAR_W / 2).toBe(sofas[i].x + sofas[i].w / 2);
+    });
+    expect(seats[2].mirror).toBe(true);              // right sofa faces back in
+    expect(seats[0].y).toBeLessThan(seats[1].y);     // front sofa is the far one
+  });
+
+  it('routes to a sofa without walking over the furniture', () => {
+    const decor = computeDecorPlacement([], W, H);
+    const seats = wanderSeats(null, decor);
+    const obstacles = decor; // chat rugs AND the divider plants
+    const desk = { x: 300, y: FLOOR_TOP + 20 };
+    for (const seat of seats) {
+      const p = wanderRoute(desk, seat, null, true, obstacles, W);
+      // The seat is inside its own chat rug, so the last leg lands in it by
+      // design; every earlier leg must stay off every chat area.
+      for (const l of p.legs.slice(0, -1))
+        for (const o of obstacles)
+          expect(overlaps(swept(l), o), `leg ${l.x0},${l.y0}-${l.x1},${l.y1} crosses ${o.kind}`).toBe(false);
+    }
+  });
+
+  it('walks a resting agent to a sofa at a canvas with no conference table', async () => {
+    const { office, state } = await freshMotion();
+    canvasDom(W, H);
+    office.noteJobsUpdate();
+    state.agents.set('si', { state: 'WAITING', repoPath: '/r', repoSlug: 'r' });
+    office.renderOffice();
+    expect(office.hasMotion()).toBe(true);
   });
 });
