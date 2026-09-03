@@ -1401,14 +1401,14 @@ function confLanes(conf) {
   return { left: Math.max(2, conf.table.x - 78), right: conf.table.x + conf.table.w + 46 };
 }
 
-function wanderRoute(desk, seat, conf, toSeat) {
+export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth = Infinity) {
   const yMid = conf.table.y - 24;
   const lanes = confLanes(conf);
   // Only the head seat (the sole down-facing one) is approached down its own
   // column — it sits above the table, so that column is clear.
   const laneX = seat.row === CHAR_ROW_DOWN ? seat.x
     : seat.x < conf.table.x + conf.table.w / 2 ? lanes.left : lanes.right;
-  const deskX = approachX(currentObstacles, desk, yMid);
+  const deskX = approachX(obstacles, desk, yMid, panelWidth, laneX);
   const pts = [desk, { x: deskX, y: desk.y }, { x: deskX, y: yMid }, { x: laneX, y: yMid }];
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
   pts.push(seat);
@@ -1418,8 +1418,13 @@ function wanderRoute(desk, seat, conf, toSeat) {
 
 // Every rect a walk route must not cross, in one list: pod rugs, spare desks,
 // decor (chat areas + plants) and the conference set with its chair overhang.
-export function walkObstacles(rugs, decor, spares, conf) {
-  const rects = [...rugs, ...decor, ...spares.map(d => ({ x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z }))];
+// Occupied desks go in too, though they sit inside a rug that already rules
+// their rows out: the rug is the walker's OWN floor on the leg along its desk
+// row, and without the desks in the list that leg would sweep the whole pod,
+// straight over the colleagues seated in it.
+export function walkObstacles(rugs, decor, spares, conf, desks = []) {
+  const cell = d => ({ x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z });
+  const rects = [...rugs, ...decor, ...spares.map(cell), ...desks.map(cell)];
   if (conf) {
     const t = conf.table;
     // The set bbox, not the tabletop: the chair overhang on every side is what
@@ -1462,24 +1467,35 @@ export function corridorY(obstacles, panelHeight, y) {
 
 // The column a vertical approach runs down. The point's own is the default;
 // when the band between it and the corridor is blocked, the walker drops down
-// the nearest column clear of everything but the rect it is headed into (its
-// own pod rug), then comes in along its own row. Candidates are the blocking
-// rects' edges, so this stays a scan rather than a search — no candidate clear
-// on both legs means falling back to the old straight-over-everything column.
-export function approachX(obstacles, point, yMid) {
+// the nearest column clear of everything but the rects it is standing in (its
+// own pod rug and its own desk), then comes in along its own row. Candidates
+// are the blocking rects' edges, so this stays a scan rather than a search --
+// no candidate clear on both legs means falling back to the old
+// straight-over-everything column.
+//
+// `toward` is where the crossing leg goes on from here (the entrance, or the
+// conference lane): of two columns the same distance away, the one on that
+// side is the one the walker does not have to double back over.
+export function approachX(obstacles, point, yMid, panelWidth = Infinity, toward = point.x) {
   const cx = point.x + CHAR_W / 2, cy = point.y + CHAR_H / 2;
-  const dest = obstacles.find(o => cx >= o.x && cx <= o.x + o.w && cy >= o.y && cy <= o.y + o.h);
+  // Every rect the walker is standing in, not just the first: it sits on its
+  // pod rug AND at its own desk, and a route cannot be clear of the floor it
+  // starts on. Excluding only one of them makes the other unroutable.
+  const mine = obstacles.filter(o => cx >= o.x && cx <= o.x + o.w && cy >= o.y && cy <= o.y + o.h);
   const top = Math.min(yMid, point.y), bot = Math.max(yMid, point.y) + CHAR_H;
-  const blockers = obstacles.filter(o => o !== dest && o.y < bot && o.y + o.h > top);
+  const blockers = obstacles.filter(o => !mine.includes(o) && o.y < bot && o.y + o.h > top);
   const colClear = x => blockers.every(o => o.x >= x + CHAR_W || o.x + o.w <= x);
   if (colClear(point.x)) return point.x;
   // The sidestep along the point's own row must be as clear as the descent.
   const rowClear = x => blockers.every(o => o.y >= point.y + CHAR_H || o.y + o.h <= point.y ||
     o.x >= Math.max(x, point.x) + CHAR_W || o.x + o.w <= Math.min(x, point.x));
-  return (dest ? [...blockers, dest] : blockers)
+  // Detour cost: out to the column and on to wherever the crossing is headed,
+  // so a column between the two is free and one past the point is not.
+  const cost = x => Math.abs(x - point.x) + Math.abs(x - toward);
+  return [...blockers, ...mine]
     .flatMap(o => [o.x - CHAR_W, o.x + o.w])
-    .filter(x => x >= ENTRY_X)
-    .sort((a, b) => Math.abs(a - point.x) - Math.abs(b - point.x))
+    .filter(x => x >= ENTRY_X && x + CHAR_W <= panelWidth)
+    .sort((a, b) => cost(a) - cost(b) || Math.abs(a - point.x) - Math.abs(b - point.x))
     .find(x => colClear(x) && rowClear(x)) ?? point.x;
 }
 
@@ -1491,7 +1507,7 @@ export function approachX(obstacles, point, yMid) {
 // nearest outer lane first. The vertical leg runs down approachX's column:
 // the desk's own when that descent is clear, else the nearest aisle beside
 // whatever blocks it, with a sidestep along the desk's own row at the end.
-export function entryRoute(point, conf, inbound, panelHeight, obstacles = []) {
+export function entryRoute(point, conf, inbound, panelHeight, obstacles = [], panelWidth = Infinity) {
   const yMid = corridorY(obstacles, panelHeight, point.y);
   // A start inside the set's footprint — chair overhang included — steps out
   // via the nearest outer lane; anywhere else approachX picks the column.
@@ -1505,7 +1521,7 @@ export function entryRoute(point, conf, inbound, panelHeight, obstacles = []) {
     }
   }
   if (climb === null) {
-    const laneX = approachX(obstacles, point, yMid);
+    const laneX = approachX(obstacles, point, yMid, panelWidth, ENTRY_X);
     climb = laneX === point.x ? [{ x: point.x, y: yMid }]
       : [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
   }
@@ -1599,8 +1615,8 @@ export function noteAgentDeparture(sessionId) {
   let pos = seat || desk;
   if (anim && desk && currentConf) {
     const path = anim.dir === 'seat'
-      ? (seat ? wanderRoute(desk, seat, currentConf, true) : null)
-      : wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false);
+      ? (seat ? wanderRoute(desk, seat, currentConf, true, currentObstacles, w) : null)
+      : wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w);
     if (path) pos = pointAlongPath(path, ((performance.now() - anim.start) / 1000) * WALK_SPEED);
   }
   confSeats.delete(sessionId);
@@ -1699,9 +1715,9 @@ function drawMotion(ctx, w, h, layout) {
         continue;
       }
       if (anim.start === null) anim.start = now;
-      path = entryRoute(to, currentConf, true, h, currentObstacles);
+      path = entryRoute(to, currentConf, true, h, currentObstacles, w);
     } else {
-      path = entryRoute({ x: anim.fromX, y: anim.fromY }, currentConf, false, h, currentObstacles);
+      path = entryRoute({ x: anim.fromX, y: anim.fromY }, currentConf, false, h, currentObstacles, w);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
@@ -1724,9 +1740,9 @@ function drawMotion(ctx, w, h, layout) {
     if (anim.dir === 'seat') {
       const seat = currentConf.seats[confSeats.get(sid)];
       if (!seat) { wanderAnims.delete(sid); continue; }
-      path = wanderRoute(desk, seat, currentConf, true);
+      path = wanderRoute(desk, seat, currentConf, true, currentObstacles, w);
     } else {
-      path = wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false);
+      path = wanderRoute(desk, { x: anim.fromX, y: anim.fromY, row: anim.fromRow }, currentConf, false, currentObstacles, w);
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
@@ -1789,7 +1805,7 @@ export function renderOffice() {
   for (const d of spares) drawWorkstation(ctx, d.x, d.y, 'DISCONNECTED', theme, d.variant, null);
   // Conference table in the open band below them; idle agents wander over
   currentConf = computeConference(rugs, spares, decor, w, h);
-  currentObstacles = walkObstacles(rugs, decor, spares, currentConf);
+  currentObstacles = walkObstacles(rugs, decor, spares, currentConf, [...layout.positions.values()]);
   updateWander(currentConf);
   if (currentConf) drawConference(ctx, currentConf);
 
