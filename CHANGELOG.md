@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.29.1] - 2026-09-03
+
+### Fixed
+
+- An agent walking to or from its desk no longer jumps sideways when someone
+  else joins or leaves the office mid-walk. The walker's route was rebuilt from
+  the current furniture on every frame while its progress along it ran on the
+  clock, so a spawn that changed the room re-projected the walker onto a
+  different route — at 900x800 with two repos, a walk could snap a whole desk
+  over. The route is now fixed when the walk starts and only rebuilt when the
+  canvas resizes.
+
 ## [0.3.29.0] - 2026-09-03
 
 ### Added
