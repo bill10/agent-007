@@ -566,10 +566,29 @@ hostile to working on your own PR.
 ### Agent-posted jobs
 An agent you are talking to can put a card on the board when you ask it to, so
 "add that to the job board" does not mean leaving the conversation to type it.
-The board exposes one MCP tool, `post_job`, over streamable HTTP from the app's
-own Express server (`server/mcp.js`), and every spawned Claude Code agent is
-pointed at it with `--mcp-config` (`server/agent-mcp.js`).
+The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
+`edit_job` — over streamable HTTP from the app's own Express server
+(`server/mcp.js`), and every spawned Claude Code agent is pointed at it with
+`--mcp-config` (`server/agent-mcp.js`).
 
+- **Reading is its own tool, so asking costs nothing.** `list_jobs` answers
+  "what is on the board?" without a card being posted to find out, and returns
+  the id of each so `read_job` and `edit_job` have something to name. The board
+  is one shared wall — every connected client already sees every card — so these
+  show the whole board rather than only what the asking agent posted. Finished
+  cards stay in the archive the board itself keeps them in, with their count
+  said out loud so a board that looks empty is never mistaken for one that is.
+- **A card stops being editable when it leaves To do, for everyone.** Its agent
+  was handed the title, detail and attachment paths in its prompt at dispatch,
+  so a later edit changes nothing about the run and leaves the card describing
+  work nobody was asked to do. The board's own form has only ever offered Edit
+  on a To do card, so `updateJob` now enforces what the interface always
+  implied, at the store rather than at the button — one rule, one message,
+  whether a person or an agent is asking. The cost is real and accepted:
+  retitling a card in Review for the archive's sake is no longer possible.
+- **`edit_job` replaces, never appends.** A tool that merged text would have an
+  agent guessing at what is already on the card; the description says so, so an
+  agent meaning to add to a detail reads it first.
 - **A tool, not a command on PATH.** An agent does not enumerate its `PATH`, so
   a binary sitting there is invisible — the first attempt at this feature put a
   CLI on every agent's `PATH` and the only thing that ever told an agent it
