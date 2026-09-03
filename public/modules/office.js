@@ -288,9 +288,10 @@ export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
 // furniture out with: the front sofa above the coffee table (its sitter faces
 // down over it, like the conference head seat) and a side sofa each side
 // facing in. Each seat carries its own approach, because unlike the
-// conference set these sit at the panel's bottom edge: laneX descends the
-// seat's own column and yMid is the row just above the rug, so wanderRoute
-// needs nothing from the conference set to route here.
+// conference set these sit at the panel's bottom edge: the lane is the seat's
+// own column and the crossing row is the one just above the rug, so wanderRoute
+// needs nothing from the conference set to route here. Both are preferences —
+// wanderRoute vets them through approachX and corridorY like any other seat's.
 export function chatSeats(spot) {
   const tx = spot.x + CHAT_PAD_X + SOFA_W + CHAT_GAP;
   const ty = spot.y + CHAT_PAD_TOP + SOFA_FRONT_H + CHAT_GAP;
@@ -298,8 +299,11 @@ export function chatSeats(spot) {
   // A whole character above the rug, not the conference set's 24px: a walker
   // standing 24px up still overlaps by 40 of its 64, so the crossing leg would
   // sweep the sofas it is heading for -- and the other chat area on the way.
-  const yMid = spot.y - CHAR_H - 8;
-  const seat = (x, y, row, mirror) => ({ x, y, row, mirror, kind: 'chat', laneX: x, yMid });
+  // Just above the rug, the same idiom the conference set uses. corridorY turns
+  // it into a row a walker actually fits in: a fixed offset does not, since a
+  // 64px character standing 24px up still overlaps the sofas by 40.
+  const yPref = spot.y - 24;
+  const seat = (x, y, row, mirror) => ({ x, y, row, mirror, kind: 'chat', lane: x, yPref });
   return [
     seat(tx + Math.floor((TABLE_W - CHAR_W) / 2), spot.y + CHAT_PAD_TOP - 18, CHAR_ROW_DOWN, false),
     seat(spot.x + CHAT_PAD_X, sy - 6, CHAR_ROW_RIGHT, false),
@@ -1415,7 +1419,7 @@ function updateWander(seats) {
       // Fully seated: walk back to the desk. Still walking over: snap back
       // rather than teleport to the seat first.
       if (!midWalk && motionEnabled()) {
-        wanderAnims.set(sid, { dir: 'desk', start: performance.now(), variant: charVariant(sid), fromX: seatPos.x, fromY: seatPos.y, fromRow: seatPos.row, fromLaneX: seatPos.laneX, fromYMid: seatPos.yMid });
+        wanderAnims.set(sid, { dir: 'desk', start: performance.now(), variant: charVariant(sid), fromX: seatPos.x, fromY: seatPos.y, fromRow: seatPos.row, fromLane: seatPos.lane, fromYPref: seatPos.yPref });
       }
     }
   }
@@ -1441,12 +1445,13 @@ export function hasMotion() {
 const ENTRY_X = Z;
 
 // Multi-leg route between a desk and a conference seat that stays off the
-// furniture: down the desk column to a corridor just above the set, across,
+// furniture: down the desk column to the corridor row above the set, across,
 // then down the seat's own clear column (side and head columns are beside or
 // above the table; the foot seat detours via the left lane, its centre column
 // being the table itself, and only brushes the table's leg row on the last
-// step). The initial descent runs down approachX's clear column, like the
-// walk in/out verticals. Reversed for the walk back.
+// step). Both verticals run down approachX's clear column and the crossing
+// runs along corridorY's clear row, like the walk in/out legs. Reversed for
+// the walk back.
 // The vertical lanes just outside the chair columns — descending a seat's
 // own column would clip through the chair above it, so side and foot seats
 // are approached down the nearest outer lane instead. Clamped for the
@@ -1455,14 +1460,25 @@ function confLanes(conf) {
   return { left: Math.max(2, conf.table.x - 78), right: conf.table.x + conf.table.w + 46 };
 }
 
-export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth = Infinity) {
-  // A sofa seat carries its own approach (it sits at the panel's bottom edge,
-  // nowhere near the conference set); a conference seat derives one from the
-  // table. Only the head seat (the sole down-facing one) is approached down
-  // its own column — it sits above the table, so that column is clear.
-  const yMid = seat.yMid ?? (conf.table.y - 24);
-  const laneX = seat.laneX ?? (seat.row === CHAR_ROW_DOWN ? seat.x
+export function wanderRoute(desk, seat, conf, toSeat, obstacles = [], panelWidth = Infinity, panelHeight = Infinity) {
+  // Where the crossing wants to run and which column it comes down: a sofa
+  // seat carries both (it sits at the panel's bottom edge, nowhere near the
+  // conference set), a conference seat derives them from the table. Only the
+  // head seat (the sole down-facing one) prefers its own column — it sits
+  // above the table. Both are preferences; the vetting below is what decides.
+  const yPref = seat.yPref ?? (conf.table.y - 24);
+  const lane = seat.lane ?? (seat.row === CHAR_ROW_DOWN ? seat.x
     : seat.x < conf.table.x + conf.table.w / 2 ? confLanes(conf).left : confLanes(conf).right);
+  // The row just above the furniture, but a row a walker can stand in: the
+  // crossing leg runs its whole width, so it takes the same scan the walk
+  // in/out corridor does rather than a fixed offset off the tabletop.
+  const yMid = corridorY(obstacles, panelHeight, yPref);
+  // The lane knows only the furniture's geometry, so it can point straight at
+  // whatever else stands between it and the corridor. approachX vets it from
+  // the lane rather than from the seat — measured from the seat the furniture
+  // is the walker's own floor and every column reads clear — and steps wider
+  // when the lane's column is not.
+  const laneX = approachX(obstacles, { x: lane, y: seat.y }, yMid, panelWidth, desk.x);
   const deskX = approachX(obstacles, desk, yMid, panelWidth, laneX);
   const pts = [desk, { x: deskX, y: desk.y }, { x: deskX, y: yMid }, { x: laneX, y: yMid }];
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
@@ -1814,10 +1830,10 @@ function drawMotion(ctx, w, h, layout) {
     if (anim.dir === 'seat') {
       const seat = currentSeats[confSeats.get(sid)];
       if (!seat) { wanderAnims.delete(sid); continue; }
-      path = routeOf(anim, () => wanderRoute(desk, seat, currentConf, true, currentObstacles, w));
+      path = routeOf(anim, () => wanderRoute(desk, seat, currentConf, true, currentObstacles, w, h));
     } else {
-      const from = { x: anim.fromX, y: anim.fromY, row: anim.fromRow, laneX: anim.fromLaneX, yMid: anim.fromYMid };
-      path = routeOf(anim, () => wanderRoute(desk, from, currentConf, false, currentObstacles, w));
+      const from = { x: anim.fromX, y: anim.fromY, row: anim.fromRow, lane: anim.fromLane, yPref: anim.fromYPref };
+      path = routeOf(anim, () => wanderRoute(desk, from, currentConf, false, currentObstacles, w, h));
     }
     const dist = ((now - anim.start) / 1000) * WALK_SPEED;
     if (dist >= path.total) {
