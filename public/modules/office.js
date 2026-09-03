@@ -1394,19 +1394,21 @@ let currentSeats = [];         // this frame's wanderSeats() pool, what a claim 
 // The pool's shape, to drop stale claims when it changes. Length alone is not
 // the shape: a conference set with both chat areas suppressed is 6 seats, and
 // no conference set with both chat areas placed is also 6 — crossing between
-// them would leave every claim pointing at unrelated furniture. The pool always
-// lists conference seats first, so the first seat's kind separates the two.
+// them would leave every claim pointing at unrelated furniture. Counting the
+// conference seats separates them without depending on the set being exactly
+// six, which is not this function's invariant to rely on.
 let lastSeatCount = 0;
-let lastSeatKind = '';
+let lastConfCount = -1;
 let currentObstacles = [];     // this frame's furniture rects, for the walk routes
 
 function updateWander(seats) {
   // Seat indices address this list, so a change to its shape (the conference
   // set placing or vanishing on resize) invalidates every claim in flight.
-  const kind = seats.length ? seats[0].kind : '';
-  if (seats.length !== lastSeatCount || kind !== lastSeatKind) {
+  let confN = 0;
+  while (confN < seats.length && seats[confN].kind === 'conf') confN++;
+  if (seats.length !== lastSeatCount || confN !== lastConfCount) {
     seatClaims.clear(); wanderAnims.clear();
-    lastSeatCount = seats.length; lastSeatKind = kind;
+    lastSeatCount = seats.length; lastConfCount = confN;
   }
   if (!seats.length) return;
   const taken = new Set(seatClaims.values());
