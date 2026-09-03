@@ -1391,8 +1391,8 @@ const ENTRY_X = Z;
 // then down the seat's own clear column (side and head columns are beside or
 // above the table; the foot seat detours via the left lane, its centre column
 // being the table itself, and only brushes the table's leg row on the last
-// step). The initial descent can still cross a lower pod row, exactly like
-// the walk in/out verticals always have. Reversed for the walk back.
+// step). The initial descent runs down approachX's clear column, like the
+// walk in/out verticals. Reversed for the walk back.
 // The vertical lanes just outside the chair columns — descending a seat's
 // own column would clip through the chair above it, so side and foot seats
 // are approached down the nearest outer lane instead. Clamped for the
@@ -1408,7 +1408,8 @@ function wanderRoute(desk, seat, conf, toSeat) {
   // column — it sits above the table, so that column is clear.
   const laneX = seat.row === CHAR_ROW_DOWN ? seat.x
     : seat.x < conf.table.x + conf.table.w / 2 ? lanes.left : lanes.right;
-  const pts = [desk, { x: desk.x, y: yMid }, { x: laneX, y: yMid }];
+  const deskX = approachX(currentObstacles, desk, yMid);
+  const pts = [desk, { x: deskX, y: desk.y }, { x: deskX, y: yMid }, { x: laneX, y: yMid }];
   if (laneX !== seat.x) pts.push({ x: laneX, y: seat.y });
   pts.push(seat);
   if (!toSeat) pts.reverse();
@@ -1459,19 +1460,42 @@ export function corridorY(obstacles, panelHeight, y) {
   return Math.round(Math.min(Math.max(y, FLOOR_TOP), panelHeight - CHAR_H));
 }
 
+// The column a vertical approach runs down. The point's own is the default;
+// when the band between it and the corridor is blocked, the walker drops down
+// the nearest column clear of everything but the rect it is headed into (its
+// own pod rug), then comes in along its own row. Candidates are the blocking
+// rects' edges, so this stays a scan rather than a search — no candidate clear
+// on both legs means falling back to the old straight-over-everything column.
+export function approachX(obstacles, point, yMid) {
+  const cx = point.x + CHAR_W / 2, cy = point.y + CHAR_H / 2;
+  const dest = obstacles.find(o => cx >= o.x && cx <= o.x + o.w && cy >= o.y && cy <= o.y + o.h);
+  const top = Math.min(yMid, point.y), bot = Math.max(yMid, point.y) + CHAR_H;
+  const blockers = obstacles.filter(o => o !== dest && o.y < bot && o.y + o.h > top);
+  const colClear = x => blockers.every(o => o.x >= x + CHAR_W || o.x + o.w <= x);
+  if (colClear(point.x)) return point.x;
+  // The sidestep along the point's own row must be as clear as the descent.
+  const rowClear = x => blockers.every(o => o.y >= point.y + CHAR_H || o.y + o.h <= point.y ||
+    o.x >= Math.max(x, point.x) + CHAR_W || o.x + o.w <= Math.min(x, point.x));
+  return (dest ? [...blockers, dest] : blockers)
+    .flatMap(o => [o.x - CHAR_W, o.x + o.w])
+    .filter(x => x >= ENTRY_X)
+    .sort((a, b) => Math.abs(a - point.x) - Math.abs(b - point.x))
+    .find(x => colClear(x) && rowClear(x)) ?? point.x;
+}
+
 // Walk in/out routes: in at the left edge on the empty floor row nearest the
 // desk, straight across that row, then up or down the desk column — and the
 // reverse walking out. The entrance rides on the corridor, so there is no
 // vertical leg along the left strip and no fixed door height. A walk-out
 // starting inside the conference set (a foot-seat sitter) steps out via the
-// nearest outer lane first. The desk column leg is the approach: it crosses
-// whatever rows lie between the corridor and the desk, exactly as the
-// verticals always have.
+// nearest outer lane first. The vertical leg runs down approachX's column:
+// the desk's own when that descent is clear, else the nearest aisle beside
+// whatever blocks it, with a sidestep along the desk's own row at the end.
 export function entryRoute(point, conf, inbound, panelHeight, obstacles = []) {
   const yMid = corridorY(obstacles, panelHeight, point.y);
   // A start inside the set's footprint — chair overhang included — steps out
-  // via the nearest outer lane; anywhere else its own column is already clear.
-  let climb = [{ x: point.x, y: yMid }];
+  // via the nearest outer lane; anywhere else approachX picks the column.
+  let climb = null;
   if (conf) {
     const t = conf.table;
     if (point.x + CHAR_W > t.x - 42 && point.x < t.x + t.w + 42 &&
@@ -1479,6 +1503,11 @@ export function entryRoute(point, conf, inbound, panelHeight, obstacles = []) {
       const laneX = point.x < t.x + t.w / 2 ? confLanes(conf).left : confLanes(conf).right;
       climb = [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
     }
+  }
+  if (climb === null) {
+    const laneX = approachX(obstacles, point, yMid);
+    climb = laneX === point.x ? [{ x: point.x, y: yMid }]
+      : [{ x: laneX, y: point.y }, { x: laneX, y: yMid }];
   }
   const pts = [{ x: point.x, y: point.y }, ...climb, { x: ENTRY_X, y: yMid }];
   if (inbound) pts.reverse();

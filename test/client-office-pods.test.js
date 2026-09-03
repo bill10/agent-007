@@ -394,8 +394,10 @@ describe('pod layout', () => {
       const last = p.legs[p.legs.length - 1];
       expect({ x: last.x1, y: last.y1 }).toEqual(end);
       for (const l of p.legs) expect(l.x0 === l.x1 || l.y0 === l.y1, 'axis-aligned leg').toBe(true);
-      // The crossing leg is the clear row nearest the desk: it touches nothing
-      const across = p.legs.find(l => l.y0 === l.y1 && l.x0 !== l.x1);
+      // The crossing leg — the one running to the entrance — is the clear row
+      // nearest the desk and touches nothing. (A blocked descent adds a
+      // sidestep along the desk's own row, which is not it.)
+      const across = p.legs.find(l => l.y0 === l.y1 && (l.x0 === entry.x || l.x1 === entry.x));
       expect(across.y0).toBe(corridorY(obstacles, T, desk.y));
       for (const o of obstacles) expect(overlaps(sweptLeg(across), o), `${inbound ? 'in' : 'out'}: corridor`).toBe(false);
       // The entrance is that row's left end, so nothing walks the left strip

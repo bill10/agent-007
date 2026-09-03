@@ -118,6 +118,29 @@ describe('walk in/out routing', () => {
     }
   });
 
+  it('drops down a clear aisle instead of stepping over the rug in between', () => {
+    // Only one gap fits a character, and it is below the second rug: the old
+    // route came straight down the desk column, over that rug.
+    const top = { x: 100, y: 200, w: 400, h: 160 };
+    const lower = { x: 60, y: 380, w: 500, h: 160 };
+    const d = { x: 300, y: 240 }; // on the top rug
+    for (const inbound of [true, false]) {
+      const p = entryRoute(d, null, inbound, H, [top, lower]);
+      for (const l of p.legs)
+        expect(overlaps(swept(l), lower), `${inbound ? 'in' : 'out'} leg ${JSON.stringify(l)}`).toBe(false);
+    }
+  });
+
+  it('falls back to the desk column when no aisle is clear on both legs', () => {
+    // A blocker sitting on the desk's own row and in every candidate column:
+    // no sidestep is clean, so the route keeps the old straight-down column.
+    const dest = { x: 100, y: 200, w: 400, h: 160 };
+    const across = { x: 290, y: 230, w: 60, h: 300 };
+    const d = { x: 300, y: 240 };
+    const p = entryRoute(d, null, false, H, [dest, across]);
+    for (const l of p.legs) expect(l.x0 === d.x || l.y0 === l.y1).toBe(true);
+  });
+
   it('crosses on the desk row, not the bottom edge, when no row is clear', () => {
     const full = [{ x: 0, y: 0, w: W, h: H }];
     const p = entryRoute(desk, null, false, H, full);
