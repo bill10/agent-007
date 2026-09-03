@@ -279,7 +279,7 @@ describe('pod layout', () => {
   });
 
   it('the conference table centres in the band between the desks and the chat areas', () => {
-    const SET_TOP = 18, SET_BOTTOM = 32, SET_H = 240 + SET_TOP + SET_BOTTOM;
+    const SET_TOP = 22, SET_BOTTOM = 32, SET_H = 240 + SET_TOP + SET_BOTTOM;
     const decor = computeDecorPlacement([], W, H);
     const conf = computeConference([], [], decor, W, H);
     expect(conf).not.toBeNull();
@@ -318,12 +318,31 @@ describe('pod layout', () => {
     }
   });
 
+  it('the conference set seats both ends, with the head chair clear of the tabletop', () => {
+    const conf = computeConference([], [], [], W, H);
+    const ends = conf.chairs.filter(c => c.kind === 'confchairback');
+    expect(ends).toHaveLength(2);
+    const head = ends.find(c => c.y < conf.table.y);
+    const foot = ends.find(c => c.y > conf.table.y);
+    expect(head).toBeDefined();
+    expect(foot).toBeDefined();
+    // Both end chairs share the table's centreline
+    expect(head.x).toBe(foot.x);
+    // The head chair clears the tabletop by more than its sitter does, or the
+    // sitter's head hides it completely (the whole point of the head chair)
+    expect(head.y).toBeLessThan(conf.seats[0].y);
+    // ...and the walk route treats that extra rise as blocked floor
+    const [set] = walkObstacles([], [], [], conf).slice(-1);
+    expect(set.y).toBeLessThanOrEqual(head.y);
+    expect(set.y + set.h).toBeGreaterThanOrEqual(foot.y + 16 * Z);
+  });
+
   it('the conference table yields on a panel narrower than its chair overhang', () => {
     expect(computeConference([], [], [], 200, 700)).toBeNull();
   });
 
   it('with no chat areas the conference band runs to the panel bottom', () => {
-    const SET_TOP = 18, SET_BOTTOM = 32;
+    const SET_TOP = 22, SET_BOTTOM = 32;
     const conf = computeConference([], [], [], W, H);
     expect(conf).not.toBeNull();
     // Centred between FLOOR_TOP and the bottom margin (the empty-spread
