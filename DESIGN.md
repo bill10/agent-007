@@ -288,26 +288,49 @@ lays out against a 0x0 room.
   a blocker, which both vets the lane and keeps any wider column it falls back
   to outside the chair overhang. While a walk plays, the motion
   overlay draws the character instead of the seated pass.
-- **Idle wander:** an IDLE agent claims a free conference seat, walks over and
-  sits there — facing the viewer at the head, sideways on the side chairs,
-  away at the foot — until its state changes, then walks back to its desk. The
-  route (`wanderRoute`) descends `approachX`'s clear column to the corridor
-  row above the conference set (`corridorY`, the same scan the walk in/out
-  crossing uses, so the crossing leg has a row it can actually stand in),
-  crosses, then descends to the seat down a lane just outside the chairs — the
-  head seat down its own column, the side and foot seats via `confLanes`. That
-  lane goes through `approachX` too, measured from the lane rather than from
-  the seat: from the seat the set is the walker's own floor and every column
-  reads clear, from the lane the set is a blocker, which both vets the lane and
-  keeps any wider column it falls back to outside the chair overhang. Walkers
-  never cross the tabletop; the last step in, from the lane to the seat, goes
-  between the chairs by design. Seats fill head-first, sides top-down, foot
-  last; a full table
-  leaves late idlers at their desks, pre-existing idle agents render seated on
-  connect (no replay walk), read-only colleagues stay at their desks (where
-  their dimming and owner label live), and the whole thing clears if the
-  conference set vanishes on resize (`updateWander`). Clicking a seated
-  character switches to its terminal, same as clicking its desk.
+- **Idle wander:** an agent at rest claims a free seat, walks over and sits
+  there until its state changes, then walks back to its desk. **At rest is
+  IDLE *or* WAITING**: every TUI agent this board spawns short-circuits to
+  WAITING in `detectState`, so IDLE is unreachable for them and the wander
+  gated on IDLE alone never fired at all.
+  - **The seats are pooled** (`wanderSeats`): the conference seats when the set
+    places, plus the chat-area sofas (`chatSeats`) — one seat on the front sofa
+    above each coffee table, facing down over it like the conference head seat,
+    and one on each side sofa facing in. The conference set only places on a
+    canvas about 972px tall, which most laptop windows are not; the sofas are
+    always there, so the wander works at any size. Conference sitters draw
+    interleaved with the chairs (`drawConference`); sofa sitters go down after
+    `drawDecor` laid the sofas out (`drawChatSitters`).
+  - **Facing:** at the conference table, the viewer at the head, sideways on the
+    side chairs, away at the foot; on the sofas, down over the coffee table on
+    the front one and inward on the two sides.
+  - **The route** (`wanderRoute`) descends `approachX`'s clear column to a
+    corridor row (`corridorY`, the same scan the walk in/out crossing uses, so
+    the crossing leg has a row it can actually stand in), crosses, then descends
+    to the seat down a lane. Each seat carries its own preferences: a conference
+    seat takes the row just above the set and a lane just outside the chairs (the
+    head seat down its own column, the side and foot seats via `confLanes`); a
+    sofa seat carries both itself — its own column, and the row just above the
+    chat rug, a whole character up rather than the set's 24px, because a walker
+    standing closer would sweep the sofas it is heading for. Both are only
+    preferences: `approachX` and `corridorY` vet them either way. The lane goes
+    through `approachX` measured from the lane rather than from the seat — from
+    the seat the furniture is the walker's own floor and every column reads
+    clear, from the lane it is a blocker, which both vets the lane and keeps any
+    wider column it falls back to outside the chair overhang. Walkers never
+    cross the tabletop; the last step in, from the lane to the seat, goes between
+    the chairs by design.
+  - **Claims** (`seatClaims`) index the pooled list, not `conf.seats`, and the
+    pool lists the conference seats first so `drawConference` can key on a seat's
+    own `confIndex` instead of aliasing a sofa claim onto a chair. Seats fill in
+    pool order; a full pool leaves late arrivals at their desks, pre-existing
+    resting agents render seated on connect (no replay walk), and read-only
+    colleagues stay at their desks (where their dimming and owner label live).
+    Every claim clears when the pool changes *shape* — its length or its first
+    seat's kind, since a conference set with the chat areas suppressed is also
+    six seats (`updateWander`) — and characters simply render at their desks
+    again. Clicking a seated character switches to its terminal, same as
+    clicking its desk.
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
 - All motion is client-side and time-based: animations never replay on page
@@ -339,13 +362,17 @@ lays out against a 0x0 room.
   as a small divider (1.25x, so they read as a hedge, not sentinels).
   A candidate only draws when it clears every pod rug by a margin
   (`computeDecorPlacement`), so decor yields and disappears as desks crowd the
-  room. `docs/office-decor.png` shows a one-row office at a 458px panel
+  room. `docs/office-decor.png` shows a one-row office at a 458px panel. The
+  three sofa seats in each chat area are wander seats (`chatSeats`), derived
+  from the same layout maths `drawDecor` places the furniture with
 - **Conference table:** A vertical boardroom table (the pixel-agents
   `table_front` sprite stretched taller) centred in the open band between the
   desks — pod rugs and spare desks — and the chat areas, with cushioned
   chairs at thirds down both sides, one at the foot, and a free seat at the
   head. Placed only when the band fits the whole set plus the decor margin
-  (`computeConference`), so it yields on short panels just like the decor
+  (`computeConference`), so it yields on short panels just like the decor — in
+  practice it needs a canvas about 972px tall, which most windows are not, and
+  that is why the sofas carry the idle wander at ordinary sizes
 - **Particles:** 5 ambient dust motes
 
 ## Job Board
