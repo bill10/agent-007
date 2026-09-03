@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.28.0] - 2026-09-02
+
+### Fixed
+
+- Agents walking in and out of the office no longer step over the furniture on
+  their way to the desk. The route already crossed the room on a clear floor
+  row; the up-or-down leg went straight down the desk's own column, over
+  whatever rugs, plants and sofas happened to lie between it and that row.
+  It now drops down the nearest clear aisle and comes in along the desk's own
+  row instead. Agents heading to and from the conference table take the same
+  clear aisle.
+
 ## [0.3.27.3] - 2026-09-02
 
 ### Fixed
