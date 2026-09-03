@@ -5,6 +5,29 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.30.0] - 2026-09-03
+
+### Added
+
+- Agents that go quiet now get up from their desks, walk over to the sofas in
+  the lounge areas and sit down until there is work for them again. The office
+  has had an idle-wander since the conference table landed, but nobody had ever
+  seen it: it only triggered on a state no Claude agent can actually reach, and
+  the conference table it walked to only exists on a canvas about 970px tall,
+  which is taller than the office panel on a normal laptop. Both are fixed, and
+  the sofas are always there, so a quiet office now has agents milling about in
+  it at any window size. A sitter is still one click away — clicking the
+  character on the sofa focuses its terminal, same as clicking its desk.
+
+### Fixed
+
+- An agent waiting on a multiple-choice question now stays at its desk instead
+  of wandering off mid-question. The board reads a terminal to tell what an
+  agent is doing, and the footer those questions print ("Enter to select ...
+  Esc to cancel") was not recognised, so the agent looked like it was simply
+  resting. It also no longer takes a noticeable pause to read a very long line
+  of terminal output.
+
 ## [0.3.29.3] - 2026-09-03
 
 ### Fixed
