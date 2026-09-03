@@ -291,10 +291,18 @@ lays out against a 0x0 room.
 - **Idle wander:** an IDLE agent claims a free conference seat, walks over and
   sits there — facing the viewer at the head, sideways on the side chairs,
   away at the foot — until its state changes, then walks back to its desk. The
-  route (`wanderRoute`) descends `approachX`'s clear column to a corridor just
-  above the conference set, crosses, then descends the seat's own clear column
-  (the foot seat detours via the left lane), so walkers never cross the
-  tabletop. Seats fill head-first, sides top-down, foot last; a full table
+  route (`wanderRoute`) descends `approachX`'s clear column to the corridor
+  row above the conference set (`corridorY`, the same scan the walk in/out
+  crossing uses, so the crossing leg has a row it can actually stand in),
+  crosses, then descends to the seat down a lane just outside the chairs — the
+  head seat down its own column, the side and foot seats via `confLanes`. That
+  lane goes through `approachX` too, measured from the lane rather than from
+  the seat: from the seat the set is the walker's own floor and every column
+  reads clear, from the lane the set is a blocker, which both vets the lane and
+  keeps any wider column it falls back to outside the chair overhang. Walkers
+  never cross the tabletop; the last step in, from the lane to the seat, goes
+  between the chairs by design. Seats fill head-first, sides top-down, foot
+  last; a full table
   leaves late idlers at their desks, pre-existing idle agents render seated on
   connect (no replay walk), read-only colleagues stay at their desks (where
   their dimming and owner label live), and the whole thing clears if the

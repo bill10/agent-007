@@ -5,6 +5,23 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.29.3] - 2026-09-03
+
+### Fixed
+
+- An idle agent walking over to the conference table now checks that its way is
+  actually clear. Two legs of that walk were picked from the table's shape
+  alone: the row it crossed the room on was a fixed offset above the tabletop,
+  and the lane it came down beside the chairs never looked at the furniture at
+  all. If anything stood between the conference set and that row — a plant, a
+  spare desk, a pod rug in a tight room — the agent walked straight over it.
+  The crossing now runs along the same clear-row scan the walk in and out
+  already used, and the lane is vetted against the furniture, stepping a little
+  wider when it is blocked. The head chair is still approached straight down
+  its own column, and the last step in still goes between the chairs. On the
+  open floor the set usually sits in, the walk is unchanged apart from crossing
+  just above the chairs rather than over the tabletop.
+
 ## [0.3.29.2] - 2026-09-03
 
 ### Fixed
