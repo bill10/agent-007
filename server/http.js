@@ -9,7 +9,9 @@ import {
   authEnabled, resolveToken, resolveAgentToken,
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
-import { postJobForAgent, attachmentPath } from './jobs.js';
+import {
+  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, attachmentPath,
+} from './jobs.js';
 import { handleMcpMessage } from './mcp.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -28,7 +30,8 @@ export function checkOrigin(req, res, next) {
 //
 //   req.user          a person, from users.json. Can do anything.
 //   req.agentSession  one live agent terminal this app spawned. Can post a job
-//                     to the board, and nothing else.
+//                     to the board, read the board back, and edit a To do card
+//                     its own owner queued — and nothing else.
 //
 // Identity is resolved for every /api request; *authorisation* is then two
 // separate gates, and the ordering in setupRoutes is what makes agent access
@@ -95,6 +98,15 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
     const reply = handleMcpMessage(req.body, {
       session: req.agentSession,
       postJob: (fields) => postJobForAgent({ ...fields, user: userById(req.agentSession.ownerId) }, broadcast),
+      listJobs: listJobsForAgent,
+      readJob: readJobForAgent,
+      // The session and its owner, like postJob: an edit is refused on another
+      // person's card and stamped with the agent's name when it lands.
+      editJob: (fields) => editJobForAgent({
+        ...fields,
+        session: req.agentSession,
+        user: userById(req.agentSession.ownerId),
+      }, broadcast),
     });
     // A notification gets no body. 202 is what the MCP HTTP transport expects.
     if (!reply) return res.status(202).end();
@@ -111,10 +123,15 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
   // access-control decision — keep it deliberate. Everything below is people
   // only.
 
-  // The non-MCP door to the same action, for agents that cannot take an MCP
-  // server (Codex and Gemini CLI both configure MCP through persistent files
-  // rather than a per-invocation flag). The MCP tool is a wrapper over this
-  // same function, not a second implementation.
+  // The non-MCP door to the same action. Codex and Gemini CLI both speak MCP,
+  // but configure their servers in persistent files (~/.codex/config.toml,
+  // `gemini mcp add`) rather than taking one per invocation the way Claude
+  // Code's --mcp-config does — and the board spawns a fresh agent per job, so
+  // reaching them through MCP would mean editing the user's global config to
+  // hand out a per-run capability. Verified 2026-08-28; if either grows a
+  // per-invocation flag, give those agents the real server and retire this.
+  // The MCP tool is a wrapper over this same function, not a second
+  // implementation.
   app.post('/api/jobs', requireIdentity, (req, res) => {
     const body = req.body || {};
     const session = req.agentSession || null;

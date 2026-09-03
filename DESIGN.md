@@ -566,10 +566,48 @@ hostile to working on your own PR.
 ### Agent-posted jobs
 An agent you are talking to can put a card on the board when you ask it to, so
 "add that to the job board" does not mean leaving the conversation to type it.
-The board exposes one MCP tool, `post_job`, over streamable HTTP from the app's
-own Express server (`server/mcp.js`), and every spawned Claude Code agent is
-pointed at it with `--mcp-config` (`server/agent-mcp.js`).
+The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
+`edit_job` — over streamable HTTP from the app's own Express server
+(`server/mcp.js`), and every spawned Claude Code agent is pointed at it with
+`--mcp-config` (`server/agent-mcp.js`).
 
+- **Reading is its own tool, so asking costs nothing.** `list_jobs` answers
+  "what is on the board?" without a card being posted to find out, and returns
+  the id of each so `read_job` and `edit_job` have something to name. The board
+  is one shared wall — every connected client already sees every card — so these
+  show the whole board rather than only what the asking agent posted. Finished
+  cards stay in the archive the board itself keeps them in, with their count
+  said out loud so a board that looks empty is never mistaken for one that is.
+- **A card stops being editable when it leaves To do, for everyone.** Its agent
+  was handed the title, detail and attachment paths in its prompt at dispatch,
+  so a later edit changes nothing about the run and leaves the card describing
+  work nobody was asked to do. The board's own form has only ever offered Edit
+  on a To do card, so `updateJob` now enforces what the interface always
+  implied, at the store rather than at the button — one rule, one message,
+  whether a person or an agent is asking. The cost is real and accepted:
+  retitling a card in Review for the archive's sake is no longer possible.
+- **An agent may read the whole board but only rewrite its owner's cards.** A To
+  do card's detail is not text about work, it IS the next agent's prompt:
+  `buildJobPrompt` hands it verbatim to an unattended `claude --permission-mode
+  auto`. Every board-dispatched agent holds one of these tokens, so without an
+  ownership rule an agent working a hostile repo could rewrite a card queued for
+  a different repo and have the board run its text there. `edit_job` therefore
+  refuses a card whose `postedBy` is not the calling session's owner, the same
+  rule `ws.js` applies to terminals, and null on a single-player board so it
+  only bites once identities exist. Reading stays board-wide: `jobsPayload`
+  already sends every card to every connected browser, and a tool that could
+  only see its own cards could not answer "what is queued?".
+- **An edit that lands says so and leaves a name.** The hazard above is an edit
+  nobody sees, so `edit_job` toasts the way `post_job` does and stamps
+  `editedByAgent`/`editedAt`, which the card renders beside "via" — a card an
+  agent rewrote must not go on reading as the work of whoever queued it.
+- **Basenames, never absolute paths.** `read_job` reports a card's repo the way
+  `resolveRepoRef`'s errors do, and does not report worktree paths at all: the
+  reply describes every card on the board, including other people's, to whatever
+  agent asked, and the layout of the user's disk is not part of the answer.
+- **`edit_job` replaces, never appends.** A tool that merged text would have an
+  agent guessing at what is already on the card; the description says so, so an
+  agent meaning to add to a detail reads it first.
 - **A tool, not a command on PATH.** An agent does not enumerate its `PATH`, so
   a binary sitting there is invisible — the first attempt at this feature put a
   CLI on every agent's `PATH` and the only thing that ever told an agent it
@@ -603,10 +641,12 @@ pointed at it with `--mcp-config` (`server/agent-mcp.js`).
   them — which meant `/api/browse` had to be retrofitted the day the credential
   was introduced.
 - **Claude Code asks the user before the call goes through.** Measured: under
-  both the default mode and `--permission-mode auto`, a `post_job` call waits for
-  approval. That is the right outcome and not something to design around — a
-  card is filed because a person said yes. It does mean an unattended agent
-  cannot post one, which is exactly why nothing instructs dispatched agents to.
+  both the default mode and `--permission-mode auto`, a call to one of these
+  tools waits for approval (measured on `post_job`; the gate is per tool call,
+  not per tool). That is the right outcome and not something to design around —
+  a card is filed, read out or rewritten because a person said yes. It does mean
+  an unattended agent cannot post one, which is exactly why nothing instructs
+  dispatched agents to.
 - **Attribution is two facts, not one.** `postedByAgent` (which agent typed it)
   is stored beside `postedBy`/`postedByName` (whose work it is), and the card
   shows the agent as an accent-tinted `via <name>`. Folding them into one field
@@ -636,8 +676,9 @@ the same shape as the terminal's upload, and land under
   `nosniff` and `no-referrer`: an uploaded HTML file must not run as this
   origin, where the token lives. A card link cannot send a header, so the
   token rides in the query for exactly this route.
-- **Only changeable in To do**, the same rule as the repo, type and schedule:
-  a running agent was handed those paths at dispatch.
+- **Only changeable in To do**, because the whole card is: `updateJob` closes
+  a card to every edit the moment it leaves To do (see Agent-posted jobs), and
+  a running agent was handed these paths in its prompt at dispatch.
 - **Refused, never silently dropped.** An unusable name, two names that one
   filesystem would fold together, more than 20 files, more than 10MB each or
   50MB per save all fail the whole edit, and a refused edit changes nothing,

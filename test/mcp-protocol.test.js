@@ -6,7 +6,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
-  handleMcpMessage, TOOLS, POST_JOB_TOOL, SERVER_INFO, DEFAULT_PROTOCOL_VERSION,
+  handleMcpMessage, TOOLS, POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL,
+  SERVER_INFO, DEFAULT_PROTOCOL_VERSION,
 } from '../server/mcp.js';
 
 const SESSION = { id: 'session-1', name: 'Onyx', repoPath: '/repos/alpha' };
@@ -57,10 +58,10 @@ describe('handshake', () => {
 });
 
 describe('tools/list', () => {
-  it('offers exactly the post_job tool, with title required', () => {
+  it('offers the four board tools, with post_job needing a title', () => {
     const reply = handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {});
     expect(reply.result.tools).toEqual(TOOLS);
-    expect(reply.result.tools.map(t => t.name)).toEqual(['post_job']);
+    expect(reply.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job']);
     expect(POST_JOB_TOOL.inputSchema.required).toEqual(['title']);
   });
 
@@ -130,6 +131,18 @@ describe('tools/call post_job', () => {
     expect(reply.result.content[0].text).toMatch(/five fields/);
   });
 
+  it('does not answer to a name it inherited from Object.prototype', () => {
+    // The dispatch table is a plain object, so a truthiness lookup would find
+    // valueOf and toString on the chain: the first throws (a 500 to the
+    // agent), the second answers "[object Undefined]" as if it were a result.
+    for (const name of ['valueOf', 'toString', 'constructor', 'hasOwnProperty']) {
+      const reply = handleMcpMessage(
+        { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name } }, {});
+      expect(reply.error?.code, name).toBe(-32602);
+      expect(reply.result, name).toBeUndefined();
+    }
+  });
+
   it('rejects an unknown tool name', () => {
     const reply = handleMcpMessage(
       { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'delete_everything', arguments: {} } },
@@ -145,5 +158,141 @@ describe('tools/call post_job', () => {
       { session: SESSION, postJob },
     );
     expect(reply.result.isError).toBe(true);
+  });
+});
+
+// Stand-ins for the read side, shaped like server/jobs.js returns.
+const CARD = {
+  id: 'job-1', title: 'Add rate limiting', state: 'todo',
+  type: 'one-time', schedule: null, nextRunAt: null, repo: 'alpha', status: 'queued',
+  agentName: null, prUrl: null, postedByName: 'Bill', postedByAgent: 'Onyx',
+  postedAt: '2026-09-03T09:00:00.000Z',
+};
+
+const callTool = (name, args, ctx) => handleMcpMessage(
+  { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } },
+  { session: SESSION, ...ctx },
+);
+const textOf = (reply) => reply.result.content[0].text;
+
+describe('listing the board', () => {
+  it('groups the cards by column and names the id of each', () => {
+    const running = { ...CARD, id: 'job-2', title: 'Already going', state: 'in-progress', agentName: 'Slate', status: 'running' };
+    const reply = callTool('list_jobs', {}, {
+      listJobs: () => ({ jobs: [CARD, running], state: null, repoName: null, archived: 0 }),
+    });
+    const text = textOf(reply);
+    expect(text).toMatch(/To do \(1\)[\s\S]*job-1  Add rate limiting/);
+    expect(text).toMatch(/In progress \(1\)[\s\S]*job-2  Already going/);
+    // The agent working a card and how it is doing is what gets asked about.
+    expect(text).toContain('Slate running');
+  });
+
+  it('says an empty board is empty, and whether anything is archived behind it', () => {
+    const reply = callTool('list_jobs', {}, {
+      listJobs: () => ({ jobs: [], state: null, repoName: null, archived: 3 }),
+    });
+    expect(textOf(reply)).toMatch(/Nothing on the Agent 007 job board/);
+    expect(textOf(reply)).toMatch(/3 finished card\(s\) are archived/);
+  });
+
+  it('passes the filters through and says which slice it answered with', () => {
+    const listJobs = vi.fn(() => ({ jobs: [CARD], state: 'todo', repoName: 'alpha', archived: 0 }));
+    const reply = callTool('list_jobs', { state: 'todo', repo: 'alpha' }, { listJobs });
+    expect(listJobs).toHaveBeenCalledWith({ state: 'todo', repo: 'alpha' });
+    expect(textOf(reply)).toContain('To do · alpha');
+  });
+
+  it('offers the columns as an enum, so a bad state is caught before the call', () => {
+    expect(LIST_JOBS_TOOL.inputSchema.properties.state.enum).toEqual(['todo', 'in-progress', 'review', 'done']);
+  });
+
+  it('returns a refusal as a tool error, not a JSON-RPC error', () => {
+    const reply = callTool('list_jobs', { state: 'backlog' }, {
+      listJobs: () => ({ error: 'Unknown state "backlog"' }),
+    });
+    expect(reply.result.isError).toBe(true);
+    expect(reply.error).toBeUndefined();
+  });
+});
+
+describe('reading one card', () => {
+  const full = {
+    ...CARD, detail: 'Token bucket, 100/min.', repoPath: '/repos/alpha',
+    branchName: 'board/add-rate-limiting', worktreePath: null, startedAt: null,
+    reviewAt: null, prMergedAt: null, doneAt: null, lastRunAt: null, runCount: 0,
+    lastError: 'worktree busy', prCheckError: null, attachments: ['spec.md'],
+  };
+
+  it('reads the card out with its detail, branch and error', () => {
+    const readJob = vi.fn(() => ({ job: full }));
+    const text = textOf(callTool('read_job', { id: 'job-1' }, { readJob }));
+    expect(readJob).toHaveBeenCalledWith('job-1');
+    expect(text).toContain('Token bucket, 100/min.');
+    expect(text).toContain('board/add-rate-limiting');
+    expect(text).toContain('spec.md');
+    // Surfaced deliberately: a card that failed to dispatch otherwise looks
+    // exactly like one waiting its turn.
+    expect(text).toContain('last error: worktree busy');
+  });
+
+  it('warns when the card has left To do and can no longer be edited', () => {
+    const reply = callTool('read_job', { id: 'job-1' }, {
+      readJob: () => ({ job: { ...full, state: 'review' } }),
+    });
+    expect(textOf(reply)).toMatch(/edit_job can no longer change it/);
+    expect(textOf(callTool('read_job', { id: 'job-1' }, { readJob: () => ({ job: full }) })))
+      .not.toMatch(/can no longer change it/);
+  });
+
+  it('renders a scheduled card\'s cron and next run in local time, not ISO', () => {
+    const reply = callTool('read_job', { id: 'job-1' }, {
+      readJob: () => ({ job: { ...full, type: 'scheduled', schedule: '@daily', nextRunAt: '2026-09-04T09:00:00.000Z' } }),
+    });
+    // Both halves: a time IS rendered, and it is not the raw ISO. Asserting
+    // only the absence passed even when the next run was dropped entirely.
+    expect(textOf(reply)).toContain(`schedule: @daily — next ${new Date('2026-09-04T09:00:00.000Z').toLocaleString()}`);
+    expect(textOf(reply)).not.toContain('2026-09-04T09:00:00.000Z');
+  });
+
+  it('hands a missing card back as a tool error', () => {
+    const reply = callTool('read_job', { id: 'nope' }, { readJob: () => ({ error: 'No job with id "nope"' }) });
+    expect(reply.result.isError).toBe(true);
+    expect(textOf(reply)).toMatch(/No job with id/);
+  });
+});
+
+describe('editing a card', () => {
+  it('passes only the fields it was given, and reports what changed', () => {
+    const editJob = vi.fn(() => ({ job: { ...CARD, title: 'Retitled' }, changed: ['title'] }));
+    const reply = callTool('edit_job', { id: 'job-1', title: 'Retitled' }, { editJob });
+    expect(editJob).toHaveBeenCalledWith({
+      id: 'job-1', title: 'Retitled', detail: undefined, repo: undefined, schedule: undefined,
+    });
+    expect(textOf(reply)).toMatch(/Updated title on "Retitled" \(alpha\), still in To do/);
+  });
+
+  it('reads back the schedule it set, and when it next fires', () => {
+    const reply = callTool('edit_job', { id: 'job-1', schedule: '@daily' }, {
+      editJob: () => ({
+        job: { ...CARD, type: 'scheduled', schedule: '@daily', nextRunAt: '2026-09-04T09:00:00.000Z' },
+        changed: ['schedule'],
+      }),
+    });
+    expect(textOf(reply)).toContain('It runs @daily, next');
+  });
+
+  it('surfaces the To do rule as a tool error the agent can read', () => {
+    const reply = callTool('edit_job', { id: 'job-1', title: 'Too late' }, {
+      editJob: () => ({ error: '"Add rate limiting" is in Review, and only cards still in To do can be edited' }),
+    });
+    expect(reply.result.isError).toBe(true);
+    expect(textOf(reply)).toMatch(/only cards still in To do can be edited/);
+  });
+
+  it('needs an id, and says the edit replaces the detail rather than appending', () => {
+    expect(EDIT_JOB_TOOL.inputSchema.required).toEqual(['id']);
+    expect(READ_JOB_TOOL.inputSchema.required).toEqual(['id']);
+    expect(EDIT_JOB_TOOL.inputSchema.properties.detail.description).toMatch(/not appended/);
   });
 });

@@ -5,6 +5,36 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.29.0] - 2026-09-03
+
+### Added
+
+- An agent you are talking to can now read the job board back to you and change
+  a card you have not started yet, not just post one. "What is queued?", "what
+  does that card say?", "add the repro steps to that one" — the board answers
+  through the same MCP tool surface `post_job` already used, so no setup and
+  nothing new to learn. A card's id comes back with the listing, which is what
+  the read and edit tools take.
+
+### Changed
+
+- A job card stops being editable the moment it leaves To do, for you as well as
+  for an agent. Its agent was handed the title, detail and attachments in its
+  prompt when the board dispatched it, so an edit afterwards changes nothing
+  about the run and leaves the card describing work nobody was asked to do. The
+  board's Edit button has only ever appeared on To do cards; now the rule holds
+  wherever the request comes from. The cost: retitling a card in Review so the
+  archive reads better is no longer possible.
+- An agent cannot rewrite a card someone else queued, and an edit it does make
+  is announced and marked on the card. A To do card's detail is the next agent's
+  prompt, so an unnoticed rewrite is the one edit that matters most.
+
+### Fixed
+
+- A malformed tool call naming a built-in JavaScript property (`valueOf`,
+  `toString`) made the board's MCP server return an error page or a nonsense
+  result instead of "unknown tool".
+
 ## [0.3.28.0] - 2026-09-02
 
 ### Fixed

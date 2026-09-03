@@ -22,7 +22,7 @@ import {
   branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
-  isScheduledRunOver, scheduledRunReset,
+  isScheduledRunOver, scheduledRunReset, STATE_LABELS,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -164,14 +164,11 @@ function planAttachments(job, list) {
     }
     // A { name } keeps what the card already has, record and all: a file
     // that has gone missing from disk stays listed (its link 404s, which
-    // says so) rather than turning an unrelated title edit into a change
-    // the in-progress gate below refuses.
+    // says so) rather than being dropped from the card by an unrelated edit.
     const old = stored.find(a => a.name === name);
     if (old) kept.push(old);
   }
-  const before = stored.map(a => a.name).join('\n');
-  const changed = writes.length > 0 || kept.map(a => a.name).join('\n') !== before;
-  return { dir, kept, writes, changed };
+  return { dir, kept, writes };
 }
 
 function applyAttachments(job, plan) {
@@ -303,6 +300,14 @@ export function resolveRepoRef(ref) {
 // Not ownership-gated, matching the WebSocket `job-create` handler: the board is
 // shared workspace state, and postedBy/postedByAgent are attribution rather than
 // access control.
+// Said the same way at both doors: an agent that passed a JSON number or an
+// object meant to schedule something, and deserves the same answer either way.
+function scheduleTypeError(schedule) {
+  return schedule != null && typeof schedule !== 'string'
+    ? 'schedule must be a string — a five-field cron expression or an @shorthand'
+    : null;
+}
+
 export function postJobForAgent({ title, detail, repo, schedule, type, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
@@ -313,9 +318,8 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
   // error, not a silent one-time card: the plain HTTP door has no schema in
   // front of it, the caller asked for a scheduled job, and every other bad
   // input here is answered with a message the caller can act on.
-  if (schedule != null && typeof schedule !== 'string') {
-    return { error: 'schedule must be a string — a five-field cron expression or an @shorthand' };
-  }
+  const badSchedule = scheduleTypeError(schedule);
+  if (badSchedule) return { error: badSchedule };
   if (type != null && typeof type !== 'string') {
     return { error: 'type must be a string — "one-time" or "scheduled"' };
   }
@@ -357,19 +361,204 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
   };
 }
 
+// --- The read side of the same door ---
+//
+// An agent asked by its user to look at the board, rather than write to it. The
+// board is one shared wall — jobsPayload sends every card to every connected
+// client — so there is nothing per-agent to filter out here, and these read the
+// same store the browser does.
+
+// The row an agent gets per card: enough to say what the card is and to name it
+// in a follow-up call, without the detail body, which is the long part.
+function jobSummary(job) {
+  const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
+  return {
+    id: job.id,
+    title: job.title,
+    state: job.state,
+    type: jobType(job),
+    schedule: job.schedule || null,
+    nextRunAt: job.nextRunAt || null,
+    repo: basename(job.repoPath || ''),
+    editedByAgent: job.editedByAgent || null,
+    // Derived fresh, never stored: it describes a PTY that exists right now.
+    status: deriveJobStatus(job, session),
+    agentName: job.agentName || null,
+    prUrl: job.prUrl || null,
+    postedByName: job.postedByName || null,
+    postedByAgent: job.postedByAgent || null,
+    postedAt: job.postedAt || null,
+  };
+}
+
+export function listJobsForAgent({ state, repo } = {}) {
+  const wanted = typeof state === 'string' && state.trim() ? state.trim() : null;
+  if (wanted && !JOB_STATES.includes(wanted)) {
+    return { error: `Unknown state "${wanted}" — expected one of: ${JOB_STATES.join(', ')}` };
+  }
+  // Narrowing arguments must narrow or refuse, never widen: a non-string repo
+  // used to fall through to "every repository", which is the opposite of what
+  // the caller asked for. postJobForAgent refuses the same shape.
+  if (repo != null && typeof repo !== 'string') {
+    return { error: 'repo must be a string — a full path or a folder name' };
+  }
+  let repoPath = null;
+  if (typeof repo === 'string' && repo.trim()) {
+    const resolved = resolveRepoRef(repo);
+    if (resolved.error) return { error: resolved.error };
+    repoPath = resolved.path;
+  }
+  // Finished cards are the archive behind the board's toolbar, not a column, so
+  // an unfiltered list answers with the board — asking for `done` reaches them.
+  const jobs = allJobs().filter(job => (wanted ? job.state === wanted : job.state !== 'done')
+    && (!repoPath || job.repoPath === repoPath))
+    // Oldest first, the order the board's own columns are sorted in, so an
+    // agent describes the board the user is looking at rather than a shuffle.
+    .sort((a, b) => String(a.postedAt || '').localeCompare(String(b.postedAt || '')));
+  return {
+    jobs: jobs.map(jobSummary),
+    state: wanted,
+    repoName: repoPath ? basename(repoPath) : null,
+    // Said out loud by the caller: a board that looks empty because the archive
+    // is hidden is different from a board with nothing on it.
+    archived: wanted ? 0 : allJobs().filter(job => job.state === 'done').length,
+  };
+}
+
+export function readJobForAgent(jobId) {
+  const job = allJobs().find(j => j.id === jobId);
+  if (!job) return { error: `No job with id "${jobId}" — list the board to see the ids.` };
+  return {
+    job: {
+      ...jobSummary(job),
+      detail: job.detail || '',
+      // Basename only, deliberately — resolveRepoRef reports repos the same
+      // way. An absolute repo or worktree path is the layout of the user's
+      // disk, and this reply goes to whatever agent called the tool, about
+      // every card on the board including other people's.
+      branchName: job.branchName || null,
+      startedAt: job.startedAt || null,
+      prMergedAt: job.prMergedAt || null,
+      editedAt: job.editedAt || null,
+      lastRunAt: job.lastRunAt || null,
+      runCount: job.runCount || 0,
+      // Both, and separately: the board keeps them apart because a card can be
+      // failing to dispatch AND failing its PR check at once.
+      lastError: job.lastError || null,
+      prCheckError: job.prCheckError || null,
+      attachments: (Array.isArray(job.attachments) ? job.attachments : []).map(a => a && a.name).filter(Boolean),
+    },
+  };
+}
+
+// The same edit, asked for by an agent. It refuses ahead of updateJob rather
+// than after it so a no-op edit to a dispatched card answers with the rule that
+// actually stopped it, not "nothing to change".
+//
+// Two guards here that the board's own form does not need. A To do card's
+// detail IS the next agent's prompt — buildJobPrompt hands it over verbatim to
+// an unattended `claude --permission-mode auto` — and every board-dispatched
+// agent holds one of these tokens, so an agent working a hostile repo could
+// otherwise rewrite a card queued for a different repo and have the board run
+// its text. So: an agent may not touch a card another person queued, matching
+// the ownership rule ws.js already applies to terminals; and an edit that does
+// land says so out loud and leaves its name on the card, because the whole
+// hazard is an edit nobody sees. Reading stays board-wide — every browser
+// already sees every card — but writing does not.
+export function editJobForAgent({ id, title, detail, repo, schedule, session, user }, broadcast) {
+  const job = allJobs().find(j => j.id === id);
+  if (!job) return { error: `No job with id "${id}" — list the board to see the ids.` };
+  const gate = editableInPlace(job);
+  if (gate) return gate;
+  // Null on a single-player board (no users file), on both sides, so this only
+  // ever bites once identities exist.
+  const asker = user ? user.id : null;
+  if (job.postedBy && job.postedBy !== asker) {
+    return {
+      error: `"${job.title}" was queued by ${job.postedByName || 'someone else'}, so this agent cannot edit it. `
+        + 'Ask them, or post a new card.',
+    };
+  }
+
+  const fields = {};
+  const changed = [];
+  if (title !== undefined) {
+    if (typeof title !== 'string' || !title.trim()) {
+      return { error: 'Title must be a non-empty string — omit it to leave the title alone.' };
+    }
+    if (title.trim() !== job.title) { fields.title = title; changed.push('title'); }
+  }
+  if (detail !== undefined) {
+    if (typeof detail !== 'string') return { error: 'detail must be a string' };
+    if (detail.trim() !== (job.detail || '')) { fields.detail = detail; changed.push('detail'); }
+  }
+  if (repo !== undefined) {
+    const resolved = resolveRepoRef(repo);
+    if (resolved.error) return { error: resolved.error };
+    if (resolved.path !== job.repoPath) { fields.repoPath = resolved.path; changed.push('repo'); }
+  }
+  if (schedule !== undefined) {
+    const bad = scheduleTypeError(schedule);
+    if (bad) return { error: bad };
+    const text = String(schedule || '').trim();
+    // An empty schedule is the way back to a one-time card: without naming the
+    // type too, resolveJobType would read "scheduled with no cron" and refuse.
+    // The tool exposes no `type` of its own — the schedule is the whole of what
+    // a card IS, and two fields that can disagree is a bug waiting to be filed.
+    fields.schedule = text;
+    fields.type = text ? 'scheduled' : 'one-time';
+    if (text !== (job.schedule || '')) changed.push('schedule');
+  }
+
+  if (!changed.length) {
+    return { error: 'Nothing to change — pass a new title, detail, repo or schedule.' };
+  }
+  const result = updateJob(job.id, fields, broadcast);
+  if (result.error) return result;
+  // Stamped before the repaint that carries it to every open board.
+  job.editedByAgent = session ? session.name : null;
+  job.editedAt = new Date().toISOString();
+  if (session && broadcast) {
+    broadcast({
+      type: 'notification', level: 'info',
+      message: `${session.name} edited a job: "${result.job.title}"`,
+    });
+  }
+  return { job: jobSummary(result.job), changed };
+}
+
+// A card stops being editable the moment it leaves To do, whoever is asking.
+//
+// The reasons stack up: its agent was handed the title, detail and attachment
+// paths in its prompt at dispatch, so a later edit changes nothing about the
+// run and leaves the card describing work nobody was asked to do; repointing
+// repoPath misattributes work already under way in a worktree; and flipping an
+// in-flight one-time card to scheduled frees its per-repo cap slot while its
+// agent still runs, after which finishScheduledRuns quietly closes that run out
+// and re-arms it forever.
+//
+// The board's own form has only ever offered Edit on a To do card, so this is
+// the rule the interface always implied — now enforced for every door into the
+// store rather than trusted to the button not being drawn.
+function editableInPlace(job) {
+  if (job.state === 'todo') return null;
+  const label = STATE_LABELS[job.state] || job.state;
+  return {
+    error: `"${job.title}" is in ${label}, and only cards still in To do can be edited — `
+      + 'its agent has already been handed the card as it stands.',
+  };
+}
+
 export function updateJob(jobId, fields, broadcast) {
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
-  // Everything that can be refused is checked before anything on the job is
-  // touched, or an error reply would leave the card half-edited in memory for
-  // the next unrelated persist to write out.
+  const gate = editableInPlace(job);
+  if (gate) return gate;
+  // Everything else that can be refused is checked before anything on the job
+  // is touched, or an error reply would leave the card half-edited in memory
+  // for the next unrelated persist to write out.
   const plan = planAttachments(job, fields.attachments);
   if (plan?.error) return plan;
-  // The agent was handed these paths in its prompt at dispatch; pulling a file
-  // out from under it mid-run is the same misattribution repoPath guards.
-  if (plan?.changed && job.state !== 'todo') {
-    return { error: 'Attachments can only change while the card is in To do' };
-  }
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
   // rejected as a pair.
@@ -383,16 +572,6 @@ export function updateJob(jobId, fields, broadcast) {
     if (resolved.error) return { error: resolved.error };
     changes = resolved.type !== jobType(job)
       || (resolved.schedule || null) !== (job.schedule || null);
-    // Changing what a card IS is only allowed while it sits in To do, for the
-    // same reason repoPath is: flipping an in-flight one-time card to
-    // scheduled frees its per-repo cap slot while its agent still runs (the
-    // cap skips scheduled cards), and finishScheduledRuns would then quietly
-    // close that run out and re-arm it forever. The form only offers Edit in
-    // To do; the raw message has to be refused too. Resending the current
-    // values is not a change, so an ordinary save is untouched.
-    if (changes && job.state !== 'todo') {
-      return { error: 'Type and schedule can only change while the card is in To do' };
-    }
   }
   // The disk write is the last thing that can fail, and it happens before the
   // first field changes.
@@ -401,9 +580,7 @@ export function updateJob(jobId, fields, broadcast) {
   if (written) job.attachments = written.attachments;
   if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, MAX_TITLE_LEN);
   if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
-  // The repo is only editable while the job is still unassigned — once an agent
-  // is working in a worktree, repointing the card would misattribute the work.
-  if (fields.repoPath && job.state === 'todo') job.repoPath = fields.repoPath;
+  if (fields.repoPath) job.repoPath = fields.repoPath;
   if (resolved) {
     job.type = resolved.type;
     job.schedule = resolved.schedule;

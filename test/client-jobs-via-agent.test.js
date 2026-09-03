@@ -91,6 +91,26 @@ describe('a card an agent posted', () => {
     expect(text).not.toContain('· via Mirage');
   });
 
+  it('says when an agent rewrote the card, not only who queued it', () => {
+    // An edit through the board's edit_job tool replaces the detail that
+    // becomes the next agent's prompt. The card must not go on reading as
+    // though the person who queued it wrote what is there now.
+    handleJobsList({ jobs: [JOB({
+      postedByName: 'Bill', editedByAgent: 'Onyx', editedAt: new Date().toISOString(),
+    })], settings: {} });
+    const text = postedLine().textContent;
+    expect(text).toContain('Bill');
+    expect(text).toContain('edited by Onyx');
+  });
+
+  it('escapes the name of an agent that edited, the same as one that posted', () => {
+    handleJobsList({ jobs: [JOB({
+      editedByAgent: '<img src=x onerror=alert(1)>', editedAt: new Date().toISOString(),
+    })], settings: {} });
+    expect(postedLine().querySelector('img')).toBeNull();
+    expect(postedLine().textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
   it('escapes an agent name rather than rendering it as markup', () => {
     handleJobsList({ jobs: [JOB({ postedByAgent: '<img src=x onerror=alert(1)>' })], settings: {} });
     expect(postedLine().querySelector('img')).toBeNull();
