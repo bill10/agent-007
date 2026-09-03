@@ -15,9 +15,11 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   than tucking into it. Both came from measuring against the table sprite's box
   instead of the tabletop it paints: the sprite's top sixth is empty, so the
   painted edge is well below where the chair was placed. The head chair now
-  faces the room and tucks under the near edge by the same amount the foot chair
-  tucks under the far one, and it uses a new front-facing chair sprite whose
-  seat cushion catches the light the way the side chairs' do.
+  faces the room, stands with its feet against that edge, and uses a new
+  front-facing chair sprite whose seat cushion catches the light the way the
+  side chairs' do. It sits at the table rather than tucking under it, because
+  it draws behind the table: overlap that reads as tucked-in on the foot chair
+  would simply eat this one, leaving a stub too small to read as a chair.
 - Sparser offices get their conference table back. The previous release grew the
   set to make the misplaced head chair visible, which pushed the table out of
   the room entirely on smaller panels. Tucking the chair where it belongs needs

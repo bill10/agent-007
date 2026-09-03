@@ -293,12 +293,13 @@ const CONF_TABLE_W = 48 * Z;   // sprite width at the desk scale
 const CONF_TABLE_H = 240;      // the 48×64 sprite stretched taller so it reads as a boardroom table
 const CONF_CHAIR = 16 * Z;
 // The table sprite's top 11 of 64 rows are empty, so the tabletop's painted edge
-// is this far below the set's y — both end chairs tuck against that edge, not
-// against the sprite box, or they float in the open floor above it.
+// is this far below the set's y. The head chair sits against that edge, not
+// against the sprite box, or it floats in the open floor above it.
 const CONF_TABLE_ART_TOP = Math.round(11 / 64 * CONF_TABLE_H);
-// Set bbox: side chairs overhang the table 42px each side; nothing rises above
-// the tabletop but the head sitter's own 18px, and the foot chair hangs 32px
-// below. Both end chairs sit inside those bounds.
+// Set bbox: side chairs overhang the table 42px each side; the head sitter's
+// own 18px is the tallest thing above the set's y — the head chair below them
+// clears the tabletop without reaching it — and the foot chair hangs 32px
+// below.
 const CONF_HEAD_RISE = 18;
 const CONF_SET_W = CONF_TABLE_W + 2 * 42;
 const CONF_SET_H = CONF_TABLE_H + CONF_HEAD_RISE + 32;
@@ -321,9 +322,12 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
     { x: tx + CONF_TABLE_W - 6, y: ty + 145, kind: 'confchair', mirror: true },
     { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_H - 16, kind: 'confchairback' },
     // Head chair, last so the indices above stay put. Its sitter faces us, so
-    // this is the chair's front, and it tucks under the tabletop's near edge by
-    // the same 16px the foot chair tucks under its far one.
-    { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_ART_TOP - (CONF_CHAIR - 16), kind: 'confchairfront' },
+    // this is the chair's front, and it stands clear of the tabletop rather
+    // than tucking under it: the foot chair draws over the table and keeps its
+    // whole body, while this one draws behind it, so any overlap is swallowed
+    // and what is left reads as a stub instead of a chair. Bottom flush with
+    // the painted edge shows all of it and still sits at the table.
+    { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_ART_TOP - CONF_CHAIR, kind: 'confchairfront' },
   ];
   // Seats in fill order: head, then alternating sides top-down, foot last.
   // Head and foot sit on the table's centreline; side sitters centre on their

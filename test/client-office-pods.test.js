@@ -331,8 +331,12 @@ describe('pod layout', () => {
     expect(foot).toBeDefined();
     // Both end chairs share the table's centreline
     expect(head.x).toBe(foot.x);
-    // Head chair faces the viewer and tucks 16px under the tabletop's near edge
-    expect(head.y + CHAIR - topEdge).toBe(16);
+    // Head chair faces the viewer and stands flush on the tabletop's near edge.
+    // It draws behind the table, so any overlap is swallowed and it reads as a
+    // stub — this is the mirror of the foot chair's tuck, not a copy of it.
+    expect(head.y + CHAIR).toBe(topEdge);
+    // ...and it stays below the head sitter, who bounds the set from above
+    expect(head.y).toBeGreaterThan(conf.seats[0].y);
     // Foot chair faces away and tucks 16px under the far edge, the mirror of it
     expect(conf.table.y + conf.table.h - foot.y).toBe(16);
     // Neither end chair escapes the set bbox the walk route steers around
