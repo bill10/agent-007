@@ -249,50 +249,51 @@ lays out against a 0x0 room.
   near the bottom, and no leg ever runs along the left edge to reach it. The
   row is picked from the frame's furniture rects (`walkObstacles`: pod rugs,
   occupied and spare desks, decor and the conference set with its chair
-  overhang): their
-  vertical spans inverted into the gaps between them, the gap nearest the desk
-  that fits a whole character winning (`corridorY`). Spans count full width, so
-  a rug half-way across still rules its rows out — a scan, not a search. This
-  office is dense enough that on most panels no gap fits: between the rugs, the
-  spare row and the chat areas they run 18-54px against a 64px character. So
-  when none fits, the widest gap takes it and the walker's feet ride its floor,
-  its body overlapping the furniture above — drawn in front of that furniture,
-  and never down on the chat areas the way the old bottom-edge fallback was.
-  With no gap at all (a pod grid that overflows the panel) it crosses on the
-  desk's own row. The vertical leg is the approach, and it picks its column
-  (`approachX`): the desk's own when the band between it and the corridor is
-  clear, else the nearest column clear of everything but the rects the walker
-  is standing in — its own pod rug and its own desk — reached by a sidestep
-  along the desk's own row, so a descent from a distant corridor drops down an
-  aisle instead of stepping over the rugs, plants and sofas in between. The
-  occupied desks are in the obstacle list for that sidestep's sake: the rug is
-  one rect over the whole pod, so without them the leg along the desk row would
-  sweep across the colleagues seated in it. Candidates are the blocking rects'
-  own edges, a scan like the row pick, ranked by what the detour costs — out to
-  the column and on to wherever the crossing leg is headed, so of two equal
-  columns the one the walker does not double back over wins — and clamped to
-  columns the character fits inside on both edges of the panel. When none is
-  clear on both legs it falls back to the desk's own column: swept over 6,825
-  desk positions that is 12% of them, against 40% fewer furniture crossings and
-  48% fewer walked-over colleagues than the straight-column route. Spare desks drop a
-  column and the conference set yields rather than reach into the entry strip
-  (`ENTRY_STRIP_W`) — a leftover from the fixed-door entrance, since the row
-  scan ignores x and already clears the crossing. A departing agent walks out the
-  same way before its desk disappears — from its conference seat, or from
-  its current point mid-wander, if it was away from the desk. While a walk
-  plays, the motion overlay draws the character instead of the seated pass.
-- **Idle wander:** an IDLE agent claims a free conference seat, walks over
-  and sits there — facing the viewer at the head, sideways on the side
-  chairs, away at the foot — until its state changes, then walks back to its
-  desk. The route (`wanderRoute`) descends `approachX`'s clear column to a
-  corridor just above the conference set, crosses, then descends the seat's own clear
-  column (the foot seat detours via the left lane), so walkers never cross
-  the tabletop. Seats fill head-first, sides top-down, foot last; a full
-  table leaves late idlers at their desks, pre-existing idle agents render
-  seated on connect (no replay walk), read-only colleagues stay at their
-  desks (where their dimming and owner label live), and the whole thing
-  clears if the conference set vanishes on resize (`updateWander`). Clicking
-  a seated character switches to its terminal, same as clicking its desk.
+  overhang): their vertical spans inverted into the gaps between them, the gap
+  nearest the desk that fits a whole character winning (`corridorY`). Spans
+  count full width, so a rug half-way across still rules its rows out — a
+  scan, not a search. This office is dense enough that on most panels no gap
+  fits: between the rugs, the spare row and the chat areas they run 18-54px
+  against a 64px character. So when none fits, the widest gap takes it and the
+  walker's feet ride its floor, its body overlapping the furniture above —
+  drawn in front of that furniture, and never down on the chat areas the way
+  the old bottom-edge fallback was. With no gap at all (a pod grid that
+  overflows the panel) it crosses on the desk's own row. The vertical leg is
+  the approach, and it picks its column (`approachX`): the desk's own when the
+  band between it and the corridor is clear, else the nearest column clear of
+  everything but the rects the walker is standing in — its own pod rug and its
+  own desk — reached by a sidestep along the desk's own row, so a descent from
+  a distant corridor drops down an aisle instead of stepping over the rugs,
+  plants and sofas in between. The occupied desks are in the obstacle list for
+  that sidestep's sake: the rug is one rect over the whole pod, so without
+  them the leg along the desk row would sweep across the colleagues seated in
+  it. Candidates are the edges of the rects in that band, blockers and the
+  walker's own floor alike, a scan like the row pick, ranked by what the
+  detour costs — out to the column and on to wherever the crossing leg is
+  headed, so of two equal columns the one the walker does not double back over
+  wins — and clamped to columns the character fits inside on both edges of the
+  panel. When none is clear on both legs it falls back to the desk's own
+  column: swept over 6,825 desk positions that is 12% of them, against 40%
+  fewer furniture crossings and 48% fewer walked-over colleagues than the
+  straight-column route. Spare desks drop a column and the conference set
+  yields rather than reach into the entry strip (`ENTRY_STRIP_W`) — a leftover
+  from the fixed-door entrance, since the row scan ignores x and already
+  clears the crossing. A departing agent walks out the same way before its
+  desk disappears — from its conference seat, or from its current point
+  mid-wander, if it was away from the desk. While a walk plays, the motion
+  overlay draws the character instead of the seated pass.
+- **Idle wander:** an IDLE agent claims a free conference seat, walks over and
+  sits there — facing the viewer at the head, sideways on the side chairs,
+  away at the foot — until its state changes, then walks back to its desk. The
+  route (`wanderRoute`) descends `approachX`'s clear column to a corridor just
+  above the conference set, crosses, then descends the seat's own clear column
+  (the foot seat detours via the left lane), so walkers never cross the
+  tabletop. Seats fill head-first, sides top-down, foot last; a full table
+  leaves late idlers at their desks, pre-existing idle agents render seated on
+  connect (no replay walk), read-only colleagues stay at their desks (where
+  their dimming and owner label live), and the whole thing clears if the
+  conference set vanishes on resize (`updateWander`). Clicking a seated
+  character switches to its terminal, same as clicking its desk.
 - **Dispatch paper:** when the board hands a job to a fresh agent, a small
   paper arcs from that job's whiteboard column down to the new desk.
 - All motion is client-side and time-based: animations never replay on page
