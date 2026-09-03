@@ -5,6 +5,24 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.27.2] - 2026-09-02
+
+### Added
+
+- The conference table now has a chair at the head as well as the foot, so an
+  empty top seat reads as a seat instead of bare floor. The head chair sits a
+  little higher above the tabletop than its occupant does, which is what lets
+  any of it show — the person facing you would otherwise hide it completely.
+  How much higher is capped by what the room can spare: a taller chair back
+  starts costing the whole conference set on smaller panels.
+
+### Fixed
+
+- The walk in/out route now measures the conference set from the same constant
+  the set is built from, instead of a copy of its old height. A route could
+  otherwise corridor straight through the top of the set whenever that height
+  changed.
+
 ## [0.3.27.1] - 2026-09-02
 
 ### Changed

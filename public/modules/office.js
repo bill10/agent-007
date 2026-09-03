@@ -285,16 +285,20 @@ export function computeDecorPlacement(rugRects, panelWidth, panelHeight) {
 
 // --- Conference table: a vertical boardroom table centred in the open band
 // between the desks (rugs + spare desks) and the chat areas, with cushioned
-// chairs down both sides, one at the foot, and a free seat at the head. Idle
-// agents wander over and sit (see the wander section below). Pure function of
-// the obstructions + panel size; null when the band is too small. ---
+// chairs down both sides and one at each end. Idle agents wander over and sit
+// (see the wander section below). Pure function of the obstructions + panel
+// size; null when the band is too small. ---
 const CONF_TABLE_W = 48 * Z;   // sprite width at the desk scale
 const CONF_TABLE_H = 240;      // the 48×64 sprite stretched taller so it reads as a boardroom table
 const CONF_CHAIR = 16 * Z;
-// Set bbox: side chairs overhang the table 42px each side; the head seat's
-// character rises 18px above the tabletop and the foot chair hangs 32px below.
+// Set bbox: side chairs overhang the table 42px each side; the head chair rises
+// CONF_HEAD_RISE above the tabletop and the foot chair hangs 32px below. The
+// rise is 22 rather than the head sitter's own 18 so a little of the chair
+// clears their head — 22 is the last value the band check places as often as 18
+// did, and 24 starts costing the whole set on tighter panels.
+const CONF_HEAD_RISE = 22;
 const CONF_SET_W = CONF_TABLE_W + 2 * 42;
-const CONF_SET_H = CONF_TABLE_H + 18 + 32;
+const CONF_SET_H = CONF_TABLE_H + CONF_HEAD_RISE + 32;
 export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, panelHeight) {
   const bandTop = Math.max(FLOOR_TOP,
     ...rugRects.map(r => r.y + r.h),
@@ -306,13 +310,17 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
   // The chair overhang must also clear the entry strip on the left.
   if (panelWidth < CONF_SET_W + 2 * ENTRY_STRIP_W || bandBottom - bandTop < CONF_SET_H + 2 * DECOR_MARGIN) return null;
   const tx = Math.floor((panelWidth - CONF_TABLE_W) / 2);
-  const ty = bandTop + Math.floor((bandBottom - bandTop - CONF_SET_H) / 2) + 18;
+  const ty = bandTop + Math.floor((bandBottom - bandTop - CONF_SET_H) / 2) + CONF_HEAD_RISE;
   const chairs = [
     { x: tx - 42, y: ty + 70, kind: 'confchair' },
     { x: tx - 42, y: ty + 145, kind: 'confchair' },
     { x: tx + CONF_TABLE_W - 6, y: ty + 70, kind: 'confchair', mirror: true },
     { x: tx + CONF_TABLE_W - 6, y: ty + 145, kind: 'confchair', mirror: true },
     { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty + CONF_TABLE_H - 16, kind: 'confchairback' },
+    // Head chair, last so the indices above stay put. Its sitter faces us, so
+    // the chair goes behind them: it has to clear the tabletop by more than the
+    // sitter does or their head hides it completely.
+    { x: tx + Math.floor((CONF_TABLE_W - CONF_CHAIR) / 2), y: ty - CONF_HEAD_RISE, kind: 'confchairback' },
   ];
   // Seats in fill order: head, then alternating sides top-down, foot last.
   // Head and foot sit on the table's centreline; side sitters centre on their
@@ -862,7 +870,8 @@ function drawStanding(ctx, variant, x, y, row, mirror) {
 
 // The conference set plus whoever is currently sitting at it. Sitters draw
 // interleaved with the furniture so the head seat's feet tuck under the
-// table's top rim and the foot chair's back covers its sitter's legs.
+// table's top rim, the head chair sits behind its sitter, and the foot chair's
+// back covers its sitter's legs.
 function drawConference(ctx, conf) {
   // Furniture is skipped when its sprites failed to load (like drawDecor),
   // but sitters ALWAYS draw: seats are claimed in updateWander regardless,
@@ -874,6 +883,9 @@ function drawConference(ctx, conf) {
     if (sitters.has(i)) drawStanding(ctx, sitters.get(i), conf.seats[i].x, conf.seats[i].y, conf.seats[i].row, conf.seats[i].mirror);
   };
   if (furniture) for (const c of conf.chairs) if (c.kind === 'confchair') drawSprite(ctx, c.kind, c.x, c.y, Z, c.mirror);
+  // The head chair goes down before its sitter — they face us, so the chair is
+  // behind them — and the table then covers all but its top rail.
+  if (furniture) drawSprite(ctx, conf.chairs[5].kind, conf.chairs[5].x, conf.chairs[5].y, Z);
   sitter(0); // head, before the table so their feet sit behind the top rim
   if (furniture) {
     const t = conf.table;
@@ -1402,7 +1414,10 @@ export function walkObstacles(rugs, decor, spares, conf) {
   const rects = [...rugs, ...decor, ...spares.map(d => ({ x: d.x, y: d.y, w: WS_W * Z, h: WS_H * Z }))];
   if (conf) {
     const t = conf.table;
-    rects.push({ x: t.x - 42, y: t.y - 18, w: t.w + 84, h: t.h + 50 });
+    // The set bbox, not the tabletop: the chair overhang on every side is what
+    // a walker has to clear, so this reads CONF_HEAD_RISE rather than repeating
+    // it — a taller head chair must push the route out with it.
+    rects.push({ x: t.x - 42, y: t.y - CONF_HEAD_RISE, w: t.w + 84, h: t.h + CONF_HEAD_RISE + 32 });
   }
   return rects;
 }
