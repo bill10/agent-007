@@ -7,7 +7,7 @@ vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 const { computeBoardLayout, BOARD_TITLES, BOARD_STATES, countBoardJobs, boardPostPlan } =
   await import('../public/modules/office.js');
 const { COLUMNS } = await import('../public/modules/jobs.js');
-const { JOB_STATES } = await import('../lib/jobs.js');
+const { JOB_STATES, STATE_LABELS } = await import('../lib/jobs.js');
 
 const Z = 3;
 
@@ -82,6 +82,13 @@ describe('job board titles', () => {
 
   it('cover every job state except done, in order', () => {
     expect(COLUMNS.map((c) => c.state)).toEqual(JOB_STATES.filter((s) => s !== 'done'));
+  });
+
+  it('read the same as the labels the server writes out', () => {
+    // The browser cannot import lib/jobs.js (only public/ is served), so the
+    // column labels exist twice: here for the board, and as STATE_LABELS for
+    // whatever writes a card out as text — the MCP tools an agent reads.
+    for (const c of COLUMNS) expect(STATE_LABELS[c.state]).toBe(c.label);
   });
 });
 

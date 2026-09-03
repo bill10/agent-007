@@ -75,10 +75,20 @@ const rpc = (body, token = AGENT_TOKEN) => fetch(`${baseUrl}/mcp`, {
   body: JSON.stringify(body),
 });
 
-const callTool = (args, token = AGENT_TOKEN) => rpc({
+const callNamed = (name, args, token = AGENT_TOKEN) => rpc({
   jsonrpc: '2.0', id: 1, method: 'tools/call',
-  params: { name: 'post_job', arguments: args },
+  params: { name, arguments: args },
 }, token);
+
+const callTool = (args, token = AGENT_TOKEN) => callNamed('post_job', args, token);
+
+// What an agent actually reads back: the text, and whether it was a refusal.
+// One read of the body — a Response can only be consumed once.
+const toolResult = async (res) => {
+  const { result } = await res.json();
+  return { text: result.content[0].text, failed: result.isError };
+};
+const toolText = async (res) => (await toolResult(res)).text;
 
 describe('who may reach /mcp', () => {
   it('turns away a caller with no token, even with auth off', () => {
@@ -124,7 +134,7 @@ describe('the handshake over HTTP', () => {
     expect(init.result.serverInfo.name).toBe('agent-007-board');
 
     const list = await (await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
-    expect(list.result.tools.map(t => t.name)).toEqual(['post_job']);
+    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job']);
   });
 
   it('answers a notification with 202 and an empty body', async () => {
@@ -291,5 +301,143 @@ describe('the agent token reaches nothing else', () => {
       headers: { Authorization: `Bearer ${userToken}` },
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe('reading and editing the board through the tools', () => {
+  // The ids are generated, so every test here starts by posting through the
+  // same door an agent would and reading the id back off the board.
+  const post = async (args) => {
+    await callTool(args);
+    return allJobs()[allJobs().length - 1];
+  };
+
+  it('lists the board grouped by column, with the id needed to act on a card', async () => {
+    const todo = await post({ title: 'Add rate limiting' });
+    const running = await post({ title: 'Already going' });
+    running.state = 'in-progress';
+    running.agentName = 'Slate';
+
+    const text = await toolText(await callNamed('list_jobs', {}));
+    expect(text).toMatch(/2 card\(s\)/);
+    expect(text).toMatch(/To do \(1\)[\s\S]*Add rate limiting/);
+    expect(text).toMatch(/In progress \(1\)[\s\S]*Already going/);
+    expect(text).toContain(todo.id);
+    expect(text).toContain('Slate');
+  });
+
+  it('leaves finished cards off the board but says they are there', async () => {
+    const done = await post({ title: 'Long since merged' });
+    done.state = 'done';
+
+    const board = await toolText(await callNamed('list_jobs', {}));
+    expect(board).not.toContain('Long since merged');
+    expect(board).toMatch(/1 finished card\(s\) are archived/);
+
+    const archive = await toolText(await callNamed('list_jobs', { state: 'done' }));
+    expect(archive).toContain('Long since merged');
+  });
+
+  it('filters by repo, by folder name, the way posting does', async () => {
+    await post({ title: 'Here' });
+    await post({ title: 'Elsewhere', repo: basename(REPO2) });
+    const text = await toolText(await callNamed('list_jobs', { repo: basename(REPO2) }));
+    expect(text).toContain('Elsewhere');
+    expect(text).not.toContain('Here');
+  });
+
+  it('refuses a state that is not a column, rather than answering with nothing', async () => {
+    const { text, failed } = await toolResult(await callNamed('list_jobs', { state: 'backlog' }));
+    expect(failed).toBe(true);
+    expect(text).toMatch(/Unknown state/);
+  });
+
+  it('reads one card back in full, detail and all', async () => {
+    const job = await post({ title: 'Add rate limiting', detail: 'Token bucket, 100/min.' });
+    job.branchName = 'board/add-rate-limiting';
+    job.lastError = 'worktree busy';
+
+    const text = await toolText(await callNamed('read_job', { id: job.id }));
+    expect(text).toContain('Token bucket, 100/min.');
+    expect(text).toContain('board/add-rate-limiting');
+    expect(text).toContain('worktree busy');
+    expect(text).toMatch(/column: To do/);
+  });
+
+  it('hands back an unknown id as a tool error naming what to do', async () => {
+    const { text, failed } = await toolResult(await callNamed('read_job', { id: 'job-nope' }));
+    expect(failed).toBe(true);
+    expect(text).toMatch(/No job with id .*list the board/);
+  });
+
+  it('edits a To do card and repaints every open board', async () => {
+    const job = await post({ title: 'Add rate limiting', detail: 'Token bucket.' });
+    broadcasts.length = 0;
+
+    const text = await toolText(await callNamed('edit_job', {
+      id: job.id, title: 'Add rate limiting to /api', detail: 'Token bucket, 100/min.',
+    }));
+    expect(text).toMatch(/Updated title, detail/);
+    expect(allJobs()[0].title).toBe('Add rate limiting to /api');
+    expect(allJobs()[0].detail).toBe('Token bucket, 100/min.');
+    expect(broadcasts.some(m => m.type === 'jobs-list')).toBe(true);
+  });
+
+  it('leaves the fields it was not given alone', async () => {
+    const job = await post({ title: 'Add rate limiting', detail: 'Token bucket.' });
+    await callNamed('edit_job', { id: job.id, title: 'Retitled' });
+    expect(allJobs()[0].detail).toBe('Token bucket.');
+    expect(allJobs()[0].repoPath).toBe(REPO);
+  });
+
+  it('turns a card into a scheduled one and back again', async () => {
+    const job = await post({ title: 'Sweep the logs' });
+    await callNamed('edit_job', { id: job.id, schedule: '@daily' });
+    expect(allJobs()[0].type).toBe('scheduled');
+    expect(allJobs()[0].nextRunAt).toBeTruthy();
+
+    await callNamed('edit_job', { id: job.id, schedule: '' });
+    expect(allJobs()[0].type).toBe('one-time');
+    expect(allJobs()[0].schedule).toBeNull();
+    expect(allJobs()[0].nextRunAt).toBeNull();
+  });
+
+  it('refuses to edit a card that has left To do, and changes nothing', async () => {
+    // The whole rule: the agent working this card was handed its text at
+    // dispatch, so a later edit would leave the card describing work nobody
+    // was asked to do.
+    for (const state of ['in-progress', 'review', 'done']) {
+      const job = await post({ title: `Gone to ${state}`, detail: 'Original.' });
+      job.state = state;
+
+      const { text, failed } = await toolResult(
+        await callNamed('edit_job', { id: job.id, title: 'Rewritten', detail: 'Rewritten.' }));
+      expect(failed, state).toBe(true);
+      expect(text, state).toMatch(/only cards still in To do can be edited/);
+      expect(job.title, state).toBe(`Gone to ${state}`);
+      expect(job.detail, state).toBe('Original.');
+    }
+  });
+
+  it('refuses an edit that changes nothing, rather than reporting a save', async () => {
+    const job = await post({ title: 'Add rate limiting' });
+    const { text, failed } = await toolResult(
+      await callNamed('edit_job', { id: job.id, title: 'Add rate limiting' }));
+    expect(failed).toBe(true);
+    expect(text).toMatch(/Nothing to change/);
+  });
+
+  it('refuses to blank a title', async () => {
+    const job = await post({ title: 'Add rate limiting' });
+    const { failed } = await toolResult(await callNamed('edit_job', { id: job.id, title: '   ' }));
+    expect(failed).toBe(true);
+    expect(allJobs()[0].title).toBe('Add rate limiting');
+  });
+
+  it('lets a person read and edit through their own board API, not this door', async () => {
+    // The read tools are on the agent side of the auth gate, like post_job:
+    // a user token is turned away at /mcp entirely.
+    const userToken = withUser();
+    expect((await callNamed('list_jobs', {}, userToken)).status).toBe(401);
   });
 });

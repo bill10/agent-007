@@ -103,17 +103,23 @@ describe('attachments', () => {
     expect(existsSync(outside)).toBe(true);
     expect(stored().attachments.map(a => a.name)).toEqual(['real.png']);
 
-    // The agent already holds these paths once dispatched.
-    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
-    expect(stored().state).toBe('in-progress');
-    expect(updateJob(job.id, { attachments: [] }, noopBroadcast).error).toMatch(/To do/);
+    // Resending the same list is not an attachment change, so an ordinary
+    // retitle goes through untouched.
     expect(updateJob(job.id, { title: 'Still fine', attachments: [{ name: 'real.png' }] }, noopBroadcast).error).toBeUndefined();
     expect(stored().attachments).toHaveLength(1);
-    // A file that vanished from disk stays on the record, so the same plain
+    // A file that vanished from disk stays on the record, so that same plain
     // edit still goes through.
     rmSync(stored().attachments[0].path);
     expect(updateJob(job.id, { title: 'Still fine 2', attachments: [{ name: 'real.png' }] }, noopBroadcast).error).toBeUndefined();
     expect(stored().attachments.map(a => a.name)).toEqual(['real.png']);
+    expect(stored().title).toBe('Still fine 2');
+
+    // Once dispatched the card is closed to edits of every kind: the agent
+    // holds these paths, and the title and detail it was handed.
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    expect(stored().state).toBe('in-progress');
+    expect(updateJob(job.id, { attachments: [] }, noopBroadcast).error).toMatch(/To do/);
+    expect(updateJob(job.id, { title: 'Too late' }, noopBroadcast).error).toMatch(/To do/);
     expect(stored().title).toBe('Still fine 2');
   });
 
