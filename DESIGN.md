@@ -641,10 +641,12 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   them — which meant `/api/browse` had to be retrofitted the day the credential
   was introduced.
 - **Claude Code asks the user before the call goes through.** Measured: under
-  both the default mode and `--permission-mode auto`, a `post_job` call waits for
-  approval. That is the right outcome and not something to design around — a
-  card is filed because a person said yes. It does mean an unattended agent
-  cannot post one, which is exactly why nothing instructs dispatched agents to.
+  both the default mode and `--permission-mode auto`, a call to one of these
+  tools waits for approval (measured on `post_job`; the gate is per tool call,
+  not per tool). That is the right outcome and not something to design around —
+  a card is filed, read out or rewritten because a person said yes. It does mean
+  an unattended agent cannot post one, which is exactly why nothing instructs
+  dispatched agents to.
 - **Attribution is two facts, not one.** `postedByAgent` (which agent typed it)
   is stored beside `postedBy`/`postedByName` (whose work it is), and the card
   shows the agent as an accent-tinted `via <name>`. Folding them into one field
@@ -674,8 +676,9 @@ the same shape as the terminal's upload, and land under
   `nosniff` and `no-referrer`: an uploaded HTML file must not run as this
   origin, where the token lives. A card link cannot send a header, so the
   token rides in the query for exactly this route.
-- **Only changeable in To do**, the same rule as the repo, type and schedule:
-  a running agent was handed those paths at dispatch.
+- **Only changeable in To do**, because the whole card is: `updateJob` closes
+  a card to every edit the moment it leaves To do (see Agent-posted jobs), and
+  a running agent was handed these paths in its prompt at dispatch.
 - **Refused, never silently dropped.** An unusable name, two names that one
   filesystem would fold together, more than 20 files, more than 10MB each or
   50MB per save all fail the whole edit, and a refused edit changes nothing,
