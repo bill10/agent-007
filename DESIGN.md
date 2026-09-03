@@ -280,7 +280,13 @@ lays out against a 0x0 room.
   from the fixed-door entrance, since the row scan ignores x and already
   clears the crossing. A departing agent walks out the same way before its
   desk disappears — from its conference seat, or from its current point
-  mid-wander, if it was away from the desk. While a walk plays, the motion
+  mid-wander, if it was away from the desk. A walk-out that starts inside the
+  set's footprint steps out sideways to the lane just outside the chairs
+  (`confLanes`) before descending, and that lane goes through `approachX` too,
+  measured from the lane rather than from the seat: from the seat the set is
+  the walker's own floor and every column reads clear, from the lane the set is
+  a blocker, which both vets the lane and keeps any wider column it falls back
+  to outside the chair overhang. While a walk plays, the motion
   overlay draws the character instead of the seated pass.
 - **Idle wander:** an IDLE agent claims a free conference seat, walks over and
   sits there — facing the viewer at the head, sideways on the side chairs,
