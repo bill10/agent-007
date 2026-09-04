@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.31.1] - 2026-09-04
+
+### Fixed
+
+- An agent running a plain shell no longer paces between its desk and the
+  sofas. Resting agents wait out a quiet window before they wander off, so
+  that a pause between commands doesn't send them on an eleven-second walk
+  that the next line of output cancels -- but the window only covered the
+  state a TUI agent rests in. A shell rests in the other one, so every bash
+  terminal walked out and snapped back every few seconds, forever. Both rest
+  states now wait the same window.
+
 ## [0.3.31.0] - 2026-09-04
 
 ### Added
