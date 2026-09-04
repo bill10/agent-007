@@ -1456,13 +1456,18 @@ function updateWander(seats) {
     // WAITING, not just IDLE: every TUI agent (claude, aider, codex, gemini)
     // short-circuits to WAITING in detectState, so IDLE is unreachable for the
     // agents this board actually spawns and the wander never fired for them.
-    // Quiet for a while, not merely quiet: detectState flips WORKING -> WAITING
-    // after 3s of silence, but a walk to a seat takes 7-11s at WALK_SPEED, so
-    // an agent that just paused to think would start a walk, get output, and
-    // teleport back to its desk -- jittering on a 3s cycle and never arriving.
+    // Quiet for a while, not merely quiet: detectState flips WORKING -> the
+    // rest state after 3s of silence, but a walk to a seat takes 7-11s at
+    // WALK_SPEED, so an agent that just paused would start a walk, get output,
+    // and teleport back to its desk -- jittering on a 3s cycle and never
+    // arriving. The window covers IDLE as well as WAITING: which of the two a
+    // quiet agent reads as is a property of its command, not of how long it
+    // has been resting. A plain shell (not a TUI, prompt not matching
+    // PROMPT_PATTERNS) lands on IDLE, so guarding WAITING alone left every
+    // bash terminal pacing between its desk and the sofas.
     // Same window the board already uses to call a quiet WAITING "stalled".
-    const resting = agent.state === 'IDLE'
-      || (agent.state === 'WAITING' && Date.now() - (agent.lastOutputAt || 0) > STALLED_AFTER_MS);
+    const resting = (agent.state === 'IDLE' || agent.state === 'WAITING')
+      && Date.now() - (agent.lastOutputAt || 0) > STALLED_AFTER_MS;
     const idle = resting && canControlAgent(agent);
     if (idle && !seatClaims.has(sid) && !wanderAnims.has(sid) && !walkAnims.has(sid)) {
       if (taken.size >= seats.length) continue; // every seat taken — stay at the desk

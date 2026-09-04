@@ -746,6 +746,22 @@ describe('sofa wander', () => {
     expect(office.hasMotion(), 'a long-quiet agent stayed put').toBe(true);
   });
 
+  it('holds an IDLE agent at its desk too until it has been quiet a while', async () => {
+    // A plain shell is not a TUI and its prompt need not match PROMPT_PATTERNS,
+    // so detectState calls it IDLE, not WAITING. Guarding WAITING alone left
+    // every bash terminal pacing: 3s after each command it set off for a sofa,
+    // the next line of output snapped it back, and it never arrived.
+    const { office, state, frameAt } = await sofaOffice();
+    office.noteJobsUpdate();
+    state.agents.set('si', { state: 'IDLE', repoPath: '/r', repoSlug: 'r', lastOutputAt: Date.now() });
+    frameAt(0);
+    expect(office.hasMotion(), 'a just-quiet bash terminal left its desk').toBe(false);
+
+    state.agents.get('si').lastOutputAt = Date.now() - 4 * 60 * 1000;
+    frameAt(0);
+    expect(office.hasMotion(), 'a long-quiet bash terminal stayed put').toBe(true);
+  });
+
   it('leaves an agent blocked on a question, or gone, at its desk', async () => {
     // The whole reason lib/helpers.js widens MESSAGE_PATTERNS in this same
     // change: a question-blocked agent must read MESSAGE, not WAITING, or it
