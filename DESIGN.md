@@ -504,7 +504,19 @@ those cards have always been.
   card caught in-progress on the spot — back to To do, next run computed from
   now, with a `lastError` naming the interrupted run's branch so its work can
   be recovered from the orphans list. **End run** on the card is the manual
-  version of the same move, and its only manual control while running.
+  version of the same move.
+- **Pause holds the next firing, not the current run** (since v0.3.32.0). A
+  paused card sits in To do reading "paused" instead of a countdown, and
+  `isJobDue` refuses it — one guard, at the gate every dispatch route passes
+  through. It is offered while a run is going as well as between runs, because
+  "stop running this from now on" is asked for mid-run more often than not:
+  **End run** stops the run that is happening, Pause stops the ones after it.
+  So it does not go through `updateJob`, whose gate refuses any edit past To do
+  on the grounds that the agent already holds the card as it stands — pause
+  changes no text the agent was handed. Resuming re-arms `nextRunAt` from that
+  moment rather than honouring a due time that went by during the pause, which
+  would dispatch on the very next scan: firings missed while paused are gone,
+  the same rule a long run follows.
 - **The run's terminal outlives the run.** The agent is not killed when the
   run ends: its terminal is the run's only output — a scheduled job need not
   produce code — and killing it would destroy the summary before anyone read

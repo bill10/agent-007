@@ -1590,6 +1590,9 @@ body {
    own — just enough contrast to read as the machine-readable bit. */
 .job-card-cron { color: var(--text-muted); }
 .job-card-next { color: var(--accent); opacity: 0.85; }
+/* A paused schedule is not a countdown: drop the accent so the card reads as
+   held rather than as the next one about to go. */
+.job-card-paused { color: var(--text-muted); }
 .job-card-runs { opacity: 0.8; }
 
 .job-card-detail {

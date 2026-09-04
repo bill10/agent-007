@@ -593,6 +593,27 @@ export function updateJob(jobId, fields, broadcast) {
   return { job };
 }
 
+// Pause / resume. Deliberately NOT routed through updateJob: that gate refuses
+// any edit to a card past To do because the agent has already been handed the
+// card's text, and pause changes no text — it only decides whether the NEXT
+// firing goes out. So a schedule can be stopped while its current run is still
+// going, which is exactly when someone reaches for it.
+//
+// Resuming re-arms from now rather than leaving a due time that went by during
+// the pause: an overdue nextRunAt would dispatch on the very next scan, so a
+// card resumed after a week off would fire immediately, which is the backlog
+// replay the board avoids everywhere else.
+export function setJobPaused(jobId, paused, broadcast) {
+  const job = allJobs().find(j => j.id === jobId);
+  if (!job) return { error: 'Job not found' };
+  const next = !!paused;
+  if (job.paused === next) return { job };
+  job.paused = next;
+  if (!next && job.schedule) job.nextRunAt = nextCronIso(job.schedule);
+  persist(broadcast);
+  return { job };
+}
+
 // Deleting a card retires its agent, for the same reason requeueing does:
 // otherwise the agent keeps running with nothing pointing at it, stops counting
 // toward the per-repo cap, and is never cleaned up. removeWorktree still

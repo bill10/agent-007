@@ -79,6 +79,15 @@ describe('isJobDue', () => {
     expect(isJobDue({ ...job, nextRunAt: null }, now)).toBe(true);
     expect(isJobDue({ ...job, nextRunAt: 'not a date' }, now)).toBe(true);
   });
+
+  it('holds a paused card, scheduled or not', () => {
+    // The guard sits above the scheduled check on purpose: isJobDue is the one
+    // gate every dispatch route passes through, so a paused card of any kind
+    // stays put without a second check at each door.
+    expect(isJobDue({ ...make(), paused: true }, now)).toBe(false);
+    expect(isJobDue({ title: 'one-time', paused: true }, now)).toBe(false);
+    expect(isJobDue({ title: 'one-time', paused: false }, now)).toBe(true);
+  });
 });
 
 describe('selectDispatchableJobs with scheduled jobs', () => {

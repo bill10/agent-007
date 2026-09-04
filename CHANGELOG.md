@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.32.0] - 2026-09-04
+
+### Added
+
+- A scheduled job can be paused. **Pause** on the card holds every further run
+  while the card stays in To do, and **Resume** starts it again; until now the
+  only ways to stop a schedule were to stop the whole dispatcher or delete the
+  card. Pause is offered during a run as well as between runs -- **End run**
+  stops the run that is going, Pause stops the ones after it -- and a run
+  already under way is left to finish. Resuming sets the next run from that
+  moment: a card paused for a week does not fire the instant it comes back.
+
 ## [0.3.31.1] - 2026-09-04
 
 ### Fixed

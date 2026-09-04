@@ -278,7 +278,11 @@ function renderCard(job) {
     // happening, so showing it would read as a second run being due. The next
     // one is only decided when this one finishes.
     if (job.state === 'in-progress') {
-      bits.push('<span class="job-card-next">running now</span>');
+      bits.push(`<span class="job-card-next">running now${job.paused ? ', paused after this run' : ''}</span>`);
+    } else if (job.paused) {
+      // The stored nextRunAt is not shown: it is the due time the pause is
+      // holding, and resuming re-arms from that moment instead of running it.
+      bits.push('<span class="job-card-next job-card-paused">paused</span>');
     } else if (job.nextRunAt) {
       bits.push(`<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
     } else {
@@ -448,6 +452,16 @@ function renderCardActions(job) {
   // always keeps the final say over where a card sits.
   if (job.state === 'todo') {
     actions.appendChild(mk('Edit', 'Edit this job', () => openForm(job.id)));
+  }
+  // Pause holds the NEXT firing, so it is offered in both states a scheduled
+  // card lives in: between runs, and during one (where "End run" stops the run
+  // itself but leaves the schedule armed).
+  if (isScheduled(job) && job.state !== 'done') {
+    actions.appendChild(job.paused
+      ? mk('Resume', 'Resume this schedule. The next run is set from now, so a firing missed while paused is not replayed.',
+        () => send({ type: 'job-pause', jobId: job.id, paused: false }))
+      : mk('Pause', 'Hold this schedule. The card stays in To do and no further runs go out until you resume; a run already under way is left alone.',
+        () => send({ type: 'job-pause', jobId: job.id, paused: true })));
   }
   if (job.state === 'in-progress' && isScheduled(job)) {
     // No "→ Review" here: a scheduled card has no finished state to move to.
