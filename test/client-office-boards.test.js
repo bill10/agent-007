@@ -3,10 +3,16 @@ import { describe, it, expect, vi } from 'vitest';
 
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+// The click wiring is the feature: a board click must reach showJobBoard(). The
+// rest of jobs.js stays real so COLUMNS below is still the production list.
+vi.mock('../public/modules/jobs.js', async (actual) => ({
+  ...(await actual()),
+  showJobBoard: vi.fn(),
+}));
 
-const { computeBoardLayout, BOARD_TITLES, BOARD_STATES, countBoardJobs, boardPostPlan } =
+const { computeBoardLayout, BOARD_TITLES, BOARD_STATES, countBoardJobs, boardPostPlan, hitJobBoard, setupOfficeClick } =
   await import('../public/modules/office.js');
-const { COLUMNS } = await import('../public/modules/jobs.js');
+const { COLUMNS, showJobBoard } = await import('../public/modules/jobs.js');
 const { JOB_STATES, STATE_LABELS } = await import('../lib/jobs.js');
 
 const Z = 3;
@@ -129,5 +135,59 @@ describe('job board post sync', () => {
     expect(boardPostPlan(cap)).toEqual({ shown: cap, overflow: 0 });
     expect(boardPostPlan(cap + 1)).toEqual({ shown: cap, overflow: 1 });
     expect(boardPostPlan(cap + 3)).toEqual({ shown: cap, overflow: 3 });
+  });
+});
+
+describe('clicking a board opens the Jobs tab', () => {
+  const W = 1200;
+  const board = computeBoardLayout(W);
+
+  it('hits every painted board, frame and stand', () => {
+    for (const { centerX } of board.sections) {
+      expect(hitJobBoard(centerX, board.boardTop + 1, W)).toBe(true);
+      expect(hitJobBoard(centerX, board.footY - 1, W)).toBe(true);   // the stand
+    }
+  });
+
+  it('misses the wall above, the floor below and the gaps between', () => {
+    const { centerX } = board.sections[0];
+    expect(hitJobBoard(centerX, board.boardTop - 1, W)).toBe(false);
+    expect(hitJobBoard(centerX, board.footY + 1, W)).toBe(false);
+    const gap = (board.sections[0].centerX + board.sections[1].centerX) / 2;
+    expect(hitJobBoard(gap, board.boardTop + 1, W)).toBe(false);
+  });
+
+  it('never hits when the panel is too narrow to draw a board', () => {
+    const narrow = 120;
+    expect(computeBoardLayout(narrow).visible).toBe(false);
+    expect(hitJobBoard(60, 60, narrow)).toBe(false);
+  });
+});
+
+describe('the canvas click reaches the board', () => {
+  const W = 1200, H = 800;
+
+  // A stand-in for the office canvas: setupOfficeClick only needs to register a
+  // listener and measure the element.
+  function fakeCanvas() {
+    let handler;
+    const canvas = {
+      addEventListener: (_type, fn) => { handler = fn; },
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: W, height: H }),
+    };
+    vi.spyOn(document, 'getElementById').mockReturnValue(canvas);
+    setupOfficeClick();
+    return (x, y) => handler({ clientX: x, clientY: y });
+  }
+
+  it('opens the Jobs tab on a board click and leaves it shut elsewhere', () => {
+    showJobBoard.mockClear();
+    const click = fakeCanvas();
+    const board = computeBoardLayout(W);
+    click(board.sections[1].centerX, board.boardTop + 4);
+    expect(showJobBoard).toHaveBeenCalledTimes(1);
+    click(board.sections[1].centerX, H - 4);   // empty floor, no agents
+    expect(showJobBoard).toHaveBeenCalledTimes(1);
+    document.getElementById.mockRestore();
   });
 });
