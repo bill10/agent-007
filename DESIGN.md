@@ -292,7 +292,13 @@ lays out against a 0x0 room.
   there until its state changes, then walks back to its desk. **At rest is
   IDLE *or* WAITING**: every TUI agent this board spawns short-circuits to
   WAITING in `detectState`, so IDLE is unreachable for them and the wander
-  gated on IDLE alone never fired at all.
+  gated on IDLE alone never fired at all. Either state has to be quiet past
+  the same window the board calls "stalled" before the agent leaves its desk:
+  `detectState` moves an agent out of WORKING after 3s of silence and the walk
+  to a seat takes 7-11s, so without the window a pause between commands starts
+  a walk that the next line of output cancels. Guarding WAITING alone (before
+  v0.3.31.1) left plain shells -- not a TUI, prompt not in `PROMPT_PATTERNS`,
+  so IDLE -- pacing between desk and sofa forever.
   - **The seats are pooled** (`wanderSeats`): the conference seats when the set
     places, plus the chat-area sofas (`chatSeats`) — one seat on the front sofa
     above each coffee table, facing down over it like the conference head seat,
