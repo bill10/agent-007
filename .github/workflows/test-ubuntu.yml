@@ -1,4 +1,4 @@
-name: Tests
+name: Tests (Ubuntu)
 
 on:
   push:
@@ -10,13 +10,8 @@ permissions:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    # Windows runners are roughly 2x slower than ubuntu.
-    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v7

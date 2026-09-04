@@ -1,6 +1,7 @@
 # Agent 007
 
-[![Tests](https://github.com/bill10/agent-007/actions/workflows/test.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test.yml)
+[![Tests (Ubuntu)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml)
+[![Tests (Windows)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml)
 
 A pixel office for managing AI terminal agents. Spawn Claude Code (or any CLI) instances into isolated git worktrees and watch them work side-by-side in a retro pixel art office.
 

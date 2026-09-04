@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.30.2] - 2026-09-04
+
+### Changed
+
+- The README screenshot is current again: it shows the office with the
+  conference table, the lounge sofas and the seated agents, alongside a live
+  agent terminal.
+- The test workflow is now two workflows, one per operating system, so the
+  README carries a separate badge for Ubuntu and for Windows. Both runners run
+  exactly the same suite they ran before; the split is what makes the two
+  results visible separately, because a badge points at a workflow file rather
+  than at one job inside it.
+
 ## [0.3.30.1] - 2026-09-04
 
 ### Fixed
