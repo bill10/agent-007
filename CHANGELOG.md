@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.31.0] - 2026-09-04
+
+### Added
+
+- Clicking one of the whiteboards painted on the office wall opens the Jobs
+  tab. The boards already mirror the board's three columns, so they were the
+  one part of the room that showed job state and did nothing when you clicked
+  it. The whole board is the target, frame and stand, and a click anywhere
+  else on the wall or floor still falls through to the agents.
+
 ## [0.3.30.2] - 2026-09-04
 
 ### Changed

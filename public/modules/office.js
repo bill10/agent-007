@@ -1,6 +1,7 @@
 // Pixel office rendering — canvas drawing, click handling, animation
 import { agents, jobs, activeSessionId, canControlAgent } from './state.js';
 import { switchToSession } from './terminal.js';
+import { showJobBoard } from './jobs.js';
 
 const Z = 3;
 
@@ -2075,6 +2076,17 @@ export function renderOffice() {
   drawMotion(ctx, w, h, layout);
 }
 
+// True when (x, y) is on one of the painted job boards — the frame or its
+// stand. Exported so the hit box can be checked against computeBoardLayout
+// without a canvas.
+export function hitJobBoard(x, y, panelWidth) {
+  const board = computeBoardLayout(panelWidth);
+  if (!board.visible) return false;
+  if (y < board.boardTop || y > board.footY) return false;
+  const half = Math.floor(board.boardW / 2);
+  return board.sections.some(({ centerX }) => x >= centerX - half && x <= centerX + half);
+}
+
 export function setupOfficeClick() {
   const canvas = document.getElementById('office-canvas');
   canvas.addEventListener('click', (e) => {
@@ -2082,6 +2094,10 @@ export function setupOfficeClick() {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     const layout = computeOfficeLayout(rect.width, rect.height);
+    // The painted boards are the office's view of the Jobs tab, so clicking one
+    // opens it (showJobBoard repaints the tab strip itself). Checked first: the
+    // boards sit against the wall, above every desk and seat.
+    if (hitJobBoard(x, y, rect.width)) { showJobBoard(); return; }
     // A seated agent's visible character is at the conference table or on a
     // sofa, so click-to-focus follows it there (the empty desk still works).
     // The claim indexes the pooled seat list, NOT conf.seats — a sofa claim is
