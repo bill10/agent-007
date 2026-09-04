@@ -738,6 +738,40 @@ describe('scheduled cards', () => {
     expect(document.querySelector('.job-card-type')).toBeNull();
   });
 
+  it('offers Pause between runs and during one, and sends the toggle', () => {
+    // Pause holds the NEXT firing, so it is offered in both states a scheduled
+    // card lives in. During a run it sits beside "End run": one stops this run,
+    // the other stops the ones after it.
+    handleJobsList({ jobs: [SCHEDULED()], settings: {} });
+    const btn = () => [...document.querySelectorAll('.job-card-btn')].find(b => /Pause|Resume/.test(b.textContent));
+    expect(btn().textContent).toBe('Pause');
+    btn().click();
+    expect(send).toHaveBeenCalledWith({ type: 'job-pause', jobId: 'job-sched', paused: true });
+
+    handleJobsList({
+      jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })],
+      settings: {},
+    });
+    expect(btn().textContent).toBe('Pause');
+  });
+
+  it('reads as paused on the card and offers Resume instead', () => {
+    handleJobsList({ jobs: [SCHEDULED({ paused: true })], settings: {} });
+    // The held due time is not shown: resuming re-arms from that moment, so a
+    // countdown here would be a promise the board does not keep.
+    expect(document.querySelector('.job-card-next').textContent).toBe('paused');
+    const resume = [...document.querySelectorAll('.job-card-btn')].find(b => b.textContent === 'Resume');
+    expect(resume).toBeTruthy();
+    resume.click();
+    expect(send).toHaveBeenCalledWith({ type: 'job-pause', jobId: 'job-sched', paused: false });
+  });
+
+  it('leaves a one-time card without a Pause button', () => {
+    handleJobsList({ jobs: [JOB({ type: 'one-time' })], settings: {} });
+    const labels = [...document.querySelectorAll('.job-card-btn')].map(b => b.textContent);
+    expect(labels).not.toContain('Pause');
+  });
+
   it('offers "End run" rather than "→ Review", which a scheduled card never reaches', () => {
     handleJobsList({
       jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })],
