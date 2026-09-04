@@ -244,26 +244,6 @@
 - **Context:** Raised by the adversarial review during /ship (2026-09-03),
   after two instances had already been fixed in the same round.
 
-## Sofa sitter placement has never been checked against a render
-
-- **What:** `chatSeats` positions its three sitters from the sofa sprites' BOX
-  coordinates. `sofa_side.png` is a 16x32 box with art only in x 0-12, and the
-  right-hand sofa is drawn mirrored, so its 3px of padding flips to the other
-  side — the two side sitters sit 3px off-centre in opposite directions, a 6px
-  asymmetry. Nothing has ever rendered this: the vitest ctx is a stub with no
-  transform, so a mirrored `drawStanding` records at 0,0 and cannot be placed.
-- **Why:** Not measured as wrong, only unverified — the character (32px) is
-  wider than the painted sofa (26px) either way, so it covers the sofa
-  regardless and the error may be invisible. The art spans are now documented
-  in `SPRITE_PATHS`; the nudge itself should not be made blind, because the
-  repo has already shipped one sprite-adjacency bug (the head chair floating
-  63px clear of the table) that only a composited render caught.
-- **Effort:** S (human: ~1h / CC: ~15 min)
-- **Priority:** P3
-- **Depends on:** Sofa wander (v0.3.30.0)
-- **Context:** Raised by the coverage audit and the pre-landing review during
-  /ship (2026-09-03). Needs eyes on a real canvas, not another unit test.
-
 ## chatSeats restates drawDecor's sofa layout instead of reading it
 
 - **What:** The sofa positions exist three times: `drawDecor` draws them,
@@ -331,6 +311,36 @@
   during /ship (2026-09-03).
 
 ## Completed
+
+## Sofa sitter placement has never been checked against a render
+
+- **What:** `chatSeats` positions its three sitters from the sofa sprites' BOX
+  coordinates. `sofa_side.png` is a 16x32 box with art only in x 0-12, and the
+  right-hand sofa is drawn mirrored, so its 3px of padding flips to the other
+  side — the two side sitters sit 3px off-centre in opposite directions, a 6px
+  asymmetry. Nothing has ever rendered this: the vitest ctx is a stub with no
+  transform, so a mirrored `drawStanding` records at 0,0 and cannot be placed.
+- **Why:** Not measured as wrong, only unverified — the character (32px) is
+  wider than the painted sofa (26px) either way, so it covers the sofa
+  regardless and the error may be invisible. The art spans are now documented
+  in `SPRITE_PATHS`; the nudge itself should not be made blind, because the
+  repo has already shipped one sprite-adjacency bug (the head chair floating
+  63px clear of the table) that only a composited render caught.
+- **Effort:** S (human: ~1h / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Sofa wander (v0.3.30.0)
+- **Context:** Raised by the coverage audit and the pre-landing review during
+  /ship (2026-09-03). Needs eyes on a real canvas, not another unit test.
+- **Outcome:** Checked against a live office (2026-09-04). The horizontal
+  placement was already correct and the arithmetic that said otherwise was
+  wrong twice: it anchored on the sofa's painted centre when the anchor is the
+  SEAT (the backrest is part of the sprite), and it was compensating for the
+  wrong sprite entirely. The real defect was that sitters drew the STANDING
+  frame. Fixed in v0.3.30.1; the values were read off rendered comparisons,
+  not computed.
+
+**Completed:** v0.3.30.1 (2026-09-04)
+
 
 ## The conference walk-out lane skips the clear-column check
 
