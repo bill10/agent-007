@@ -1,0 +1,29 @@
+name: Tests (Windows)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    # Windows runners are roughly 2x slower than ubuntu.
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      # node-pty is a native module; npm ci builds it from source when no
+      # prebuild matches the runner.
+      - run: npm ci
+
+      - run: npm test
