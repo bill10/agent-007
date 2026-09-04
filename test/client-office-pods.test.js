@@ -350,6 +350,23 @@ describe('pod layout', () => {
     expect(foot.y + CHAIR).toBeLessThanOrEqual(set.y + set.h);
   });
 
+  it('sits the side sitters on their chairs, not hanging off the front of them', () => {
+    // A side sitter draws the seated frame, which has no legs, so its box has
+    // to end on the chair rather than below it — the standing-frame offset put
+    // the body 4px past the chair's bottom edge and it read as sliding off.
+    // Seat order is head, then alternating sides top-down: 1,3 are the left
+    // chairs (0,1), 2,4 the right ones (2,3).
+    const conf = computeConference([], [], [], W, H);
+    const CHAIR = 16 * Z, CHAR_H = 64;
+    const chairFor = [0, 2, 1, 3];
+    for (let i = 1; i <= 4; i++) {
+      const chair = conf.chairs[chairFor[i - 1]];
+      const bottom = conf.seats[i].y + CHAR_H;
+      expect(bottom, `seat ${i} hangs below its chair`).toBeLessThanOrEqual(chair.y + CHAIR);
+      expect(bottom, `seat ${i} floats above its chair`).toBeGreaterThan(chair.y);
+    }
+  });
+
   it('the conference table yields on a panel narrower than its chair overhang', () => {
     expect(computeConference([], [], [], 200, 700)).toBeNull();
   });

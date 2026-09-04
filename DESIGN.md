@@ -304,6 +304,20 @@ lays out against a 0x0 room.
   - **Facing:** at the conference table, the viewer at the head, sideways on the
     side chairs, away at the foot; on the sofas, down over the coffee table on
     the front one and inward on the two sides.
+  - **Pose:** a sitter draws the sheet's seated frame (column 3 — torso only,
+    no legs, the same frame the desk pass animates as typing), not the standing
+    one, which on a chair read as standing *on* it. The seat carries the column
+    (`CHAR_COL_SIT`) alongside its lift onto the cushion, so the two halves of
+    that decision live together and `drawCharFrame` just draws what the seat
+    says. The lifts: `CHAT_FRONT_SIT_RISE` on the front sofa, whose 16px of art
+    is short enough that the seated frame's lower bounding box fell past its
+    front edge, and `CONF_SIDE_SIT_RISE` on the four side chairs, larger
+    because the chairs draw at 3x while characters draw at 2x, so the seat line
+    sits high against the body. The two side sofas need no lift — drawn at the
+    character's own 2x, the seated art already lands on the cushion. The
+    conference head and foot seats keep the standing frame and carry no column
+    at all (`drawCharFrame` defaults to standing): the tabletop covers one set
+    of legs and the chair-back the other, and both compositions rely on it.
   - **The route** (`wanderRoute`) descends `approachX`'s clear column to a
     corridor row (`corridorY`, the same scan the walk in/out crossing uses, so
     the crossing leg has a row it can actually stand in), crosses, then descends

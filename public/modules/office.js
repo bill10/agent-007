@@ -52,10 +52,16 @@ export const SPRITE_PATHS = {
 };
 // Derived from the charN keys above; exported for the character-variant test.
 export const CHAR_VARIANTS = Object.keys(SPRITE_PATHS).filter((k) => k.startsWith('char')).length;
-const CHAR_FRAME_W = 16, CHAR_FRAME_H = 32;
+export const CHAR_FRAME_W = 16;
+const CHAR_FRAME_H = 32;
 const CHAR_SCALE = 2; // 16px art in a 32px-tile office — 2x keeps pixels square
 const CHAR_ROW_DOWN = 0, CHAR_ROW_UP = 1, CHAR_ROW_RIGHT = 2;
-const CHAR_COL_STAND = 1, CHAR_COL_TYPE = 3;
+// Sprite sheet columns: 1 is the standing frame (legs and feet), 3-6 are the
+// seated frames (torso only, flat bottom) — the desk pass animates 3/4 as
+// typing, and a sitter on any furniture uses 3 for the same reason: a standing
+// frame on a chair reads as standing ON it.
+const CHAR_COL_STAND = 1;
+export const CHAR_COL_SIT = 3;
 const CHAR_W = CHAR_FRAME_W * CHAR_SCALE, CHAR_H = CHAR_FRAME_H * CHAR_SCALE;
 // The left-edge lane the walk in/out entrance and its strip occupy: furniture
 // that can yield (spare desks, the conference set) keeps out of it.
@@ -259,6 +265,9 @@ const CHAT_PAD_X = 13, CHAT_PAD_TOP = 14, CHAT_PAD_BOTTOM = 12, CHAT_GAP = 8;
 const CHAT_W = 2 * CHAT_PAD_X + 2 * SOFA_W + 2 * CHAT_GAP + TABLE_W;             // 170
 const CHAT_H = CHAT_PAD_TOP + SOFA_FRONT_H + CHAT_GAP + TABLE_H + CHAT_PAD_BOTTOM; // 130
 const CHAT_MARGIN_X = 13 * Z;  // chat areas sit in from the panel edges, leaving the entry corner clear
+// How far the front sofa lifts its occupant. See chatSeats for why the two side
+// sofas need none.
+const CHAT_FRONT_SIT_RISE = 10;
 // The divider plants between the chat areas draw smaller than the 16px decor
 // grid so they read as a low hedge, not sentinels towering over the sofas.
 const PLANT_MID_SCALE = 1.25;
@@ -302,9 +311,16 @@ export function chatSeats(spot) {
   // Just above the rug, the same 24px idiom the conference set uses; corridorY
   // is what turns the preference into a row a walker actually fits in.
   const yPref = spot.y - 24;
-  const seat = (x, y, row, mirror) => ({ x, y, row, mirror, kind: 'chat', lane: x, yPref });
+  const seat = (x, y, row, mirror) =>
+    ({ x, y, row, mirror, kind: 'chat', lane: x, yPref, col: CHAR_COL_SIT });
   return [
-    seat(tx + Math.floor((TABLE_W - CHAR_W) / 2), spot.y + CHAT_PAD_TOP - 18, CHAR_ROW_DOWN, false),
+    // The front sofa lifts its occupant; the two side sofas do not, and that is
+    // deliberate: they are drawn at the same 2x as the character, so the seated
+    // art already lands on the cushion. The front sofa is only 16px of art tall,
+    // and the seated frame starts 4px lower in its box than the standing frame
+    // (bbox y7 vs y3), so without the lift the body fell past the sofa's front
+    // edge onto the coffee table and read as sitting on the floor.
+    seat(tx + Math.floor((TABLE_W - CHAR_W) / 2), spot.y + CHAT_PAD_TOP - 18 - CHAT_FRONT_SIT_RISE, CHAR_ROW_DOWN, false),
     seat(spot.x + CHAT_PAD_X, sy - 6, CHAR_ROW_RIGHT, false),
     seat(tx + TABLE_W + CHAT_GAP, sy - 6, CHAR_ROW_RIGHT, true),
   ];
@@ -338,6 +354,17 @@ const CONF_TABLE_ART_TOP = Math.round(11 / 64 * CONF_TABLE_H);
 // clears the tabletop without reaching it — and the foot chair hangs 32px
 // below.
 const CONF_HEAD_RISE = 18;
+// A side sitter draws the seated frame, which has no legs, and sits 14px above
+// its chair's anchor. The lift goes into the SEAT, not into the draw call, on
+// purpose: seat.y is where the character is, and drawConference, the
+// setupOfficeClick hit box and wanderRoute's endpoint all read it, so moving it
+// keeps them aligned. Offsetting only the draw would leave a clickable box
+// where nobody is standing. (Forcing the rise to 0 changes no other test, so
+// nothing behavioural rides on the exact value.) Why 14 and not the sofa's 10: the chairs draw at Z (3x) while characters draw at
+// CHAR_SCALE (2x), so the chair's seat line sits high relative to the body.
+// The head and foot seats keep the standing frame — the tabletop and the
+// chair-back are already drawn over their legs.
+const CONF_SIDE_SIT_RISE = 14;
 const CONF_SET_W = CONF_TABLE_W + 2 * 42;
 const CONF_SET_H = CONF_TABLE_H + CONF_HEAD_RISE + 32;
 export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, panelHeight) {
@@ -373,10 +400,10 @@ export function computeConference(rugRects, spareDesks, decorSpots, panelWidth, 
   const cx = tx + Math.floor((CONF_TABLE_W - CHAR_W) / 2);
   const seats = [
     { x: cx, y: ty - 18, row: CHAR_ROW_DOWN },
-    { x: chairs[0].x + 8, y: chairs[0].y - 12, row: CHAR_ROW_RIGHT },
-    { x: chairs[2].x + 8, y: chairs[2].y - 12, row: CHAR_ROW_RIGHT, mirror: true },
-    { x: chairs[1].x + 8, y: chairs[1].y - 12, row: CHAR_ROW_RIGHT },
-    { x: chairs[3].x + 8, y: chairs[3].y - 12, row: CHAR_ROW_RIGHT, mirror: true },
+    { x: chairs[0].x + 8, y: chairs[0].y - 12 - CONF_SIDE_SIT_RISE, row: CHAR_ROW_RIGHT, col: CHAR_COL_SIT },
+    { x: chairs[2].x + 8, y: chairs[2].y - 12 - CONF_SIDE_SIT_RISE, row: CHAR_ROW_RIGHT, mirror: true, col: CHAR_COL_SIT },
+    { x: chairs[1].x + 8, y: chairs[1].y - 12 - CONF_SIDE_SIT_RISE, row: CHAR_ROW_RIGHT, col: CHAR_COL_SIT },
+    { x: chairs[3].x + 8, y: chairs[3].y - 12 - CONF_SIDE_SIT_RISE, row: CHAR_ROW_RIGHT, mirror: true, col: CHAR_COL_SIT },
     { x: cx, y: ty + CONF_TABLE_H - 38, row: CHAR_ROW_UP },
   ];
   return { table: { x: tx, y: ty, w: CONF_TABLE_W, h: CONF_TABLE_H }, chairs, seats };
@@ -901,14 +928,16 @@ function drawDecor(ctx, spots, theme) {
   }
 }
 
-// One character in a standing frame, facing a given row; mirror turns the
-// right-facing row into a left-facing one (the sheet has no left row).
-function drawStanding(ctx, variant, x, y, row, mirror) {
+// One character in a given sprite-sheet frame, facing a given row; mirror turns
+// the right-facing row into a left-facing one (the sheet has no left row).
+// Defaults to the standing column, which is what a seat without its own `col`
+// (the conference head and foot) wants.
+function drawCharFrame(ctx, variant, x, y, row, mirror, col = CHAR_COL_STAND) {
   const sheet = SPRITES['char' + variant] || SPRITES.char0;
   if (!sheet) return;
   ctx.save();
   if (mirror) { ctx.translate(x + CHAR_W, y); ctx.scale(-1, 1); x = 0; y = 0; }
-  ctx.drawImage(sheet, CHAR_COL_STAND * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H, x, y, CHAR_W, CHAR_H);
+  ctx.drawImage(sheet, col * CHAR_FRAME_W, row * CHAR_FRAME_H, CHAR_FRAME_W, CHAR_FRAME_H, x, y, CHAR_W, CHAR_H);
   ctx.restore();
 }
 
@@ -929,7 +958,13 @@ function drawConference(ctx, conf) {
     if (seat?.kind === 'conf' && !wanderAnims.has(sid)) sitters.set(seat.confIndex, charVariant(sid));
   }
   const sitter = (i) => {
-    if (sitters.has(i)) drawStanding(ctx, sitters.get(i), conf.seats[i].x, conf.seats[i].y, conf.seats[i].row, conf.seats[i].mirror);
+    if (!sitters.has(i)) return;
+    const s = conf.seats[i];
+    // The seat carries its own frame: a side seat is lifted AND drawn seated,
+    // two halves of one decision, so they live together in computeConference.
+    // Head and foot carry none and fall through to standing — the tabletop
+    // covers one and the chair-back the other, and both compositions rely on it.
+    drawCharFrame(ctx, sitters.get(i), s.x, s.y, s.row, s.mirror, s.col);
   };
   if (furniture) for (const c of conf.chairs) if (c.kind === 'confchair') drawSprite(ctx, c.kind, c.x, c.y, Z, c.mirror);
   // The head chair goes down before its sitter — they face us, so the chair is
@@ -954,7 +989,7 @@ function drawChatSitters(ctx) {
   for (const [sid, i] of seatClaims) {
     const seat = currentSeats[i];
     if (!seat || seat.kind !== 'chat' || wanderAnims.has(sid)) continue;
-    drawStanding(ctx, charVariant(sid), seat.x, seat.y, seat.row, seat.mirror);
+    drawCharFrame(ctx, charVariant(sid), seat.x, seat.y, seat.row, seat.mirror, seat.col);
   }
 }
 
@@ -1961,14 +1996,14 @@ export function renderOffice() {
       if (state === 'WORKING') {
         // Seated at the keyboard, typing (2-frame cycle), back to the viewer.
         row = CHAR_ROW_UP;
-        col = CHAR_COL_TYPE + (prefersReducedMotion ? 0 : Math.floor(Date.now() / 300) % 2);
+        col = CHAR_COL_SIT + (prefersReducedMotion ? 0 : Math.floor(Date.now() / 300) % 2);
       } else if (state === 'IDLE') {
         row = CHAR_ROW_DOWN;
         col = CHAR_COL_STAND;
       } else {
         // WAITING / MESSAGE: chair turned around, facing the viewer
         row = CHAR_ROW_DOWN;
-        col = CHAR_COL_TYPE;
+        col = CHAR_COL_SIT;
       }
       ctx.drawImage(
         sheet,

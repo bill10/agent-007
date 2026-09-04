@@ -12,7 +12,7 @@ afterEach(() => {
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
 vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
-const { entryRoute, corridorY, pointAlongPath, detectDispatches, approachX, wanderRoute, wanderSeats, chatSeats, computeDecorPlacement, computePodLayout, podRugRect, computeSpareDesks, computeConference, walkObstacles } =
+const { entryRoute, corridorY, pointAlongPath, detectDispatches, approachX, wanderRoute, wanderSeats, chatSeats, computeDecorPlacement, computePodLayout, podRugRect, computeSpareDesks, computeConference, walkObstacles, CHAR_COL_SIT, CHAR_FRAME_W } =
   await import('../public/modules/office.js');
 
 const FLOOR_TOP = (36 * 3 + 2 * 3) + 26 * 3, CHAR_W = 32, CHAR_H = 64;
@@ -613,6 +613,10 @@ describe('sofa seats', () => {
     });
     expect(seats[2].mirror).toBe(true);              // right sofa faces back in
     expect(seats[0].y).toBeLessThan(seats[1].y);     // front sofa is the far one
+    // ...and sits high enough on it to clear the coffee table below. The
+    // seated frame's art starts 4px lower in its box than the standing one's,
+    // so reusing the side sofas' offset dropped this body onto the tabletop.
+    expect(seats[0].y + CHAR_H, 'the front sitter spills onto the coffee table').toBeLessThanOrEqual(ty);
   });
 
   // Built the way renderOffice builds them: pod rugs, spare desks, occupied
@@ -681,7 +685,7 @@ describe('sofa wander', () => {
     const drawn = [];
     const ctx = new Proxy({}, {
       get: (_t, k) => k === 'drawImage'
-        ? (img, ...a) => { if (String(img.src_).includes('characters/')) drawn.push({ x: a[4], y: a[5] }); }
+        ? (img, ...a) => { if (String(img.src_).includes('characters/')) drawn.push({ x: a[4], y: a[5], col: a[0] / CHAR_FRAME_W }); }
         : () => ctx,
       set: () => true,
     });
@@ -697,6 +701,10 @@ describe('sofa wander', () => {
   // The seat pool renderOffice will build for a given set of agents, from the
   // same exported pieces it uses — so a layout change moves the expectations
   // with it instead of stranding a hardcoded coordinate.
+  // Position of a recorded draw. The recorder also carries the sprite-sheet
+  // column, which animates between frames, so comparing whole records across
+  // frames is brittle — compare this instead.
+  const posOf = d => ({ x: d.x, y: d.y });
   const seatsFor = (ids, w = W, h = H) => {
     const layout = computePodLayout(ids.map(id => ({ id, repoPath: '/r', slug: 'r' })), w, h);
     const decor = computeDecorPlacement(layout.pods.map(podRugRect), w, h);
@@ -712,13 +720,13 @@ describe('sofa wander', () => {
     state.agents.set('si', { state: 'WAITING', repoPath: '/r', repoSlug: 'r' });
     const desk = frameAt(0).at(-1);       // route resolves; walker still at the desk
     const moved = frameAt(3000);
-    expect(moved.at(-1)).not.toEqual(desk); // genuinely mid-walk to a conference seat
+    expect(posOf(moved.at(-1))).not.toEqual(posOf(desk)); // genuinely mid-walk to a conference seat
 
     const canvas = document.getElementById('office-canvas');
     Object.defineProperty(canvas, 'clientHeight', { value: 900, configurable: true });
     // Same wall clock as the mid-walk frame: only a cleared claim (and the
     // fresh anim that replaces it) puts the walker back at its desk.
-    expect(frameAt(3000).at(-1)).toEqual(desk);
+    expect(posOf(frameAt(3000).at(-1))).toEqual(posOf(desk));
   });
 
   it('waits for an agent to be quiet a while before sending it off', async () => {
@@ -787,7 +795,7 @@ describe('sofa wander', () => {
 
     at(5000, () => office.noteAgentDeparture('a1'));
     state.agents.delete('a1');
-    expect(frameAt(5000).at(-1)).toEqual({ x: seats[0].x, y: seats[0].y });
+    expect(posOf(frameAt(5000).at(-1))).toEqual({ x: seats[0].x, y: seats[0].y });
   });
 
   it('draws an arrived sitter on its sofa, and nothing there while it walks over', async () => {
@@ -828,6 +836,25 @@ describe('sofa wander', () => {
       const stripped = wanderRoute(desk, { x: seat.x, y: seat.y, row: seat.row }, null, false, decor, W, H);
       expect(stripped.legs).not.toEqual(back.legs);
     }
+  });
+
+  it('draws an arrived sitter in the seated frame, not the standing one', async () => {
+    // The standing frame (col 1) has legs and feet, so a sitter drawn with it
+    // reads as standing ON the sofa. Columns 3-6 are the seated frames — torso
+    // only, flat bottom — which is what the desk pass already uses for a
+    // seated agent. Nothing asserted the frame before, so the wrong one shipped.
+    const { seats } = seatsFor(['si']);
+    const { office, state, frameAt } = await sofaOffice();
+    office.noteJobsUpdate();
+    state.agents.set('si', { state: 'WAITING', repoPath: '/r', repoSlug: 'r', lastOutputAt: 0 });
+    frameAt(0);
+    frameAt(60000);                // the frame the walk completes on
+    const seated = frameAt(60000); // drawChatSitters runs before drawMotion, so
+                                   // the sitter first appears the frame after
+    const onSeat = seated.filter(d => seats.some(s => s.x === d.x && s.y === d.y));
+    expect(onSeat.length, 'nobody drawn on a sofa').toBeGreaterThan(0);
+    for (const d of onSeat)
+      expect(d.col, `sitter drawn with frame column ${d.col}, wanted the seated one`).toBe(3);
   });
 
   it('walks a sofa sitter back to its desk when it starts working', async () => {
@@ -878,5 +905,44 @@ describe('sofa wander', () => {
     // Conference seats stay first, so drawConference's index-keyed draw passes
     // still address conf.seats[i] with the same i.
     expect(pooled.slice(2).every(s => s.kind === 'chat')).toBe(true);
+  });
+
+  // The conference set needs ~972px of height, so these use a taller canvas
+  // than the sofa tests above — the sofaOffice harness is the same one.
+  it('draws the side sitters in the seated frame and the end sitters standing', async () => {
+    // Columns 3-6 are the seated frames: torso only, no legs, built for a desk
+    // to occlude the lower body. A side sitter needs one — its legs would hang
+    // beside the chair otherwise. The head and foot sitters must NOT get one:
+    // the tabletop covers the head's legs and the chair-back covers the foot's,
+    // and a legless torso there floats.
+    const CW = 1440, CH = 1100;
+    const ids = ['s0', 's1', 's2', 's3', 's4', 's5'];
+    const infos = ids.map(id => ({ id, repoPath: '/r', slug: 'r' }));
+    const layout = computePodLayout(infos, CW, CH);
+    const rugs = layout.pods.map(podRugRect);
+    const decor = computeDecorPlacement(rugs, CW, CH);
+    const conf = computeConference(rugs, computeSpareDesks(layout.pods, decor, CW, CH), decor, CW, CH);
+    expect(conf, 'no conference set on this canvas').not.toBeNull();
+
+    const { office, state, frameAt } = await sofaOffice(CW, CH);
+    office.noteJobsUpdate();
+    // Seats fill in index order, so agent i takes conference seat i.
+    for (const id of ids) state.agents.set(id, { state: 'WAITING', repoPath: '/r', repoSlug: 'r', lastOutputAt: 0 });
+    frameAt(0);
+    frameAt(60000);
+    const seated = frameAt(60000);
+
+    // Head (0) and foot (5) face the viewer/away and keep the standing frame;
+    // the unmirrored side seats (1, 3) take the seated one.
+    for (const [i, col] of [[0, 1], [1, 3], [3, 3], [5, 1]]) {
+      const drawn = seated.filter(d => d.x === conf.seats[i].x && d.y === conf.seats[i].y);
+      expect(drawn.length, `nobody drawn on conference seat ${i}`).toBe(1);
+      expect(drawn[0].col, `seat ${i} drawn with frame column ${drawn[0].col}`).toBe(col);
+    }
+    // Seats 2 and 4 are mirrored, so they draw through a canvas transform at
+    // 0,0 — their column is still recorded, and it is the seated one.
+    const mirrored = seated.filter(d => d.x === 0 && d.y === 0);
+    expect(mirrored.length, 'the mirrored side sitters are missing').toBe(2);
+    for (const d of mirrored) expect(d.col).toBe(3);
   });
 });

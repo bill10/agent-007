@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.30.1] - 2026-09-04
+
+### Fixed
+
+- Agents sitting down in the office now actually sit. They were drawn standing
+  — the character art has a separate seated pose, the one already used at the
+  desks, and the sofas and conference chairs were using the standing one, so
+  everybody looked like they were perched on top of the furniture rather than
+  in it. Sofa sitters and the four side seats at the conference table now use
+  the seated pose and settle onto the cushion. The head and foot of the table
+  keep the standing pose on purpose: the tabletop and the chair back are drawn
+  over their legs, so nothing shows.
+
 ## [0.3.30.0] - 2026-09-03
 
 ### Added
