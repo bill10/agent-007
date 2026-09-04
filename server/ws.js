@@ -13,7 +13,7 @@ import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcas
 import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import {
-  addJob, updateJob, deleteJob, moveJob, updateSettings,
+  addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob,
 } from './jobs.js';
 
@@ -375,6 +375,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
             type: msg.jobType, schedule: msg.schedule, attachments: msg.attachments,
           }, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        case 'job-pause': {
+          const result = setJobPaused(msg.jobId, msg.paused, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }

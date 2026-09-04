@@ -5,7 +5,7 @@ import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import {
   addJob, updateJob, moveJob, deleteJob, dispatchOnce, finishScheduledRuns, checkPullRequests, checkMergedPullRequests,
-  runScan, allJobs, boardSettings, jobsPayload, postJobForAgent,
+  runScan, allJobs, boardSettings, jobsPayload, postJobForAgent, setJobPaused,
 } from '../server/jobs.js';
 import { STALLED_AFTER_MS, jobType } from '../lib/jobs.js';
 
@@ -75,6 +75,63 @@ describe('dispatching a scheduled job', () => {
     expect(job.agentSessionId).toBe('session-1');
     expect(job.runCount).toBe(1);
     expect(job.lastRunAt).toBe(job.startedAt);
+  });
+});
+
+describe('pausing a schedule', () => {
+  it('holds a due card out of dispatch until it is resumed', async () => {
+    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
+    const job = allJobs()[0];
+    job.nextRunAt = past();
+    setJobPaused(job.id, true, noopBroadcast);
+
+    const calls = [];
+    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
+    expect(allJobs()[0].state).toBe('todo');
+
+    setJobPaused(job.id, false, noopBroadcast);
+    // Resuming does not replay the firing the pause held: nextRunAt is re-armed
+    // from now, so the card waits for the next occurrence like any other.
+    expect(Date.parse(allJobs()[0].nextRunAt)).toBeGreaterThan(Date.now());
+    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
+
+    allJobs()[0].nextRunAt = past();
+    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toHaveLength(1);
+  });
+
+  it('pauses a card whose run is already under way, and leaves that run alone', async () => {
+    // The whole reason pause is not routed through updateJob: that refuses any
+    // edit past To do, and "stop running this from tomorrow" is asked for
+    // during a run more often than between them.
+    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
+    allJobs()[0].nextRunAt = past();
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    expect(job.state).toBe('in-progress');
+
+    expect(setJobPaused(job.id, true, noopBroadcast).error).toBeUndefined();
+    expect(allJobs()[0].paused).toBe(true);
+    expect(allJobs()[0].agentSessionId).toBe('session-1');
+    expect(sessions.has('session-1')).toBe(true);
+
+    // The run ends normally; the card lands back in To do and stays there.
+    sessions.get('session-1').exited = true;
+    await finishScheduledRuns(noopBroadcast, { killSession: fakeKillSession([]) });
+    expect(allJobs()[0].state).toBe('todo');
+    allJobs()[0].nextRunAt = past();
+    const calls = [];
+    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
+  });
+
+  it('rejects an unknown card and no-ops a repeat of the state it is in', () => {
+    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
+    const job = allJobs()[0];
+    expect(setJobPaused('nope', true, noopBroadcast).error).toBeTruthy();
+
+    setJobPaused(job.id, true, noopBroadcast);
+    const armed = allJobs()[0].nextRunAt;
+    setJobPaused(job.id, true, noopBroadcast);
+    expect(allJobs()[0].nextRunAt).toBe(armed);
   });
 });
 
