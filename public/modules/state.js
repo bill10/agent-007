@@ -15,7 +15,7 @@ export let boardActive = false;
 export function setBoardActive(on) { boardActive = !!on; }
 
 export const jobs = new Map(); // jobId -> job record from the server
-export let boardSettings = { running: false, maxPerRepo: 2, intervalMs: 180000, permissionMode: 'acceptEdits' };
+export let boardSettings = { running: false, maxPerRepo: 2, intervalMs: 300000, permissionMode: 'auto' };
 export function setBoardSettings(s) { boardSettings = { ...boardSettings, ...s }; }
 
 // --- Viewer identity & ownership (phase 2) ---

@@ -5,7 +5,7 @@ import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
-import { buildJobCommand as buildCommand } from '../lib/jobs.js';
+import { buildJobCommand as buildCommand, DEFAULT_PERMISSION_MODE } from '../lib/jobs.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
 const REPO = mkdtempSync(join(tmpdir(), 'a007-jobrepo-'));
@@ -798,11 +798,11 @@ describe('branch naming on dispatch', () => {
     expect(calls[0].meta.branchSuffixOnCollision).toBe(true);
   });
 
-  it('runs the agent in auto mode', async () => {
+  it('runs the agent in the board default permission mode', async () => {
     addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
     const calls = [];
     await dispatchOnce(fakeCreateSession(calls), noopBroadcast);
-    expect(calls[0].command).toContain('--permission-mode auto');
+    expect(calls[0].command).toContain(`--permission-mode ${DEFAULT_PERMISSION_MODE}`);
   });
 });
 

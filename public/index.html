@@ -136,6 +136,17 @@
               max/repo
               <input type="number" id="job-max-per-repo" min="1" max="10" step="1">
             </label>
+            <label class="job-cap-label job-perm-label" title="How much a dispatched agent may do without asking. Auto lets Claude Code's classifier decide and escalate the rest to you; it needs a supported model, and where it is unavailable the agent quietly starts in manual and waits for a permission nobody is there to give. A card can override this for itself.">
+              permissions
+              <select id="job-permission-mode">
+                <option value="auto">auto — classifier decides</option>
+                <option value="acceptEdits">acceptEdits — edits, ask for the rest</option>
+                <option value="bypassPermissions">bypassPermissions — never asks</option>
+                <option value="manual">manual — ask for everything</option>
+                <option value="dontAsk">dontAsk</option>
+                <option value="plan">plan — read-only</option>
+              </select>
+            </label>
           </div>
 
           <div class="job-form" id="job-form" style="display:none">
@@ -148,6 +159,17 @@
                 <select id="job-type">
                   <option value="one-time">One-time</option>
                   <option value="scheduled">Scheduled</option>
+                </select>
+              </label>
+              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different.">Permissions
+                <select id="job-permission-mode-field">
+                  <option value="">Board default</option>
+                  <option value="auto">auto — classifier decides</option>
+                  <option value="acceptEdits">acceptEdits — edits, ask for the rest</option>
+                  <option value="bypassPermissions">bypassPermissions — never asks</option>
+                  <option value="manual">manual — ask for everything</option>
+                  <option value="dontAsk">dontAsk</option>
+                  <option value="plan">plan — read-only</option>
                 </select>
               </label>
               <label class="job-form-schedule" id="job-schedule-field" style="display:none">Schedule

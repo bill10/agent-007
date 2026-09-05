@@ -19,7 +19,8 @@ import { safeFilename } from '../lib/helpers.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
-  branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
+  branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode,
+  dispatchPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
@@ -37,12 +38,51 @@ function defaultSettings() {
     maxPerRepo: MAX_AGENTS_PER_REPO,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
+    // Whether a human ever picked that mode in the toolbar. Written only by
+    // updateSettings; see boardSettings() for why the flag has to exist.
+    permissionModeChosen: false,
+    // Whether the legacy-value migration in boardSettings() has already run.
+    // Separate from `permissionModeChosen` on purpose: that one means a person
+    // decided, and setting it here would be a lie that also stops any future
+    // default from ever reaching this board.
+    permissionModeMigrated: false,
   };
 }
 
 export function boardSettings() {
   if (!config.jobBoard || typeof config.jobBoard !== 'object') config.jobBoard = defaultSettings();
   else config.jobBoard = { ...defaultSettings(), ...config.jobBoard };
+  // Migrate the legacy value ONCE. Until the toolbar got a permission-mode
+  // control there was no way to choose one, so every mode sitting in
+  // ~/.agent-007/config.json today was written by the first dispatcher start
+  // out of whatever DEFAULT_PERMISSION_MODE was then. The stored object is
+  // spread OVER the defaults, so without this a changed default reaches
+  // nobody. Unchosen therefore reads as unset, and the current default wins.
+  //
+  // The `permissionModeMigrated` guard is what makes "once" true. Keying the
+  // reset on `permissionModeChosen` alone re-ran it on EVERY call, so a mode
+  // hand-edited into config.json was silently overwritten on the next read,
+  // for ever — and hand-editing that file is what every doc said to do before
+  // this release, and is still the only route on a box with no browser. The
+  // symptom was the worst kind: the file says one thing and the board
+  // dispatches another, with nothing logged.
+  if (!config.jobBoard.permissionModeMigrated) {
+    if (!config.jobBoard.permissionModeChosen) config.jobBoard.permissionMode = DEFAULT_PERMISSION_MODE;
+    config.jobBoard.permissionModeMigrated = true;
+    // Written through immediately, and this is the only place boardSettings()
+    // is allowed to write. A marker that lives only in memory is not a marker:
+    // a board with no queued cards never reaches the dispatcher's persist, so
+    // the flag would die with the process and the migration would run again on
+    // the next boot -- reverting exactly the hand-edit it is meant to respect.
+    // saveConfig only serialises `config`, so there is no recursion back here,
+    // and the branch cannot be taken twice.
+    saveConfig();
+  }
+  // Always, whenever it arrived: an unknown mode would show up as a blank
+  // select, and buildJobCommand would fall back to the default anyway.
+  if (!isValidPermissionMode(config.jobBoard.permissionMode)) {
+    config.jobBoard.permissionMode = DEFAULT_PERMISSION_MODE;
+  }
   return config.jobBoard;
 }
 
@@ -246,8 +286,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -336,6 +376,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
     // the calling agent can act on rather than a card that never fires.
     type: typeof type === 'string' ? type : undefined,
     schedule: typeof schedule === 'string' ? schedule : '',
+    // No permissionMode: an agent posting a card must not be able to pick the
+    // mode the board will spawn with, which would be a way around every gate
+    // its own session runs under. A card an agent files inherits the board's.
     postedBy: user ? user.id : null,
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
@@ -559,6 +602,14 @@ export function updateJob(jobId, fields, broadcast) {
   // for the next unrelated persist to write out.
   const plan = planAttachments(job, fields.attachments);
   if (plan?.error) return plan;
+  // Refused before anything is written, alongside the attachment plan and the
+  // type/schedule pair, for the same reason: an error reply must not leave a
+  // half-edited card in memory.
+  let mode = null;
+  if (fields.permissionMode !== undefined) {
+    mode = resolveJobPermissionMode(fields.permissionMode);
+    if (mode.error) return { error: mode.error };
+  }
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
   // rejected as a pair.
@@ -581,6 +632,7 @@ export function updateJob(jobId, fields, broadcast) {
   if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, MAX_TITLE_LEN);
   if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
   if (fields.repoPath) job.repoPath = fields.repoPath;
+  if (mode) job.permissionMode = mode.permissionMode;
   if (resolved) {
     job.type = resolved.type;
     job.schedule = resolved.schedule;
@@ -799,7 +851,12 @@ export function updateSettings(fields, broadcast) {
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
   // Allowlisted: this value is interpolated into the agent's command line.
-  if (isValidPermissionMode(fields.permissionMode)) settings.permissionMode = fields.permissionMode;
+  // A valid one is also the only thing that ever sets permissionModeChosen —
+  // that flag is what tells the stored mode apart from one nobody picked.
+  if (isValidPermissionMode(fields.permissionMode)) {
+    settings.permissionMode = fields.permissionMode;
+    settings.permissionModeChosen = true;
+  }
   persist(broadcast);
   return { settings };
 }
@@ -835,6 +892,9 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
+    // Kept so the recheck below can tell whether the card still dispatches
+    // with what its argv was built from.
+    const spawnedMode = dispatchPermissionMode(job, settings.permissionMode);
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
     // Branch named after the job, not a cocktail, so `git branch` reads like
     // the board. Two jobs can share a title, so collisions take a -2 suffix
@@ -864,7 +924,18 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // no card pointing at it: invisible to the board, uncounted by the cap, and
     // never cleaned up. The scan guard does not cover this — it serialises
     // scans against each other, not against the user.
-    const stillQueued = allJobs().includes(job) && job.state === 'todo';
+    //
+    // The permission mode is rechecked on the same terms, and boardSettings()
+    // is re-read rather than reused so a board retuned mid-tick counts too.
+    // The argv was fixed before the await, so a card tightened (or the board
+    // tightened) while the agent spawned would otherwise leave that agent
+    // running under a mode neither of them still says, with the card showing
+    // the safer one — the store and the live process silently disagreeing.
+    // Abandoning the spawn hands it the same remedy every other change in
+    // this window gets: the card stays in To do and the next tick dispatches
+    // it again, with the mode that now applies.
+    const stillQueued = allJobs().includes(job) && job.state === 'todo'
+      && dispatchPermissionMode(job, boardSettings().permissionMode) === spawnedMode;
     if (!stillQueued) {
       if (killSession) {
         try { await killSession(session.id); } catch (err) {
@@ -872,25 +943,6 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
         }
       }
       continue;
-    }
-
-    // Only now that the replacement run is real does the previous run's kept
-    // agent retire (see finishScheduledRuns). Retiring before the spawn meant
-    // a failed createSession destroyed the last run's only output and left no
-    // new run behind it — the card showed a dispatch error and the summary the
-    // board promises to keep was gone. removeWorktree still protects the work:
-    // dirty or unpushed changes become an orphan rather than being deleted.
-    if (isScheduled(job) && job.lastRunSessionId) {
-      const prev = sessions.get(job.lastRunSessionId);
-      if (prev && !prev.exited && killSession) {
-        try {
-          await killSession(job.lastRunSessionId);
-        } catch (err) {
-          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
-        }
-      }
-      job.lastRunSessionId = null;
-      job.lastRunAgentName = null;
     }
 
     if (onSessionCreated) onSessionCreated(session);
@@ -909,6 +961,35 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.worktreePath = session.worktreePath;
     job.lastError = null;
     job.lastErrorAt = null;
+
+    // Only once the replacement run is real does the previous run's kept agent
+    // retire (see finishScheduledRuns). Retiring before the spawn meant a
+    // failed createSession destroyed the last run's only output and left no new
+    // run behind it — the card showed a dispatch error and the summary the
+    // board promises to keep was gone. removeWorktree still protects the work:
+    // dirty or unpushed changes become an orphan rather than being deleted.
+    //
+    // AFTER the claim above, not before it, and that ordering is load-bearing:
+    // this block awaits, and an await between the recheck and the claim is the
+    // very window the recheck exists to close. Sitting above the claim it
+    // reopened that window for every scheduled card on its second or later run
+    // — the common case, since a run's agent is deliberately kept alive to be
+    // read. The claim is now the first thing after the recheck, with nothing
+    // suspending in between, and "the run is real" holds more strictly here
+    // than it did before rather than less.
+    if (isScheduled(job) && job.lastRunSessionId) {
+      const prev = sessions.get(job.lastRunSessionId);
+      if (prev && !prev.exited && killSession) {
+        try {
+          await killSession(job.lastRunSessionId);
+        } catch (err) {
+          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
+        }
+      }
+      job.lastRunSessionId = null;
+      job.lastRunAgentName = null;
+    }
+
     dispatched.push({ job, session });
   }
   if (dispatched.length > 0 || candidates.length > 0) persist(broadcast);

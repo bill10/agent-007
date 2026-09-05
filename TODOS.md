@@ -310,7 +310,149 @@
 - **Context:** Raised by the simplification and maintainability specialists
   during /ship (2026-09-03).
 
+## Session MCP tokens sit in a sibling directory of the worktrees
+
+- **What:** `MCP_CONFIG_DIR` is `~/.agent-007/mcp/<port>/` (`server/agent-mcp.js`)
+  and `WORKTREE_DIR` is `~/.agent-007/worktrees/` (`server/state.js`). They are
+  siblings, and every board agent's cwd is inside the second one, so
+  `../../mcp/<port>/*.json` reaches every live session's bearer token. Move the
+  token files somewhere a worktree cannot walk to with two `..` segments, and
+  give each dispatched session only its own.
+- **Why:** `resolveAgentToken` maps a token to its session and `server/http.js`
+  derives the MCP caller's identity from that session's `ownerId`, so a stolen
+  token makes the caller that other user and `editJobForAgent`'s
+  `job.postedBy !== asker` check passes. That is the ownership rule the board's
+  agent-facing writes rest on. The 0600/0700 modes do not help: same UID.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P2
+- **Depends on:** Board MCP credential (v0.3.0.0)
+- **Context:** Found by the adversarial review during /ship for v0.3.33.0
+  (2026-09-04), which made it matter: board agents now dispatch with
+  `bypassPermissions`, so reading outside the worktree no longer prompts.
+  Fixing this does not restore a boundary against a hostile agent -- ungated
+  Bash means there is none -- it removes a needless one-command path to every
+  other session's identity, and lets DESIGN.md's ownership rule mean what it
+  says for an agent that is merely confused. `USERS_PATH` is a sibling too and
+  `loadUsers()` re-reads on mtime with no restart; same directory-layout fix.
+
+## A board agent that dies seconds after spawn leaves its card stuck forever
+
+- **What:** `dispatchOnce` treats a successful `createSession` as a successful
+  dispatch. If the spawned `claude` exits immediately -- a flag its runtime
+  rejects, a missing binary, a crash on startup -- the PTY spawn still
+  succeeded, so `result.error` is null, the card takes `agentSessionId`, a
+  branch and a worktree, and moves to In progress. `deriveJobStatus` then shows
+  "agent gone" with `lastError` null, and nothing puts a one-time job back in To
+  do, so it never retries. A scheduled card resets and fails the same way on
+  every firing. Treat an exit within a few seconds of dispatch as a dispatch
+  failure: set `lastError` from the tail of the session's ring buffer and
+  requeue the card.
+- **Why:** The card gives no reason and offers no retry, so the only way to find
+  out why a job never ran is to open the dead terminal tab and read the error
+  the process printed before it died.
+- **Effort:** S (human: ~3 hours / CC: ~20 min)
+- **Priority:** P3
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Noticed while tracing the `auto`-mode problem on Bedrock
+  (2026-09-04), but it is NOT what happened there -- an unavailable auto mode
+  starts the session in Manual rather than killing it, so that card stalled
+  visibly instead of vanishing. This is a latent gap with no observed
+  occurrence yet, hence P3: worth closing because any early death hits it, not
+  because something hit it.
+
+## A scan tick uses the agent cap it started with, not the one in force
+
+- **What:** `dispatchOnce` reads `boardSettings()` once (`const settings`) and
+  uses `settings.maxPerRepo` for the whole tick, then awaits `createSession`
+  once per candidate -- seconds each. `boardSettings()` returns a freshly
+  merged object every call, so a concurrent `updateSettings` mutates a
+  different object than the one the loop still points at, and a cap lowered
+  mid-tick has no effect until the next scan. Re-read the setting per
+  iteration, or document that a tick is deliberately atomic in its cap.
+- **Why:** A user reaching for the cap is usually reacting to a board that is
+  spawning too much right now, and the control quietly does nothing until the
+  current tick drains. The permission mode had the same shape and was fixed in
+  v0.3.33.0 (it re-reads `boardSettings()` at the post-await recheck, because
+  there the stale value decides what a live agent is allowed to do); the cap is
+  the same latent race with a smaller blast radius.
+- **Effort:** S (human: ~1 hour / CC: ~10 min)
+- **Priority:** P3
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Found by the adversarial review during /ship for v0.3.33.0
+  (2026-09-04), which flagged that making the toolbar controls reachable is
+  exactly what gives users a reason to reach for one mid-crisis.
+
+## Any board user can raise another user's queued card to bypassPermissions
+
+- **What:** `server/ws.js`'s `job-update` is deliberately not ownership-gated
+  ("the board is shared workspace state, not a per-user resource"), and as of
+  v0.3.33.0 `permissionMode` rides that same door. So on a multi-user board any
+  authenticated user can change someone else's To do card to
+  `bypassPermissions` before it dispatches. Decide whether the permission mode
+  specifically should be ownership-gated the way `editJobForAgent` already
+  gates agent writes, or whether the shared-board model covers it.
+- **Why:** Every other field on that door describes work; this one decides what
+  the spawned agent is allowed to do to the machine. `editJobForAgent` already
+  draws exactly this line for agents (`job.postedBy !== asker`), so the board
+  has the notion of card ownership -- it is only the browser door that does not
+  apply it. Consistent with the project's stated trust model (auth is identity,
+  not a sandbox -- see server/auth.js), which is why this is a question rather
+  than a bug.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Per-job permission mode (v0.3.33.0)
+- **Context:** Raised by the adversarial review during /ship for v0.3.33.0
+  (2026-09-04) as "worth the maintainer explicitly confirming that's
+  acceptable". Only bites on a board with more than one user.
+
 ## Completed
+
+## The board permission mode is unreachable and unmigrated
+
+- **What:** Two halves of the same gap. `server/ws.js` accepts `permissionMode`
+  on the `job-settings` message, but nothing in `public/` ever sends it, so
+  there is no way to change the mode from the app -- only by hand-editing
+  `~/.agent-007/config.json` and restarting. And `boardSettings()` spreads the
+  stored object over the defaults, so every board that has ever run has the
+  old default persisted and keeps it: changing `DEFAULT_PERMISSION_MODE` only
+  reaches installs that never saved one.
+- **Why:** Together they mean a default change cannot reach an existing user at
+  all, and the user cannot apply it themselves without leaving the app. A
+  migration is not obviously safe on its own -- rewriting a stored `auto` would
+  stomp a deliberate choice on a setup where the classifier works, and pinning
+  the legacy value as "unset" would make `auto` unselectable -- so the control
+  should probably come first, and the migration decided with it.
+- **Effort:** S (human: ~3 hours / CC: ~20 min)
+- **Priority:** P2
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Raised by the ship coverage audit for v0.3.33.0 (2026-09-04).
+  `test/jobs-permission-mode.test.js` documents the stored-mode behaviour as it
+  stands, so a migration has to change that test deliberately.
+- **Shape it should take:** a per-job permission mode on the card, defaulting to
+  the board setting, with the board setting defaulting back to `auto`. Two
+  levels, so a machine where auto is unavailable sets it once rather than per
+  card, and the safe mode is what you get unless a job asks for more. `auto` is
+  the right default on merit -- its classifier is the only thing reviewing a
+  dispatched agent's actions, which matters most for a job whose prompt came
+  from repo content. Adding the field is cheap: `jobsPayload()` spreads the
+  whole job so it reaches the client for free, and the mode is only read at
+  dispatch, which happens from To do, so `editableInPlace` refusing edits past
+  To do is exactly the right gate.
+
+- **Outcome:** Both halves closed in v0.3.33.0. The board's toolbar has a
+  **permissions** select (the fallback), and the job form has a per-card one
+  whose "Board default" option stores `null` rather than a copy of the board
+  value -- so an unset card follows the board if that changes before it is
+  dispatched. `buildJobCommand` resolves card-then-board-then-default, and the
+  allowlist check stayed at the argv-building function as well as the settings
+  boundary. The migration became decidable once the control existed: a stored
+  mode with no `permissionModeChosen` flag is a default nobody picked, so it is
+  ignored and `DEFAULT_PERMISSION_MODE` (back to `auto`) wins. Boards that had
+  been running on `bypassPermissions` -- every board whose first dispatcher
+  start happened on v0.3.33.0 -- move back to `auto`.
+
+**Completed:** v0.3.33.0 (2026-09-04)
+
 
 ## Sofa sitter placement has never been checked against a render
 

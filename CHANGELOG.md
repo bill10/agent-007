@@ -5,6 +5,66 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.33.0] - 2026-09-04
+
+### Added
+
+- **A permission mode you can actually reach, at two levels.** The board's
+  toolbar has a **permissions** select -- the mode every dispatched agent gets
+  unless its card says otherwise -- and the job form has a **Permissions** field
+  for one job on its own. A card left on "Board default" stays genuinely unset
+  rather than taking a copy of today's board setting, so changing the board
+  still moves every card queued behind it. A card that does carry its own mode
+  shows it as a chip on its face, because the mode decides how much that agent
+  may do without asking. Only a card still in To do can be given one, which is
+  the rule the board already applies to every other edit: past To do, its agent
+  has already been handed the card. An agent posting a card through the board's
+  MCP tool cannot set the mode -- those cards always inherit the board's.
+
+### Fixed
+
+- **A job on a machine without auto mode no longer waits at every permission
+  prompt.** Board agents dispatch with `--permission-mode auto`, whose
+  classifier needs a supported model and an organisation that has not switched
+  it off. On an Amazon Bedrock or Vertex account running an unsupported model,
+  or behind `permissions.disableAutoMode`, it simply isn't available -- and
+  Claude Code does not say so. It quietly starts the session in Manual instead,
+  so the agent works normally right up until it needs your permission for
+  something and then stops, waiting for a person who isn't watching. Every job,
+  every time. Until now there was nothing you could do about it from inside the
+  app; the two controls above are the fix. Set the board's permissions once on
+  a machine like that, or give a single card what it needs.
+
+  `auto` stays the default, and deliberately so rather than for want of an
+  alternative. Its classifier is the only thing that reviews a dispatched
+  agent's actions before they run, and a job agent's prompt is your card text
+  plus whatever it reads out of the repo. Under `bypassPermissions` nothing
+  reviews anything: the agent runs shell commands and edits files with nothing
+  asking you first, as you, with your access, and the only thing keeping it
+  inside its own worktree is its own good behaviour. That is a reasonable trade
+  to make on purpose -- point the board at repositories whose contents you
+  trust, the same way you would only hand an Agent 007 login to someone you
+  would give an SSH account -- and a bad one to end up in by accident, which is
+  why it is a mode you pick rather than a mode you get.
+
+  A note on how the setting is stored, because it changes once here. The board
+  writes its settings to `~/.agent-007/config.json` the first time the
+  dispatcher starts, so every board that has ever run already has a permission
+  mode saved that nobody chose -- there was no way to choose one until this
+  release. Those saved values are treated as unset, once, and the default
+  applies. In practice nothing moves: the saved value and the default are both
+  `auto`. From now on a mode you pick in the toolbar is recorded as a choice
+  and is never overwritten by a future default.
+
+  One thing no permission mode changes, so that `bypassPermissions` isn't
+  mistaken for hands-off dispatch: Claude Code asks you to trust a directory
+  the first time it runs there, and every board job gets a brand-new worktree,
+  so each job still needs one click before it starts. The mode decides what
+  happens after that click, not whether there is one. And the first session you
+  ever start with permissions bypassed asks you to accept responsibility once
+  and remembers -- until that is answered by hand, an agent in that mode waits
+  there instead of working.
+
 ## [0.3.32.1] - 2026-09-04
 
 ### Fixed

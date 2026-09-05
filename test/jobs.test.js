@@ -164,8 +164,12 @@ describe('buildJobCommand', () => {
   });
 
   it('honours an overridden permission mode', () => {
-    const parsed = parseCommand(buildJobCommand(job(), { permissionMode: 'bypassPermissions' }));
-    expect(parsed.args[1]).toBe('bypassPermissions');
+    // Deliberately NOT the default -- this assertion has to be able to fail.
+    // It used to pass 'bypassPermissions', which became the default and turned
+    // the test into a tautology.
+    const parsed = parseCommand(buildJobCommand(job(), { permissionMode: 'acceptEdits' }));
+    expect(parsed.args[1]).toBe('acceptEdits');
+    expect(parsed.args[1]).not.toBe(DEFAULT_PERMISSION_MODE);
   });
 
   it('includes the title, the detail, and the ship instruction', () => {
@@ -452,7 +456,13 @@ describe('dispatch defaults', () => {
   });
 
   it('runs agents in auto mode', () => {
+    // Back to auto: its classifier is the only thing that reviews what a
+    // dispatched agent does before it does it, which matters most for a job
+    // whose prompt is card text plus repo content. Where auto is unavailable
+    // the board setting and the per-card override are the way out -- see
+    // test/jobs-permission-mode.test.js.
     expect(DEFAULT_PERMISSION_MODE).toBe('auto');
+    expect(PERMISSION_MODES).toContain(DEFAULT_PERMISSION_MODE);
   });
 
   it('sends the agent to /ship when the work is finished', () => {
