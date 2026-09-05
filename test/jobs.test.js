@@ -164,8 +164,12 @@ describe('buildJobCommand', () => {
   });
 
   it('honours an overridden permission mode', () => {
-    const parsed = parseCommand(buildJobCommand(job(), { permissionMode: 'bypassPermissions' }));
-    expect(parsed.args[1]).toBe('bypassPermissions');
+    // Deliberately NOT the default -- this assertion has to be able to fail.
+    // It used to pass 'bypassPermissions', which became the default and turned
+    // the test into a tautology.
+    const parsed = parseCommand(buildJobCommand(job(), { permissionMode: 'acceptEdits' }));
+    expect(parsed.args[1]).toBe('acceptEdits');
+    expect(parsed.args[1]).not.toBe(DEFAULT_PERMISSION_MODE);
   });
 
   it('includes the title, the detail, and the ship instruction', () => {
