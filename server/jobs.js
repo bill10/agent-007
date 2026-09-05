@@ -19,7 +19,8 @@ import { safeFilename } from '../lib/helpers.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
-  branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, JOB_STATES,
+  branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode,
+  dispatchPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
@@ -868,6 +869,9 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
+    // Kept so the recheck below can tell whether the card still dispatches
+    // with what its argv was built from.
+    const spawnedMode = dispatchPermissionMode(job, settings.permissionMode);
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
     // Branch named after the job, not a cocktail, so `git branch` reads like
     // the board. Two jobs can share a title, so collisions take a -2 suffix
@@ -897,7 +901,18 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // no card pointing at it: invisible to the board, uncounted by the cap, and
     // never cleaned up. The scan guard does not cover this — it serialises
     // scans against each other, not against the user.
-    const stillQueued = allJobs().includes(job) && job.state === 'todo';
+    //
+    // The permission mode is rechecked on the same terms, and boardSettings()
+    // is re-read rather than reused so a board retuned mid-tick counts too.
+    // The argv was fixed before the await, so a card tightened (or the board
+    // tightened) while the agent spawned would otherwise leave that agent
+    // running under a mode neither of them still says, with the card showing
+    // the safer one — the store and the live process silently disagreeing.
+    // Abandoning the spawn hands it the same remedy every other change in
+    // this window gets: the card stays in To do and the next tick dispatches
+    // it again, with the mode that now applies.
+    const stillQueued = allJobs().includes(job) && job.state === 'todo'
+      && dispatchPermissionMode(job, boardSettings().permissionMode) === spawnedMode;
     if (!stillQueued) {
       if (killSession) {
         try { await killSession(session.id); } catch (err) {

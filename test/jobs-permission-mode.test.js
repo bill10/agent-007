@@ -20,7 +20,7 @@ import {
   postJobForAgent, editJobForAgent,
 } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
-import { buildJobCommand, createJob, resolveJobPermissionMode, DEFAULT_PERMISSION_MODE, PERMISSION_MODES } from '../lib/jobs.js';
+import { buildJobCommand, createJob, resolveJobPermissionMode, dispatchPermissionMode, DEFAULT_PERMISSION_MODE, PERMISSION_MODES } from '../lib/jobs.js';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-jobperm-'));
 const noopBroadcast = () => {};
@@ -98,16 +98,44 @@ describe('buildJobCommand permission mode', () => {
     }
   });
 
-  it('falls back to the default rather than smuggle an invalid stored mode into argv', () => {
+  it('falls back to the BOARD setting when a stored card mode is invalid', () => {
     // createJob and updateJob both refuse an unrecognised mode before it ever
     // reaches a job record, but buildJobCommand is the last door before argv --
     // the comment above it says so -- so a card holding a bad value some other
-    // way (hand-edited config, an older schema) must still come out safe.
-    const cmd = buildJobCommand({ title: 'x', permissionMode: 'auto --dangerously-skip-permissions' }, { permissionMode: OTHER_MODE });
+    // way (hand-edited config, a mode dropped from the allowlist by a later
+    // release) must still come out safe.
+    //
+    // Safe means the BOARD's mode, not the built-in default: skipping past the
+    // board level would defeat a board deliberately set strict, which is the
+    // safety net this case should land in. Only when the board setting is
+    // unusable too does the default apply -- both halves are asserted, and the
+    // board mode here is not the default, so the distinction can fail.
+    const bad = 'auto --dangerously-skip-permissions';
+    expect(OTHER_MODE).not.toBe(DEFAULT_PERMISSION_MODE);
+    const cmd = buildJobCommand({ title: 'x', permissionMode: bad }, { permissionMode: OTHER_MODE });
     const parsed = parseCommand(cmd);
-    expect(parsed.args[1]).toBe(DEFAULT_PERMISSION_MODE);
+    expect(parsed.args[1]).toBe(OTHER_MODE);
     expect(parsed.args).toHaveLength(3);
     expect(cmd).not.toContain('dangerously');
+
+    // Neither level usable -- now, and only now, the default.
+    const both = buildJobCommand({ title: 'x', permissionMode: bad }, { permissionMode: 'yolo' });
+    expect(parseCommand(both).args[1]).toBe(DEFAULT_PERMISSION_MODE);
+    expect(parseCommand(both).args).toHaveLength(3);
+  });
+
+  it('resolves the same answer buildJobCommand puts in the argv', () => {
+    // dispatchOnce asks dispatchPermissionMode directly to check nothing
+    // retuned the card while its agent spawned, so the two must not drift.
+    for (const [job, board] of [
+      [{ permissionMode: THIRD_MODE }, OTHER_MODE],
+      [{ permissionMode: null }, OTHER_MODE],
+      [{ permissionMode: 'yolo' }, OTHER_MODE],
+      [{ permissionMode: 'yolo' }, 'yolo'],
+    ]) {
+      expect(parseCommand(buildJobCommand({ title: 'x', ...job }, { permissionMode: board })).args[1])
+        .toBe(dispatchPermissionMode(job, board));
+    }
   });
 });
 
@@ -228,6 +256,80 @@ describe('the controls in public/index.html', () => {
     const opts = optionsOf('job-permission-mode-field');
     expect(opts[0]).toBe('');
     expect(opts.slice(1).sort()).toEqual([...PERMISSION_MODES].sort());
+  });
+});
+
+describe('a mode retuned while the agent is spawning', () => {
+  beforeEach(resetBoard);
+
+  // createSession takes seconds (a worktree plus a PTY), and the card stays in
+  // To do for all of it -- editableInPlace gates on state, and the state only
+  // flips once the session comes back. So a WS job-update lands happily in the
+  // middle of a dispatch. The argv was fixed before that await, so without a
+  // recheck the agent would run under a mode the card no longer says, while
+  // the board showed the new one: the store and the live process disagreeing
+  // about the one field that decides what the agent may do.
+  //
+  // The remedy is the one every other mid-dispatch change already gets --
+  // abandon the spawn, leave the card in To do, let the next tick re-dispatch
+  // it with the mode that now applies.
+  function racingCreateSession(calls, mutate) {
+    return async (command, name, repoPath, branch, ownerId, meta) => {
+      calls.push({ command });
+      const session = {
+        id: `session-${calls.length}`, name: 'Agent1', command, repoPath,
+        state: 'WORKING', exited: false, lastOutputAt: Date.now(),
+        spawnedBy: meta?.spawnedBy, jobId: meta?.jobId,
+      };
+      sessions.set(session.id, session);
+      mutate();                       // stands in for the WS handler
+      return { session };
+    };
+  }
+
+  it('does not claim a card whose own mode changed mid-spawn, and kills the agent', async () => {
+    const { job } = addJob({ title: 'retuned', repoPath: REPO, permissionMode: 'bypassPermissions' }, noopBroadcast);
+    const calls = [];
+    const killed = [];
+    await dispatchOnce(
+      racingCreateSession(calls, () => updateJob(job.id, { permissionMode: OTHER_MODE }, noopBroadcast)),
+      noopBroadcast,
+      { killSession: async (id) => { killed.push(id); } },
+    );
+    // It really did spawn with the pre-edit mode -- that is the hazard.
+    expect(calls[0].command).toContain('--permission-mode bypassPermissions');
+    // ...so the card is not claimed and the agent does not survive.
+    expect(killed).toEqual(['session-1']);
+    expect(allJobs()[0].state).toBe('todo');
+    expect(allJobs()[0].agentSessionId).toBeNull();
+    expect(allJobs()[0].permissionMode).toBe(OTHER_MODE);
+  });
+
+  it('does the same when the BOARD is retuned mid-spawn', async () => {
+    updateSettings({ permissionMode: 'bypassPermissions' }, noopBroadcast);
+    addJob({ title: 'inherits', repoPath: REPO }, noopBroadcast);
+    const calls = [];
+    const killed = [];
+    await dispatchOnce(
+      racingCreateSession(calls, () => updateSettings({ permissionMode: OTHER_MODE }, noopBroadcast)),
+      noopBroadcast,
+      { killSession: async (id) => { killed.push(id); } },
+    );
+    expect(calls[0].command).toContain('--permission-mode bypassPermissions');
+    expect(killed).toEqual(['session-1']);
+    expect(allJobs()[0].state).toBe('todo');
+  });
+
+  it('claims the card normally when nothing changed', async () => {
+    addJob({ title: 'quiet', repoPath: REPO, permissionMode: OTHER_MODE }, noopBroadcast);
+    const calls = [];
+    const killed = [];
+    await dispatchOnce(racingCreateSession(calls, () => {}), noopBroadcast, {
+      killSession: async (id) => { killed.push(id); },
+    });
+    expect(killed).toEqual([]);
+    expect(allJobs()[0].state).toBe('in-progress');
+    expect(allJobs()[0].agentSessionId).toBe('session-1');
   });
 });
 
