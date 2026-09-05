@@ -455,12 +455,13 @@ describe('dispatch defaults', () => {
     expect(DISPATCH_INTERVAL_MS).toBe(5 * 60 * 1000);
   });
 
-  it('runs agents with permissions bypassed', () => {
-    // Not auto: auto mode needs the classifier, which is not available on every
-    // provider the board runs against, and `claude` accepts the flag at argv
-    // parsing before failing at runtime -- so the board sees a successful spawn
-    // and a card stuck in In progress with no recorded error.
-    expect(DEFAULT_PERMISSION_MODE).toBe('bypassPermissions');
+  it('runs agents in auto mode', () => {
+    // Back to auto: its classifier is the only thing that reviews what a
+    // dispatched agent does before it does it, which matters most for a job
+    // whose prompt is card text plus repo content. Where auto is unavailable
+    // the board setting and the per-card override are the way out -- see
+    // test/jobs-permission-mode.test.js.
+    expect(DEFAULT_PERMISSION_MODE).toBe('auto');
     expect(PERMISSION_MODES).toContain(DEFAULT_PERMISSION_MODE);
   });
 

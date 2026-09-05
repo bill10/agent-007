@@ -24,6 +24,14 @@ const BOARD_HTML = `
         <button id="btn-dispatch-now"></button>
         <span id="job-dispatcher-status"></span>
         <input type="number" id="job-max-per-repo">
+        <select id="job-permission-mode">
+          <option value="auto">auto</option>
+          <option value="acceptEdits">acceptEdits</option>
+          <option value="bypassPermissions">bypassPermissions</option>
+          <option value="manual">manual</option>
+          <option value="dontAsk">dontAsk</option>
+          <option value="plan">plan</option>
+        </select>
         <button id="btn-finished-jobs"></button>
       </div>
       <div class="job-form" id="job-form" style="display:none">
@@ -36,6 +44,15 @@ const BOARD_HTML = `
         <div id="job-schedule-field" style="display:none">
           <input type="text" id="job-schedule">
         </div>
+        <select id="job-permission-mode-field">
+          <option value=""></option>
+          <option value="auto">auto</option>
+          <option value="acceptEdits">acceptEdits</option>
+          <option value="bypassPermissions">bypassPermissions</option>
+          <option value="manual">manual</option>
+          <option value="dontAsk">dontAsk</option>
+          <option value="plan">plan</option>
+        </select>
         <textarea id="job-detail"></textarea>
         <button id="btn-job-attach"></button>
         <input type="file" id="job-attach-input">
@@ -294,6 +311,72 @@ describe('dispatcher controls', () => {
     cap.dispatchEvent(new Event('change'));
     expect(send).toHaveBeenCalledWith({ type: 'job-settings', maxPerRepo: 4 });
   });
+
+  it('shows the board permission mode and sends a new one', () => {
+    handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, permissionMode: 'acceptEdits' } });
+    const perm = document.getElementById('job-permission-mode');
+    expect(perm.value).toBe('acceptEdits');
+    perm.value = 'plan';
+    perm.dispatchEvent(new Event('change'));
+    // Sending it is also what records the choice server-side, which is what
+    // stops the migration in boardSettings() resetting it again.
+    expect(send).toHaveBeenCalledWith({ type: 'job-settings', permissionMode: 'plan' });
+  });
+});
+
+describe('the per-job permission mode', () => {
+  const perm = () => document.getElementById('job-permission-mode-field');
+
+  it('opens on "board default" for a card with no mode of its own', () => {
+    // Never pre-filled with the board's current value: that would freeze the
+    // card onto today's setting the next time anyone opened the form.
+    handleJobsList({ jobs: [JOB()], settings: { running: false, maxPerRepo: 2, permissionMode: 'plan' } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(perm().value).toBe('');
+  });
+
+  it('shows and sends the mode a card carries', () => {
+    handleJobsList({ jobs: [JOB({ permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(perm().value).toBe('plan');
+    perm().value = 'acceptEdits';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'job-update', jobId: 'job-1', permissionMode: 'acceptEdits',
+    }));
+  });
+
+  it('puts an overriding mode on the card face', () => {
+    handleJobsList({ jobs: [JOB({ permissionMode: 'bypassPermissions' })], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelector('.job-card-title').textContent).toContain('bypassPermissions');
+  });
+
+  it('shows both the scheduled chip and the permission-mode chip together', () => {
+    // Two sibling .job-card-type spans. A querySelector (singular) assertion
+    // elsewhere would only ever see the first, so this pins both.
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    const chips = [...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent);
+    expect(chips).toEqual(['scheduled', 'plan']);
+  });
+
+  it('colours only the bypassPermissions chip as dangerous', () => {
+    handleJobsList({ jobs: [JOB({ permissionMode: 'bypassPermissions' })], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelector('.job-card-type').classList).toContain('job-mode-danger');
+    handleJobsList({ jobs: [JOB({ permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelector('.job-card-type').classList).not.toContain('job-mode-danger');
+  });
+
+  it('marks the toolbar select when the board itself is on bypassPermissions', () => {
+    handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, permissionMode: 'bypassPermissions' } });
+    expect(document.getElementById('job-permission-mode').classList).toContain('job-mode-danger');
+    handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto' } });
+    expect(document.getElementById('job-permission-mode').classList).not.toContain('job-mode-danger');
+  });
+
+  it('leaves an inheriting card unchipped', () => {
+    handleJobsList({ jobs: [JOB()], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelector('.job-card-type')).toBeNull();
+  });
 });
 
 describe('job form', () => {
@@ -304,7 +387,7 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '', attachments: [],
+      jobType: 'one-time', schedule: '', permissionMode: '', attachments: [],
     });
   });
 
