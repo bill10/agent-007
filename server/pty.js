@@ -63,20 +63,42 @@ function installAsyncSpawnGuard() {
 export function setupPtyHandlers(session, sessionId, broadcast) {
   session.pty.onData((data) => {
     session.ringBuffer.push(data);
-    const stripped = stripAnsiComplete(data);
-    const lines = stripped.split('\n').filter(l => l.trim().length > 0);
-    const hasContent = lines.length > 0 && lines.some(l => l.length > 3 && !TRIVIAL_RE.test(l) && !ESCAPE_REMNANT_RE.test(l));
+    // A pty read is not a line. When a read boundary falls mid-line the line
+    // arrives as two fragments, neither of which can match a dialog footer --
+    // the session then falls through to a bare TUI WAITING and, since a TUI
+    // parked at a question emits nothing further, nothing ever repairs it.
+    // So carry the tail past the last newline over to the next chunk.
+    //
+    // The carry is of RAW bytes, before stripping: a boundary lands mid-escape
+    // as readily as mid-word, and half a sequence survives stripAnsiComplete
+    // as literal "[7Gto" garbage glued into the line. Escapes never span a
+    // newline, so cutting the raw stream there is safe.
+    //
+    // Bounded because an agent controls this text and a line that never gets a
+    // newline would otherwise grow forever. Trimmed from the left, since the
+    // next chunk continues on the right.
+    const raw = (session.pendingRaw || '') + data;
+    const cut = raw.lastIndexOf('\n');
+    session.pendingRaw = (cut === -1 ? raw : raw.slice(cut + 1)).slice(-2000);
+    const lines = stripAnsiComplete(raw.slice(0, cut + 1)).split('\n').filter(l => l.trim().length > 0);
+    const partial = stripAnsiComplete(session.pendingRaw).trim();
+    const hasContent = [...lines, partial].some(l => l.length > 3 && !TRIVIAL_RE.test(l) && !ESCAPE_REMNANT_RE.test(l));
     const recentResize = (Date.now() - (session.lastResizeAt || 0)) < 2000;
     if (hasContent && !recentResize) session.lastOutputAt = Date.now();
+    // Capped: these lines are matched against MESSAGE_PATTERNS/PROMPT_PATTERNS
+    // on every chunk AND on a 1s per-session interval, and several of those
+    // patterns are quadratic on a long line (`/Allow .+ to (read|edit|...)/`
+    // measured 2s on one 180KB line, which pegs the event loop for every
+    // session). An agent controls this text, and no prompt footer is 400
+    // chars, so bound it here rather than hardening one regex at a time.
+    const cap = l => l.trim().slice(0, 400);
+    // The partial goes to lastStrippedLine, which detectState scans but which
+    // is a single overwritten slot -- keeping it out of the 5-line window, so
+    // a frame whose last row never gets a newline cannot latch a fragment
+    // there forever. It rejoins the window as a whole line once it completes.
+    if (partial) session.lastStrippedLine = cap(partial);
+    else if (lines.length > 0) session.lastStrippedLine = cap(lines[lines.length - 1]);
     if (lines.length > 0) {
-      // Capped: these lines are matched against MESSAGE_PATTERNS/PROMPT_PATTERNS
-      // on every chunk AND on a 1s per-session interval, and several of those
-      // patterns are quadratic on a long line (`/Allow .+ to (read|edit|...)/`
-      // measured 2s on one 180KB line, which pegs the event loop for every
-      // session). An agent controls this text, and no prompt footer is 400
-      // chars, so bound it here rather than hardening one regex at a time.
-      const cap = l => l.trim().slice(0, 400);
-      session.lastStrippedLine = cap(lines[lines.length - 1]);
       session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(cap)].slice(-5);
     }
     broadcast({ type: 'pty-output', sessionId, data: Buffer.from(data).toString('base64') });
@@ -156,6 +178,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     lastResizeAt: 0,
     lastStrippedLine: '',
     recentStrippedLines: [],
+    pendingRaw: '',            // tail of the last pty chunk, past its final newline
     isTUI: isTUI ?? /^(claude|aider|codex|gemini)\b/.test(command),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
