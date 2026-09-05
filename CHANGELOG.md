@@ -5,6 +5,39 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.33.0] - 2026-09-04
+
+### Fixed
+
+- Jobs dispatched by the board no longer die on the spot where auto mode is
+  unavailable. Board agents were started with `--permission-mode auto`, which
+  needs a classifier that some setups do not have -- an Amazon Bedrock or
+  Vertex account, or a machine whose settings turn auto mode off. `claude`
+  accepts the flag and then fails once it is running, and because the process
+  did start, the board saw a healthy spawn: the card moved to In progress,
+  the agent died seconds later, and the card sat there reading "agent gone"
+  with no reason on it and no retry, forever. New boards now dispatch with
+  permissions bypassed instead, which every setup supports.
+
+  Read that as the trade it is, because it is a real one. Bypassing
+  permissions means a dispatched agent runs shell commands and file edits with
+  nothing asking you first, as you, with your access -- so the only thing
+  keeping a job inside its own worktree is the job's own good behaviour. Point
+  the board at repositories whose contents you trust, the same way you would
+  only hand an Agent 007 login to someone you would give an SSH account.
+
+  This changes the default only. A board that has already saved a permission
+  mode keeps the one it saved -- which is every board that has ever run, since
+  the mode is written to `~/.agent-007/config.json` the first time the
+  dispatcher starts. So an existing install carries on unchanged until that
+  file is edited by hand. Choosing auto on purpose still works where the
+  classifier is available.
+
+  One thing to expect on a new machine: the first time you start Claude Code
+  with permissions bypassed it asks you to accept responsibility once, and
+  remembers. Until someone has answered that by hand, a board agent will wait
+  at the question instead of working.
+
 ## [0.3.32.1] - 2026-09-04
 
 ### Fixed
