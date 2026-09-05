@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   createJob, resolveJobType, jobType, isScheduled, isJobDue, selectDispatchableJobs,
   buildJobPrompt, buildJobCommand, isScheduledRunOver, scheduledRunReset,
-  JOB_TYPES, DEFAULT_JOB_TYPE, STALLED_AFTER_MS,
+  JOB_TYPES, DEFAULT_JOB_TYPE, STALLED_AFTER_MS, DEFAULT_PERMISSION_MODE,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -162,7 +162,7 @@ describe('the scheduled prompt', () => {
   });
 
   it('still ships as a single quoted argv', () => {
-    expect(buildJobCommand(scheduled)).toMatch(/^claude --permission-mode auto "/);
+    expect(buildJobCommand(scheduled)).toMatch(new RegExp(`^claude --permission-mode ${DEFAULT_PERMISSION_MODE} "`));
   });
 });
 
