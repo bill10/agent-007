@@ -5,6 +5,21 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.32.1] - 2026-09-04
+
+### Fixed
+
+- An agent waiting on a multiple-choice question is no longer mistaken for one
+  that has gone quiet. The dialog is recognised by its footer line, but the
+  server was reading the terminal one chunk at a time rather than one line at a
+  time -- so whenever a chunk boundary happened to land in the middle of that
+  footer, the line arrived as two halves, matched nothing, and the agent was
+  filed as resting: no thought bubble, and after a few seconds it walked off to
+  a conference seat with the question still on screen. About one dialog in five
+  landed that way, which is why it looked intermittent. Terminal output is now
+  reassembled into whole lines across chunk boundaries, escape sequences
+  included.
+
 ## [0.3.32.0] - 2026-09-04
 
 ### Added
