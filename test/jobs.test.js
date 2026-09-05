@@ -451,8 +451,13 @@ describe('dispatch defaults', () => {
     expect(DISPATCH_INTERVAL_MS).toBe(5 * 60 * 1000);
   });
 
-  it('runs agents in auto mode', () => {
-    expect(DEFAULT_PERMISSION_MODE).toBe('auto');
+  it('runs agents with permissions bypassed', () => {
+    // Not auto: auto mode needs the classifier, which is not available on every
+    // provider the board runs against, and `claude` accepts the flag at argv
+    // parsing before failing at runtime -- so the board sees a successful spawn
+    // and a card stuck in In progress with no recorded error.
+    expect(DEFAULT_PERMISSION_MODE).toBe('bypassPermissions');
+    expect(PERMISSION_MODES).toContain(DEFAULT_PERMISSION_MODE);
   });
 
   it('sends the agent to /ship when the work is finished', () => {
