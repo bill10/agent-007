@@ -47,12 +47,21 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   never touched again. If auto mode isn't available on your machine, set the
   board's permissions to something else and it stays set.
 
+  One thing no permission mode changes, so that setting `bypassPermissions`
+  isn't mistaken for hands-off dispatch: Claude Code asks you to trust a
+  directory the first time it runs there, and every board job gets a brand-new
+  worktree, so each job still needs one click before it starts. The mode
+  decides what happens after that click, not whether there is one. And the
+  first session you ever start with permissions bypassed asks you to accept
+  responsibility once and remembers -- until that is answered by hand, an agent
+  in that mode waits there instead of working.
+
 ## [0.3.33.0] - 2026-09-04
 
 ### Fixed
 
-- Jobs dispatched by the board no longer stall on the very first thing they
-  try to do, on setups where auto mode is unavailable. Board agents were
+- Jobs dispatched by the board no longer stop at every permission prompt on
+  setups where auto mode is unavailable. Board agents were
   started with `--permission-mode auto`, which needs a supported model and an
   organisation that has not switched it off -- so on an Amazon Bedrock or
   Vertex account running an unsupported model, or behind a managed setting,
@@ -76,10 +85,14 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   file is edited by hand. Choosing auto on purpose still works where the
   classifier is available.
 
-  One thing to expect on a new machine: the first time you start Claude Code
-  with permissions bypassed it asks you to accept responsibility once, and
-  remembers. Until someone has answered that by hand, a board agent will wait
-  at the question instead of working.
+  Two things to expect, so this is not oversold. Dispatch is still not
+  hands-off: Claude Code asks you to trust a directory the first time it runs
+  there, every board job gets a brand-new worktree, and no permission mode
+  skips that -- so each job still needs one click to get going. What changes is
+  what happens after it: one click at the start instead of a prompt at every
+  step. And on a new machine, the first session started with permissions
+  bypassed asks you to accept responsibility once and remembers; until someone
+  has answered that by hand, a board agent waits there instead of working.
 
 ## [0.3.32.1] - 2026-09-04
 

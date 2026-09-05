@@ -745,7 +745,9 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
 
   What follows is larger than the board, and the honest answer belongs here
   rather than in a tooltip. `bypassPermissions` means the agent runs Bash
-  unprompted, as the user, and `MCP_CONFIG_DIR` (`~/.agent-007/mcp/<port>/`) is
+  unprompted, as the user, from the moment the operator grants that worktree's
+  trust dialog (which is every job, so read this as one click away rather than
+  as automatic), and `MCP_CONFIG_DIR` (`~/.agent-007/mcp/<port>/`) is
   a SIBLING of `WORKTREE_DIR` (`~/.agent-007/worktrees/`), where every board
   agent's cwd lives. One `cat ../../mcp/<port>/*.json` yields every live
   session's bearer token; `resolveAgentToken` maps a token to its session and
