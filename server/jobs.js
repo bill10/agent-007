@@ -922,25 +922,6 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
       continue;
     }
 
-    // Only now that the replacement run is real does the previous run's kept
-    // agent retire (see finishScheduledRuns). Retiring before the spawn meant
-    // a failed createSession destroyed the last run's only output and left no
-    // new run behind it — the card showed a dispatch error and the summary the
-    // board promises to keep was gone. removeWorktree still protects the work:
-    // dirty or unpushed changes become an orphan rather than being deleted.
-    if (isScheduled(job) && job.lastRunSessionId) {
-      const prev = sessions.get(job.lastRunSessionId);
-      if (prev && !prev.exited && killSession) {
-        try {
-          await killSession(job.lastRunSessionId);
-        } catch (err) {
-          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
-        }
-      }
-      job.lastRunSessionId = null;
-      job.lastRunAgentName = null;
-    }
-
     if (onSessionCreated) onSessionCreated(session);
     job.state = 'in-progress';
     job.agentSessionId = session.id;
@@ -957,6 +938,35 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.worktreePath = session.worktreePath;
     job.lastError = null;
     job.lastErrorAt = null;
+
+    // Only once the replacement run is real does the previous run's kept agent
+    // retire (see finishScheduledRuns). Retiring before the spawn meant a
+    // failed createSession destroyed the last run's only output and left no new
+    // run behind it — the card showed a dispatch error and the summary the
+    // board promises to keep was gone. removeWorktree still protects the work:
+    // dirty or unpushed changes become an orphan rather than being deleted.
+    //
+    // AFTER the claim above, not before it, and that ordering is load-bearing:
+    // this block awaits, and an await between the recheck and the claim is the
+    // very window the recheck exists to close. Sitting above the claim it
+    // reopened that window for every scheduled card on its second or later run
+    // — the common case, since a run's agent is deliberately kept alive to be
+    // read. The claim is now the first thing after the recheck, with nothing
+    // suspending in between, and "the run is real" holds more strictly here
+    // than it did before rather than less.
+    if (isScheduled(job) && job.lastRunSessionId) {
+      const prev = sessions.get(job.lastRunSessionId);
+      if (prev && !prev.exited && killSession) {
+        try {
+          await killSession(job.lastRunSessionId);
+        } catch (err) {
+          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
+        }
+      }
+      job.lastRunSessionId = null;
+      job.lastRunAgentName = null;
+    }
+
     dispatched.push({ job, session });
   }
   if (dispatched.length > 0 || candidates.length > 0) persist(broadcast);

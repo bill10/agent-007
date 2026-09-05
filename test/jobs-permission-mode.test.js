@@ -320,6 +320,55 @@ describe('a mode retuned while the agent is spawning', () => {
     expect(allJobs()[0].state).toBe('todo');
   });
 
+  it('holds for a scheduled card retiring its previous run too', async () => {
+    // The retirement of a scheduled run's kept agent also awaits, and it used
+    // to sit between the recheck and the claim -- which reopened this very
+    // window for every scheduled card on its second or later run, the common
+    // case. It now runs after the card is claimed, so the recheck is the last
+    // thing before the claim with nothing suspending in between. This pins
+    // that ordering: the previous agent must still be retired, and a card
+    // retuned during the SPAWN must still be refused.
+    const { job } = addJob({ title: 'nightly', repoPath: REPO, schedule: '@daily', permissionMode: 'bypassPermissions' }, noopBroadcast);
+    sessions.set('old-run', { id: 'old-run', name: 'Prev', state: 'WAITING', exited: false, lastOutputAt: 0 });
+    job.lastRunSessionId = 'old-run';
+    job.lastRunAgentName = 'Prev';
+    job.nextRunAt = new Date(Date.now() - 60_000).toISOString();   // due now
+
+    const calls = [];
+    const killed = [];
+    await dispatchOnce(
+      racingCreateSession(calls, () => updateJob(job.id, { permissionMode: OTHER_MODE }, noopBroadcast)),
+      noopBroadcast,
+      { killSession: async (id) => { killed.push(id); } },
+    );
+    // Refused, so the new session goes and the PREVIOUS run is untouched --
+    // retiring it here would have thrown away the output of a run that is
+    // still the card's last, for a dispatch that never happened.
+    expect(killed).toEqual(['session-1']);
+    expect(allJobs()[0].state).toBe('todo');
+    expect(allJobs()[0].lastRunSessionId).toBe('old-run');
+    expect(allJobs()[0].runCount).toBe(0);
+  });
+
+  it('retires the previous scheduled run once the new one is claimed', async () => {
+    const { job } = addJob({ title: 'nightly', repoPath: REPO, schedule: '@daily' }, noopBroadcast);
+    sessions.set('old-run', { id: 'old-run', name: 'Prev', state: 'WAITING', exited: false, lastOutputAt: 0 });
+    job.lastRunSessionId = 'old-run';
+    job.lastRunAgentName = 'Prev';
+    job.nextRunAt = new Date(Date.now() - 60_000).toISOString();   // due now
+
+    const calls = [];
+    const killed = [];
+    await dispatchOnce(racingCreateSession(calls, () => {}), noopBroadcast, {
+      killSession: async (id) => { killed.push(id); },
+    });
+    expect(killed).toEqual(['old-run']);
+    expect(allJobs()[0].state).toBe('in-progress');
+    expect(allJobs()[0].agentSessionId).toBe('session-1');
+    expect(allJobs()[0].lastRunSessionId).toBeNull();
+    expect(allJobs()[0].runCount).toBe(1);
+  });
+
   it('claims the card normally when nothing changed', async () => {
     addJob({ title: 'quiet', repoPath: REPO, permissionMode: OTHER_MODE }, noopBroadcast);
     const calls = [];
