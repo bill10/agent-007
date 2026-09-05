@@ -27,6 +27,16 @@ export const COLUMNS = [
   { state: 'review', label: 'Review' },
 ];
 
+// The one mode that leaves a dispatched agent unreviewed. Named here rather
+// than compared inline in three places, and marked wherever it is shown so it
+// never reads as just another entry in a list of six. Kept in step with
+// PERMISSION_MODES in lib/jobs.js by a test — public/ cannot import it.
+const DANGEROUS_MODE = 'bypassPermissions';
+
+function markDangerousMode(el) {
+  if (el) el.classList.toggle('job-mode-danger', el.value === DANGEROUS_MODE);
+}
+
 // Mirrors STALLED_AFTER_MS in lib/jobs.js.
 const STALLED_AFTER_MS = 3 * 60 * 1000;
 
@@ -246,6 +256,19 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'scheduled';
     chip.title = 'Runs again on its schedule instead of finishing in Review';
+    title.appendChild(chip);
+  }
+  if (job.permissionMode) {
+    // Only when the card overrides the board. The mode decides how much its
+    // agent may do unasked, so a card carrying its own must say so on its face
+    // rather than only inside the edit form.
+    const chip = document.createElement('span');
+    // bypassPermissions gets the danger colour rather than the routine gold:
+    // it is the one mode with nothing reviewing the agent, and a card already
+    // on the board is exactly where that has to be readable at a glance.
+    chip.className = `job-card-type${job.permissionMode === DANGEROUS_MODE ? ' job-mode-danger' : ''}`;
+    chip.textContent = job.permissionMode;
+    chip.title = `This job runs with --permission-mode ${job.permissionMode} instead of the board's setting`;
     title.appendChild(chip);
   }
   card.appendChild(title);
@@ -512,17 +535,21 @@ function renderToolbar() {
   const toggle = document.getElementById('btn-dispatcher-toggle');
   const status = document.getElementById('job-dispatcher-status');
   const cap = document.getElementById('job-max-per-repo');
+  const perm = document.getElementById('job-permission-mode');
   if (!toggle) return;
 
   const running = boardSettings.running;
   toggle.textContent = running ? 'Stop' : 'Start';
   toggle.classList.toggle('running', running);
-  const mins = Math.round((boardSettings.intervalMs || 180000) / 60000);
+  const mins = Math.round((boardSettings.intervalMs || 300000) / 60000);
   status.textContent = running
     ? `scanning every ${mins}m`
     : 'dispatcher stopped';
   status.classList.toggle('running', running);
   if (document.activeElement !== cap) cap.value = boardSettings.maxPerRepo;
+  // The mode a card falls back to when it does not name one of its own.
+  if (perm && document.activeElement !== perm) perm.value = boardSettings.permissionMode || 'auto';
+  markDangerousMode(perm);
 }
 
 // --- Attachments ---
@@ -637,6 +664,7 @@ function openForm(jobId) {
   const repoEl = document.getElementById('job-repo');
   const typeEl = document.getElementById('job-type');
   const scheduleEl = document.getElementById('job-schedule');
+  const permEl = document.getElementById('job-permission-mode-field');
   const saveBtn = document.getElementById('btn-job-save');
 
   repoEl.innerHTML = '';
@@ -659,6 +687,11 @@ function openForm(jobId) {
   if (job) repoEl.value = job.repoPath;
   typeEl.value = job && isScheduled(job) ? 'scheduled' : 'one-time';
   scheduleEl.value = job && job.schedule ? job.schedule : '';
+  // '' is the "Board default" option, and it is what a card with no mode of
+  // its own goes back to — never pre-filled with the board's current value,
+  // which would silently freeze the card onto today's setting.
+  if (permEl) permEl.value = job && job.permissionMode ? job.permissionMode : '';
+  markDangerousMode(permEl);
   pendingAttachments = job && Array.isArray(job.attachments) ? job.attachments.map(a => ({ name: a.name })) : [];
   renderAttachments();
   syncScheduleField();
@@ -691,6 +724,7 @@ function saveForm() {
   const repoPath = document.getElementById('job-repo').value;
   const jobType = document.getElementById('job-type').value;
   const schedule = document.getElementById('job-schedule').value.trim();
+  const permissionMode = document.getElementById('job-permission-mode-field')?.value || '';
   if (!title) return showFormError('Give the job a title.');
   if (!repoPath) return showFormError('Add a repository in the explorer first — a job needs one to run in.');
   if (jobType === 'scheduled' && !schedule) return showFormError('A scheduled job needs a cron schedule, for example "0 9 * * 1-5".');
@@ -701,7 +735,7 @@ function saveForm() {
   // The form always holds the complete list; an empty one on an edit means
   // "none left".
   const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
-  const fields = { title, detail, repoPath, jobType, schedule, attachments };
+  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, attachments };
   if (editingJobId) send({ type: 'job-update', jobId: editingJobId, ...fields });
   else send({ type: 'job-create', ...fields });
   closeForm();
@@ -801,6 +835,18 @@ export function setupJobBoard() {
     const value = parseInt(e.target.value, 10);
     if (Number.isFinite(value)) send({ type: 'job-settings', maxPerRepo: value });
   };
+  const permEl = document.getElementById('job-permission-mode');
+  // Sending this is what records the mode as CHOSEN on the server, which is
+  // how a stored value is told apart from one a default wrote (see
+  // boardSettings in server/jobs.js) — so it must only fire on a real change.
+  if (permEl) permEl.onchange = (e) => {
+    markDangerousMode(e.target);
+    send({ type: 'job-settings', permissionMode: e.target.value });
+  };
+  // The form's own select is marked as it changes too, not only when the form
+  // opens — the warning has to be on screen while the choice is being made.
+  const formPermEl = document.getElementById('job-permission-mode-field');
+  if (formPermEl) formPermEl.onchange = () => markDangerousMode(formPermEl);
 
   // Relative timestamps and the "quiet" threshold both drift with the clock, so
   // the board re-renders on a slow tick while it is visible. Cheap: it only
