@@ -360,6 +360,53 @@
   occurrence yet, hence P3: worth closing because any early death hits it, not
   because something hit it.
 
+## A scan tick uses the agent cap it started with, not the one in force
+
+- **What:** `dispatchOnce` reads `boardSettings()` once (`const settings`) and
+  uses `settings.maxPerRepo` for the whole tick, then awaits `createSession`
+  once per candidate -- seconds each. `boardSettings()` returns a freshly
+  merged object every call, so a concurrent `updateSettings` mutates a
+  different object than the one the loop still points at, and a cap lowered
+  mid-tick has no effect until the next scan. Re-read the setting per
+  iteration, or document that a tick is deliberately atomic in its cap.
+- **Why:** A user reaching for the cap is usually reacting to a board that is
+  spawning too much right now, and the control quietly does nothing until the
+  current tick drains. The permission mode had the same shape and was fixed in
+  v0.3.34.0 (it re-reads `boardSettings()` at the post-await recheck, because
+  there the stale value decides what a live agent is allowed to do); the cap is
+  the same latent race with a smaller blast radius.
+- **Effort:** S (human: ~1 hour / CC: ~10 min)
+- **Priority:** P3
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Found by the adversarial review during /ship for v0.3.34.0
+  (2026-09-04), which flagged that making the toolbar controls reachable is
+  exactly what gives users a reason to reach for one mid-crisis.
+
+## Any board user can raise another user's queued card to bypassPermissions
+
+- **What:** `server/ws.js`'s `job-update` is deliberately not ownership-gated
+  ("the board is shared workspace state, not a per-user resource"), and as of
+  v0.3.34.0 `permissionMode` rides that same door. So on a multi-user board any
+  authenticated user can change someone else's To do card to
+  `bypassPermissions` before it dispatches. Decide whether the permission mode
+  specifically should be ownership-gated the way `editJobForAgent` already
+  gates agent writes, or whether the shared-board model covers it.
+- **Why:** Every other field on that door describes work; this one decides what
+  the spawned agent is allowed to do to the machine. `editJobForAgent` already
+  draws exactly this line for agents (`job.postedBy !== asker`), so the board
+  has the notion of card ownership -- it is only the browser door that does not
+  apply it. Consistent with the project's stated trust model (auth is identity,
+  not a sandbox -- see server/auth.js), which is why this is a question rather
+  than a bug.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P3
+- **Depends on:** Per-job permission mode (v0.3.34.0)
+- **Context:** Raised by the adversarial review during /ship for v0.3.34.0
+  (2026-09-04) as "worth the maintainer explicitly confirming that's
+  acceptable". Only bites on a board with more than one user.
+
+## Completed
+
 ## The board permission mode is unreachable and unmigrated
 
 - **What:** Two halves of the same gap. `server/ws.js` accepts `permissionMode`
@@ -392,7 +439,20 @@
   dispatch, which happens from To do, so `editableInPlace` refusing edits past
   To do is exactly the right gate.
 
-## Completed
+- **Outcome:** Both halves closed in v0.3.34.0. The board's toolbar has a
+  **permissions** select (the fallback), and the job form has a per-card one
+  whose "Board default" option stores `null` rather than a copy of the board
+  value -- so an unset card follows the board if that changes before it is
+  dispatched. `buildJobCommand` resolves card-then-board-then-default, and the
+  allowlist check stayed at the argv-building function as well as the settings
+  boundary. The migration became decidable once the control existed: a stored
+  mode with no `permissionModeChosen` flag is a default nobody picked, so it is
+  ignored and `DEFAULT_PERMISSION_MODE` (back to `auto`) wins. Boards that had
+  been running on `bypassPermissions` -- every board whose first dispatcher
+  start happened on v0.3.33.0 -- move back to `auto`.
+
+**Completed:** v0.3.34.0 (2026-09-04)
+
 
 ## Sofa sitter placement has never been checked against a render
 

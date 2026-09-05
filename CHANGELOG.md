@@ -5,6 +5,48 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.34.0] - 2026-09-04
+
+### Added
+
+- **A permission mode you can actually reach, at two levels.** The board's
+  toolbar has a **permissions** select -- the mode every dispatched agent gets
+  unless its card says otherwise -- and the job form has a **Permissions** field
+  for one job on its own. A card left on "Board default" stays genuinely unset
+  rather than taking a copy of today's board setting, so changing the board
+  still moves every card queued behind it. A card that does carry its own mode
+  shows it as a chip on its face, because the mode decides how much that agent
+  may do without asking. Only a card still in To do can be given one, which is
+  the rule the board already applies to every other edit: past To do, its agent
+  has already been handed the card. An agent posting a card through the board's
+  MCP tool cannot set the mode -- those cards always inherit the board's.
+
+### Changed
+
+- **Board agents dispatch in `auto` mode again, and boards running on
+  `bypassPermissions` will move back to it.** Read this one if your board has
+  run since v0.3.33.0. That release made `bypassPermissions` the default as a
+  stopgap, because `auto` needs a classifier that isn't available on every
+  account (an unsupported model on Bedrock or Vertex, or
+  `permissions.disableAutoMode`) and Claude Code quietly starts the session in
+  Manual where it's missing -- so a job would run until it needed a permission
+  and then wait there for a person who isn't watching. That is a stall the board
+  shows you (the card goes orange, then reads as stalled), not a crash, and now
+  that there is a control for it the safer mode is the right default again:
+  `auto`'s classifier is the only thing that reviews a dispatched agent's
+  actions before they run, and a job agent's prompt is your card text plus
+  whatever it reads out of the repo. Under `bypassPermissions` nothing reviews
+  anything.
+
+  Why this reaches you at all, when a default change normally wouldn't: the
+  board writes its settings to `~/.agent-007/config.json` the first time the
+  dispatcher starts, so every board that has ever run has a mode stored that
+  nobody chose -- there was no way to choose one until this release. Those
+  stored values are therefore treated as unset, once, and the new default wins.
+  A mode you pick in the toolbar from now on is recorded as a choice and is
+  never touched again. If auto mode isn't available on your machine, set the
+  board's permissions to something else and it stays set.
+
 ## [0.3.33.0] - 2026-09-04
 
 ### Fixed

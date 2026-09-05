@@ -662,7 +662,7 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
 - **An agent may read the whole board but only rewrite its owner's cards.** A To
   do card's detail is not text about work, it IS the next agent's prompt:
   `buildJobPrompt` hands it verbatim to an unattended `claude --permission-mode
-  bypassPermissions`. Every board-dispatched agent holds one of these tokens, so without an
+  auto`. Every board-dispatched agent holds one of these tokens, so without an
   ownership rule an agent working a hostile repo could rewrite a card queued for
   a different repo and have the board run its text there. `edit_job` therefore
   refuses a card whose `postedBy` is not the calling session's owner, the same
@@ -713,39 +713,51 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   it the other way round — agents allowed unless a route remembered to exclude
   them — which meant `/api/browse` had to be retrofitted the day the credential
   was introduced.
-- **Claude Code no longer asks before the call goes through, and the ownership
-  rule above does not survive that on its own.** Measured: under the default
-  mode and under `--permission-mode auto`, a call to one of these tools waits
-  for approval (measured on `post_job`; the gate is per tool call, not per
-  tool). Under `bypassPermissions` it does not — and `bypassPermissions` is what
-  `DEFAULT_PERMISSION_MODE` now is, because auto mode needs a classifier that is
-  not available on every provider the board runs against (see lib/jobs.js).
+- **Claude Code asks the user before the call goes through — under the default
+  mode.** Measured: under the default mode and under `--permission-mode auto`, a
+  call to one of these tools waits for approval (measured on `post_job`; the
+  gate is per tool call, not per tool). That is the right outcome and not
+  something to design around — a card is filed, read out or rewritten because a
+  person said yes. It does mean an unattended agent cannot post one, which is
+  exactly why nothing instructs dispatched agents to.
 
-  Be clear about what that costs, because the honest answer is larger than the
-  board. `bypassPermissions` means the agent runs Bash unprompted, as the user,
-  and `MCP_CONFIG_DIR` (`~/.agent-007/mcp/<port>/`) is a SIBLING of
-  `WORKTREE_DIR` (`~/.agent-007/worktrees/`), where every board agent's cwd
-  lives. One `cat ../../mcp/<port>/*.json` yields every live session's bearer
-  token; `resolveAgentToken` maps a token to its session and `http.js` derives
-  the MCP caller's identity from that session's `ownerId`, so a stolen token
-  makes the caller that other user and `editJobForAgent`'s
+  Under `bypassPermissions` it does not ask, and the board can be put in that
+  mode: `DEFAULT_PERMISSION_MODE` is `auto` (v0.3.34.0, after one release on
+  `bypassPermissions`), but the toolbar exposes the board setting and a card can
+  override it, because auto mode needs a classifier that is not available on
+  every provider the board runs against and silently degrades to Manual where it
+  is missing. So this is a choice a user can make, with what follows.
+
+  What follows is larger than the board, and the honest answer belongs here
+  rather than in a tooltip. `bypassPermissions` means the agent runs Bash
+  unprompted, as the user, and `MCP_CONFIG_DIR` (`~/.agent-007/mcp/<port>/`) is
+  a SIBLING of `WORKTREE_DIR` (`~/.agent-007/worktrees/`), where every board
+  agent's cwd lives. One `cat ../../mcp/<port>/*.json` yields every live
+  session's bearer token; `resolveAgentToken` maps a token to its session and
+  `http.js` derives the MCP caller's identity from that session's `ownerId`, so
+  a stolen token makes the caller that other user and `editJobForAgent`'s
   `job.postedBy !== asker` check passes. `USERS_PATH` is a sibling too, and
   `loadUsers()` re-reads on mtime with no restart. The 0600/0700 modes are
   same-UID and stop none of it. Nor is this list exhaustive: `git worktree add`
   leaves `.git` pointing into the real repository, and ungated Bash is the
   universal way around any file-tool rule.
 
-  So the ownership rule is a guard against an agent that misbehaves, not
-  against one that is hostile. Against a hostile agent there is no in-app
-  boundary left, and there never really was one below Claude Code's prompts —
-  the prompts were the boundary. The remaining boundary is operational: run the
-  board on repositories whose contents you trust, the same standard the auth
-  section already sets for handing out a token. What still helps in the
-  misbehaving case: nothing in `buildJobPrompt` tells a dispatched agent to
-  touch the board at all. If a real gate is wanted back, the lever is
-  withholding the board credential from dispatched sessions in `server/pty.js`
-  and moving `MCP_CONFIG_DIR` out from beside the worktrees — not the
-  permission mode, which has to stay usable on every provider.
+  So in that mode the ownership rule is a guard against an agent that
+  misbehaves, not against one that is hostile — against a hostile agent there is
+  no in-app boundary left, and there never really was one below Claude Code's
+  prompts: the prompts ARE the boundary. Which is the argument for `auto` as the
+  default and not merely as a fallback. The classifier is the only thing that
+  reviews a dispatched agent's actions before they run, and a board agent's
+  prompt is card text plus whatever it reads out of the repo. A user who turns
+  it off is choosing the operational boundary instead: run the board on
+  repositories whose contents you trust, the same standard the auth section sets
+  for handing out a token. Two levers, deliberately: the board setting so a
+  machine without the classifier sets it once, and a per-card mode so a single
+  job asking for more does not lower the bar for the queue behind it. If a real
+  gate is wanted back for the bypassed case, the lever is withholding the board
+  credential from dispatched sessions in `server/pty.js` and moving
+  `MCP_CONFIG_DIR` out from beside the worktrees — not the permission mode,
+  which has to stay changeable on every provider.
 - **Attribution is two facts, not one.** `postedByAgent` (which agent typed it)
   is stored beside `postedBy`/`postedByName` (whose work it is), and the card
   shows the agent as an accent-tinted `via <name>`. Folding them into one field
