@@ -584,6 +584,13 @@ those cards have always been.
   the status pill does the same, and stays the keyboard path since the card
   itself is not a tab stop. Card buttons, the PR link, and a click that ends
   a text selection on the card are all excluded.
+- A card that carries its own permission mode wears it as a chip; a card left on
+  the board default wears nothing, because the chip's job is to say "this one is
+  different". `bypassPermissions` takes `--state-disconnected` instead of the
+  routine chip gold, on the card and on both selects, since it is the one mode
+  with nothing reviewing the agent and it otherwise reads as just another entry
+  in a list of six. The colour sits on the closed select, not on the `<option>`
+  (Safari ignores option colours), so the warning survives the dropdown closing.
 - Card actions are hidden until hover/focus-within, so a full board stays scannable.
 - Two error lines can appear, and they are independent. `lastError` carries what
   happened to the job (a dispatch failure, or "agent lost" after a restart);
@@ -661,8 +668,9 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   retitling a card in Review for the archive's sake is no longer possible.
 - **An agent may read the whole board but only rewrite its owner's cards.** A To
   do card's detail is not text about work, it IS the next agent's prompt:
-  `buildJobPrompt` hands it verbatim to an unattended `claude --permission-mode
-  auto`. Every board-dispatched agent holds one of these tokens, so without an
+  `buildJobPrompt` hands it verbatim to an unattended `claude`, in whatever
+  permission mode the card or the board names (`auto` unless someone changed
+  it). Every board-dispatched agent holds one of these tokens, so without an
   ownership rule an agent working a hostile repo could rewrite a card queued for
   a different repo and have the board run its text there. `edit_job` therefore
   refuses a card whose `postedBy` is not the calling session's owner, the same
@@ -670,6 +678,13 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   only bites once identities exist. Reading stays board-wide: `jobsPayload`
   already sends every card to every connected browser, and a tool that could
   only see its own cards could not answer "what is queued?".
+- **An agent cannot choose the mode its card will run in.** `postJobForAgent`
+  and `editJobForAgent` drop `permissionMode` entirely, so a card filed or
+  rewritten through the MCP door always inherits the board's setting. The field
+  decides how much the next dispatched agent may do unasked; letting an agent
+  set it would be a way around every gate its own session runs under, and the
+  ownership rule above would not catch it — an agent is allowed to edit its
+  owner's cards.
 - **An edit that lands says so and leaves a name.** The hazard above is an edit
   nobody sees, so `edit_job` toasts the way `post_job` does and stamps
   `editedByAgent`/`editedAt`, which the card renders beside "via" — a card an
