@@ -41,23 +41,46 @@ function defaultSettings() {
     // Whether a human ever picked that mode in the toolbar. Written only by
     // updateSettings; see boardSettings() for why the flag has to exist.
     permissionModeChosen: false,
+    // Whether the legacy-value migration in boardSettings() has already run.
+    // Separate from `permissionModeChosen` on purpose: that one means a person
+    // decided, and setting it here would be a lie that also stops any future
+    // default from ever reaching this board.
+    permissionModeMigrated: false,
   };
 }
 
 export function boardSettings() {
   if (!config.jobBoard || typeof config.jobBoard !== 'object') config.jobBoard = defaultSettings();
   else config.jobBoard = { ...defaultSettings(), ...config.jobBoard };
-  // A one-time migration, and it can only be done once: until the toolbar got
-  // a permission-mode control there was no way to choose one, so every mode
-  // sitting in ~/.agent-007/config.json today was written by the first
-  // dispatcher start out of whatever DEFAULT_PERMISSION_MODE was then. The
-  // stored object is spread OVER the defaults, so without this a changed
-  // default reaches nobody — and a board whose first run was on v0.3.33.0
-  // would keep dispatching with `bypassPermissions` for ever, having never
-  // been asked. Unchosen therefore reads as unset, and the current default
-  // wins. The same line rejects a mode hand-edited into something the
-  // allowlist does not know, which would otherwise show up as a blank select.
-  if (!config.jobBoard.permissionModeChosen || !isValidPermissionMode(config.jobBoard.permissionMode)) {
+  // Migrate the legacy value ONCE. Until the toolbar got a permission-mode
+  // control there was no way to choose one, so every mode sitting in
+  // ~/.agent-007/config.json today was written by the first dispatcher start
+  // out of whatever DEFAULT_PERMISSION_MODE was then. The stored object is
+  // spread OVER the defaults, so without this a changed default reaches
+  // nobody. Unchosen therefore reads as unset, and the current default wins.
+  //
+  // The `permissionModeMigrated` guard is what makes "once" true. Keying the
+  // reset on `permissionModeChosen` alone re-ran it on EVERY call, so a mode
+  // hand-edited into config.json was silently overwritten on the next read,
+  // for ever — and hand-editing that file is what every doc said to do before
+  // this release, and is still the only route on a box with no browser. The
+  // symptom was the worst kind: the file says one thing and the board
+  // dispatches another, with nothing logged.
+  if (!config.jobBoard.permissionModeMigrated) {
+    if (!config.jobBoard.permissionModeChosen) config.jobBoard.permissionMode = DEFAULT_PERMISSION_MODE;
+    config.jobBoard.permissionModeMigrated = true;
+    // Written through immediately, and this is the only place boardSettings()
+    // is allowed to write. A marker that lives only in memory is not a marker:
+    // a board with no queued cards never reaches the dispatcher's persist, so
+    // the flag would die with the process and the migration would run again on
+    // the next boot -- reverting exactly the hand-edit it is meant to respect.
+    // saveConfig only serialises `config`, so there is no recursion back here,
+    // and the branch cannot be taken twice.
+    saveConfig();
+  }
+  // Always, whenever it arrived: an unknown mode would show up as a blank
+  // select, and buildJobCommand would fall back to the default anyway.
+  if (!isValidPermissionMode(config.jobBoard.permissionMode)) {
     config.jobBoard.permissionMode = DEFAULT_PERMISSION_MODE;
   }
   return config.jobBoard;

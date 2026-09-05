@@ -197,6 +197,29 @@ describe('the stored board permission mode', () => {
     expect(boardSettings().running).toBe(false);
   });
 
+  it('migrates once, so a later hand-edit is not silently overwritten', () => {
+    // The reset used to key on permissionModeChosen alone, which meant it ran
+    // on EVERY boardSettings() call, not once. A mode hand-edited into
+    // config.json was therefore reverted on the next read, for ever, with
+    // nothing logged -- the file said one thing and the board dispatched
+    // another. Hand-editing is what every doc said to do before the toolbar
+    // existed, and is still the only route on a box with no browser.
+    config.jobBoard = { permissionMode: 'bypassPermissions' };
+    expect(boardSettings().permissionMode).toBe(DEFAULT_PERMISSION_MODE);   // migrated
+    expect(boardSettings().permissionModeMigrated).toBe(true);
+
+    // Now the user edits the file by hand. It has to stick.
+    config.jobBoard.permissionMode = 'bypassPermissions';
+    expect(boardSettings().permissionMode).toBe('bypassPermissions');
+    expect(boardSettings().permissionMode).toBe('bypassPermissions');
+  });
+
+  it('still refuses nonsense that arrives after the migration has run', () => {
+    config.jobBoard = { permissionMode: 'auto', permissionModeMigrated: true };
+    config.jobBoard.permissionMode = 'yolo';
+    expect(boardSettings().permissionMode).toBe(DEFAULT_PERMISSION_MODE);
+  });
+
   it('keeps a mode a human actually picked', () => {
     config.jobBoard = { permissionMode: OTHER_MODE, permissionModeChosen: true };
     expect(boardSettings().permissionMode).toBe(OTHER_MODE);
