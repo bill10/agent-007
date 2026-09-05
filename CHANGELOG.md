@@ -9,15 +9,16 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Fixed
 
-- Jobs dispatched by the board no longer die on the spot where auto mode is
-  unavailable. Board agents were started with `--permission-mode auto`, which
-  needs a classifier that some setups do not have -- an Amazon Bedrock or
-  Vertex account, or a machine whose settings turn auto mode off. `claude`
-  accepts the flag and then fails once it is running, and because the process
-  did start, the board saw a healthy spawn: the card moved to In progress,
-  the agent died seconds later, and the card sat there reading "agent gone"
-  with no reason on it and no retry, forever. New boards now dispatch with
-  permissions bypassed instead, which every setup supports.
+- Jobs dispatched by the board no longer stall on the very first thing they
+  try to do, on setups where auto mode is unavailable. Board agents were
+  started with `--permission-mode auto`, which needs a supported model and an
+  organisation that has not switched it off -- so on an Amazon Bedrock or
+  Vertex account running an unsupported model, or behind a managed setting,
+  it is not available. Claude Code does not complain about that: it quietly
+  starts the session in Manual instead. The agent then works normally right up
+  until it needs your permission for something, and stops there, waiting for a
+  person who is not watching. Every job, every time. New boards now dispatch
+  with permissions bypassed instead, which needs no classifier.
 
   Read that as the trade it is, because it is a real one. Bypassing
   permissions means a dispatched agent runs shell commands and file edits with
