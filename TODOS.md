@@ -349,15 +349,16 @@
   requeue the card.
 - **Why:** The card gives no reason and offers no retry, so the only way to find
   out why a job never ran is to open the dead terminal tab and read the error
-  the process printed before it died. This is how the `auto`-mode breakage
-  (v0.3.33.0) stayed invisible: the board reported a healthy dispatch every
-  time.
+  the process printed before it died.
 - **Effort:** S (human: ~3 hours / CC: ~20 min)
-- **Priority:** P2
+- **Priority:** P3
 - **Depends on:** Job board (v0.3.0.0)
-- **Context:** Found while tracing why `--permission-mode auto` fails on
-  Bedrock (2026-09-04). The permission-mode default was fixed; this failure
-  class was not, and it is not specific to permission modes.
+- **Context:** Noticed while tracing the `auto`-mode problem on Bedrock
+  (2026-09-04), but it is NOT what happened there -- an unavailable auto mode
+  starts the session in Manual rather than killing it, so that card stalled
+  visibly instead of vanishing. This is a latent gap with no observed
+  occurrence yet, hence P3: worth closing because any early death hits it, not
+  because something hit it.
 
 ## The board permission mode is unreachable and unmigrated
 
@@ -380,6 +381,16 @@
 - **Context:** Raised by the ship coverage audit for v0.3.33.0 (2026-09-04).
   `test/jobs-permission-mode.test.js` documents the stored-mode behaviour as it
   stands, so a migration has to change that test deliberately.
+- **Shape it should take:** a per-job permission mode on the card, defaulting to
+  the board setting, with the board setting defaulting back to `auto`. Two
+  levels, so a machine where auto is unavailable sets it once rather than per
+  card, and the safe mode is what you get unless a job asks for more. `auto` is
+  the right default on merit -- its classifier is the only thing reviewing a
+  dispatched agent's actions, which matters most for a job whose prompt came
+  from repo content. Adding the field is cheap: `jobsPayload()` spreads the
+  whole job so it reaches the client for free, and the mode is only read at
+  dispatch, which happens from To do, so `editableInPlace` refusing edits past
+  To do is exactly the right gate.
 
 ## Completed
 

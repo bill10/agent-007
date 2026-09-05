@@ -1,11 +1,11 @@
 // The permission mode a board agent is spawned with, end to end: the constant
 // in lib/jobs.js, the stored board setting, and the argv dispatchOnce builds
-// from it. The default moved from `auto` to `bypassPermissions` because auto
-// needs a classifier that is missing on Bedrock/Vertex and behind
-// permissions.disableAutoMode -- `claude` takes the flag at argv parsing and
-// dies at runtime, so the spawn "succeeds", the card goes to In progress, and
-// it sticks there forever with lastError null. These cover the paths that
-// change of default left untested.
+// from it. The default moved from `auto` to `bypassPermissions` because where
+// auto mode is unavailable -- an unsupported model on Bedrock/Vertex,
+// permissions.disableAutoMode, or a server-side switch -- Claude Code starts
+// the session in Manual instead of failing, so every board job runs until its
+// first permission prompt and then waits for a human who is not there. These
+// cover the paths that change of default left untested.
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
