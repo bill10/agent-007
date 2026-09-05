@@ -156,7 +156,7 @@
 - **Effort:** XS (human: ~5 min / CC: ~2 min)
 - **Priority:** P3
 - **Depends on:** Nothing
-- **Context:** Identified during eng review (2026-03-26). Currently masked because `strip-ansi` v7 handles most charset sequences before our regex runs, but edge cases may slip through.
+- **Context:** Identified during eng review (2026-03-26). Currently masked because `strip-ansi` v7 handles most charset sequences before our regex runs, but edge cases may slip through. Narrowed by v0.3.33.0: state detection now matches against a headless terminal's screen, not `stripAnsiComplete` output, so the remaining exposure is the `hasContent` activity check in `server/pty.js` only.
 
 ## npm global install + CLI UX
 - **What:** Add `bin` entry, `--help`/`--version`/`--port` flags, `.npmignore`, and `npm publish` workflow so users can `npm install -g agent-007`.

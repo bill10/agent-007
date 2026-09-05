@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.3.33.0] - 2026-09-05
+
+### Fixed
+
+- An agent asking you a question keeps its thought bubble and stays at its desk.
+  Pressing the arrow keys to move through the choices used to make the office
+  forget the question was there at all: the character wandered off to a
+  conference seat and sat down while the dialog was still on screen waiting for
+  an answer. The office now reads what is actually displayed in each agent's
+  terminal, rather than the last few lines it wrote, so a dialog counts as
+  present for exactly as long as you can see it -- and stops counting the moment
+  you answer. A stray beep, a spinner tick, or resizing the window used to
+  trigger the same disappearing act, and no longer does.
+
 ## [0.3.32.0] - 2026-09-04
 
 ### Added
