@@ -19,7 +19,7 @@ import { safeFilename } from '../lib/helpers.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
-  branchSlugFromTitle, isValidPermissionMode, JOB_STATES,
+  branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
@@ -37,12 +37,28 @@ function defaultSettings() {
     maxPerRepo: MAX_AGENTS_PER_REPO,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
+    // Whether a human ever picked that mode in the toolbar. Written only by
+    // updateSettings; see boardSettings() for why the flag has to exist.
+    permissionModeChosen: false,
   };
 }
 
 export function boardSettings() {
   if (!config.jobBoard || typeof config.jobBoard !== 'object') config.jobBoard = defaultSettings();
   else config.jobBoard = { ...defaultSettings(), ...config.jobBoard };
+  // A one-time migration, and it can only be done once: until the toolbar got
+  // a permission-mode control there was no way to choose one, so every mode
+  // sitting in ~/.agent-007/config.json today was written by the first
+  // dispatcher start out of whatever DEFAULT_PERMISSION_MODE was then. The
+  // stored object is spread OVER the defaults, so without this a changed
+  // default reaches nobody — and a board whose first run was on v0.3.33.0
+  // would keep dispatching with `bypassPermissions` for ever, having never
+  // been asked. Unchosen therefore reads as unset, and the current default
+  // wins. The same line rejects a mode hand-edited into something the
+  // allowlist does not know, which would otherwise show up as a blank select.
+  if (!config.jobBoard.permissionModeChosen || !isValidPermissionMode(config.jobBoard.permissionMode)) {
+    config.jobBoard.permissionMode = DEFAULT_PERMISSION_MODE;
+  }
   return config.jobBoard;
 }
 
@@ -246,8 +262,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -336,6 +352,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
     // the calling agent can act on rather than a card that never fires.
     type: typeof type === 'string' ? type : undefined,
     schedule: typeof schedule === 'string' ? schedule : '',
+    // No permissionMode: an agent posting a card must not be able to pick the
+    // mode the board will spawn with, which would be a way around every gate
+    // its own session runs under. A card an agent files inherits the board's.
     postedBy: user ? user.id : null,
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
@@ -559,6 +578,14 @@ export function updateJob(jobId, fields, broadcast) {
   // for the next unrelated persist to write out.
   const plan = planAttachments(job, fields.attachments);
   if (plan?.error) return plan;
+  // Refused before anything is written, alongside the attachment plan and the
+  // type/schedule pair, for the same reason: an error reply must not leave a
+  // half-edited card in memory.
+  let mode = null;
+  if (fields.permissionMode !== undefined) {
+    mode = resolveJobPermissionMode(fields.permissionMode);
+    if (mode.error) return { error: mode.error };
+  }
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
   // rejected as a pair.
@@ -581,6 +608,7 @@ export function updateJob(jobId, fields, broadcast) {
   if (typeof fields.title === 'string' && fields.title.trim()) job.title = fields.title.trim().slice(0, MAX_TITLE_LEN);
   if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
   if (fields.repoPath) job.repoPath = fields.repoPath;
+  if (mode) job.permissionMode = mode.permissionMode;
   if (resolved) {
     job.type = resolved.type;
     job.schedule = resolved.schedule;
@@ -799,7 +827,12 @@ export function updateSettings(fields, broadcast) {
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
   // Allowlisted: this value is interpolated into the agent's command line.
-  if (isValidPermissionMode(fields.permissionMode)) settings.permissionMode = fields.permissionMode;
+  // A valid one is also the only thing that ever sets permissionModeChosen —
+  // that flag is what tells the stored mode apart from one nobody picked.
+  if (isValidPermissionMode(fields.permissionMode)) {
+    settings.permissionMode = fields.permissionMode;
+    settings.permissionModeChosen = true;
+  }
   persist(broadcast);
   return { settings };
 }
