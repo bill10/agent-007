@@ -7,6 +7,7 @@ import { resolveExecutable, isUsableCwd } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
+import { createScreen, syncScreenLines } from './screen.js';
 import { broadcastJobs } from './jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
@@ -50,6 +51,7 @@ function installAsyncSpawnGuard() {
     session.exited = true;
     clearInterval(session.stateCheckInterval);
     clearTimeout(session.scanTimer);
+    session.screen?.dispose(); session.screen = null;   // reads on a disposed xterm log a leak warning
     removeMcpConfig(session.id);
     updateState(session, broadcast);
     if (broadcast) broadcast({ type: 'session-ended', sessionId: session.id, reason });
@@ -68,17 +70,9 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     const hasContent = lines.length > 0 && lines.some(l => l.length > 3 && !TRIVIAL_RE.test(l) && !ESCAPE_REMNANT_RE.test(l));
     const recentResize = (Date.now() - (session.lastResizeAt || 0)) < 2000;
     if (hasContent && !recentResize) session.lastOutputAt = Date.now();
-    if (lines.length > 0) {
-      // Capped: these lines are matched against MESSAGE_PATTERNS/PROMPT_PATTERNS
-      // on every chunk AND on a 1s per-session interval, and several of those
-      // patterns are quadratic on a long line (`/Allow .+ to (read|edit|...)/`
-      // measured 2s on one 180KB line, which pegs the event loop for every
-      // session). An agent controls this text, and no prompt footer is 400
-      // chars, so bound it here rather than hardening one regex at a time.
-      const cap = l => l.trim().slice(0, 400);
-      session.lastStrippedLine = cap(lines[lines.length - 1]);
-      session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(cap)].slice(-5);
-    }
+    // Detection lines come off the screen model on the 1s tick, not from this
+    // chunk — see server/screen.js. Writing is all that happens per chunk.
+    session.screen?.write(data);
     broadcast({ type: 'pty-output', sessionId, data: Buffer.from(data).toString('base64') });
     updateState(session, broadcast);
   });
@@ -87,6 +81,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     session.exited = true;
     clearInterval(session.stateCheckInterval);
     clearTimeout(session.scanTimer);
+    session.screen?.dispose(); session.screen = null;   // reads on a disposed xterm log a leak warning
     // The config file holds this agent's board credential. resolveAgentToken
     // already stops honouring the token the moment `exited` is set, so this is
     // about not leaving credentials lying in the filesystem, not about access.
@@ -95,7 +90,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
   });
 
-  session.stateCheckInterval = setInterval(() => updateState(session, broadcast), 1000);
+  session.stateCheckInterval = setInterval(() => {
+    syncScreenLines(session);
+    updateState(session, broadcast);
+  }, 1000);
 }
 
 /**
@@ -151,6 +149,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     createdAt: Date.now(),
     pty: ptyProcess,
     ringBuffer: createRingBuffer(RING_BUFFER_MAX),
+    screen: createScreen(120, 30),   // same dimensions as the spawn below
     state: 'WORKING',
     lastOutputAt: Date.now(),
     lastResizeAt: 0,

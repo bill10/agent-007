@@ -185,6 +185,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           if (session && !session.exited && owns(ws, session.ownerId)) {
             session.lastResizeAt = Date.now();
             session.pty.resize(msg.cols, msg.rows);
+            session.screen?.resize(msg.cols, msg.rows);
           }
           break;
         }
