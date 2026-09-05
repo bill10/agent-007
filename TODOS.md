@@ -310,6 +310,77 @@
 - **Context:** Raised by the simplification and maintainability specialists
   during /ship (2026-09-03).
 
+## Session MCP tokens sit in a sibling directory of the worktrees
+
+- **What:** `MCP_CONFIG_DIR` is `~/.agent-007/mcp/<port>/` (`server/agent-mcp.js`)
+  and `WORKTREE_DIR` is `~/.agent-007/worktrees/` (`server/state.js`). They are
+  siblings, and every board agent's cwd is inside the second one, so
+  `../../mcp/<port>/*.json` reaches every live session's bearer token. Move the
+  token files somewhere a worktree cannot walk to with two `..` segments, and
+  give each dispatched session only its own.
+- **Why:** `resolveAgentToken` maps a token to its session and `server/http.js`
+  derives the MCP caller's identity from that session's `ownerId`, so a stolen
+  token makes the caller that other user and `editJobForAgent`'s
+  `job.postedBy !== asker` check passes. That is the ownership rule the board's
+  agent-facing writes rest on. The 0600/0700 modes do not help: same UID.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P2
+- **Depends on:** Board MCP credential (v0.3.0.0)
+- **Context:** Found by the adversarial review during /ship for v0.3.33.0
+  (2026-09-04), which made it matter: board agents now dispatch with
+  `bypassPermissions`, so reading outside the worktree no longer prompts.
+  Fixing this does not restore a boundary against a hostile agent -- ungated
+  Bash means there is none -- it removes a needless one-command path to every
+  other session's identity, and lets DESIGN.md's ownership rule mean what it
+  says for an agent that is merely confused. `USERS_PATH` is a sibling too and
+  `loadUsers()` re-reads on mtime with no restart; same directory-layout fix.
+
+## A board agent that dies seconds after spawn leaves its card stuck forever
+
+- **What:** `dispatchOnce` treats a successful `createSession` as a successful
+  dispatch. If the spawned `claude` exits immediately -- a flag its runtime
+  rejects, a missing binary, a crash on startup -- the PTY spawn still
+  succeeded, so `result.error` is null, the card takes `agentSessionId`, a
+  branch and a worktree, and moves to In progress. `deriveJobStatus` then shows
+  "agent gone" with `lastError` null, and nothing puts a one-time job back in To
+  do, so it never retries. A scheduled card resets and fails the same way on
+  every firing. Treat an exit within a few seconds of dispatch as a dispatch
+  failure: set `lastError` from the tail of the session's ring buffer and
+  requeue the card.
+- **Why:** The card gives no reason and offers no retry, so the only way to find
+  out why a job never ran is to open the dead terminal tab and read the error
+  the process printed before it died. This is how the `auto`-mode breakage
+  (v0.3.33.0) stayed invisible: the board reported a healthy dispatch every
+  time.
+- **Effort:** S (human: ~3 hours / CC: ~20 min)
+- **Priority:** P2
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Found while tracing why `--permission-mode auto` fails on
+  Bedrock (2026-09-04). The permission-mode default was fixed; this failure
+  class was not, and it is not specific to permission modes.
+
+## The board permission mode is unreachable and unmigrated
+
+- **What:** Two halves of the same gap. `server/ws.js` accepts `permissionMode`
+  on the `job-settings` message, but nothing in `public/` ever sends it, so
+  there is no way to change the mode from the app -- only by hand-editing
+  `~/.agent-007/config.json` and restarting. And `boardSettings()` spreads the
+  stored object over the defaults, so every board that has ever run has the
+  old default persisted and keeps it: changing `DEFAULT_PERMISSION_MODE` only
+  reaches installs that never saved one.
+- **Why:** Together they mean a default change cannot reach an existing user at
+  all, and the user cannot apply it themselves without leaving the app. A
+  migration is not obviously safe on its own -- rewriting a stored `auto` would
+  stomp a deliberate choice on a setup where the classifier works, and pinning
+  the legacy value as "unset" would make `auto` unselectable -- so the control
+  should probably come first, and the migration decided with it.
+- **Effort:** S (human: ~3 hours / CC: ~20 min)
+- **Priority:** P2
+- **Depends on:** Job board (v0.3.0.0)
+- **Context:** Raised by the ship coverage audit for v0.3.33.0 (2026-09-04).
+  `test/jobs-permission-mode.test.js` documents the stored-mode behaviour as it
+  stands, so a migration has to change that test deliberately.
+
 ## Completed
 
 ## Sofa sitter placement has never been checked against a render
