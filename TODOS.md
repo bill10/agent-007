@@ -372,13 +372,13 @@
 - **Why:** A user reaching for the cap is usually reacting to a board that is
   spawning too much right now, and the control quietly does nothing until the
   current tick drains. The permission mode had the same shape and was fixed in
-  v0.3.34.0 (it re-reads `boardSettings()` at the post-await recheck, because
+  v0.3.33.0 (it re-reads `boardSettings()` at the post-await recheck, because
   there the stale value decides what a live agent is allowed to do); the cap is
   the same latent race with a smaller blast radius.
 - **Effort:** S (human: ~1 hour / CC: ~10 min)
 - **Priority:** P3
 - **Depends on:** Job board (v0.3.0.0)
-- **Context:** Found by the adversarial review during /ship for v0.3.34.0
+- **Context:** Found by the adversarial review during /ship for v0.3.33.0
   (2026-09-04), which flagged that making the toolbar controls reachable is
   exactly what gives users a reason to reach for one mid-crisis.
 
@@ -386,7 +386,7 @@
 
 - **What:** `server/ws.js`'s `job-update` is deliberately not ownership-gated
   ("the board is shared workspace state, not a per-user resource"), and as of
-  v0.3.34.0 `permissionMode` rides that same door. So on a multi-user board any
+  v0.3.33.0 `permissionMode` rides that same door. So on a multi-user board any
   authenticated user can change someone else's To do card to
   `bypassPermissions` before it dispatches. Decide whether the permission mode
   specifically should be ownership-gated the way `editJobForAgent` already
@@ -400,8 +400,8 @@
   than a bug.
 - **Effort:** S (human: ~2 hours / CC: ~15 min)
 - **Priority:** P3
-- **Depends on:** Per-job permission mode (v0.3.34.0)
-- **Context:** Raised by the adversarial review during /ship for v0.3.34.0
+- **Depends on:** Per-job permission mode (v0.3.33.0)
+- **Context:** Raised by the adversarial review during /ship for v0.3.33.0
   (2026-09-04) as "worth the maintainer explicitly confirming that's
   acceptable". Only bites on a board with more than one user.
 
@@ -439,7 +439,7 @@
   dispatch, which happens from To do, so `editableInPlace` refusing edits past
   To do is exactly the right gate.
 
-- **Outcome:** Both halves closed in v0.3.34.0. The board's toolbar has a
+- **Outcome:** Both halves closed in v0.3.33.0. The board's toolbar has a
   **permissions** select (the fallback), and the job form has a per-card one
   whose "Board default" option stores `null` rather than a copy of the board
   value -- so an unset card follows the board if that changes before it is
@@ -451,7 +451,7 @@
   been running on `bypassPermissions` -- every board whose first dispatcher
   start happened on v0.3.33.0 -- move back to `auto`.
 
-**Completed:** v0.3.34.0 (2026-09-04)
+**Completed:** v0.3.33.0 (2026-09-04)
 
 
 ## Sofa sitter placement has never been checked against a render

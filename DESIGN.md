@@ -737,8 +737,8 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   exactly why nothing instructs dispatched agents to.
 
   Under `bypassPermissions` it does not ask, and the board can be put in that
-  mode: `DEFAULT_PERMISSION_MODE` is `auto` (v0.3.34.0, after one release on
-  `bypassPermissions`), but the toolbar exposes the board setting and a card can
+  mode: `DEFAULT_PERMISSION_MODE` is `auto`, but the toolbar exposes the board
+  setting (v0.3.33.0) and a card can
   override it, because auto mode needs a classifier that is not available on
   every provider the board runs against and silently degrades to Manual where it
   is missing. So this is a choice a user can make, with what follows.
