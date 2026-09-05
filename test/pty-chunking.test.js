@@ -9,7 +9,9 @@ import { setupPtyHandlers } from '../server/pty.js';
 import { detectState } from '../lib/helpers.js';
 import { ASK_QUESTION_FRAME, FOOTER_AT } from './fixtures/ask-user-question-frame.js';
 
-function feed(chunks) {
+// Split out from feed() so a test can drive chunks one at a time and inspect
+// the session between them, which is what the lastOutputAt case below needs.
+function openSession() {
   let onData;
   const session = {
     id: 's1',
@@ -26,7 +28,12 @@ function feed(chunks) {
   };
   setupPtyHandlers(session, 's1', () => {});
   clearInterval(session.stateCheckInterval);
-  for (const chunk of chunks) onData(chunk);
+  return { session, write: (chunk) => onData(chunk) };
+}
+
+function feed(chunks) {
+  const { session, write } = openSession();
+  for (const chunk of chunks) write(chunk);
   // The dialog is parked: nothing more arrives, so the WORKING window lapses.
   session.lastOutputAt = 0;
   return session;
@@ -58,6 +65,23 @@ describe('PTY line reassembly across chunk boundaries', () => {
     // chunk intact: the footer that follows still detects.
     const session = feed(['x'.repeat(3000), 'x\r\nEnter to select · Esc to cancel']);
     expect(session.pendingRaw.length).toBeLessThanOrEqual(2000);
+    expect(detectState(session)).toBe('MESSAGE');
+  });
+
+  it('does not count carried-over text as new output', () => {
+    // hasContent was read off the accumulated carry, so once an unterminated
+    // line sat in it, ANY later chunk -- a bare cursor move, a bell --
+    // re-counted that same text as fresh output and bumped lastOutputAt.
+    // detectState returns WORKING while that window is open, so a TUI emitting
+    // periodic control sequences masks the dialog indefinitely: exactly the
+    // failure this file exists to stop, reached through another door.
+    const { session, write } = openSession();
+    write('Enter to select \u00b7 Esc to cancel');   // footer, no trailing newline
+    session.lastOutputAt = 0;                         // let the WORKING window lapse
+    expect(detectState(session)).toBe('MESSAGE');
+
+    write('\u001b[18A');                             // pure cursor move: nothing visible
+    expect(session.lastOutputAt).toBe(0);
     expect(detectState(session)).toBe('MESSAGE');
   });
 

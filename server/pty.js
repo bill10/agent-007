@@ -82,7 +82,15 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     session.pendingRaw = (cut === -1 ? raw : raw.slice(cut + 1)).slice(-2000);
     const lines = stripAnsiComplete(raw.slice(0, cut + 1)).split('\n').filter(l => l.trim().length > 0);
     const partial = stripAnsiComplete(session.pendingRaw).trim();
-    const hasContent = [...lines, partial].some(l => l.length > 3 && !TRIVIAL_RE.test(l) && !ESCAPE_REMNANT_RE.test(l));
+    // Freshness is judged on THIS read, never on the carry. `partial` is
+    // re-derived from accumulated bytes, so counting it here would re-count
+    // text already seen: once an unterminated line sits in the carry, a bare
+    // cursor move or a bell would keep bumping lastOutputAt, and detectState
+    // reports WORKING for as long as that window stays open. A TUI emitting
+    // periodic control sequences could then mask a question dialog for ever —
+    // the same failure this carry-over exists to fix, through another door.
+    const fresh = stripAnsiComplete(data).trim();
+    const hasContent = [...lines, fresh].some(l => l.length > 3 && !TRIVIAL_RE.test(l) && !ESCAPE_REMNANT_RE.test(l));
     const recentResize = (Date.now() - (session.lastResizeAt || 0)) < 2000;
     if (hasContent && !recentResize) session.lastOutputAt = Date.now();
     // Capped: these lines are matched against MESSAGE_PATTERNS/PROMPT_PATTERNS
