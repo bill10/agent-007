@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.0.0] - 2026-09-11
+
+### Added
+
+- **Ask Codex to manage the job board.** Newly launched Codex agents can now
+  post, list, read, and edit jobs through the same board tools as Claude Code.
+  The connection is configured automatically for each session, preserves your
+  other MCP servers, and keeps the session credential out of command-line
+  arguments and inherited environment variables.
+
 ## [0.3.33.0] - 2026-09-04
 
 ### Added
