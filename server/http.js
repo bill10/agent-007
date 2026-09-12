@@ -123,15 +123,8 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
   // access-control decision — keep it deliberate. Everything below is people
   // only.
 
-  // The non-MCP door to the same action. Codex and Gemini CLI both speak MCP,
-  // but configure their servers in persistent files (~/.codex/config.toml,
-  // `gemini mcp add`) rather than taking one per invocation the way Claude
-  // Code's --mcp-config does — and the board spawns a fresh agent per job, so
-  // reaching them through MCP would mean editing the user's global config to
-  // hand out a per-run capability. Verified 2026-08-28; if either grows a
-  // per-invocation flag, give those agents the real server and retire this.
-  // The MCP tool is a wrapper over this same function, not a second
-  // implementation.
+  // The non-MCP door to the same action, available to clients with an agent
+  // session token. MCP calls share this implementation through postJobForAgent.
   app.post('/api/jobs', requireIdentity, (req, res) => {
     const body = req.body || {};
     const session = req.agentSession || null;

@@ -3,7 +3,7 @@
 //
 // This is the half of the feature that decides whether an agent can see the
 // tool at all, and it is the half that must not break a spawn when the command
-// is not Claude Code.
+// is neither Claude Code nor Codex.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
@@ -74,17 +74,18 @@ describe('the config an agent reads at startup', () => {
   });
 });
 
-describe('which commands take --mcp-config', () => {
+describe('which commands receive the board MCP server', () => {
   it('accepts claude, by name or by absolute path', () => {
     expect(takesMcpConfig('claude')).toBe(true);
     expect(takesMcpConfig('/opt/homebrew/bin/claude')).toBe(true);
   });
 
+  it.each(['codex', '/opt/bin/codex', 'codex.cmd', 'codex.EXE'])('accepts %s', cmd => {
+    expect(takesMcpConfig(cmd)).toBe(true);
+  });
+
   it('refuses every other agent', () => {
-    // Verified against the real CLIs: Gemini has no per-invocation MCP config
-    // flag (only `gemini mcp add`), and Codex uses ~/.codex/config.toml.
-    // Appending the flag to either is an unknown-option error and a dead spawn.
-    for (const cmd of ['gemini', 'codex', 'aider', 'bash', '/usr/local/bin/gemini', '']) {
+    for (const cmd of ['gemini', 'aider', 'bash', '/usr/local/bin/gemini', '']) {
       expect(takesMcpConfig(cmd)).toBe(false);
     }
   });
@@ -152,5 +153,31 @@ describe('injecting the flag', () => {
   it('spawns unchanged when the config could not be written', () => {
     // A missing config is a missing convenience, never a failed spawn.
     expect(withMcpConfig('claude', ['-p', 'x'], null)).toEqual(['-p', 'x']);
+  });
+});
+
+describe('Codex launch overrides', () => {
+  it('adds a stdio bridge before existing options and positional arguments', () => {
+    const typed = ['-c', 'mcp_servers.other.url="http://localhost:9000"', 'exec', '--', 'prompt'];
+    const args = withMcpConfig('codex', typed, 'C:\\a path\\config.json');
+    expect(args[0]).toBe('-c');
+    expect(args[1]).toContain(`mcp_servers.${MCP_SERVER_NAME}={command=${JSON.stringify(process.execPath)}`);
+    expect(args[1]).toContain('agent-mcp-bridge.js');
+    expect(args[1]).toContain(JSON.stringify('C:\\a path\\config.json'));
+    expect(args.slice(2)).toEqual(typed);
+    expect(typed).toHaveLength(5);
+  });
+
+  it('keeps the session token out of the Codex arguments', () => {
+    const path = writeMcpConfig('codex-session', 'a007a_secret');
+    const args = withMcpConfig('codex.cmd', ['hello'], path);
+    expect(args.join(' ')).not.toContain('a007a_secret');
+    expect(args.at(-1)).toBe('hello');
+    removeMcpConfig('codex-session');
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('leaves Codex unchanged if writing the config failed', () => {
+    expect(withMcpConfig('codex', ['hello'], null)).toEqual(['hello']);
   });
 });

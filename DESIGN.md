@@ -648,8 +648,9 @@ An agent you are talking to can put a card on the board when you ask it to, so
 "add that to the job board" does not mean leaving the conversation to type it.
 The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
 `edit_job` — over streamable HTTP from the app's own Express server
-(`server/mcp.js`), and every spawned Claude Code agent is pointed at it with
-`--mcp-config` (`server/agent-mcp.js`).
+(`server/mcp.js`), and every spawned Claude Code or Codex agent is connected to it by
+`server/agent-mcp.js`. Claude reads `--mcp-config`; Codex gets a per-launch
+`-c mcp_servers.agent-007-board=...` override that starts a local stdio bridge.
 
 - **Reading is its own tool, so asking costs nothing.** `list_jobs` answers
   "what is on the board?" without a card being posted to find out, and returns
@@ -703,19 +704,16 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   instruction to queue work rather than a capability to use when asked. A tool
   arrives in the agent's tool list with a description. That is real discovery,
   and it is passive: nothing anywhere tells an agent to post jobs.
-- **HTTP, not stdio.** stdio would have Claude Code spawn a server process per
-  agent. We already listen on a port, so HTTP costs no processes at all.
-- **Merged with the user's own MCP servers, never replacing them.** We pass
-  `--mcp-config` and deliberately NOT `--strict-mcp-config`: the strict flag
-  scopes cleanly but takes away every MCP server the user has configured, inside
-  every agent this app spawns. Verified both ways against the real CLI.
-- **Claude Code only, by construction.** Gemini CLI has no per-invocation MCP
-  config flag (only `gemini mcp add`, which writes its persistent settings) and
-  Codex configures MCP through `~/.codex/config.toml`. Appending the flag to
-  either is an unknown-option error and a dead spawn, so injection is gated on
-  the binary being `claude` and every other command is passed through untouched.
-  `POST /api/jobs` is the same action behind plain HTTP, kept as the door those
-  agents could use — the MCP tool is a wrapper over it, not a second copy.
+- **One HTTP endpoint.** Claude Code connects directly. Codex starts a small
+  stdio bridge that reads the same credential file and forwards JSON-RPC to
+  that endpoint, including notifications and tool errors.
+- **Merged with the user's own MCP servers.** Claude gets `--mcp-config`
+  without `--strict-mcp-config`. Codex gets a per-invocation `-c` override for
+  only `mcp_servers.agent-007-board`, leaving other servers and global config
+  intact. The bridge uses the app's Node executable and an absolute script path.
+- **Claude Code and Codex.** Both receive the board automatically, including
+  Windows launchers. Other commands pass through untouched. `POST /api/jobs`
+  remains a plain HTTP door to the same action.
 - **The token is a file, not an environment variable.** An env var is inherited
   by every child process the agent starts — a test run, an install script in a
   repo under review — and any of them could read it. The token lives in a

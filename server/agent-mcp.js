@@ -1,12 +1,13 @@
 // Handing a spawned agent the board's MCP tool.
 //
 // Three pieces: where the board is reachable, a per-session MCP config file,
-// and the flags that point `claude` at it. Separate from pty.js so it can be
+// and the flags that connect Claude Code and Codex to it. Separate from pty.js so it can be
 // tested without importing node-pty.
 
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, join } from 'path';
+import { fileURLToPath } from 'url';
 import { PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
 
 // Alongside config.json and users.json rather than in the worktree: a config
@@ -102,22 +103,22 @@ export function sweepMcpConfigs() {
   }
 }
 
-// Only Claude Code takes `--mcp-config`. Verified against the other agents a
-// user might reasonably type here: Gemini CLI has no per-invocation MCP config
-// flag at all (only `gemini mcp add`, which mutates its persistent settings),
-// and Codex configures MCP through ~/.codex/config.toml. Appending the flag to
-// either would be an unknown-option error and a failed spawn, so the rule is:
-// inject for `claude`, pass everything else through untouched.
-// On Windows the thing on PATH is `claude.cmd`, and a user who spells that out
-// would otherwise silently get no tool at all.
+// Claude reads the JSON config directly; Codex launches a stdio bridge with
+// per-invocation TOML overrides. Neither changes the user's persistent config.
 const WINDOWS_EXEC_EXT = /\.(cmd|exe|bat|ps1)$/i;
 
-export function takesMcpConfig(file) {
-  return basename(String(file || '')).replace(WINDOWS_EXEC_EXT, '') === 'claude';
+function agentName(file) {
+  return basename(String(file || '')).replace(WINDOWS_EXEC_EXT, '');
 }
 
+export function takesMcpConfig(file) {
+  return ['claude', 'codex'].includes(agentName(file));
+}
+
+const CODEX_BRIDGE = fileURLToPath(new URL('./agent-mcp-bridge.js', import.meta.url));
+
 /**
- * Insert `--mcp-config <path>` into an already-parsed argv.
+ * Insert the agent-specific board MCP options into an already-parsed argv.
  *
  * Works on argv rather than on the command string: the string is what the user
  * typed and what the UI displays, and threading a path through quoting rules
@@ -129,6 +130,15 @@ export function takesMcpConfig(file) {
  */
 export function withMcpConfig(file, args, configPath) {
   if (!configPath || !takesMcpConfig(file)) return args;
+  if (agentName(file) === 'codex') {
+    // JSON strings/arrays are also valid TOML here, including Windows paths.
+    // Only this server's table is overridden; other MCP servers remain intact.
+    const server = `mcp_servers.${MCP_SERVER_NAME}`;
+    return [
+      '-c', `${server}={command=${JSON.stringify(process.execPath)},args=${JSON.stringify([CODEX_BRIDGE, configPath])},enabled=true}`,
+      ...args,
+    ];
+  }
   // The user may have passed their own. The flag is variadic (`<configs...>`),
   // so a second occurrence is ambiguous — extend theirs instead of adding one.
   const existing = args.indexOf('--mcp-config');
