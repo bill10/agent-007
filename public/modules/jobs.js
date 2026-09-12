@@ -258,6 +258,13 @@ function renderCard(job) {
     chip.title = 'Runs again on its schedule instead of finishing in Review';
     title.appendChild(chip);
   }
+  if (job.agent === 'codex') {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = 'codex';
+    chip.title = 'Runs on Codex instead of Claude Code';
+    title.appendChild(chip);
+  }
   if (job.permissionMode) {
     // Only when the card overrides the board. The mode decides how much its
     // agent may do unasked, so a card carrying its own must say so on its face
@@ -625,6 +632,18 @@ function syncScheduleField() {
   document.getElementById('job-schedule-field').style.display = scheduled ? 'flex' : 'none';
 }
 
+// Codex has no --permission-mode: only "board default", auto (no flag) and
+// bypassPermissions mean anything to it, so the Claude-only modes are hidden
+// and a selection among them falls back to the board default.
+function syncAgentField() {
+  const codex = document.getElementById('job-agent')?.value === 'codex';
+  const permEl = document.getElementById('job-permission-mode-field');
+  if (!permEl) return;
+  for (const opt of permEl.querySelectorAll('option[data-claude-only]')) opt.hidden = codex;
+  if (codex && permEl.selectedOptions[0]?.hasAttribute('data-claude-only')) permEl.value = '';
+  markDangerousMode(permEl);
+}
+
 // A shape check only — five whitespace-separated fields, or a known @shorthand.
 // The real parser is lib/cron.js on the server, and it stays the authority; this
 // exists so the commonest typo (too few fields) is caught while the form is
@@ -665,6 +684,7 @@ function openForm(jobId) {
   const typeEl = document.getElementById('job-type');
   const scheduleEl = document.getElementById('job-schedule');
   const permEl = document.getElementById('job-permission-mode-field');
+  const agentEl = document.getElementById('job-agent');
   const saveBtn = document.getElementById('btn-job-save');
 
   repoEl.innerHTML = '';
@@ -691,6 +711,8 @@ function openForm(jobId) {
   // its own goes back to — never pre-filled with the board's current value,
   // which would silently freeze the card onto today's setting.
   if (permEl) permEl.value = job && job.permissionMode ? job.permissionMode : '';
+  if (agentEl) agentEl.value = job && job.agent === 'codex' ? 'codex' : 'claude';
+  syncAgentField();
   markDangerousMode(permEl);
   pendingAttachments = job && Array.isArray(job.attachments) ? job.attachments.map(a => ({ name: a.name })) : [];
   renderAttachments();
@@ -725,6 +747,7 @@ function saveForm() {
   const jobType = document.getElementById('job-type').value;
   const schedule = document.getElementById('job-schedule').value.trim();
   const permissionMode = document.getElementById('job-permission-mode-field')?.value || '';
+  const agent = document.getElementById('job-agent')?.value || 'claude';
   if (!title) return showFormError('Give the job a title.');
   if (!repoPath) return showFormError('Add a repository in the explorer first — a job needs one to run in.');
   if (jobType === 'scheduled' && !schedule) return showFormError('A scheduled job needs a cron schedule, for example "0 9 * * 1-5".');
@@ -735,7 +758,7 @@ function saveForm() {
   // The form always holds the complete list; an empty one on an edit means
   // "none left".
   const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
-  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, attachments };
+  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, attachments };
   if (editingJobId) send({ type: 'job-update', jobId: editingJobId, ...fields });
   else send({ type: 'job-create', ...fields });
   closeForm();
@@ -847,6 +870,8 @@ export function setupJobBoard() {
   // opens — the warning has to be on screen while the choice is being made.
   const formPermEl = document.getElementById('job-permission-mode-field');
   if (formPermEl) formPermEl.onchange = () => markDangerousMode(formPermEl);
+  const agentEl = document.getElementById('job-agent');
+  if (agentEl) agentEl.onchange = syncAgentField;
 
   // Relative timestamps and the "quiet" threshold both drift with the clock, so
   // the board re-renders on a slow tick while it is visible. Cheap: it only

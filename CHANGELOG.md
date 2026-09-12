@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.1.0] - 2026-09-11
+
+### Added
+
+- **A job can run on Codex.** The job form has an **Agent** select, Claude Code
+  or Codex, and the board's `post_job` tool takes an `agent`. A card an agent
+  files defaults to the CLI it is itself running on; a card a person files
+  defaults to Claude Code. Codex has no `--permission-mode`, so a Codex card
+  offers board default, `auto` (Codex with no flag) and `bypassPermissions`
+  (`--dangerously-bypass-approvals-and-sandbox`); any other board setting runs
+  it with no flag. A Codex card is told to run `$ship` rather than `/ship`,
+  and shows a `codex` chip on its face.
 ## [0.4.0.0] - 2026-09-11
 
 ### Added

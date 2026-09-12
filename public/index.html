@@ -161,15 +161,21 @@
                   <option value="scheduled">Scheduled</option>
                 </select>
               </label>
-              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different.">Permissions
+              <label title="Which CLI the board spawns for this job.">Agent
+                <select id="job-agent">
+                  <option value="claude">Claude Code</option>
+                  <option value="codex">Codex</option>
+                </select>
+              </label>
+              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different. Codex has two settings: auto runs it with no flag, and bypassPermissions runs it with --dangerously-bypass-approvals-and-sandbox.">Permissions
                 <select id="job-permission-mode-field">
                   <option value="">Board default</option>
                   <option value="auto">auto — classifier decides</option>
-                  <option value="acceptEdits">acceptEdits — edits, ask for the rest</option>
+                  <option value="acceptEdits" data-claude-only>acceptEdits — edits, ask for the rest</option>
                   <option value="bypassPermissions">bypassPermissions — never asks</option>
-                  <option value="manual">manual — ask for everything</option>
-                  <option value="dontAsk">dontAsk</option>
-                  <option value="plan">plan — read-only</option>
+                  <option value="manual" data-claude-only>manual — ask for everything</option>
+                  <option value="dontAsk" data-claude-only>dontAsk</option>
+                  <option value="plan" data-claude-only>plan — read-only</option>
                 </select>
               </label>
               <label class="job-form-schedule" id="job-schedule-field" style="display:none">Schedule

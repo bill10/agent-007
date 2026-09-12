@@ -134,6 +134,7 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
       repo: body.repo || body.repoPath,
       type: body.type,
       schedule: body.schedule,
+      agent: body.agent,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),
     }, broadcast);

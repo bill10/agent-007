@@ -63,6 +63,7 @@ describe('tools/list', () => {
     expect(reply.result.tools).toEqual(TOOLS);
     expect(reply.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job']);
     expect(POST_JOB_TOOL.inputSchema.required).toEqual(['title']);
+    expect(POST_JOB_TOOL.inputSchema.properties.agent.enum).toEqual(['claude', 'codex']);
   });
 
   it('describes the tool as something to reach for when asked', () => {
@@ -82,9 +83,9 @@ describe('tools/list', () => {
 describe('tools/call post_job', () => {
   it('passes the arguments through and credits the calling agent', () => {
     const postJob = fakePostJob();
-    call({ title: 'Add rate limiting', detail: 'Token bucket.', repo: 'alpha' }, postJob);
+    call({ title: 'Add rate limiting', detail: 'Token bucket.', repo: 'alpha', agent: 'codex' }, postJob);
     expect(postJob).toHaveBeenCalledWith({
-      title: 'Add rate limiting', detail: 'Token bucket.', repo: 'alpha', session: SESSION,
+      title: 'Add rate limiting', detail: 'Token bucket.', repo: 'alpha', agent: 'codex', session: SESSION,
     });
   });
 
