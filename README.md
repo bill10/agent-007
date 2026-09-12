@@ -160,6 +160,7 @@ server/
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job)
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
+  agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   auth.js          Login tokens, user accounts, agent session tokens
 bin/
   adduser.js       Create a login user (`npm run adduser`)
