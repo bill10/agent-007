@@ -7,10 +7,9 @@
 // capability, not an instruction. Nothing tells an agent to post jobs; the tool
 // is simply there when the user asks for one.
 //
-// Transport is streamable HTTP served from the app's own Express server (see
-// server/http.js), so there is no child process anywhere: Claude Code connects
-// to a URL. The alternative, stdio, would have Claude Code spawn a server per
-// agent, which is a process to supervise for no gain when we already listen.
+// Transport is JSON HTTP served by the app's own Express server. Claude Code
+// connects directly; Codex uses agent-mcp-bridge.js to forward stdio requests
+// while keeping the board credential in its per-session file.
 //
 // Kept free of Express and of the job store so the protocol is testable on its
 // own: handleMcpMessage takes a parsed message and a context, and returns the
