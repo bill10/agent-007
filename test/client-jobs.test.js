@@ -421,6 +421,48 @@ describe('job form', () => {
     expect(document.getElementById('job-agent').value).toBe('codex');
   });
 
+  it('opens a codex card with the Claude-only modes hidden, and sends the agent on save', () => {
+    handleJobsList({ jobs: [JOB({ agent: 'codex', permissionMode: 'bypassPermissions' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    const perm = document.getElementById('job-permission-mode-field');
+    expect(perm.querySelector('option[value="manual"]').hidden).toBe(true);
+    // A mode codex understands survives the open; only Claude-only ones reset.
+    expect(perm.value).toBe('bypassPermissions');
+    expect(perm.classList).toContain('job-mode-danger');
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', agent: 'codex', permissionMode: 'bypassPermissions' }));
+  });
+
+  it('switching a card back to claude unhides every mode and sends claude', () => {
+    handleJobsList({ jobs: [JOB({ agent: 'codex' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    const perm = document.getElementById('job-permission-mode-field');
+    const agent = document.getElementById('job-agent');
+    agent.value = 'claude';
+    agent.dispatchEvent(new Event('change'));
+    expect(perm.querySelector('option[value="plan"]').hidden).toBe(false);
+    perm.value = 'plan';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', agent: 'claude', permissionMode: 'plan' }));
+  });
+
+  it('opens a claude card on claude even right after a codex one', () => {
+    handleJobsList({ jobs: [JOB({ id: 'c', agent: 'codex' }), JOB({ id: 'k' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(document.getElementById('job-agent').value).toBe('codex');
+    closeJobForm();
+    cards()[1].querySelector('.job-card-actions button').click();
+    expect(document.getElementById('job-agent').value).toBe('claude');
+    expect(document.getElementById('job-permission-mode-field').querySelector('option[value="plan"]').hidden).toBe(false);
+  });
+
+  it('lines up the scheduled, codex and mode chips in that order, and none on a plain card', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', agent: 'codex', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toEqual(['scheduled', 'codex', 'plan']);
+    handleJobsList({ jobs: [JOB({ agent: 'claude' })], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelectorAll('.job-card-type')).toHaveLength(0);
+  });
+
   // A screenshot pasted into Details becomes a named base64 attachment on the
   // create message, and the terminal's own paste handler (mocked here) is not
   // what receives it.

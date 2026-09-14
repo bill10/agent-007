@@ -196,6 +196,7 @@ const scheduleText = (job, sep = ', next ') =>
 // twenty questions.
 function summaryLine(job) {
   const bits = [job.repo];
+  if (job.agent === 'codex') bits.push('codex');
   if (job.type === 'scheduled') {
     bits.push(`scheduled ${scheduleText(job)}`);
   }
@@ -270,6 +271,8 @@ const CALLS = {
       `id: ${job.id}`,
       `column: ${STATE_LABELS[job.state] || job.state}${job.status ? ` (${job.status})` : ''}`,
       `repo: ${job.repo}`,
+      // Only when it is not the default, the way the card's chip works.
+      job.agent === 'codex' ? 'runs on: codex' : null,
       job.type === 'scheduled'
         ? `schedule: ${scheduleText(job, ' — next ')}`
           + `${job.runCount ? ` — run ${job.runCount} time(s), last ${when(job.lastRunAt)}` : ''}`

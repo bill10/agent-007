@@ -167,12 +167,12 @@
                   <option value="codex">Codex</option>
                 </select>
               </label>
-              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different. Codex has two settings: auto runs it with no flag, and bypassPermissions runs it with --dangerously-bypass-approvals-and-sandbox.">Permissions
+              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different. A Codex card offers auto (Codex's own default) and bypassPermissions (--dangerously-bypass-approvals-and-sandbox); a board set to another mode maps onto Codex's nearest flag: plan is read-only, manual asks before every command, dontAsk never asks.">Permissions
                 <select id="job-permission-mode-field">
                   <option value="">Board default</option>
-                  <option value="auto">auto — classifier decides</option>
+                  <option value="auto" data-codex-label="auto — Codex default, no flag">auto — classifier decides</option>
                   <option value="acceptEdits" data-claude-only>acceptEdits — edits, ask for the rest</option>
-                  <option value="bypassPermissions">bypassPermissions — never asks</option>
+                  <option value="bypassPermissions" data-codex-label="bypassPermissions — no sandbox, never asks">bypassPermissions — never asks</option>
                   <option value="manual" data-claude-only>manual — ask for everything</option>
                   <option value="dontAsk" data-claude-only>dontAsk</option>
                   <option value="plan" data-claude-only>plan — read-only</option>

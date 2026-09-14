@@ -180,13 +180,15 @@ describe('/api/jobs/:id/attachments/:name', () => {
       ws.on('message', h);
     });
     let list = next(m => m.type === 'jobs-list' && m.jobs.some(j => j.title === 'Wire shot'));
-    ws.send(JSON.stringify({ type: 'job-create', title: 'Wire shot', repoPath: tmpdir(), attachments: [{ name: 'wire.png', data: Buffer.from('w').toString('base64') }] }));
+    ws.send(JSON.stringify({ type: 'job-create', title: 'Wire shot', repoPath: tmpdir(), agent: 'codex', attachments: [{ name: 'wire.png', data: Buffer.from('w').toString('base64') }] }));
     const created = (await list).jobs.find(j => j.title === 'Wire shot');
     expect(created.attachments).toEqual([{ name: 'wire.png', path: join(process.env.AGENT007_CONFIG_DIR, 'attachments', created.id, 'wire.png') }]);
     expect(existsSync(created.attachments[0].path)).toBe(true);
+    // The agent rides the same two messages.
+    expect(created.agent).toBe('codex');
     list = next(m => m.type === 'jobs-list' && m.jobs.find(j => j.id === created.id)?.attachments.length === 0);
-    ws.send(JSON.stringify({ type: 'job-update', jobId: created.id, attachments: [] }));
-    await list;
+    ws.send(JSON.stringify({ type: 'job-update', jobId: created.id, agent: 'claude', attachments: [] }));
+    expect((await list).jobs.find(j => j.id === created.id).agent).toBe('claude');
     expect(existsSync(created.attachments[0].path)).toBe(false);
     ws.close();
     await deleteJob(created.id, () => {});

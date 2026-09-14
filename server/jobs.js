@@ -20,7 +20,7 @@ import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode,
-  dispatchPermissionMode, JOB_STATES,
+  JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
@@ -906,11 +906,10 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
-    // Kept so the recheck below can tell whether the card still dispatches
-    // with what its argv was built from.
-    const spawnedMode = dispatchPermissionMode(job, settings.permissionMode);
-    const spawnedAgent = jobAgent(job);
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
+    // Kept so the recheck below can tell whether the card still dispatches
+    // into the same repo as the session it is about to be handed.
+    const spawnedRepo = job.repoPath;
     // Branch named after the job, not a cocktail, so `git branch` reads like
     // the board. Two jobs can share a title, so collisions take a -2 suffix
     // rather than failing the dispatch.
@@ -940,18 +939,20 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // never cleaned up. The scan guard does not cover this — it serialises
     // scans against each other, not against the user.
     //
-    // The permission mode is rechecked on the same terms, and boardSettings()
-    // is re-read rather than reused so a board retuned mid-tick counts too.
-    // The argv was fixed before the await, so a card tightened (or the board
-    // tightened) while the agent spawned would otherwise leave that agent
-    // running under a mode neither of them still says, with the card showing
-    // the safer one — the store and the live process silently disagreeing.
-    // Abandoning the spawn hands it the same remedy every other change in
-    // this window gets: the card stays in To do and the next tick dispatches
-    // it again, with the mode that now applies.
+    // The argv is rechecked on the same terms — rebuilt from the card as it
+    // is now (boardSettings() re-read, so a board retuned mid-tick counts too)
+    // and compared with the one actually spawned. That covers everything the
+    // argv is made of at once: permission mode, which CLI, the prompt (title,
+    // detail, attachments) — so a card tightened, switched or rewritten while
+    // its agent spawned cannot be claimed by a process running the old text
+    // under a mode neither it nor the board still says. The repo is checked
+    // the same way, since it is not in the argv but is where the worktree
+    // was just made. Abandoning the spawn hands it the same remedy every
+    // other change in this window gets: the card stays in To do and the next
+    // tick dispatches it again, as it now reads.
     const stillQueued = allJobs().includes(job) && job.state === 'todo'
-      && dispatchPermissionMode(job, boardSettings().permissionMode) === spawnedMode
-      && jobAgent(job) === spawnedAgent;
+      && buildJobCommand(job, { permissionMode: boardSettings().permissionMode }) === command
+      && job.repoPath === spawnedRepo;
     if (!stillQueued) {
       if (killSession) {
         try { await killSession(session.id); } catch (err) {

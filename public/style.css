@@ -1413,12 +1413,15 @@ select.job-mode-danger {
 }
 /* Type and schedule sit on one line: they are a single decision, and a cron
    box stacked under its own label would take a third of the form. */
-.job-form-row { display: flex; gap: 8px; align-items: flex-start; }
+/* Wraps: with Type, Agent, Permissions and Schedule in one row, a narrow
+   panel would otherwise clip the right-hand fields under the board's
+   overflow: hidden rather than drop them to a second line. */
+.job-form-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
 /* Capped like the toolbar's: uncapped, the select sizes to its longest option
    and squeezes the flex:1 cron field beside it on a narrow panel. */
 #job-permission-mode-field { max-width: 200px; }
 .job-form-row > label { flex: 0 0 auto; }
-.job-form-schedule { flex: 1 1 auto; min-width: 0; }
+.job-form-schedule { flex: 1 1 200px; min-width: 0; }
 .job-form-hint {
   font-size: 9px;
   color: var(--text-dim);

@@ -275,7 +275,9 @@ function renderCard(job) {
     // on the board is exactly where that has to be readable at a glance.
     chip.className = `job-card-type${job.permissionMode === DANGEROUS_MODE ? ' job-mode-danger' : ''}`;
     chip.textContent = job.permissionMode;
-    chip.title = `This job runs with --permission-mode ${job.permissionMode} instead of the board's setting`;
+    chip.title = job.agent === 'codex'
+      ? `This job runs on Codex in ${job.permissionMode}, mapped onto Codex's sandbox and approval flags, instead of the board's setting`
+      : `This job runs with --permission-mode ${job.permissionMode} instead of the board's setting`;
     title.appendChild(chip);
   }
   card.appendChild(title);
@@ -639,8 +641,17 @@ function syncAgentField() {
   const codex = document.getElementById('job-agent')?.value === 'codex';
   const permEl = document.getElementById('job-permission-mode-field');
   if (!permEl) return;
-  for (const opt of permEl.querySelectorAll('option[data-claude-only]')) opt.hidden = codex;
+  // Both flags: Safari does not hide a hidden <option> in a native select,
+  // so it is disabled as well and refuses the pick there instead.
+  for (const opt of permEl.querySelectorAll('option[data-claude-only]')) { opt.hidden = codex; opt.disabled = codex; }
   if (codex && permEl.selectedOptions[0]?.hasAttribute('data-claude-only')) permEl.value = '';
+  // The two modes both CLIs share mean different things under each, and the
+  // visible gloss has to say which — a title tooltip never reaches keyboard
+  // or touch users.
+  for (const opt of permEl.querySelectorAll('option[data-codex-label]')) {
+    if (!opt.dataset.claudeLabel) opt.dataset.claudeLabel = opt.textContent;
+    opt.textContent = codex ? opt.dataset.codexLabel : opt.dataset.claudeLabel;
+  }
   markDangerousMode(permEl);
 }
 
@@ -712,8 +723,7 @@ function openForm(jobId) {
   // which would silently freeze the card onto today's setting.
   if (permEl) permEl.value = job && job.permissionMode ? job.permissionMode : '';
   if (agentEl) agentEl.value = job && job.agent === 'codex' ? 'codex' : 'claude';
-  syncAgentField();
-  markDangerousMode(permEl);
+  syncAgentField();   // also marks the danger colour on the permission select
   pendingAttachments = job && Array.isArray(job.attachments) ? job.attachments.map(a => ({ name: a.name })) : [];
   renderAttachments();
   syncScheduleField();

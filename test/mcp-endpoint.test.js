@@ -275,6 +275,39 @@ describe('POST /api/jobs — the door for agents that cannot take an MCP server'
     withUser();
     expect((await post({ title: 'x' }, null)).status).toBe(401);
   });
+
+  it('carries the agent field through, and refuses one it does not know with a 400', async () => {
+    // No schema at this door, unlike the MCP tool's enum, so the allowlist in
+    // lib/jobs.js is the only thing between the body and the argv.
+    const res = await post({ title: 'On codex', agent: 'codex' }, AGENT_TOKEN);
+    expect(res.status).toBe(201);
+    expect((await res.json()).job.agent).toBe('codex');
+    const bad = await post({ title: 'x', agent: 'gemini' }, AGENT_TOKEN);
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/Unknown agent/);
+    expect(allJobs()).toHaveLength(1);
+  });
+});
+
+describe('the CLI a posted card runs on', () => {
+  it('defaults to the calling session\'s own, and an explicit agent overrides it', async () => {
+    sessions.get('session-1').command = 'codex --model o3';
+    await callTool({ title: 'Same as me' });
+    await callTool({ title: 'But this one on claude', agent: 'claude' });
+    expect(allJobs().map(j => j.agent)).toEqual(['codex', 'claude']);
+  });
+
+  it('is readable back through list_jobs and read_job, and only when it is codex', async () => {
+    sessions.get('session-1').command = 'codex';
+    await callTool({ title: 'On codex' });
+    await callTool({ title: 'On claude', agent: 'claude' });
+    const [codex, claude] = allJobs();
+    const list = await toolText(await callNamed('list_jobs', {}));
+    expect(list).toMatch(/On codex\n\s+\S+ · codex/);
+    expect(list).not.toMatch(/On claude\n\s+\S+ · codex/);
+    expect(await toolText(await callNamed('read_job', { id: codex.id }))).toContain('runs on: codex');
+    expect(await toolText(await callNamed('read_job', { id: claude.id }))).not.toContain('runs on:');
+  });
 });
 
 describe('the agent token reaches nothing else', () => {
