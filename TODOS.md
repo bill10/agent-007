@@ -172,27 +172,28 @@
 - **Depends on:** Multiplayer phase 1 (identity & auth) — shipped.
 - **Context:** Raised by adversarial + security review of the phase 1 auth PR (2026-07-18). Accepted as a known limitation for now: the app itself doesn't log request URLs and deployment is behind Tailscale, so exposure is bounded. Revisit when auth hardens further (phase 2+).
 
-## A card edited in the window dispatchOnce awaits in runs the old prompt
+## A job title that begins with a dash reaches the agent CLI as a flag
 
-- **What:** `dispatchOnce` builds the command, branch and repo from the card,
-  then awaits `createSession` (addRepo + `git worktree add` + PTY spawn) and
-  only re-checks `state === 'todo'` afterwards. Throughout that multi-second
-  await the card still reads `todo`, so `editableInPlace` lets an edit through:
-  the agent then runs the OLD prompt in the OLD repo while the card advertises
-  the new `repoPath`, and `branchName`/`worktreePath` are written from the old
-  repo's session. `checkPullRequests` searches the new repoPath for that branch,
-  never finds the PR, and the card sits in In progress forever. Fix belongs in
-  `dispatchOnce` — stamp the claim before the await, or re-read the fields after
-  `stillQueued` — not in the gate.
-- **Why:** The window is pre-existing (the old `if (fields.repoPath && job.state
-  === 'todo')` had it too), but it used to need a mistimed human click. With
-  `edit_job` on the board's MCP surface it is something a program can hit on
-  purpose, and the failure is silent: a card stuck in In progress with no error
-  on it.
-- **Effort:** S (human: ~2h / CC: ~20 min)
+- **What:** `buildJobCommand` hands the prompt to the CLI as a positional
+  argument, and the prompt begins with the card title. A title such as
+  `-c sandbox_mode=x` is parsed by Codex (clap) as an option, and one such as
+  `--dangerously-skip-permissions` by Claude Code (commander), rather than as
+  the prompt. In practice the trailing prompt text makes most values invalid
+  and the spawn fails, but the argv position is unguarded for both CLIs.
+- **Why:** A card title comes from a person or from an agent posting through
+  the board's MCP tool, and the whole point of the permission mode is that
+  the spawned argv is decided by the board, not by the card.
+- **Fix:** A `--` separator before the prompt, which both parsers honour.
+  For Claude the `--add-dir` flags must move ahead of it (they follow the
+  prompt today and the argv-position tests depend on that), and the change
+  wants verifying against both CLIs — Codex was not installed on the machine
+  that raised this.
+- **Effort:** S (human: ~1h / CC: ~10 min)
 - **Priority:** P3
-- **Depends on:** Board read/edit MCP tools (v0.3.29.0)
-- **Context:** Raised by the adversarial review during /ship (2026-09-03).
+- **Depends on:** None
+- **Context:** Raised by the security specialist and the adversarial review
+  during /ship for v0.4.1.0 (2026-09-14). Pre-existing for Claude; the Codex
+  branch added a second parser with the same exposure.
 
 ## A rejected job save throws away what you typed
 
@@ -394,6 +395,31 @@
   acceptable". Only bites on a board with more than one user.
 
 ## Completed
+
+## A card edited in the window dispatchOnce awaits in runs the old prompt
+
+- **What:** `dispatchOnce` builds the command, branch and repo from the card,
+  then awaits `createSession` (addRepo + `git worktree add` + PTY spawn) and
+  only re-checks `state === 'todo'` afterwards. Throughout that multi-second
+  await the card still reads `todo`, so `editableInPlace` lets an edit through:
+  the agent then runs the OLD prompt in the OLD repo while the card advertises
+  the new `repoPath`, and `branchName`/`worktreePath` are written from the old
+  repo's session. `checkPullRequests` searches the new repoPath for that branch,
+  never finds the PR, and the card sits in In progress forever. Fix belongs in
+  `dispatchOnce` — stamp the claim before the await, or re-read the fields after
+  `stillQueued` — not in the gate.
+- **Why:** The window is pre-existing (the old `if (fields.repoPath && job.state
+  === 'todo')` had it too), but it used to need a mistimed human click. With
+  `edit_job` on the board's MCP surface it is something a program can hit on
+  purpose, and the failure is silent: a card stuck in In progress with no error
+  on it.
+- **Effort:** S (human: ~2h / CC: ~20 min)
+- **Priority:** P3
+- **Depends on:** Board read/edit MCP tools (v0.3.29.0)
+- **Context:** Raised by the adversarial review during /ship (2026-09-03).
+- **Completed:** v0.4.1.0 (2026-09-14) — `dispatchOnce` now compares the spawned
+  command and repository against the card after the await and abandons the
+  spawn on any difference.
 
 ## Hand the board tool to Codex agents
 
