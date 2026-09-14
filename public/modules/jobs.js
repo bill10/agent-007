@@ -634,17 +634,22 @@ function syncScheduleField() {
   document.getElementById('job-schedule-field').style.display = scheduled ? 'flex' : 'none';
 }
 
-// Codex has no --permission-mode: only "board default", auto (no flag) and
-// bypassPermissions mean anything to it, so the Claude-only modes are hidden
-// and a selection among them falls back to the board default.
+// A Codex card is offered "board default", auto and bypassPermissions, so the
+// Claude-only modes are hidden for it — except one the card already holds.
+// The server maps every mode onto a Codex flag, so a stored plan or manual is
+// a real, stricter setting; resetting it to board default on open would let
+// an unrelated edit (a typo fixed in the title) quietly widen the card.
 function syncAgentField() {
   const codex = document.getElementById('job-agent')?.value === 'codex';
   const permEl = document.getElementById('job-permission-mode-field');
   if (!permEl) return;
   // Both flags: Safari does not hide a hidden <option> in a native select,
   // so it is disabled as well and refuses the pick there instead.
-  for (const opt of permEl.querySelectorAll('option[data-claude-only]')) { opt.hidden = codex; opt.disabled = codex; }
-  if (codex && permEl.selectedOptions[0]?.hasAttribute('data-claude-only')) permEl.value = '';
+  for (const opt of permEl.querySelectorAll('option[data-claude-only]')) {
+    const off = codex && !opt.selected;
+    opt.hidden = off;
+    opt.disabled = off;
+  }
   // The two modes both CLIs share mean different things under each, and the
   // visible gloss has to say which — a title tooltip never reaches keyboard
   // or touch users.
