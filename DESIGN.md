@@ -586,7 +586,9 @@ those cards have always been.
   a text selection on the card are all excluded.
 - A card that carries its own permission mode wears it as a chip; a card left on
   the board default wears nothing, because the chip's job is to say "this one is
-  different". `bypassPermissions` takes `--state-disconnected` instead of the
+  different". A Codex card wears a `codex` chip on the same reasoning, and
+  `read_job` says `runs on: codex` only for one, since Claude Code is the
+  default. `bypassPermissions` takes `--state-disconnected` instead of the
   routine chip gold, on the card and on both selects, since it is the one mode
   with nothing reviewing the agent and it otherwise reads as just another entry
   in a list of six. The colour sits on the closed select, not on the `<option>`
@@ -669,9 +671,9 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   retitling a card in Review for the archive's sake is no longer possible.
 - **An agent may read the whole board but only rewrite its owner's cards.** A To
   do card's detail is not text about work, it IS the next agent's prompt:
-  `buildJobPrompt` hands it verbatim to an unattended `claude`, in whatever
-  permission mode the card or the board names (`auto` unless someone changed
-  it). Every board-dispatched agent holds one of these tokens, so without an
+  `buildJobPrompt` hands it verbatim to an unattended `claude` or `codex`, in
+  whatever permission mode the card or the board names (`auto` unless someone
+  changed it). Every board-dispatched agent holds one of these tokens, so without an
   ownership rule an agent working a hostile repo could rewrite a card queued for
   a different repo and have the board run its text there. `edit_job` therefore
   refuses a card whose `postedBy` is not the calling session's owner, the same
@@ -686,6 +688,22 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   set it would be a way around every gate its own session runs under, and the
   ownership rule above would not catch it — an agent is allowed to edit its
   owner's cards.
+- **An agent may pick the CLI, but not widen the mode through it.** `post_job`
+  takes an `agent` (`claude` or `codex`, defaulting to the CLI the poster is
+  itself running on), and Codex has no `--permission-mode`. If a Codex card
+  simply ignored the board's mode, posting `agent: codex` would be the way
+  around the rule above: a read-only board would dispatch a Codex that writes
+  files. So `CODEX_MODE_FLAGS` in `lib/jobs.js` maps every Claude mode onto the
+  nearest thing Codex's own sandbox and approval flags say — `plan` is
+  `--sandbox read-only`, `manual` asks before every command, `dontAsk` never
+  asks, `bypassPermissions` is `--dangerously-bypass-approvals-and-sandbox`,
+  and `auto`/`acceptEdits` are Codex's default (workspace-write, approval on
+  request) — and a strict board binds a Codex card too. Nearest, not
+  equivalent: that default runs a command it judges safe inside the sandbox
+  without asking, where Claude's `acceptEdits` would have prompted. The form
+  offers a Codex card only board default, `auto` and `bypassPermissions`; the
+  rest are reached through the board setting, and a card already holding one
+  keeps it when the form opens, so an unrelated edit cannot quietly widen it.
 - **An edit that lands says so and leaves a name.** The hazard above is an edit
   nobody sees, so `edit_job` toasts the way `post_job` does and stamps
   `editedByAgent`/`editedAt`, which the card renders beside "via" — a card an
@@ -796,7 +814,9 @@ the same shape as the terminal's upload, and land under
 - **Outside the repository, by construction.** The agent is handed absolute
   paths in its prompt, so nothing can be committed by accident; the spawn
   command adds `--add-dir` for that directory so an unattended Claude Code job
-  does not stop at a permission prompt on its first screenshot.
+  does not stop at a permission prompt on its first screenshot. A Codex job
+  gets no such flag: every Codex sandbox, read-only included, reads anywhere
+  on disk and gates only writes, and attachments are only ever read.
 - **Served sandboxed, to people only.** `/api/jobs/:id/attachments/:name` sits
   below the `requireUser` gate and sends `Content-Security-Policy: sandbox`,
   `nosniff` and `no-referrer`: an uploaded HTML file must not run as this

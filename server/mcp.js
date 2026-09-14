@@ -19,7 +19,7 @@
 
 // lib/jobs.js is the pure half of the board — no store, no Express — so the
 // column names come from there rather than being spelled out a second time.
-import { JOB_STATES, STATE_LABELS } from '../lib/jobs.js';
+import { JOB_STATES, STATE_LABELS, JOB_AGENTS } from '../lib/jobs.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -71,6 +71,13 @@ export const POST_JOB_TOOL = {
           + '@hourly, @daily, @weekly, @monthly, @yearly. A scheduled job need not be '
           + 'a coding task and is not expected to open a pull request. Omit this for '
           + 'ordinary work that should happen once.',
+      },
+      agent: {
+        type: 'string',
+        enum: JOB_AGENTS,
+        description:
+          'Optional. Which CLI the board spawns for this card: claude (Claude Code) '
+          + 'or codex. Defaults to the one you are running as.',
       },
     },
     required: ['title'],
@@ -189,6 +196,7 @@ const scheduleText = (job, sep = ', next ') =>
 // twenty questions.
 function summaryLine(job) {
   const bits = [job.repo];
+  if (job.agent === 'codex') bits.push('codex');
   if (job.type === 'scheduled') {
     bits.push(`scheduled ${scheduleText(job)}`);
   }
@@ -206,6 +214,7 @@ const CALLS = {
       detail: args.detail,
       repo: args.repo,
       schedule: args.schedule,
+      agent: args.agent,
       session: ctx.session || null,
     });
     if (result.error) return toolText(result.error, true);
@@ -262,6 +271,8 @@ const CALLS = {
       `id: ${job.id}`,
       `column: ${STATE_LABELS[job.state] || job.state}${job.status ? ` (${job.status})` : ''}`,
       `repo: ${job.repo}`,
+      // Only when it is not the default, the way the card's chip works.
+      job.agent === 'codex' ? 'runs on: codex' : null,
       job.type === 'scheduled'
         ? `schedule: ${scheduleText(job, ' — next ')}`
           + `${job.runCount ? ` — run ${job.runCount} time(s), last ${when(job.lastRunAt)}` : ''}`

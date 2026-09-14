@@ -20,10 +20,11 @@ import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode,
-  dispatchPermissionMode, JOB_STATES,
+  JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
+  jobAgent, jobAgentFromCommand, resolveJobAgent,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -286,8 +287,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, permissionMode, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -348,7 +349,7 @@ function scheduleTypeError(schedule) {
     : null;
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, type, session, user }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, type, agent, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -363,6 +364,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
   if (type != null && typeof type !== 'string') {
     return { error: 'type must be a string — "one-time" or "scheduled"' };
   }
+  if (agent != null && typeof agent !== 'string') {
+    return { error: 'agent must be a string — "claude" or "codex"' };
+  }
 
   const result = addJob({
     // Typed explicitly: this comes off the wire, and a non-string would be
@@ -376,6 +380,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, session, 
     // the calling agent can act on rather than a card that never fires.
     type: typeof type === 'string' ? type : undefined,
     schedule: typeof schedule === 'string' ? schedule : '',
+    // Unnamed, the card runs on the same CLI as the agent posting it; a person
+    // at the HTTP door with no session gets the board default.
+    agent: agent || (session ? jobAgentFromCommand(session.command) : undefined),
     // No permissionMode: an agent posting a card must not be able to pick the
     // mode the board will spawn with, which would be a way around every gate
     // its own session runs under. A card an agent files inherits the board's.
@@ -420,6 +427,7 @@ function jobSummary(job) {
     title: job.title,
     state: job.state,
     type: jobType(job),
+    agent: jobAgent(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
     repo: basename(job.repoPath || ''),
@@ -610,6 +618,11 @@ export function updateJob(jobId, fields, broadcast) {
     mode = resolveJobPermissionMode(fields.permissionMode);
     if (mode.error) return { error: mode.error };
   }
+  let cli = null;
+  if (fields.agent !== undefined) {
+    cli = resolveJobAgent(fields.agent);
+    if (cli.error) return { error: cli.error };
+  }
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
   // rejected as a pair.
@@ -633,6 +646,7 @@ export function updateJob(jobId, fields, broadcast) {
   if (typeof fields.detail === 'string') job.detail = fields.detail.trim().slice(0, MAX_DETAIL_LEN);
   if (fields.repoPath) job.repoPath = fields.repoPath;
   if (mode) job.permissionMode = mode.permissionMode;
+  if (cli) job.agent = cli.agent;
   if (resolved) {
     job.type = resolved.type;
     job.schedule = resolved.schedule;
@@ -892,10 +906,10 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
-    // Kept so the recheck below can tell whether the card still dispatches
-    // with what its argv was built from.
-    const spawnedMode = dispatchPermissionMode(job, settings.permissionMode);
     const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
+    // Kept so the recheck below can tell whether the card still dispatches
+    // into the same repo as the session it is about to be handed.
+    const spawnedRepo = job.repoPath;
     // Branch named after the job, not a cocktail, so `git branch` reads like
     // the board. Two jobs can share a title, so collisions take a -2 suffix
     // rather than failing the dispatch.
@@ -925,17 +939,20 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // never cleaned up. The scan guard does not cover this — it serialises
     // scans against each other, not against the user.
     //
-    // The permission mode is rechecked on the same terms, and boardSettings()
-    // is re-read rather than reused so a board retuned mid-tick counts too.
-    // The argv was fixed before the await, so a card tightened (or the board
-    // tightened) while the agent spawned would otherwise leave that agent
-    // running under a mode neither of them still says, with the card showing
-    // the safer one — the store and the live process silently disagreeing.
-    // Abandoning the spawn hands it the same remedy every other change in
-    // this window gets: the card stays in To do and the next tick dispatches
-    // it again, with the mode that now applies.
+    // The argv is rechecked on the same terms — rebuilt from the card as it
+    // is now (boardSettings() re-read, so a board retuned mid-tick counts too)
+    // and compared with the one actually spawned. That covers everything the
+    // argv is made of at once: permission mode, which CLI, the prompt (title,
+    // detail, attachments) — so a card tightened, switched or rewritten while
+    // its agent spawned cannot be claimed by a process running the old text
+    // under a mode neither it nor the board still says. The repo is checked
+    // the same way, since it is not in the argv but is where the worktree
+    // was just made. Abandoning the spawn hands it the same remedy every
+    // other change in this window gets: the card stays in To do and the next
+    // tick dispatches it again, as it now reads.
     const stillQueued = allJobs().includes(job) && job.state === 'todo'
-      && dispatchPermissionMode(job, boardSettings().permissionMode) === spawnedMode;
+      && buildJobCommand(job, { permissionMode: boardSettings().permissionMode }) === command
+      && job.repoPath === spawnedRepo;
     if (!stillQueued) {
       if (killSession) {
         try { await killSession(session.id); } catch (err) {

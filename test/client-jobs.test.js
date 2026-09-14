@@ -44,14 +44,18 @@ const BOARD_HTML = `
         <div id="job-schedule-field" style="display:none">
           <input type="text" id="job-schedule">
         </div>
+        <select id="job-agent">
+          <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+        </select>
         <select id="job-permission-mode-field">
           <option value=""></option>
           <option value="auto">auto</option>
-          <option value="acceptEdits">acceptEdits</option>
+          <option value="acceptEdits" data-claude-only>acceptEdits</option>
           <option value="bypassPermissions">bypassPermissions</option>
-          <option value="manual">manual</option>
-          <option value="dontAsk">dontAsk</option>
-          <option value="plan">plan</option>
+          <option value="manual" data-claude-only>manual</option>
+          <option value="dontAsk" data-claude-only>dontAsk</option>
+          <option value="plan" data-claude-only>plan</option>
         </select>
         <textarea id="job-detail"></textarea>
         <button id="btn-job-attach"></button>
@@ -387,8 +391,93 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '', permissionMode: '', attachments: [],
+      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', attachments: [],
     });
+  });
+
+  it('posts a codex job, hiding the Claude-only modes except one already picked', () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Codex task';
+    const perm = document.getElementById('job-permission-mode-field');
+    perm.value = 'plan';
+    const agent = document.getElementById('job-agent');
+    agent.value = 'codex';
+    agent.dispatchEvent(new Event('change'));
+    // The pick survives: the server maps plan onto Codex's read-only sandbox.
+    expect(perm.value).toBe('plan');
+    expect(perm.querySelector('option[value="plan"]').hidden).toBe(false);
+    expect(perm.querySelector('option[value="manual"]').hidden).toBe(true);
+    expect(perm.querySelector('option[value="manual"]').disabled).toBe(true);
+    expect(perm.querySelector('option[value="bypassPermissions"]').hidden).toBe(false);
+    perm.value = 'bypassPermissions';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-create', agent: 'codex', permissionMode: 'bypassPermissions' }));
+    // Reopening for a claude card shows every mode again.
+    document.getElementById('btn-new-job').click();
+    expect(perm.querySelector('option[value="plan"]').hidden).toBe(false);
+  });
+
+  it('shows a codex chip on the card and pre-fills the agent when editing', () => {
+    handleJobsList({ jobs: [JOB({ agent: 'codex' })], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelector('.job-card-type').textContent).toBe('codex');
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(document.getElementById('job-agent').value).toBe('codex');
+  });
+
+  it('opens a codex card with the Claude-only modes hidden, and sends the agent on save', () => {
+    handleJobsList({ jobs: [JOB({ agent: 'codex', permissionMode: 'bypassPermissions' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    const perm = document.getElementById('job-permission-mode-field');
+    expect(perm.querySelector('option[value="manual"]').hidden).toBe(true);
+    expect(perm.value).toBe('bypassPermissions');
+    expect(perm.classList).toContain('job-mode-danger');
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', agent: 'codex', permissionMode: 'bypassPermissions' }));
+  });
+
+  // A card can hold a Claude-only mode on Codex (a ws client, config.json, or
+  // a Claude card switched to Codex in the form); the server maps it onto a
+  // stricter Codex flag, so opening the card must not quietly drop it.
+  it('keeps a stored Claude-only mode on a codex card and sends it back unchanged', () => {
+    handleJobsList({ jobs: [JOB({ agent: 'codex', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    const perm = document.getElementById('job-permission-mode-field');
+    expect(perm.value).toBe('plan');
+    expect(perm.querySelector('option[value="plan"]').hidden).toBe(false);
+    expect(perm.querySelector('option[value="manual"]').hidden).toBe(true);
+    document.getElementById('job-title').value = 'typo fixed';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', agent: 'codex', permissionMode: 'plan' }));
+  });
+
+  it('switching a card back to claude unhides every mode and sends claude', () => {
+    handleJobsList({ jobs: [JOB({ agent: 'codex' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    const perm = document.getElementById('job-permission-mode-field');
+    const agent = document.getElementById('job-agent');
+    agent.value = 'claude';
+    agent.dispatchEvent(new Event('change'));
+    expect(perm.querySelector('option[value="plan"]').hidden).toBe(false);
+    perm.value = 'plan';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', agent: 'claude', permissionMode: 'plan' }));
+  });
+
+  it('opens a claude card on claude even right after a codex one', () => {
+    handleJobsList({ jobs: [JOB({ id: 'c', agent: 'codex' }), JOB({ id: 'k' })], settings: { running: false, maxPerRepo: 2 } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(document.getElementById('job-agent').value).toBe('codex');
+    closeJobForm();
+    cards()[1].querySelector('.job-card-actions button').click();
+    expect(document.getElementById('job-agent').value).toBe('claude');
+    expect(document.getElementById('job-permission-mode-field').querySelector('option[value="plan"]').hidden).toBe(false);
+  });
+
+  it('lines up the scheduled, codex and mode chips in that order, and none on a plain card', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', agent: 'codex', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toEqual(['scheduled', 'codex', 'plan']);
+    handleJobsList({ jobs: [JOB({ agent: 'claude' })], settings: { running: false, maxPerRepo: 2 } });
+    expect(cards()[0].querySelectorAll('.job-card-type')).toHaveLength(0);
   });
 
   // A screenshot pasted into Details becomes a named base64 attachment on the

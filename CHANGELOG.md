@@ -5,6 +5,31 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.1.0] - 2026-09-11
+
+### Added
+
+- **A job can run on Codex.** The job form has an **Agent** select, Claude Code
+  or Codex, and the board's `post_job` tool takes an `agent`. A card an agent
+  files defaults to the CLI it is itself running on; a card a person files
+  defaults to Claude Code. Codex has no `--permission-mode`, so a Codex card
+  offers board default, `auto` (Codex's own default) and `bypassPermissions`
+  (`--dangerously-bypass-approvals-and-sandbox`); a board set to any other
+  mode maps onto Codex's nearest flag, so a read-only board stays read-only
+  for a Codex card. A Codex card is told to run `$ship` rather than `/ship`,
+  shows a `codex` chip on its face, and reads back as such through the
+  board's `list_jobs` and `read_job` tools.
+
+### Fixed
+
+- **A card edited while its agent was spawning no longer runs the old text.**
+  The dispatcher builds the agent's command, then spends seconds creating the
+  worktree and process, and only afterwards claims the card. An edit landing
+  in that window used to leave the agent running the previous prompt, in the
+  previous repository, under a card that read otherwise. The claim now
+  compares the command it actually spawned, and the repository, against the
+  card as it stands, and abandons the spawn on any difference; the next scan
+  sends the card out as it now reads.
 ## [0.4.0.0] - 2026-09-11
 
 ### Added

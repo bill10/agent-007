@@ -367,6 +367,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             // Empty means "inherit the board setting" — a real unset, so the
             // card follows the board if that changes before it is dispatched.
             permissionMode: msg.permissionMode,
+            agent: msg.agent,
             postedBy: ws.user ? ws.user.id : null,
             postedByName: ws.user ? ws.user.displayName : null,
           }, broadcast);
@@ -377,7 +378,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           const result = updateJob(msg.jobId, {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
             type: msg.jobType, schedule: msg.schedule, attachments: msg.attachments,
-            permissionMode: msg.permissionMode,
+            permissionMode: msg.permissionMode, agent: msg.agent,
           }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
