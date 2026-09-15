@@ -2027,7 +2027,8 @@ export function renderOffice() {
       if (!isActive) {
         ctx.font = LABEL_FONT;
         ctx.fillStyle = `rgba(${theme.tr}, ${theme.tg}, ${theme.tb}, 0.7)`;
-        ctx.fillText(agent.name, nameX, nameY);
+        // maxWidth: a long (renamed) label squeezes into the tile instead of overflowing onto neighbors.
+        ctx.fillText(agent.name, nameX, nameY, WS_W * Z);
       } else {
         // Pulsing glow
         const pulse = Math.sin(Date.now() / 600) * 0.5 + 0.5;
@@ -2035,8 +2036,8 @@ export function renderOffice() {
         ctx.shadowColor = `rgba(${GOLD_RGB}, ${0.4 + pulse * 0.5})`;
         ctx.shadowBlur = 6 + pulse * 8;
         ctx.fillStyle = '#d4a847';
-        ctx.fillText(agent.name, nameX, nameY);
-        ctx.fillText(agent.name, nameX, nameY);
+        ctx.fillText(agent.name, nameX, nameY, WS_W * Z);
+        ctx.fillText(agent.name, nameX, nameY, WS_W * Z);
         ctx.shadowBlur = 0;
       }
       ctx.textAlign = 'start';

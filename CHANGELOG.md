@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.2.0] - 2026-09-15
+
+### Added
+
+- **Rename a running agent.** Double-click an agent's tab, or press the pencil
+  button in the terminal header, to give it a new name. Only the agent's owner
+  can rename it, and the change reaches every connected browser at once, along
+  with the pixel office, the explorer sidebar, and any job card the agent is
+  working. The name survives a server restart. The agent's worktree directory
+  and branch keep their original codename, so nothing moves under a running
+  session.
+
 ## [0.4.1.0] - 2026-09-11
 
 ### Added

@@ -89,7 +89,8 @@ export async function handleSessionCreated(msg) {
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
     a.state = state || 'WORKING';
-    // Keep ownership fresh if the session is re-emitted (reconnect/reassignment).
+    // Keep name and ownership fresh if the session is re-emitted (reconnect/reassignment).
+    a.name = name;
     a.ownerId = ownerId || null;
     a.ownerName = ownerName || null;
     a.ownerColor = ownerColor || null;
@@ -363,6 +364,10 @@ export function updateTabs() {
     tab.onclick = (e) => {
       if (!e.target.classList.contains('close-btn') && !e.target.classList.contains('upload-btn')) switchToSession(sessionId);
     };
+    if (canControlAgent(agent)) {
+      tab.title = 'Double-click to rename';
+      tab.ondblclick = () => promptRename(sessionId);
+    }
     tab.ondragstart = (e) => {
       e.dataTransfer.setData('text/plain', sessionId);
       tab.classList.add('dragging');
@@ -407,11 +412,20 @@ export function updateTabs() {
     tab.appendChild(document.createTextNode(agent.name));
     const close = document.createElement('span');
     close.className = 'close-btn';
+    close.title = 'Close';
     close.textContent = '\u00d7';
     close.onclick = (e) => { e.stopPropagation(); removeSession(sessionId); };
     tab.appendChild(close);
     container.appendChild(tab);
   }
+}
+
+// Shared by the tab double-click and the topbar button (the keyboard path).
+export function promptRename(sessionId) {
+  const agent = agents.get(sessionId);
+  if (!agent) return;
+  const name = prompt('Rename agent', agent.name);
+  if (name && name.trim() && name.trim() !== agent.name) send({ type: 'rename-session', sessionId, name: name.trim() });
 }
 
 export function updateTopbarAgent() {
@@ -434,6 +448,9 @@ export function updateTopbarAgent() {
     const who = agent.ownerName ? ` · ${escapeHtml(agent.ownerName)}` : '';
     parts.push(`<span class="topbar-readonly" style="color:${c};border-color:${c}">\u{1F441} view-only${who}</span>`);
   }
+  if (canControlAgent(agent)) {
+    parts.push(`<button class="icon-btn topbar-rename" title="Rename agent" aria-label="Rename agent"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8.5 1.5l2 2L4 10H2V8z"/></svg></button>`);
+  }
   if (agent.repoSlug) {
     parts.push(`<span class="topbar-repo-label">Repo:</span> <span class="topbar-repo-name">${escapeHtml(agent.repoSlug)}</span>`);
   }
@@ -441,6 +458,8 @@ export function updateTopbarAgent() {
     parts.push(`<svg class="topbar-branch-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="3.5" cy="2.5" r="1.2"/><circle cx="3.5" cy="9.5" r="1.2"/><circle cx="8.5" cy="4" r="1.2"/><path d="M3.5 3.7v4.6"/><path d="M8.5 5.2c0 2.2-1.8 2.6-3.4 3.1"/></svg><span class="topbar-branch-name">${escapeHtml(agent.branchName)}</span>`);
   }
   el.innerHTML = parts.join(' ');
+  const rename = el.querySelector('.topbar-rename');
+  if (rename) rename.onclick = () => promptRename(activeSessionId);
 }
 
 export function updateStatusBar() {

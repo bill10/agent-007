@@ -1,6 +1,7 @@
 // Config persistence — load, save, orphan tracking, crash recovery
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { basename } from 'path';
 import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
@@ -69,6 +70,7 @@ export function loadConfig() {
     for (const o of config.orphans) {
       orphans.set(o.id, o);
       codenamePool.addUsed(o.name);
+      if (o.worktreePath) codenamePool.addUsed(basename(o.worktreePath)); // the label may have been renamed
     }
   } catch (err) {
     console.warn('Config corrupted, starting with empty config:', err.message);
@@ -134,6 +136,7 @@ export function recoverCrashedSessions(broadcast) {
     };
     orphans.set(orphanId, orphan);
     codenamePool.addUsed(s.name);
+    codenamePool.addUsed(basename(s.worktreePath));
     console.log(`Recovered crashed session: ${s.name} in ${s.repoPath}`);
   }
   config.activeSessions = [];
