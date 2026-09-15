@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { app, server, startup, sessions } from '../server.js';
 import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
 import { addJob, deleteJob } from '../server/jobs.js';
+import { config, orphans, codenamePool } from '../server/state.js';
 import WebSocket from 'ws';
 import { tmpdir } from 'os';
 import { mkdirSync, existsSync, writeFileSync, rmSync } from 'fs';
@@ -532,6 +533,28 @@ describe('ownership authorization', () => {
     a.close(); b.close();
   }, 15000);
 
+  it('lets only the owner rename a session and broadcasts the new name', async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep 7/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'sleep 7' }));
+    const { sessionId, name: oldName } = await created;
+    const b = await connect(tokenB);
+
+    const denied = nextMatching(b, (m) => m.type === 'notification' && /read-only/i.test(m.message || ''));
+    b.send(JSON.stringify({ type: 'rename-session', sessionId, name: 'nope' }));
+    expect(await denied).toBeTruthy();
+    expect(sessions.get(sessionId).name).toBe(oldName);
+
+    const seenByB = nextMatching(b, (m) => m.type === 'session-renamed' && m.sessionId === sessionId);
+    a.send(JSON.stringify({ type: 'rename-session', sessionId, name: '  viper  ' }));
+    const renamed = await seenByB;
+    expect(renamed.name).toBe('viper');
+    expect(sessions.get(sessionId).name).toBe('viper');
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
   it('silently drops pty-input from a non-owner but forwards the owner\'s', async () => {
     const a = await connect(tokenA);
     const created = nextMatching(a, (m) => m.type === 'session-created' && /cat/.test(m.command || ''));
@@ -617,5 +640,100 @@ describe('ownership is inert when auth is disabled', () => {
     expect(await ended).toBeTruthy(); // second socket kills it — no ownership block
 
     w1.close(); w2.close();
+  }, 15000);
+
+  it('spawn refuses a custom name that is already held', async () => {
+    const w = await open();
+    const created = next(w, (m) => m.type === 'session-created' && m.name === 'dup-name-test');
+    w.send(JSON.stringify({ type: 'spawn', command: 'sleep 4', name: 'dup-name-test' }));
+    const { sessionId } = await created;
+    const err = next(w, (m) => m.type === 'spawn-error' && /already exists/.test(m.error || ''));
+    w.send(JSON.stringify({ type: 'spawn', command: 'sleep 4', name: 'dup-name-test' }));
+    expect(await err).toBeTruthy();
+    w.send(JSON.stringify({ type: 'kill', sessionId }));
+    w.close();
+  }, 15000);
+
+  it('rename-session ignores bad input, rejects a taken name, and truncates to 40', async () => {
+    const w = await open();
+    const spawn = async (cmd) => {
+      const created = next(w, (m) => m.type === 'session-created' && m.command === cmd);
+      w.send(JSON.stringify({ type: 'spawn', command: cmd }));
+      return created;
+    };
+    const one = await spawn('sleep 6');
+    const two = await spawn('sleep 8');
+
+    // A missing session, a non-string or missing name, a whitespace name, a
+    // name with no letters or digits, and the current name are all silent no-ops.
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: 'nope-999', name: 'ghost' }));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: 42 }));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId }));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: '   ' }));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: '...' }));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: one.name }));
+    // A name another live session holds is refused with an error notification.
+    const dup = next(w, (m) => m.type === 'notification' && /already exists/.test(m.message || ''));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: two.name }));
+    expect((await dup).level).toBe('error');
+    expect(sessions.get(one.sessionId).name).toBe(one.name);
+    // So is a name an orphan still holds: the pool reserves those too.
+    orphans.set('orphan-rename-test', { id: 'orphan-rename-test', name: 'orphan-ghost', worktreePath: '/nonexistent/orphan-ghost' });
+    codenamePool.addUsed('orphan-ghost');
+    const dupOrphan = next(w, (m) => m.type === 'notification' && /already exists/.test(m.message || ''));
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: 'orphan-ghost' }));
+    expect((await dupOrphan).level).toBe('error');
+    orphans.delete('orphan-rename-test');
+    codenamePool.recycle('orphan-ghost');
+
+    // Over-long names are cut to 40 characters.
+    const renamed = next(w, (m) => m.type === 'session-renamed' && m.sessionId === one.sessionId);
+    w.send(JSON.stringify({ type: 'rename-session', sessionId: one.sessionId, name: 'x'.repeat(41) }));
+    expect((await renamed).name).toBe('x'.repeat(40));
+
+    w.send(JSON.stringify({ type: 'kill', sessionId: one.sessionId }));
+    w.send(JSON.stringify({ type: 'kill', sessionId: two.sessionId }));
+    w.close();
+  }, 15000);
+
+  it('rename-session carries the new name into the restart record and the linked job card', async () => {
+    const w = await open();
+    const created = next(w, (m) => m.type === 'session-created' && m.command === 'sleep 9');
+    w.send(JSON.stringify({ type: 'spawn', command: 'sleep 9' }));
+    const { sessionId, name: oldName } = await created;
+    const session = sessions.get(sessionId);
+    // A bare spawn has no worktree; give it one named after the codename, the
+    // way createWorktree lays them out, so the config record is findable.
+    session.worktreePath = join(tmpdir(), oldName);
+    config.activeSessions.push({ name: oldName, worktreePath: session.worktreePath });
+    const { job } = addJob({ title: 'Rename me', repoPath: tmpdir() }, () => {});
+    Object.assign(job, { agentSessionId: sessionId, agentName: oldName });
+    // Every card linked to this session follows, whatever label it showed before.
+    const { job: other } = addJob({ title: 'Stale label', repoPath: tmpdir() }, () => {});
+    Object.assign(other, { agentSessionId: sessionId, agentName: 'someone-else' });
+
+    try {
+      const list = next(w, (m) => m.type === 'jobs-list' && m.jobs.find(j => j.id === job.id)?.agentName === 'mamba');
+      w.send(JSON.stringify({ type: 'rename-session', sessionId, name: 'mamba' }));
+      expect((await list).jobs.find(j => j.id === other.id).agentName).toBe('mamba');
+      expect(config.activeSessions.find(s => s.worktreePath === session.worktreePath).name).toBe('mamba');
+      // The old codename still names the worktree directory on disk, so it stays
+      // reserved: a later spawn must not try to create the same path.
+      expect(codenamePool.has(oldName)).toBe(true);
+      expect(codenamePool.has('mamba')).toBe(true);
+      // Renaming back to the directory's own codename is allowed, and frees the label.
+      const back = next(w, (m) => m.type === 'session-renamed' && m.name === oldName);
+      w.send(JSON.stringify({ type: 'rename-session', sessionId, name: oldName }));
+      expect(await back).toBeTruthy();
+      expect(codenamePool.has('mamba')).toBe(false);
+    } finally {
+      config.activeSessions = config.activeSessions.filter(s => s.worktreePath !== session.worktreePath);
+      session.worktreePath = null; // keep the kill path from touching a worktree that never existed
+      codenamePool.recycle(oldName);
+      await deleteJob(job.id, () => {});
+      await deleteJob(other.id, () => {});
+      w.send(JSON.stringify({ type: 'kill', sessionId }));
+      w.close();
+    }
   }, 15000);
 });

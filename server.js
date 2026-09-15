@@ -48,6 +48,10 @@ setupRoutes(app, join(__dirname, 'public'), { broadcast });
 // These span multiple modules (git, pty, config, ws) and stay here.
 
 async function createSession(command, name, repoPath, customBranch, ownerId, meta = {}) {
+  // A custom name must not already be a live label, an orphan's label, or a
+  // worktree directory's codename: two holders of one name means the first
+  // kill frees it while the other still names a directory on disk.
+  if (name && codenamePool.has(name)) return { error: `An agent named ${name} already exists` };
   const sessionId = nextSessionId();
   const agentName = name || codenamePool.pick();
   if (name) codenamePool.addUsed(name);
@@ -137,6 +141,7 @@ async function killSession(sessionId) {
     broadcast({ type: 'notification', level: 'info', message: `${session.name} orphaned — worktree kept (${reason} changes)` });
   } else {
     codenamePool.recycle(session.name);
+    if (session.worktreePath) codenamePool.recycle(basename(session.worktreePath)); // differs after a rename
   }
   sessions.delete(sessionId);
 }

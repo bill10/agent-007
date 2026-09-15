@@ -8,13 +8,13 @@ import {
   GIT_USER_TIMEOUT, isAllowedOrigin,
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
-import { saveActiveSession, syncOrphansToConfig } from './config.js';
+import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
-  jobsPayload, broadcastJobs, runScan, relinkSessionToJob,
+  jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
 } from './jobs.js';
 
 // --- Client tracking ---
@@ -203,6 +203,38 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           removeRepo(msg.path, broadcast);
           break;
         }
+        case 'rename-session': {
+          const session = sessions.get(msg.sessionId);
+          if (!session) break;
+          if (!owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
+          const name = typeof msg.name === 'string' ? msg.name.trim().slice(0, 40) : '';
+          if (!/[a-zA-Z0-9]/.test(name) || name === session.name) break;
+          // The pool holds every live label, every orphan's label, and every
+          // worktree directory's codename, so one lookup covers all three. The
+          // one name this session may reclaim is its own directory's codename.
+          const dirName = session.worktreePath ? basename(session.worktreePath) : null;
+          if (codenamePool.has(name) && name !== dirName) {
+            ws.send(JSON.stringify({ type: 'notification', level: 'error', message: `An agent named ${name} already exists` }));
+            break;
+          }
+          const oldName = session.name;
+          session.name = name;
+          // Only the label moves. The worktree directory keeps its codename:
+          // moving it under a live PTY would strand the agent's cwd. That codename
+          // stays reserved until the directory is gone (killSession, delete-orphan),
+          // or the next spawn in this repo would try to create the same path.
+          if (oldName !== dirName) codenamePool.recycle(oldName);
+          codenamePool.addUsed(name);
+          const rec = config.activeSessions.find(s => s.worktreePath && s.worktreePath === session.worktreePath);
+          if (rec) rec.name = name;
+          for (const job of allJobs()) {
+            if (job.agentSessionId === session.id) job.agentName = name;
+          }
+          saveConfig(broadcast);
+          broadcast({ type: 'session-renamed', sessionId: session.id, name });
+          broadcastJobs(broadcast);
+          break;
+        }
         case 'refresh-tree': {
           const session = sessions.get(msg.sessionId);
           if (session && !owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
@@ -264,6 +296,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
               // it. The branch needs no bookkeeping: git is asked directly at spawn
               // time, so whether this branch still exists takes care of itself.
               codenamePool.recycle(orphan.name);
+              if (orphan.worktreePath) codenamePool.recycle(basename(orphan.worktreePath)); // differs after a rename
               orphans.delete(msg.orphanId);
               syncOrphansToConfig(broadcast);
               broadcastOrphansList();
@@ -325,6 +358,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           }
           await deleteBranch(orphan.repoPath, orphan.branchName);
           codenamePool.recycle(orphan.name);
+          if (orphan.worktreePath) codenamePool.recycle(basename(orphan.worktreePath)); // differs after a rename
           orphans.delete(msg.orphanId);
           syncOrphansToConfig(broadcast);
           broadcastOrphansList();

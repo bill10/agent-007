@@ -6,7 +6,7 @@ import {
   handleSpawnError, handleSessionEnded, switchToSession,
   removeSession, updateTabs, updateStatusBar, fitActiveTerminal,
   setOnSessionChanged, handleUploadComplete, setupUpload,
-  updateTerminalThemes,
+  updateTerminalThemes, updateTopbarAgent,
 } from './modules/terminal.js';
 import {
   renderOffice, setupOfficeClick, startAnimationLoop,
@@ -487,6 +487,17 @@ function onMessage(msg) {
         agent.branchName = msg.branchName;
         updateStatusBar();
         renderExplorer();
+      }
+      break;
+    }
+    case 'session-renamed': {
+      const agent = agents.get(msg.sessionId);
+      if (agent) {
+        agent.name = msg.name;
+        updateTabs();
+        updateTopbarAgent();
+        renderExplorer();
+        renderOffice();
       }
       break;
     }
