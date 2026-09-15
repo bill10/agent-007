@@ -16,7 +16,14 @@ mission control dashboard — calm, information-dense, utility-first.
 **Agents** — Spy codenames from a fixed pool:
 `Shadow, Phantom, Viper, Cipher, Raven, Onyx, Echo, Spectre, Falcon, Ghost, Dagger, Mirage, Cobra, Apex, Ember`
 
-Random assignment, recycled on agent death. User can override with custom name.
+Random assignment, recycled on agent death. User can override with custom name
+at spawn, or rename a running agent later (double-click its tab, or the pencil
+button in the terminal header; owner only, max 40 characters, must be unique
+among live agents and orphans). A rename changes only the label: the worktree
+directory and branch keep the original codename, since moving the directory
+under a live PTY would strand the agent's cwd. The new name reaches every
+connected client and the office, explorer and job card at once, and survives
+a server restart.
 
 **Branches** — Cocktail names with `{git-username}/` prefix:
 `bill/vesper, bill/martini, bill/gimlet, bill/negroni, bill/sidecar, bill/daiquiri, bill/manhattan, bill/mojito, bill/paloma, bill/sazerac, bill/aviation, bill/bellini, bill/spritz, bill/collins, bill/julep, bill/highball, bill/rickey, bill/fizz`
@@ -147,8 +154,8 @@ Three-panel layout with per-panel headers:
 - **Dividers:** Gradient top (matches header bg) + border below. Gold on hover.
 - **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E
 - **Office:** Centered "+ Agent" and "+ Job" buttons
-- **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle in the header; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
-- **Terminal tabs:** Draggable for reordering, order persisted to localStorage
+- **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle in the header, plus a pencil rename button when the viewer owns the agent; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
+- **Terminal tabs:** Draggable for reordering, order persisted to localStorage; double-click renames the agent (owner only)
 - **Jobs tab:** Pinned first in the tab bar, not draggable and not closable. Shows
   an orange count badge when any in-progress job needs the user. Selecting it swaps
   the terminal viewport for the board; selecting any agent tab swaps back to that
@@ -845,8 +852,9 @@ the same shape as the terminal's upload, and land under
 ## Interactive Behaviors
 
 ### Icon buttons
-- Shared `.icon-btn` primitive (formerly `.theme-toggle`): theme toggle in the
-  terminal header; the voice mic reuses it with the `.voice-fab` overlay class
+- Shared `.icon-btn` primitive (formerly `.theme-toggle`): theme toggle and
+  the rename pencil in the terminal header; the voice mic reuses it with the
+  `.voice-fab` overlay class
 
 ### Voice input
 - Mic button floats bottom-right of the terminal viewport (`.voice-fab`,
