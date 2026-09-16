@@ -6,7 +6,7 @@ import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
-import { isScheduled, scheduledRunReset } from '../lib/jobs.js';
+import { isScheduled, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent } from '../lib/jobs.js';
 
 export function loadConfig() {
   try {
@@ -104,9 +104,19 @@ export function saveActiveSession(session, broadcast) {
     color: session.color,
     cocktail: session.cocktail,
     ownerId: session.ownerId || null,
+    // Which CLI to resume with if this session has to be re-adopted after a
+    // restart: the orphan it becomes inherits it (recoverCrashedSessions).
+    // null when nobody knows, so the fallbacks get to answer.
+    agent: sessionAgent(session),
     savedAt: new Date().toISOString(),
   });
   saveConfig(broadcast);
+}
+
+// The session's own note when it carries one (every PTY session does, see
+// createSessionFromConfig); read off the command otherwise.
+export function sessionAgent(session) {
+  return session.agent !== undefined ? session.agent : sessionAgentFromCommand(session.command);
 }
 
 export function removeActiveSession(worktreePath, broadcast) {
@@ -131,6 +141,10 @@ export function recoverCrashedSessions(broadcast) {
       branchName: s.branchName,
       color: s.color,
       ownerId: s.ownerId || null,
+      // Absent in a config written before it was recorded; a value that is not
+      // one of ours (config.json is hand-editable) is dropped rather than
+      // carried forward as a note.
+      agent: isValidJobAgent(s.agent) ? s.agent : null,
       reason: 'server-restart',
       createdAt: new Date().toISOString(),
     };

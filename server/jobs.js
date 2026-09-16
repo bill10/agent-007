@@ -15,16 +15,17 @@ import { basename, dirname, join, resolve, sep } from 'path';
 import { config, sessions, CONFIG_DIR } from './state.js';
 import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
+import { agentFromTranscripts } from './agent-transcripts.js';
 import { safeFilename } from '../lib/helpers.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
-  branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode,
+  branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
-  jobAgent, jobAgentFromCommand, resolveJobAgent,
+  jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -1025,20 +1026,61 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
 // The branch is the link. It is created per job, never reused while it exists,
 // and survives the restart on both the orphan record and the job — the one
 // identifier that outlives the session.
-export function relinkSessionToJob(session, broadcast) {
-  if (!session || !session.branchName) return null;
+//
+// findJobForBranch is that link on its own: the card an agent on this branch
+// belongs to, or null. relinkSessionToJob below ties the session to it, and
+// resumeCommandForOrphan reads the card's agent through the same lookup before
+// the spawn, so the two cannot disagree about which card the orphan came from.
+export function findJobForBranch({ repoPath, branchName }) {
+  if (!branchName) return null;
   // in-progress OR review: a job can reach review while its link is null (the
   // PR was found after a restart, so there was no session to retire), and the
   // agent re-adopted afterwards still belongs to that card.
   const matches = allJobs().filter(j =>
-    j.branchName === session.branchName
-    && j.repoPath === session.repoPath
+    j.branchName === branchName
+    && j.repoPath === repoPath
     && (j.state === 'in-progress' || j.state === 'review')
     && !j.agentSessionId,   // never steal a job that already has a live agent
   );
   // Prefer work still in flight: if an old review job and a new in-progress job
   // share a branch, the agent belongs to the one that is not finished.
-  const job = matches.find(j => j.state === 'in-progress') || matches[0];
+  return matches.find(j => j.state === 'in-progress') || matches[0] || null;
+}
+
+// What re-adopting an orphan should run. The orphan record says which CLI the
+// session ran when it was orphaned by a restart or a close. One written before
+// that was noted, or discovered from a bare worktree on disk, carries no such
+// note, so its job card, matched on the branch, is the next witness; a manually
+// spawned agent has no card either, so the transcripts the CLIs leave under
+// their own homes are the last. With none of those it is Claude Code, the
+// board's own default — the same guess as before the note existed.
+//
+// When the card is known its permission mode rides along too: the resumed
+// session should run under the sandbox it was dispatched with, not the CLI's
+// default. The returned `agent` is what was resolved (null when nothing was),
+// so the caller can note it on the orphan and spare the next attempt the
+// same lookup.
+//
+// `homes` is for tests, which must not probe the developer's real ~/.codex.
+export function orphanResumePlan(orphan, homes) {
+  const card = findJobForBranch(orphan);
+  // The note is trusted only when it is one of ours: config.json is hand-
+  // editable, and a stray value would otherwise be stamped onto the new
+  // session as if it had been seen.
+  const agent = (isValidJobAgent(orphan.agent) ? orphan.agent : null)
+    || (card ? jobAgent(card) : null)
+    || agentFromTranscripts(orphan.worktreePath, homes);
+  const mode = card ? dispatchPermissionMode(card, boardSettings().permissionMode) : null;
+  return { agent, mode, command: resumeCommand(agent, mode) };
+}
+
+export function resumeCommandForOrphan(orphan, homes) {
+  return orphanResumePlan(orphan, homes).command;
+}
+
+export function relinkSessionToJob(session, broadcast) {
+  if (!session) return null;
+  const job = findJobForBranch(session);
   if (!job) return null;
   job.agentSessionId = session.id;
   job.agentName = session.name;

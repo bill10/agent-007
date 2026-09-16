@@ -2,14 +2,16 @@
 // reaches the spawned argv, so it is allowlisted like the permission mode; a
 // card an agent posts defaults to the poster's own CLI; and Codex, having no
 // --permission-mode, gets the board's mode folded into its one flag.
-import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync } from 'fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, symlinkSync, chmodSync, readdirSync, readFileSync, rmSync, realpathSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
-import { addJob, updateJob, updateSettings, boardSettings, allJobs, postJobForAgent, dispatchOnce, listJobsForAgent } from '../server/jobs.js';
+import { addJob, updateJob, updateSettings, boardSettings, allJobs, postJobForAgent, dispatchOnce, listJobsForAgent, resumeCommandForOrphan, orphanResumePlan } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
-import { createJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS } from '../lib/jobs.js';
+import { createJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, resumeCommand, sessionAgentFromCommand, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS } from '../lib/jobs.js';
+import { execSync } from 'child_process';
+import { agentFromTranscripts } from '../server/agent-transcripts.js';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-jobagent-'));
 const noop = () => {};
@@ -63,7 +65,7 @@ describe('buildJobCommand for codex', () => {
     const want = {
       auto: [], acceptEdits: [],
       plan: ['--sandbox', 'read-only'],
-      manual: ['--ask-for-approval', 'untrusted'],
+      manual: ['--ask-for-approval', 'on-request', '--sandbox', 'read-only'],
       dontAsk: ['--ask-for-approval', 'never'],
       bypassPermissions: ['--dangerously-bypass-approvals-and-sandbox'],
     };
@@ -106,6 +108,379 @@ describe('a card posted by an agent', () => {
     expect(postJobForAgent({ title: 'x', agent: 'claude', session }, noop).job.agent).toBe('claude');
     expect(postJobForAgent({ title: 'x', repo: REPO }, noop).job.agent).toBe('claude');
     expect(postJobForAgent({ title: 'x', repo: REPO, agent: 7 }, noop).error).toMatch(/agent must be a string/);
+  });
+});
+
+// The mapping is only as good as the CLI it targets: `untrusted` was a valid
+// approval policy once and is not in codex-cli 0.153, and a flag the parser
+// rejects kills the agent before it prints a prompt. With a real codex on
+// PATH, every entry is run through its parser, on both the spawn form and the
+// resume form; --help makes the CLI parse and exit without starting anything.
+const codexOnPath = (() => { try { execSync('codex --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
+describe.skipIf(!codexOnPath)('CODEX_MODE_FLAGS against the installed codex', () => {
+  for (const [mode, flags] of Object.entries(CODEX_MODE_FLAGS)) {
+    it(`${mode}: ${flags || '(no flags)'} parses on codex and on codex resume`, () => {
+      for (const form of [`codex ${flags} --help`, `codex resume --last ${flags} --help`]) {
+        expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).not.toThrow();
+      }
+    });
+  }
+});
+
+describe('re-adopting an orphan', () => {
+  beforeEach(resetBoard);
+
+  it('resumes with the CLI the session ran, not always claude', () => {
+    // `claude --continue` on a Codex worktree finds no Claude transcript there
+    // and exits with "No conversation found to continue" — the session is
+    // gone before anyone can type into it.
+    expect(resumeCommand('codex')).toBe('codex resume --last');
+    expect(resumeCommand('claude')).toBe('claude --continue');
+    expect(resumeCommand(undefined)).toBe('claude --continue');
+    expect(resumeCommand(null)).toBe('claude --continue');
+    // Both are commands the PTY treats as a TUI agent.
+    expect(parseCommand(resumeCommand('codex'))).toEqual({ file: 'codex', args: ['resume', '--last'] });
+  });
+
+  it('carries the permission mode the session was dispatched with', () => {
+    // Neither CLI remembers its mode: a read-only Codex card resumed bare
+    // comes back with workspace-write, and an unattended one comes back
+    // asking. Same flag mapping as dispatch, validated the same way.
+    expect(resumeCommand('codex', 'plan')).toBe('codex resume --last --sandbox read-only');
+    expect(resumeCommand('codex', 'dontAsk')).toBe('codex resume --last --ask-for-approval never');
+    expect(resumeCommand('codex', 'bypassPermissions')).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+    expect(resumeCommand('codex', 'auto')).toBe('codex resume --last');   // Codex's own default
+    expect(resumeCommand('claude', 'plan')).toBe('claude --continue --permission-mode plan');
+    expect(resumeCommand('claude', 'bypassPermissions')).toBe('claude --continue --permission-mode bypassPermissions');
+    // No card, or a mode that is not one of ours: nothing is smuggled onto the argv.
+    expect(resumeCommand('codex', null)).toBe('codex resume --last');
+    expect(resumeCommand('claude', 'plan --add-dir /')).toBe('claude --continue');
+    expect(parseCommand(resumeCommand('codex', 'plan')).args).toEqual(['resume', '--last', '--sandbox', 'read-only']);
+  });
+
+  it('resumes a job agent under its card\'s mode, and a manual agent under the CLI default', async () => {
+    updateSettings({ permissionMode: 'plan', maxPerRepo: 2 }, noop);
+    addJob({ title: 'read only codex', repoPath: REPO, agent: 'codex' }, noop);
+    addJob({ title: 'unattended codex', repoPath: REPO, agent: 'codex', permissionMode: 'bypassPermissions' }, noop);
+    let n = 0;
+    await dispatchOnce(async (command, name, repoPath, branch) => {
+      const session = { id: `s${++n}`, name: `A${n}`, command, repoPath, branchName: branch, exited: false };
+      sessions.set(session.id, session);
+      return { session };
+    }, noop);
+    const [inherits, own] = allJobs();
+    expect(inherits.state).toBe('in-progress');
+    expect(own.state).toBe('in-progress');
+    sessions.clear();
+    inherits.agentSessionId = null;
+    own.agentSessionId = null;
+    const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
+    // The board mode applies when the card inherits it...
+    expect(orphanResumePlan({ repoPath: REPO, branchName: inherits.branchName, worktreePath: '/wt/x', agent: 'codex' }, homes))
+      .toEqual({ agent: 'codex', mode: 'plan', command: 'codex resume --last --sandbox read-only' });
+    // ...and the card's own mode when it has one.
+    expect(orphanResumePlan({ repoPath: REPO, branchName: own.branchName, worktreePath: '/wt/y', agent: 'codex' }, homes).command)
+      .toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+    // A manual agent has no card: no flag, and the resolved agent is reported for noting.
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex' }, homes)).toEqual({ agent: 'codex', mode: null, command: 'codex resume --last' });
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes)).toEqual({ agent: null, mode: null, command: 'claude --continue' });
+  });
+
+  it('records a CLI only when the command is literally one of them', () => {
+    // Unlike jobAgentFromCommand, no default: the record outranks the card and
+    // the transcripts, so a guess here would silence both.
+    expect(sessionAgentFromCommand('codex')).toBe('codex');
+    expect(sessionAgentFromCommand('/opt/homebrew/bin/codex --model o3')).toBe('codex');
+    expect(sessionAgentFromCommand('claude --continue')).toBe('claude');
+    expect(sessionAgentFromCommand('claude.exe --continue')).toBe('claude');
+    expect(sessionAgentFromCommand('bash -lc codex')).toBeNull();
+    expect(sessionAgentFromCommand('gemini')).toBeNull();
+    expect(sessionAgentFromCommand(undefined)).toBeNull();
+    expect(sessionAgentFromCommand('')).toBeNull();
+  });
+
+  it('reads the CLI off the orphan record when a restart or a close recorded it', () => {
+    expect(resumeCommandForOrphan({ agent: 'codex', repoPath: REPO, branchName: 'b/x' })).toBe('codex resume --last');
+    expect(resumeCommandForOrphan({ agent: 'claude', repoPath: REPO, branchName: 'b/x' })).toBe('claude --continue');
+    // A value outside the allowlist (config.json is hand-editable) is no note
+    // at all: the fallbacks run, and the junk is not stamped onto the session.
+    const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
+    expect(orphanResumePlan({ agent: 'gemini', repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes))
+      .toEqual({ agent: null, mode: null, command: 'claude --continue' });
+  });
+
+  it('falls back to the job card on the branch for an orphan discovered on disk', async () => {
+    // scanForOrphanedWorktrees only knows the directory and the branch; the
+    // card that dispatched a Codex agent onto that branch knows the rest.
+    addJob({ title: 'codex work', repoPath: REPO, agent: 'codex' }, noop);
+    const calls = [];
+    await dispatchOnce(async (command, name, repoPath, branch) => {
+      calls.push({ command, branch });
+      const session = { id: 's1', name: 'Onyx', command, repoPath, branchName: branch, exited: false };
+      sessions.set(session.id, session);
+      return { session };
+    }, noop);
+    const job = allJobs()[0];
+    expect(job.agent).toBe('codex');
+    // After a restart the link is gone, as loadConfig leaves it.
+    sessions.clear();
+    job.agentSessionId = null;
+
+    // Empty CLI homes, so the transcript probe below cannot answer instead.
+    const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
+    const discovered = { repoPath: REPO, branchName: job.branchName, worktreePath: '/wt/x', reason: 'discovered' };
+    expect(resumeCommandForOrphan(discovered, homes)).toBe('codex resume --last');
+    // A card the orphan record contradicts loses: the record saw the command.
+    // The card's mode (the board's, here) still rides along.
+    expect(resumeCommandForOrphan({ ...discovered, agent: 'claude' }, homes)).toBe('claude --continue --permission-mode auto');
+    // No card on that branch, no note, no transcript: Claude Code, the default.
+    expect(resumeCommandForOrphan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes)).toBe('claude --continue');
+    // A card that already has a live agent is not this orphan's card.
+    job.agentSessionId = 'someone-else';
+    expect(resumeCommandForOrphan(discovered, homes)).toBe('claude --continue');
+  });
+
+  // A manually spawned agent has no card, and an orphan record written before
+  // the CLI was noted has no note: the transcripts each CLI leaves under its
+  // home are the only thing left that knows.
+  // Every temp root is removed after each test: the FIFO test leaves pipes
+  // behind that would hang any later reader of the temp dir (unlink does not
+  // open them, so the cleanup itself is safe).
+  const tempRoots = [];
+  const tempRoot = (prefix) => { const r = mkdtempSync(join(tmpdir(), prefix)); tempRoots.push(r); return r; };
+  afterEach(() => { for (const r of tempRoots.splice(0)) rmSync(r, { recursive: true, force: true }); });
+
+  function fakeHomes() {
+    const root = tempRoot('a007-homes-');
+    const claude = join(root, 'claude');
+    const codex = join(root, 'codex');
+    // Claude Code: ~/.claude/projects/<path, non-alphanumerics dashed>/<uuid>.jsonl
+    const claudeFor = (wt, at, { name = 'f5fe539b.jsonl' } = {}) => {
+      const dir = join(claude, 'projects', wt.replace(/[^A-Za-z0-9]/g, '-'));
+      mkdirSync(dir, { recursive: true });
+      const f = join(dir, name);
+      writeFileSync(f, '{"type":"user"}\n');
+      utimesSync(f, at, at);
+    };
+    // Codex: ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl, first line session_meta with cwd
+    let n = 0;
+    const codexFor = (wt, at, { meta = true, source = 'cli', thread = 'user' } = {}) => {
+      const dir = join(codex, 'sessions', '2026', '09', '15');
+      mkdirSync(dir, { recursive: true });
+      const f = join(dir, `rollout-2026-09-15T00-00-0${n++}.jsonl`);
+      // The real session_meta line carries Codex's base instructions and runs
+      // past 20 KB; a reader that stops at a fixed head misses the cwd.
+      const first = meta
+        ? JSON.stringify({ timestamp: 't', type: 'session_meta', payload: { id: 'x', cwd: wt, originator: 'codex-tui', source, thread_source: thread, base_instructions: { text: 'You are Codex. '.repeat(2000) } } })
+        : JSON.stringify({ type: 'other' });
+      writeFileSync(f, first + '\n' + JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(50000) } }) + '\n');
+      utimesSync(f, at, at);
+    };
+    return { homes: { claude, codex }, claudeFor, codexFor };
+  }
+
+  it('reads the CLI off the transcripts on disk when nothing else knows', () => {
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    const t = 1_700_000_000;
+    codexFor('/wt/video/Vid Gen', t);                   // a space in the path, as a renamed agent leaves
+    claudeFor('/wt/video/Ghost', t);
+    codexFor('/wt/video/Phantom', t, { meta: false });   // a rollout with no readable cwd says nothing
+    expect(agentFromTranscripts('/wt/video/Vid Gen', homes)).toBe('codex');
+    expect(agentFromTranscripts('/wt/video/Ghost', homes)).toBe('claude');
+    expect(agentFromTranscripts('/wt/video/Phantom', homes)).toBeNull();
+    expect(agentFromTranscripts('/wt/video/Nobody', homes)).toBeNull();
+    expect(agentFromTranscripts(undefined, homes)).toBeNull();
+    // Homes that do not exist at all are simply empty.
+    expect(agentFromTranscripts('/wt/video/Ghost', { claude: '/nope/claude', codex: '/nope/codex' })).toBeNull();
+
+    const orphan = { repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/video/Vid Gen', reason: 'server-restart' };
+    expect(resumeCommandForOrphan(orphan, homes)).toBe('codex resume --last');
+    expect(resumeCommandForOrphan({ ...orphan, worktreePath: '/wt/video/Ghost' }, homes)).toBe('claude --continue');
+    // The record and the card still come first.
+    expect(resumeCommandForOrphan({ ...orphan, agent: 'claude' }, homes)).toBe('claude --continue');
+  });
+
+  it('counts only a real, non-empty transcript, and never opens a FIFO', () => {
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    const t = 1_700_000_000;
+    // A newer empty Claude file must not outvote the Codex session next to it,
+    // nor may a directory named like a transcript.
+    codexFor('/wt/a', t);
+    claudeFor('/wt/a', t + 100, { name: 'empty.jsonl' });
+    writeFileSync(join(homes.claude, 'projects', '-wt-a', 'empty.jsonl'), '');
+    mkdirSync(join(homes.claude, 'projects', '-wt-a', 'dir.jsonl'));
+    expect(agentFromTranscripts('/wt/a', homes)).toBe('codex');
+    // An empty Codex rollout says nothing either.
+    codexFor('/wt/b', t);
+    const day = join(homes.codex, 'sessions', '2026', '09', '15');
+    for (const name of readdirSync(day)) if (readFileSync(join(day, name), 'utf8').includes('/wt/b')) writeFileSync(join(day, name), '');
+    expect(agentFromTranscripts('/wt/b', homes)).toBeNull();
+    if (process.platform !== 'win32') {
+      // A FIFO with no writer would block a synchronous open for ever — and the
+      // whole server with it. It is not a regular file, so it is never opened.
+      execSync(`mkfifo "${join(day, 'rollout-fifo.jsonl')}"`);
+      execSync(`mkfifo "${join(homes.claude, 'projects', '-wt-a', 'fifo.jsonl')}"`);
+      expect(agentFromTranscripts('/wt/a', homes)).toBe('codex');
+      expect(agentFromTranscripts('/wt/nobody', homes)).toBeNull();
+    }
+  });
+
+  it('counts only interactive, top-level Codex sessions, the ones resume --last can reach', () => {
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    const t = 1_700_000_000;
+    // A Claude agent that shelled out to `codex exec` in its own worktree, and
+    // a Codex subagent thread that finished last: both newer than the Claude
+    // transcript, neither resumable, so the worktree is still Claude's.
+    claudeFor('/wt/c', t);
+    codexFor('/wt/c', t + 10, { source: 'exec' });
+    codexFor('/wt/c', t + 20, { source: { subagent: { depth: 1 } }, thread: 'subagent' });
+    expect(agentFromTranscripts('/wt/c', homes)).toBe('claude');
+    // With nothing else there, they are not evidence of Codex either.
+    codexFor('/wt/d', t, { source: 'exec' });
+    expect(agentFromTranscripts('/wt/d', homes)).toBeNull();
+    // An older rollout with neither field is read as interactive.
+    codexFor('/wt/e', t, { source: undefined, thread: undefined });
+    expect(agentFromTranscripts('/wt/e', homes)).toBe('codex');
+  });
+
+  it('finds a worktree reached through a symlink under the path the CLI recorded', () => {
+    if (process.platform === 'win32') return;
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    const real = tempRoot('a007-real-');
+    const link = join(tempRoot('a007-link-'), 'wt');
+    symlinkSync(real, link);
+    // Both CLIs file the session under getcwd(), the resolved path.
+    const resolved = realpathSync.native(real);
+    codexFor(resolved, 1_700_000_000);
+    expect(agentFromTranscripts(link, homes)).toBe('codex');
+    claudeFor(resolved, 1_700_000_100);
+    expect(agentFromTranscripts(link, homes)).toBe('claude');
+    // A path that does not exist at all is still looked up as given.
+    expect(agentFromTranscripts('/wt/gone', homes)).toBeNull();
+  });
+
+  it('stops scanning rollouts after the newest few hundred', () => {
+    // A miss is bounded by the cap, not by months of history: a session older
+    // than 500 later ones is a stale worktree, and it gets the default.
+    const { homes, codexFor } = fakeHomes();
+    const t = 1_700_000_000;
+    const day = join(homes.codex, 'sessions', '2026', '09', '15');
+    mkdirSync(day, { recursive: true });
+    const meta = (cwd) => JSON.stringify({ type: 'session_meta', payload: { id: 'x', cwd } }) + '\n';
+    const old = join(day, 'rollout-old.jsonl');
+    writeFileSync(old, meta('/wt/stale')); utimesSync(old, t, t);
+    for (let i = 0; i < 500; i++) {
+      const f = join(day, `rollout-newer-${String(i).padStart(3, '0')}.jsonl`);
+      writeFileSync(f, meta('/wt/other')); utimesSync(f, t + 1 + i, t + 1 + i);
+    }
+    expect(agentFromTranscripts('/wt/stale', homes)).toBeNull();
+    expect(agentFromTranscripts('/wt/other', homes)).toBe('codex');
+    // One fewer newer session and the old one is within reach again.
+    rmSync(join(day, 'rollout-newer-000.jsonl'));
+    expect(agentFromTranscripts('/wt/stale', homes)).toBe('codex');
+  });
+
+  it('prefers the newer transcript when both CLIs worked in the worktree', () => {
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    claudeFor('/wt/both', 1_700_000_000);
+    codexFor('/wt/both', 1_700_000_100);
+    expect(agentFromTranscripts('/wt/both', homes)).toBe('codex');
+    claudeFor('/wt/both', 1_700_000_200);
+    expect(agentFromTranscripts('/wt/both', homes)).toBe('claude');
+  });
+
+  it('looks under CLAUDE_CONFIG_DIR and CODEX_HOME when no homes are given', () => {
+    // Each CLI honours its own home override, so an agent that ran with one
+    // left its transcript there and not under ~/.claude or ~/.codex.
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    claudeFor('/wt/env/Ghost', 1_700_000_000);
+    codexFor('/wt/env/Vid Gen', 1_700_000_000);
+    const saved = { CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR, CODEX_HOME: process.env.CODEX_HOME };
+    process.env.CLAUDE_CONFIG_DIR = homes.claude;
+    process.env.CODEX_HOME = homes.codex;
+    try {
+      expect(agentFromTranscripts('/wt/env/Ghost')).toBe('claude');
+      expect(agentFromTranscripts('/wt/env/Vid Gen')).toBe('codex');
+      // What the ws handler calls: no homes argument at all.
+      expect(resumeCommandForOrphan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/env/Vid Gen' })).toBe('codex resume --last');
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
+    }
+  });
+
+  it('judges each CLI by its newest transcript, and a tie goes to claude', () => {
+    const { homes, claudeFor, codexFor } = fakeHomes();
+    // Two sessions per CLI in one worktree: the newest of the four decides,
+    // wherever the listing happens to put it.
+    claudeFor('/wt/many', 1_700_000_300, { name: 'a.jsonl' });
+    claudeFor('/wt/many', 1_700_000_000, { name: 'b.jsonl' });
+    codexFor('/wt/many', 1_700_000_200);
+    codexFor('/wt/many', 1_700_000_100);
+    expect(agentFromTranscripts('/wt/many', homes)).toBe('claude');
+    codexFor('/wt/many', 1_700_000_400);
+    expect(agentFromTranscripts('/wt/many', homes)).toBe('codex');
+    // The same instant: claude, the board's default, as before the probe existed.
+    claudeFor('/wt/tie', 1_700_000_000);
+    codexFor('/wt/tie', 1_700_000_000);
+    expect(agentFromTranscripts('/wt/tie', homes)).toBe('claude');
+  });
+
+  it('skips what is not a transcript: other files, a rollout nested too deep, entries it cannot stat', () => {
+    const { homes, codexFor } = fakeHomes();
+    const claudeDir = join(homes.claude, 'projects', '-wt-junk');
+    mkdirSync(claudeDir, { recursive: true });
+    writeFileSync(join(claudeDir, 'notes.txt'), 'x');
+    if (process.platform !== 'win32') symlinkSync('/nope/gone.jsonl', join(claudeDir, 'dangling.jsonl'));   // stat fails, readdir does not
+    const day = join(homes.codex, 'sessions', '2026', '09', '15');
+    mkdirSync(join(day, 'extra'), { recursive: true });
+    writeFileSync(join(day, 'notes.txt'), 'x');
+    if (process.platform !== 'win32') symlinkSync('/nope/gone.jsonl', join(day, 'rollout-dangling.jsonl'));
+    // sessions/YYYY/MM/DD is as deep as Codex goes; the walk does not follow further.
+    writeFileSync(join(day, 'extra', 'rollout-deep.jsonl'), '{"type":"session_meta","payload":{"cwd":"/wt/junk"}}\n');
+    expect(agentFromTranscripts('/wt/junk', homes)).toBeNull();
+    // None of it stopped the walk: a real rollout beside the junk is still found.
+    codexFor('/wt/junk', 1_700_000_000);
+    expect(agentFromTranscripts('/wt/junk', homes)).toBe('codex');
+  });
+
+  it('says nothing for a rollout whose first line yields no cwd', () => {
+    const { homes } = fakeHomes();
+    const day = join(homes.codex, 'sessions', '2026', '09', '15');
+    mkdirSync(day, { recursive: true });
+    const rollout = (name, body) => writeFileSync(join(day, name), body);
+    rollout('rollout-empty.jsonl', '');
+    rollout('rollout-garbage.jsonl', 'not json\n');
+    rollout('rollout-null.jsonl', 'null\n');
+    rollout('rollout-no-payload.jsonl', '{"type":"session_meta"}\n');
+    // A first line that never ends: the reader gives up at its cap rather than
+    // swallowing a whole multi-megabyte file.
+    rollout('rollout-endless.jsonl', '{"type":"session_meta","payload":{"cwd":"/wt/bad"' + ' '.repeat(1024 * 1024 + 1));
+    if (process.getuid && process.getuid() !== 0) {   // root can read anything
+      rollout('rollout-locked.jsonl', '{"type":"session_meta","payload":{"cwd":"/wt/bad"}}\n');
+      chmodSync(join(day, 'rollout-locked.jsonl'), 0o000);
+    }
+    expect(agentFromTranscripts('/wt/bad', homes)).toBeNull();
+    // A rollout that is one line with no newline at all still yields its cwd.
+    rollout('rollout-eof.jsonl', '{"type":"session_meta","payload":{"cwd":"/wt/bad"}}');
+    expect(agentFromTranscripts('/wt/bad', homes)).toBe('codex');
+  });
+
+  it('trusts the card over the transcripts, whichever CLI the card names', () => {
+    const { homes, codexFor } = fakeHomes();
+    // A claude card whose worktree also holds a Codex transcript (someone ran
+    // codex there by hand): the card dispatched the agent, so it knows better.
+    // The card is in review with its link gone, as a restart leaves one whose
+    // PR was found before its agent came back — still this orphan's card.
+    addJob({ title: 'claude work', repoPath: REPO }, noop);
+    const job = allJobs()[0];
+    Object.assign(job, { state: 'review', branchName: 'b/claude-work', agentSessionId: null });
+    codexFor('/wt/claude-work', 1_700_000_000);
+    expect(agentFromTranscripts('/wt/claude-work', homes)).toBe('codex');
+    expect(resumeCommandForOrphan({ repoPath: REPO, branchName: 'b/claude-work', worktreePath: '/wt/claude-work' }, homes)).toBe('claude --continue --permission-mode auto');
+    // An orphan record with no worktree path cannot be probed at all: the default.
+    expect(resumeCommandForOrphan({ repoPath: REPO, branchName: 'nobody/here' }, homes)).toBe('claude --continue');
   });
 });
 

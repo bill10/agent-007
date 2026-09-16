@@ -8,6 +8,7 @@ import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
+import { sessionAgentFromCommand } from '../lib/jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 const TRIVIAL_RE = /^[\s.·•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷─━▏▎▍▌▋▊▉█░▒▓⬡◐◑◒◓|\\\/\-*>]+$/;
@@ -132,7 +133,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent }, broadcast) {
   const { file, args } = parseCommand(command);
   const cwd = worktreePath || homedir();
 
@@ -188,6 +189,13 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     recentStrippedLines: [],
     pendingRaw: '',            // tail of the last pty chunk, past its final newline
     isTUI: isTUI ?? /^(claude|aider|codex|gemini)\b/.test(command),
+    // Which CLI this is, as far as anyone KNOWS — 'claude', 'codex' or null.
+    // A fresh spawn reads it off the command. A re-adopted orphan passes its
+    // own note instead, which may be null: its resume command was chosen by
+    // a card, a transcript or the default, and a guess must not be written
+    // down as fact, or a wrong one could never be corrected — the record
+    // outranks every other witness the next time round.
+    agent: agent === undefined ? sessionAgentFromCommand(command) : agent,
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client
