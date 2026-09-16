@@ -618,6 +618,38 @@ the moment the server restarted. The same reasoning is why `prCheckError` IS
 stored: it describes the board's own ability to reach GitHub, which outlives any
 session and is not re-derivable from one.
 
+### How the server reads a PTY's state
+`detectState` (`lib/helpers.js`) runs on every pty read and once a second per
+session. An exited process is DISCONNECTED; output within the last 3s is
+WORKING; after that, a dialog matching `MESSAGE_PATTERNS` is MESSAGE ("needs
+you"), a `PROMPT_PATTERNS` match or any TUI agent is WAITING, and a plain shell
+that matches nothing is IDLE. The dialog patterns are each CLI's own wording
+(Codex, Claude Code 2.1, Gemini CLI, aider), word-bounded and phrase-shaped:
+until v0.4.2.3 a bare `/approve|deny|allow|reject/` also matched Codex's
+permission picker describing itself ("choose what Codex is allowed to do") and
+any summary line an agent wrote with "allowed" in it, and a false MESSAGE keeps
+a card orange and a scheduled run open for good. Claude Code positions words
+with cursor moves, so its phrases match with the spaces gone
+("Yes,andalwaysallow"); its 2.1 permission dialogs are captured raw in
+`test/fixtures/claude-permission-dialogs.js`.
+
+What the patterns run over is the last line plus a five-line window of whole
+lines (`recentStrippedLines`). For a Codex session the last synchronized-output
+frame (DEC mode 2026, `trackSyncFrames`) stands in for the window: Codex draws
+its whole bottom pane inside such frames and redraws it with cursor moves rather
+than newlines, so an answered dialog's text sat in the window until five more
+real lines arrived, bubble lit the whole time, while the last frame is the pane
+as it stands -- the dialog while open, the bare prompt once answered. A frame
+is the whole pane only when it carries the composer placeholder or the status
+row (which names the working directory); any other frame (the option rows as
+you arrow through a picker, the history Codex re-inserts after a resize) merges
+onto the pane it held. Frame bytes never enter the line stream, a marker cut by
+a read boundary is still found, a whole line printed outside any frame since the
+frame closed outranks it (a shell tab that ran Codex and then Claude Code), and
+a frame open past 1s is abandoned. Frames are trusted for Codex only: Claude
+Code draws none today, and its repaints are diffs, so a frame of its would be
+one row, not the pane. The full answer is a screen model; TODOS.md has it.
+
 ### Identity across restarts
 No session survives a restart, so every job's `agentSessionId` is cleared on
 load. Session ids also carry a per-process prefix: the counter alone restarts at
