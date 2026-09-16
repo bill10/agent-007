@@ -346,6 +346,115 @@ describe('detectState', () => {
     expect(detectState({ ...BASE, isTUI: true, recentStrippedLines: ['Enter to select · Esc to cancel'], lastFrame: '' }, { now: 50000 })).toBe('MESSAGE');
   });
 
+  it('does not read a near-miss of a dialog\'s phrasing as a dialog', () => {
+    // Each of these is one word or one character away from a pattern above:
+    // the word boundaries and the literal question marks are what hold them off.
+    const nearMisses = [
+      'Would you like to review the plan before I continue?',
+      'Approve app tool call',
+      'Apply changes to the remaining files as well',
+      'Enable full access with /permissions if you want me to push',
+      'Updated Model Permissions and moved on',
+      'update model permissions with /permissions',   // the picker's title is Title Case; prose about it is not
+      'Yes, the tests pass on the branch',
+      'No, the branch is clean',
+      'Always allowed: git status',
+      'Allowed for this session: reading files',
+      'Do you want to see the diff first?',
+    ];
+    for (const line of nearMisses) {
+      expect(detectState({ ...BASE, isTUI: true, lastStrippedLine: line }, { now: 50000 }), line).toBe('WAITING');
+      expect(detectState({ ...BASE, isTUI: true, lastFrame: line }, { now: 50000 }), line).toBe('WAITING');
+    }
+  });
+
+  it('reads every answer a dialog offers, on the last line or in the frame', () => {
+    const answers = [
+      'Yes, just this once',
+      'Yes, continue anyway',
+      'Yes, grant access',
+      'Yes, and do not ask again',
+      'Yes, and don’t ask again',                  // the curly apostrophe Codex actually prints
+      'No, and block this host',
+      'No, continue without permissions',
+      'No, and tell Claude what to do differently',
+      'Allow and don\'t ask again',
+      'Allow and don’t ask again',
+      'Do you want to make this edit to foo.js?',
+      'Doyouwanttorunthiscommand?',                     // Claude Code, words run together
+      'Do you want to create foo.js?',
+      'Do you want to fetch https://example.com?',
+      'Do you want to allow this tool?',
+    ];
+    for (const line of answers) {
+      expect(detectState({ ...BASE, isTUI: true, lastStrippedLine: line }, { now: 50000 }), line).toBe('MESSAGE');
+      expect(detectState({ ...BASE, isTUI: true, lastFrame: `› 1. ${line}  2. Cancel` }, { now: 50000 }), line).toBe('MESSAGE');
+    }
+  });
+
+  it('reads Gemini CLI and aider dialogs, and not their near-misses', () => {
+    const state = (line) => detectState({ ...BASE, isTUI: true, lastStrippedLine: line }, { now: 50000 });
+    for (const line of ['Allow execution?', '● 1. Yes, allow once', '2. Yes, allow always', 'Apply edits? (Y)es/(N)o [Yes]:']) {
+      expect(state(line), line).toBe('MESSAGE');
+    }
+    for (const line of ['Allow execution of the plan as written', 'Yes, allowed it', 'yes/no', 'Answered (Yes) to the (No) question']) {
+      expect(state(line), line).toBe('WAITING');
+    }
+  });
+
+  it('bounds the gap in "Allow … to", so a long line cannot pin the event loop', () => {
+    const state = (line) => detectState({ ...BASE, isTUI: true, lastStrippedLine: line }, { now: 50000 });
+    expect(state(`Allow ${'x'.repeat(200)} to read files`)).toBe('MESSAGE');
+    expect(state(`Allow ${'x'.repeat(201)} to read files`)).toBe('WAITING');
+    expect(state('Allow to read files')).toBe('WAITING');   // the gap is at least one character
+  });
+
+  it('uses the frame only while it is newer than the last output outside one', () => {
+    // A shell tab that ran a frame-drawing tool and then something that prints
+    // plain lines: the frame is history, and the window is current again.
+    const asking = 'Update Model Permissions › 1. Ask for approval';
+    const stale = { ...BASE, isTUI: true, lastFrame: asking, lastFrameAt: 1000, lastOutputAt: 2000, recentStrippedLines: ['Done and committed.'] };
+    expect(detectState(stale, { now: 50000 })).toBe('WAITING');
+    // ...and the window is read, not merely the frame skipped.
+    expect(detectState({ ...stale, lastFrame: '› Ask Codex to do anything', recentStrippedLines: ['Enter to select · Esc to cancel'] }, { now: 50000 })).toBe('MESSAGE');
+    // Newer, or the same instant (one read that printed a line and closed a
+    // frame): the frame speaks.
+    expect(detectState({ ...stale, lastFrameAt: 2000 }, { now: 50000 })).toBe('MESSAGE');
+    expect(detectState({ ...stale, lastFrameAt: 2001 }, { now: 50000 })).toBe('MESSAGE');
+    // A session that predates lastFrameAt: both clocks read as 0, a tie.
+    expect(detectState({ ...BASE, isTUI: true, lastFrame: asking }, { now: 50000 })).toBe('MESSAGE');
+  });
+
+  it('leaves a lastFrame that is not a string to the five-line window', () => {
+    // Session objects that predate the field, and fakes that never set it.
+    for (const lastFrame of [undefined, null, 0, {}]) {
+      const session = { ...BASE, isTUI: true, recentStrippedLines: ['Enter to select · Esc to cancel'], lastFrame };
+      expect(detectState(session, { now: 50000 }), String(lastFrame)).toBe('MESSAGE');
+    }
+  });
+
+  it('after a frame that asks nothing, the prompt and the TUI flag decide as before', () => {
+    const frame = '› Ask Codex to do anything gpt-6-astra medium · ~/wt';
+    expect(detectState({ ...BASE, lastFrame: frame, lastStrippedLine: '$ ' }, { now: 50000 })).toBe('WAITING');
+    expect(detectState({ ...BASE, lastFrame: frame, lastStrippedLine: 'random text' }, { now: 50000 })).toBe('IDLE');
+    expect(detectState({ ...BASE, lastFrame: frame, lastStrippedLine: 'random text', isTUI: true }, { now: 50000 })).toBe('WAITING');
+    // The frame asks: it counts whether or not the session is flagged as a TUI.
+    expect(detectState({ ...BASE, lastFrame: 'Would you like to run the following command?' }, { now: 50000 })).toBe('MESSAGE');
+  });
+
+  it('WORKING and DISCONNECTED still outrank a frame that asks', () => {
+    const asking = { ...BASE, isTUI: true, lastFrame: 'Update Model Permissions › 1. Ask for approval' };
+    expect(detectState({ ...asking, lastOutputAt: 49900 }, { now: 50000 })).toBe('WORKING');
+    expect(detectState({ ...asking, exited: true }, { now: 50000 })).toBe('DISCONNECTED');
+  });
+
+  it('reads a Claude Code dialog inside a frame, words run together and all', () => {
+    // Claude Code draws no frames today; a TUI that positions words with cursor
+    // moves and does would arrive with the same run-together text as its lines.
+    expect(detectState({ ...BASE, isTUI: true, lastFrame: 'Securityguide ❯No,exit Yes,Itrustthisfolder Entertoconfirm·Esctocancel' }, { now: 50000 })).toBe('MESSAGE');
+    expect(detectState({ ...BASE, isTUI: true, lastFrame: 'Entertoselect·↑/↓tonavigate·Esctocancel' }, { now: 50000 })).toBe('MESSAGE');
+  });
+
   it('should return DISCONNECTED when session has exited', () => {
     expect(detectState({ ...BASE, exited: true }, { now: 1000 })).toBe('DISCONNECTED');
   });

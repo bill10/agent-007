@@ -397,6 +397,26 @@
   (2026-09-04) as "worth the maintainer explicitly confirming that's
   acceptable". Only bites on a board with more than one user.
 
+## State detection reads Codex's last repaint as the whole pane
+- **What:** `trackSyncFrames` keeps the last DEC 2026 synchronized frame and
+  `detectState` treats it as what is on screen. Codex repaints nothing while a
+  dialog waits, so this holds today, but a partial repaint (the status row
+  alone) would stand in for the pane and drop the "needs you" bubble until
+  the dialog repainted. The full answer is a screen model: feed each TUI
+  session's bytes to `@xterm/headless` at the tab's size and run the dialog
+  patterns over the visible rows, so a closed dialog is simply not there and
+  a partial repaint changes only its rows.
+- **Why:** The bubble is what stops the board from calling a blocked agent
+  "resting", and a false WAITING lets a scheduled run be marked over while
+  its agent still waits on an approval.
+- **Effort:** M (human: ~1 day / CC: ~30 min, one new server dependency, and
+  the headless terminal must follow `pty-resize`)
+- **Priority:** P2
+- **Depends on:** v0.4.2.3 (frame tracking)
+- **Context:** Raised by the adversarial reviews during /ship (2026-09-16).
+  The frame approach was chosen over the screen model to avoid the
+  dependency; this is the upgrade when a partial repaint is observed.
+
 ## Completed
 
 ## A card edited in the window dispatchOnce awaits in runs the old prompt
