@@ -77,6 +77,7 @@ server/
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job)
   agent-mcp.js     Per-session MCP config for spawned Claude Code and Codex agents
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
+  agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)
   auth.js          Login tokens, ownership, agent session tokens
 bin/adduser.js     Create a login user (npm run adduser)
 lib/               Pure functions, tested (helpers.js, jobs.js job logic, cron.js parser)
