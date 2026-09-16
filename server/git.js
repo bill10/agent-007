@@ -420,6 +420,9 @@ export async function scanForOrphanedWorktrees(broadcast) {
         const orphan = {
           id: orphanId, name: agentDir, repoPath, repoSlug: basename(repoPath),
           worktreePath, branchName, color: colorCycler.next(),
+          // Nothing on disk says which CLI ran here or with what flags; the
+          // same shape as the other orphan sites, with nothing in it.
+          agent: null, permissionFlags: [],
           reason: 'discovered', createdAt: new Date().toISOString(),
         };
         orphans.set(orphanId, orphan);

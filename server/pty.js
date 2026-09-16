@@ -133,7 +133,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags }, broadcast) {
   const { file, args } = parseCommand(command);
   const cwd = worktreePath || homedir();
 
@@ -197,9 +197,15 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     // outranks every other witness the next time round.
     agent: agent === undefined ? sessionAgentFromCommand(command) : agent,
     // The permission flags it was spawned with, so a re-spawn with no job
-    // card to ask can run under the same ones. Unlike `agent` this is never a
-    // guess: it is read off the command itself, resume commands included.
-    permissionFlags: permissionFlagsFromCommand(command),
+    // card to ask can run under the same ones. Only a session that OWNS its
+    // flags records them: one a person started by hand. A board dispatch
+    // runs under its card's mode, which the board re-resolves at every
+    // re-spawn against its current setting, so recording the dispatch-time
+    // flags would freeze a bypass past the card's retirement and past any
+    // tightening of the board since. A re-adopt passes its own answer in:
+    // the recorded flags it resumed under, or none when a card's mode did.
+    permissionFlags: permissionFlags !== undefined ? permissionFlags
+      : (spawnedBy === 'board' ? [] : permissionFlagsFromCommand(command)),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client

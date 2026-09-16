@@ -6,7 +6,7 @@ import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
-import { isScheduled, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent, permissionFlagsFromCommand, normalizePermissionFlags } from '../lib/jobs.js';
+import { isScheduled, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent, permissionFlagsFromCommand, recordedPermissionFlags } from '../lib/jobs.js';
 
 export function loadConfig() {
   try {
@@ -152,9 +152,7 @@ export function recoverCrashedSessions(broadcast) {
       // one of ours (config.json is hand-editable) is dropped rather than
       // carried forward as a note.
       agent: isValidJobAgent(s.agent) ? s.agent : null,
-      // Through the allowlist again, since the record is hand-editable; and
-      // only with a known CLI, since the flags are that CLI's.
-      permissionFlags: isValidJobAgent(s.agent) ? normalizePermissionFlags(s.agent, s.permissionFlags) : [],
+      permissionFlags: recordedPermissionFlags(s),
       reason: 'server-restart',
       createdAt: new Date().toISOString(),
     };

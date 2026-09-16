@@ -25,7 +25,7 @@ import {
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
-  jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, normalizePermissionFlags,
+  jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -1057,9 +1057,10 @@ export function findJobForBranch({ repoPath, branchName }) {
 //
 // When the card is known its permission mode rides along too: the resumed
 // session should run under the sandbox it was dispatched with, not the CLI's
-// default. The returned `agent` is what was resolved (null when nothing was),
-// so the caller can note it on the orphan and spare the next attempt the
-// same lookup.
+// default. A hand-spawned orphan has no card; its record's `permissionFlags`
+// (what it was started with) are resolved and returned as `flags`, and go on
+// the command when no card supplies a mode. The returned `agent` is what was
+// resolved (null when nothing was).
 //
 // `homes` is for tests, which must not probe the developer's real ~/.codex.
 export function orphanResumePlan(orphan, homes) {
@@ -1074,7 +1075,7 @@ export function orphanResumePlan(orphan, homes) {
   // The flags it was spawned with, for a hand-spawned agent with no card.
   // They belong to the CLI on the record: a note-less orphan resolved by a
   // transcript has none to pass on, and resumes under that CLI's default.
-  const flags = isValidJobAgent(orphan.agent) ? normalizePermissionFlags(orphan.agent, orphan.permissionFlags) : [];
+  const flags = recordedPermissionFlags(orphan);
   return { agent, mode, flags, command: resumeCommand(agent, mode, flags) };
 }
 

@@ -118,23 +118,53 @@ describe('a card posted by an agent', () => {
 // resume form; --help makes the CLI parse and exit without starting anything.
 const codexOnPath = (() => { try { execSync('codex --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
 describe.skipIf(!codexOnPath)('CODEX_MODE_FLAGS against the installed codex', () => {
-  for (const [mode, flags] of Object.entries(CODEX_MODE_FLAGS)) {
-    it(`${mode}: ${flags || '(no flags)'} parses on codex and on codex resume`, () => {
-      for (const form of [`codex ${flags} --help`, `codex resume --last ${flags} --help`]) {
-        expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).not.toThrow();
-      }
-    });
+  // Every form once: the mode table and the flag allowlist overlap, and each
+  // --help run is a subprocess.
+  const forms = new Set();
+  for (const flags of Object.values(CODEX_MODE_FLAGS)) {
+    forms.add(`codex ${flags} --help`);
+    forms.add(`codex resume --last ${flags} --help`);
   }
   // And every flag a hand-spawned agent could carry back onto its resume.
   for (const [flag, values] of Object.entries(PERMISSION_FLAGS.codex)) {
+    expect(values === null || values.length > 0, `${flag} allows nothing`).toBe(true);
+    for (const value of values === null ? [null] : values) {
+      forms.add(`codex resume --last ${value === null ? flag : `${flag} ${value}`} --help`);
+    }
+  }
+  for (const form of forms) {
+    it(`${form.replace(/ --help$/, '')} parses`, () => {
+      expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).not.toThrow();
+    });
+  }
+  // The runs above prove nothing unless --help comes AFTER the parse: a value
+  // the allowlist refuses must be one the CLI refuses too, or the list is
+  // stricter than the CLI for no reason — and a value it accepts that the CLI
+  // does not would kill the resumed agent on the spot.
+  it('rejects a value the allowlist rejects, so the --help runs are a real parse', () => {
+    for (const form of ['codex resume --last --sandbox nope --help', 'codex resume --last --approve-for-me=yes --help']) {
+      expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).toThrow();
+    }
+  });
+});
+
+// Same for Claude Code: its --permission-mode choices are PERMISSION_MODES,
+// which a hand-spawned agent carries back verbatim onto `claude --continue`.
+const claudeOnPath = (() => { try { execSync('claude --version', { stdio: 'ignore' }); return true; } catch { return false; } })();
+describe.skipIf(!claudeOnPath)('PERMISSION_FLAGS.claude against the installed claude', () => {
+  for (const [flag, values] of Object.entries(PERMISSION_FLAGS.claude)) {
     for (const value of values || [null]) {
       const flags = value === null ? flag : `${flag} ${value}`;
-      it(`spawn flag ${flags} parses on codex resume`, () => {
-        const form = `codex resume --last ${flags} --help`;
+      it(`spawn flag ${flags} parses on claude --continue`, () => {
+        const form = `claude --continue ${flags} --help`;
         expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).not.toThrow();
       });
     }
   }
+  it('rejects a mode the allowlist rejects, so the --help runs are a real parse', () => {
+    const form = 'claude --continue --permission-mode nope --help';
+    expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).toThrow();
+  });
 });
 
 describe('re-adopting an orphan', () => {
@@ -196,6 +226,20 @@ describe('re-adopting an orphan', () => {
     expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes)).toEqual({ agent: null, mode: null, flags: [], command: 'claude --continue' });
   });
 
+  it('names Codex modes only with flags the allowlist accepts, so the two tables cannot drift apart', () => {
+    // CODEX_MODE_FLAGS spells out the mode → flags mapping; PERMISSION_FLAGS
+    // spells out what a permission flag is. A rename or a dropped value (as
+    // `untrusted` was) fixed in one and missed in the other would send a card
+    // agent out with a flag the resume path throws away, or vice versa.
+    for (const [mode, flags] of Object.entries(CODEX_MODE_FLAGS)) {
+      const tokens = flags ? flags.split(' ') : [];
+      expect(normalizePermissionFlags('codex', tokens), mode).toEqual(tokens);
+    }
+    for (const mode of PERMISSION_MODES) {
+      expect(normalizePermissionFlags('claude', ['--permission-mode', mode])).toEqual(['--permission-mode', mode]);
+    }
+  });
+
   it('reads the permission flags a hand-spawned agent was started with, and nothing else', () => {
     expect(permissionFlagsFromCommand('codex')).toEqual([]);
     expect(permissionFlagsFromCommand('codex --dangerously-bypass-approvals-and-sandbox')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
@@ -244,6 +288,124 @@ describe('re-adopting an orphan', () => {
     // A stored record's flags pass the allowlist again.
     expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex', permissionFlags: ['--sandbox', 'nope', '--approve-for-me'] }, homes).command)
       .toBe('codex resume --last --approve-for-me');
+  });
+
+  it('normalises every spelling of a permission flag, and keeps nothing that is not one whole', () => {
+    // Each CLI's own spellings come back in the long form, in the order given.
+    expect(normalizePermissionFlags('codex', ['-s=read-only', '-a=never'])).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never']);
+    expect(normalizePermissionFlags('codex', ['-a', 'never', '-s', 'read-only'])).toEqual(['--ask-for-approval', 'never', '--sandbox', 'read-only']);
+    expect(normalizePermissionFlags('claude', ['--permission-mode=plan'])).toEqual(['--permission-mode', 'plan']);
+    // The short forms are Codex's: on a Claude agent -s is not a permission.
+    expect(normalizePermissionFlags('claude', ['-s', 'read-only'])).toEqual([]);
+    // A value flag at the end of the argv has no value, and is dropped whole.
+    expect(normalizePermissionFlags('codex', ['--approve-for-me', '--sandbox'])).toEqual(['--approve-for-me']);
+    expect(normalizePermissionFlags('claude', ['--permission-mode'])).toEqual([]);
+    // An empty inline value is no value; a bare switch keeps only itself, and
+    // a word after it is not its value.
+    expect(normalizePermissionFlags('codex', ['--sandbox=', '--approve-for-me='])).toEqual([]);
+    expect(normalizePermissionFlags('codex', ['--approve-for-me', 'yes'])).toEqual(['--approve-for-me']);
+    expect(normalizePermissionFlags('claude', ['--dangerously-skip-permissions', 'plan'])).toEqual(['--dangerously-skip-permissions']);
+    // A record that is not strings (hand-edited config.json) is skipped, not
+    // stringified into something the table might match.
+    expect(normalizePermissionFlags('codex', [42, null, undefined, {}, ['--approve-for-me'], '--approve-for-me'])).toEqual(['--approve-for-me']);
+    expect(normalizePermissionFlags('codex', ['--sandbox', 42])).toEqual([]);
+    // Names the allowlist object inherits are not in it.
+    expect(normalizePermissionFlags('codex', ['constructor', '__proto__', 'toString', 'hasOwnProperty'])).toEqual([]);
+    expect(normalizePermissionFlags('codex', [])).toEqual([]);
+    expect(normalizePermissionFlags(undefined, ['--approve-for-me'])).toEqual([]);
+  });
+
+  it('keeps one value per flag, stops at --, and unpacks a short option with its value attached', () => {
+    // Each CLI refuses a repeated flag outright, so a record that carries one
+    // twice (hand-edited, or two spellings of the same flag) comes back with
+    // the last value only — the one the CLI would have taken had it accepted.
+    expect(normalizePermissionFlags('codex', ['--sandbox', 'read-only', '-s', 'workspace-write'])).toEqual(['--sandbox', 'workspace-write']);
+    expect(normalizePermissionFlags('codex', ['--yolo', '--dangerously-bypass-approvals-and-sandbox'])).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
+    expect(normalizePermissionFlags('claude', ['--permission-mode', 'plan', '--permission-mode=auto'])).toEqual(['--permission-mode', 'auto']);
+    // First appearance fixes the order; the last value fills it.
+    expect(normalizePermissionFlags('codex', ['-s', 'read-only', '-a', 'never', '-s', 'danger-full-access'])).toEqual(['--sandbox', 'danger-full-access', '--ask-for-approval', 'never']);
+    // Past `--` is the prompt, however flag-shaped.
+    expect(normalizePermissionFlags('codex', ['--approve-for-me', '--', '--sandbox', 'read-only'])).toEqual(['--approve-for-me']);
+    expect(permissionFlagsFromCommand('claude -- --permission-mode plan')).toEqual([]);
+    // Codex short options take their value attached; Claude has no short forms.
+    expect(normalizePermissionFlags('codex', ['-sread-only', '-anever'])).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never']);
+    expect(normalizePermissionFlags('codex', ['-snope', '-x=read-only'])).toEqual([]);
+    expect(normalizePermissionFlags('claude', ['-pplan'])).toEqual([]);
+    // The agent lookup is an own-property one too: a record naming a
+    // prototype key finds no table.
+    expect(normalizePermissionFlags('constructor', ['--approve-for-me'])).toEqual([]);
+    expect(normalizePermissionFlags('__proto__', ['--approve-for-me'])).toEqual([]);
+  });
+
+  it('reads the flags off every form a session command takes', () => {
+    // The resume commands themselves: a re-adopted agent records what its own
+    // next re-adopt needs, so the flags survive any number of round trips.
+    expect(permissionFlagsFromCommand('codex resume --last --sandbox read-only --ask-for-approval never')).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never']);
+    expect(permissionFlagsFromCommand('claude --continue --permission-mode plan')).toEqual(['--permission-mode', 'plan']);
+    expect(permissionFlagsFromCommand(resumeCommand('codex', null, permissionFlagsFromCommand('codex -s read-only "do it"')))).toEqual(['--sandbox', 'read-only']);
+    // A Windows binary, a path, and a prompt whose text mentions a flag.
+    expect(permissionFlagsFromCommand('codex.exe -s read-only')).toEqual(['--sandbox', 'read-only']);
+    expect(permissionFlagsFromCommand('claude.cmd --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
+    expect(permissionFlagsFromCommand('codex "run it with --sandbox read-only"')).toEqual([]);
+    expect(permissionFlagsFromCommand("claude 'use --permission-mode plan'")).toEqual([]);
+    expect(permissionFlagsFromCommand('')).toEqual([]);
+    expect(permissionFlagsFromCommand(null)).toEqual([]);
+  });
+
+  it('lets a card mode that is not one of ours fall through to the flags, and a real one shadow them', () => {
+    // A mode outside the allowlist is no card at all, so the agent's own
+    // flags apply — not the CLI default.
+    expect(resumeCommand('codex', 'yolo', ['--approve-for-me'])).toBe('codex resume --last --approve-for-me');
+    expect(resumeCommand('claude', 'plan --add-dir /', ['--permission-mode', 'plan'])).toBe('claude --continue --permission-mode plan');
+    // A card on the board default is still the board's word: auto and
+    // acceptEdits are Codex's own default, so a bypass agent whose card says
+    // so comes back under that default, not its old flag.
+    expect(resumeCommand('codex', 'auto', ['--dangerously-bypass-approvals-and-sandbox'])).toBe('codex resume --last');
+    expect(resumeCommand('codex', 'acceptEdits', ['--dangerously-bypass-approvals-and-sandbox'])).toBe('codex resume --last');
+    expect(resumeCommand('claude', 'auto', ['--dangerously-skip-permissions'])).toBe('claude --continue --permission-mode auto');
+    // Flags are read as the resolved CLI's: Codex flags on a Claude resume,
+    // and the other way round, are dropped; with no CLI resolved the default
+    // is Claude, so only Claude's flags survive.
+    expect(resumeCommand('claude', null, ['--sandbox', 'read-only'])).toBe('claude --continue');
+    expect(resumeCommand('claude', null, ['--permission-mode', 'plan --dangerously-skip-permissions'])).toBe('claude --continue');
+    expect(resumeCommand('claude', null, 'not an array')).toBe('claude --continue');
+    expect(resumeCommand(null, null, ['--permission-mode', 'plan'])).toBe('claude --continue --permission-mode plan');
+    expect(resumeCommand(undefined, null, ['--sandbox', 'read-only'])).toBe('claude --continue');
+    expect(parseCommand(resumeCommand('claude', null, ['--permission-mode', 'plan'])).args).toEqual(['--continue', '--permission-mode', 'plan']);
+  });
+
+  it('reports a hand-spawned orphan\'s flags on the plan even when its card\'s mode wins', async () => {
+    // A tab spawned by hand can still land on a card's branch (the card was
+    // posted for work already under way, or the agent was re-adopted and
+    // relinked). The card's mode is the board's current word and goes on the
+    // command; the flags are still reported, so the caller can see what was
+    // overruled.
+    updateSettings({ permissionMode: 'auto', maxPerRepo: 2 }, noop);
+    addJob({ title: 'board default codex', repoPath: REPO, agent: 'codex' }, noop);
+    addJob({ title: 'read only claude', repoPath: REPO, permissionMode: 'plan' }, noop);
+    let n = 0;
+    await dispatchOnce(async (command, name, repoPath, branch) => {
+      const session = { id: `s${++n}`, name: `A${n}`, command, repoPath, branchName: branch, exited: false };
+      sessions.set(session.id, session);
+      return { session };
+    }, noop);
+    const [inherits, own] = allJobs();
+    sessions.clear();
+    inherits.agentSessionId = null;
+    own.agentSessionId = null;
+    const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
+    const bypass = ['--dangerously-bypass-approvals-and-sandbox'];
+    // The board's auto is Codex's default: the bypass flag does not come back.
+    expect(orphanResumePlan({ repoPath: REPO, branchName: inherits.branchName, worktreePath: '/wt/x', agent: 'codex', permissionFlags: bypass }, homes))
+      .toEqual({ agent: 'codex', mode: 'auto', flags: bypass, command: 'codex resume --last' });
+    expect(orphanResumePlan({ repoPath: REPO, branchName: own.branchName, worktreePath: '/wt/y', agent: 'claude', permissionFlags: ['--dangerously-skip-permissions'] }, homes))
+      .toEqual({ agent: 'claude', mode: 'plan', flags: ['--dangerously-skip-permissions'], command: 'claude --continue --permission-mode plan' });
+    // The record's flags belong to the record's CLI: Codex flags noted on a
+    // Claude agent, or a record that is not a list, are nothing to pass on.
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'claude', permissionFlags: ['--sandbox', 'read-only'] }, homes))
+      .toEqual({ agent: 'claude', mode: null, flags: [], command: 'claude --continue' });
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex', permissionFlags: '--approve-for-me' }, homes))
+      .toEqual({ agent: 'codex', mode: null, flags: [], command: 'codex resume --last' });
   });
 
   it('records a CLI only when the command is literally one of them', () => {

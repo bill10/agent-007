@@ -16,9 +16,17 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   bypass agent started asking and a read-only one could write. The board now
   records the permission flags each agent was spawned with, on the session
   and on the orphan it becomes, and Re-spawn puts them back on the command.
-  A job card's mode still wins when there is one. Only the CLIs' own
-  permission flags are kept, and only with values they accept, so nothing
-  else on the record can reach the command line.
+  A job card's mode still wins when there is one. What is kept: Codex's
+  `--sandbox`, `--ask-for-approval`, `--approve-for-me` and
+  `--dangerously-bypass-approvals-and-sandbox` (short and `--yolo`
+  spellings included), and Claude Code's `--permission-mode` and
+  `--dangerously-skip-permissions`, each only with values the CLI accepts,
+  so nothing else on the record can reach the command line. Other
+  permission sources, such as Claude's `--allowedTools` or a Codex `-c`
+  override, are not carried. A board-dispatched agent records no flags of
+  its own: its card's mode is re-read at every re-spawn, and once the card is
+  gone the board's current setting decides, so a bypass card retired long
+  ago cannot come back as a bypass agent.
 
 ## [0.4.2.1] - 2026-09-16
 

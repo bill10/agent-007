@@ -648,11 +648,16 @@ known its permission mode rides along too, since neither CLI remembers the
 sandbox it was dispatched under. An agent spawned by hand has no card, so the
 session records the permission flags it was started with (`permissionFlags`,
 read off the command through an allowlist of each CLI's own flags and values
-in `lib/jobs.js`), the orphan inherits them, and the re-spawn puts them back —
+in `lib/jobs.js`; scanning stops at `--`, so prompt text can never come back
+as a permission), the orphan inherits them, and the re-spawn puts them back —
 the card's mode still wins when both are known, being the board's current
-word. The allowlist is the only route onto the argv: a stored record passes
-through it again on the way back, so nothing hand-edited into `config.json`
-can smuggle a second flag.
+word. Only a session that owns its flags records them: a board dispatch
+records none, because its card's mode is re-resolved against the board at
+every re-spawn, and freezing the dispatch-time flags would let a bypass card
+retired long ago come back as a bypass agent after the board was tightened.
+A session resumed under a card's mode likewise records none. The allowlist is
+the only route onto the argv: a stored record passes through it again on the
+way back, so nothing hand-edited into `config.json` can smuggle a second flag.
 
 ### Board-spawned agents
 A dispatched agent is an ordinary agent with one difference: its tab opens

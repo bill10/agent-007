@@ -862,7 +862,13 @@ describe('ownership is inert when auth is disabled', () => {
       back = await readopted;
       expect(back.command).toBe('codex resume --last --sandbox read-only');
       expect(allJobs().find(j => j.id === jobId).agentSessionId).toBe(back.sessionId);   // relinked to its card
-      expect(config.activeSessions.find(s => s.worktreePath === worktreePath).agent).toBeNull();
+      const rec = config.activeSessions.find(s => s.worktreePath === worktreePath);
+      expect(rec.agent).toBeNull();
+      // Under a card's mode the session records no flags of its own — the
+      // card, or the board once the card is gone, decides again next time —
+      // even though its resume command carries `--sandbox read-only`.
+      expect(rec.permissionFlags).toEqual([]);
+      expect(sessions.get(back.sessionId).permissionFlags).toEqual([]);
     } finally {
       restore();
       if (savedHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = savedHome;
