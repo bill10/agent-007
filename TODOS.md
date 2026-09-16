@@ -345,9 +345,12 @@
 - **Context:** Noticed while tracing the `auto`-mode problem on Bedrock
   (2026-09-04), but it is NOT what happened there -- an unavailable auto mode
   starts the session in Manual rather than killing it, so that card stalled
-  visibly instead of vanishing. This is a latent gap with no observed
-  occurrence yet, hence P3: worth closing because any early death hits it, not
-  because something hit it.
+  visibly instead of vanishing. Filed as a latent gap with no observed
+  occurrence, hence P3. It has since been hit: before v0.4.2.1 a Codex card in
+  `manual` mode dispatched with `--ask-for-approval untrusted`, a value
+  codex-cli 0.153 rejects, so the agent died at parse time and the card sat in
+  In progress with no reason (2026-09-16). That flag is fixed; the requeue is
+  not, so the next rejected flag lands the same way.
 
 ## A scan tick uses the agent cap it started with, not the one in force
 
