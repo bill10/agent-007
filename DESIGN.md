@@ -633,6 +633,20 @@ exists, and survives on both the orphan record and the job — so it is what
 reconnects a re-adopted agent to its card, and what finds the agent to retire
 when the stored link is gone.
 
+Re-adopting an orphan runs the CLI that left the conversation: each CLI keeps
+its own transcripts, so a Codex agent revived with `claude --continue` has
+nothing to continue and dies at once. `orphanResumePlan` in `server/jobs.js`
+asks three witnesses in order: the orphan record's `agent` note (written when a
+session is saved or closed, and only for a command that is literally `claude`
+or `codex`, so a shell tab or a guessed re-spawn leaves it blank rather than
+hardening a guess into a fact); the job card on its branch; and last, whichever
+CLI left the newer transcript for that worktree under its own home
+(`server/agent-transcripts.js`, honouring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`;
+only interactive Codex sessions count, the ones `resume --last` can reach).
+With none of those it is Claude Code, the board's default. When the card is
+known its permission mode rides along too, since neither CLI remembers the
+sandbox it was dispatched under.
+
 ### Board-spawned agents
 A dispatched agent is an ordinary agent with one difference: its tab opens
 without taking focus (`spawnedBy: 'board'`), because an unattended dispatcher
@@ -702,8 +716,11 @@ The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
   around the rule above: a read-only board would dispatch a Codex that writes
   files. So `CODEX_MODE_FLAGS` in `lib/jobs.js` maps every Claude mode onto the
   nearest thing Codex's own sandbox and approval flags say — `plan` is
-  `--sandbox read-only`, `manual` asks before every command, `dontAsk` never
-  asks, `bypassPermissions` is `--dangerously-bypass-approvals-and-sandbox`,
+  `--sandbox read-only`, `manual` is that same sandbox with `--ask-for-approval
+  on-request`, so every write comes back as a question (Codex's `untrusted`
+  policy, the mapping before v0.4.2.1, is gone from codex-cli 0.153 and was
+  rejected at parse time), `dontAsk` never asks, `bypassPermissions` is
+  `--dangerously-bypass-approvals-and-sandbox`,
   and `auto`/`acceptEdits` are Codex's default (workspace-write, approval on
   request) — and a strict board binds a Codex card too. Nearest, not
   equivalent: that default runs a command it judges safe inside the sandbox

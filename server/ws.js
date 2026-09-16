@@ -12,9 +12,11 @@ import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js'
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
+import { isValidJobAgent } from '../lib/jobs.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
+  orphanResumePlan,
 } from './jobs.js';
 
 // --- Client tracking ---
@@ -303,11 +305,17 @@ export function setupWebSocket(wss, { createSession, killSession }) {
               break;
             }
           }
+          // Per CLI: a Codex agent revived with `claude --continue` has no
+          // conversation to continue and dies at once. The new session keeps
+          // only what the orphan RECORD said (possibly nothing): a CLI picked
+          // by a card, a transcript or the default is a guess, and writing it
+          // down would make a wrong one permanent.
+          const { command } = orphanResumePlan(orphan);
           const result = createSessionFromConfig({
             sessionId: nextSessionId(),
             name: orphan.name,
             color: orphan.color,
-            command: 'claude --continue',
+            command,
             repoPath: orphan.repoPath,
             worktreePath: orphan.worktreePath,
             branchName: orphan.branchName,
@@ -315,10 +323,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             cocktail: (orphan.branchName || '').split('/').pop(),
             isTUI: true,
             ownerId: orphan.ownerId || null,
+            agent: isValidJobAgent(orphan.agent) ? orphan.agent : null,
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);
-            ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude --continue', error: result.error }));
+            ws.send(JSON.stringify({ type: 'spawn-error', command, error: result.error }));
             break;
           }
           const session = result.session;

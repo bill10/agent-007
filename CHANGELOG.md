@@ -5,6 +5,43 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.2.1] - 2026-09-16
+
+### Fixed
+
+- **Re-spawning a Codex agent no longer dies with "No conversation found to
+  continue".** Re-spawn always ran `claude --continue`, whichever CLI the
+  orphaned session had been running, and a Codex worktree has no Claude
+  transcript to continue. The board now notes which CLI each agent runs, the
+  orphan it becomes after a restart or a close inherits that note, and
+  Re-spawn runs `codex resume --last` (scoped to the worktree, so it picks up
+  that agent's own session) or `claude --continue` to match. An orphan with
+  no note, one recorded before this release or discovered from a bare
+  worktree, falls back to the job card on its branch, then to whichever CLI
+  left the newer transcript for that directory under its own home
+  (`~/.claude/projects`, `~/.codex/sessions`; only interactive Codex sessions
+  count, since those are the ones `resume --last` can reach), and only then
+  to Claude Code, which is what it always did before. So the orphans you
+  already have re-spawn correctly without any hand edit to `config.json`.
+  The note is written only for an agent started as `claude` or `codex`
+  itself: a shell tab you ran Codex from, or a re-spawn whose CLI was
+  guessed, records nothing and lets the fallbacks decide next time, so a
+  wrong guess can never harden into a fact.
+- **A re-spawned job agent keeps its permission mode.** Neither CLI remembers
+  it, so a Codex card dispatched read-only came back after a restart with
+  Codex's default workspace-write sandbox, and an unattended card came back
+  asking for approval. Re-spawn now passes the card's mode (or the board's,
+  if the card inherits it) the same way dispatch did: `--sandbox` /
+  `--ask-for-approval` flags for Codex, `--permission-mode` for Claude Code.
+  A manually spawned agent has no card and resumes under its CLI's default,
+  as before.
+- **A Codex card in `manual` mode starts.** The mode mapped onto Codex's
+  `--ask-for-approval untrusted`, a value codex-cli 0.153 no longer accepts,
+  so the agent died at parse time before showing a prompt. It now runs
+  Codex's read-only sandbox with approvals on request: every write and every
+  step outside the sandbox comes back as a question, the nearest Codex has
+  to asking before each tool.
+
 ## [0.4.2.0] - 2026-09-15
 
 ### Added

@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadConfig } from '../server/config.js';
-import { config } from '../server/state.js';
+import { loadConfig, saveActiveSession, recoverCrashedSessions, sessionAgent } from '../server/config.js';
+import { config, orphans } from '../server/state.js';
 import { CONFIG_PATH, CONFIG_DIR } from '../server/state.js';
 
 // loadConfig reads CONFIG_PATH, which test/setup.js has already redirected to a
@@ -72,6 +72,90 @@ describe('restart recovery for in-flight jobs', () => {
     writeFileSync(CONFIG_PATH, JSON.stringify({ version: 1, repos: [] }));
     loadConfig();
     expect(config.jobs).toEqual([]);
+  });
+});
+
+describe('restart recovery for a running agent', () => {
+  beforeEach(() => orphans.clear());
+  afterEach(() => orphans.clear());
+
+  it('remembers which CLI the agent ran, so the orphan resumes with the right one', () => {
+    // The worktree must exist or the crashed session is skipped as gone.
+    const wt = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    const wt2 = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    try {
+      writeConfig([]);
+      loadConfig();
+      saveActiveSession({ name: 'Onyx', command: 'codex --dangerously-bypass-approvals-and-sandbox "do it"', repoPath: '/r', repoSlug: 'r', worktreePath: wt, branchName: 'b/onyx', color: '#000', cocktail: 'onyx' });
+      saveActiveSession({ name: 'Viper', command: 'claude --permission-mode auto "do it"', repoPath: '/r', repoSlug: 'r', worktreePath: wt2, branchName: 'b/viper', color: '#000', cocktail: 'viper' });
+      expect(config.activeSessions.map(s => s.agent)).toEqual(['codex', 'claude']);
+
+      // What the next start does with that record.
+      loadConfig();
+      recoverCrashedSessions();
+      const byName = Object.fromEntries([...orphans.values()].map(o => [o.name, o]));
+      expect(byName.Onyx.agent).toBe('codex');
+      expect(byName.Viper.agent).toBe('claude');
+      expect(config.orphans.find(o => o.name === 'Onyx').agent).toBe('codex');   // persisted, for the restart after this one
+    } finally {
+      rmSync(wt, { recursive: true, force: true });
+      rmSync(wt2, { recursive: true, force: true });
+    }
+  });
+
+  it('prefers the session\'s own note over its command, and derives one only when there is none', () => {
+    expect(sessionAgent({ agent: 'codex', command: 'bash -lc codex' })).toBe('codex');
+    expect(sessionAgent({ agent: 'claude', command: 'codex resume --last' })).toBe('claude');
+    expect(sessionAgent({ agent: null, command: 'codex resume --last' })).toBeNull();
+    expect(sessionAgent({ command: 'claude --continue' })).toBe('claude');
+    expect(sessionAgent({ command: 'gemini' })).toBeNull();
+    expect(sessionAgent({})).toBeNull();
+  });
+
+  it('tolerates a session record written before the CLI was noted', () => {
+    const wt = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    try {
+      mkdirSync(CONFIG_DIR, { recursive: true });
+      writeFileSync(CONFIG_PATH, JSON.stringify({
+        version: 1, repos: [], orphans: [], jobs: [],
+        activeSessions: [{ name: 'Old', repoPath: '/r', repoSlug: 'r', worktreePath: wt, branchName: 'b/old', color: '#000' }],
+      }));
+      loadConfig();
+      recoverCrashedSessions();
+      expect([...orphans.values()][0].agent).toBeNull();
+    } finally {
+      rmSync(wt, { recursive: true, force: true });
+    }
+  });
+
+  it('notes a CLI only for a command that is literally one, and codex by the binary alone', () => {
+    // A re-adopted agent already on `codex resume --last` and one spawned as
+    // /opt/homebrew/bin/codex each record what their own re-adopt would need.
+    // A plain terminal tab, a gemini, and a Codex started from inside a shell
+    // record nothing: the note outranks every other witness at re-adopt time,
+    // and "claude" by default would have sent a `bash -lc codex` back up as
+    // Claude Code, past the job card and the transcripts that knew better. A
+    // session with no worktree has nothing to re-adopt and is not recorded.
+    const wt = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    try {
+      writeConfig([]);
+      loadConfig();
+      saveActiveSession({ name: 'Bare', worktreePath: wt, branchName: 'b/bare' });
+      saveActiveSession({ name: 'Back', command: 'codex resume --last', worktreePath: wt, branchName: 'b/back' });
+      saveActiveSession({ name: 'Brew', command: '/opt/homebrew/bin/codex --model o3', worktreePath: wt, branchName: 'b/brew' });
+      saveActiveSession({ name: 'Gemini', command: 'gemini', worktreePath: wt, branchName: 'b/gemini' });
+      saveActiveSession({ name: 'Shell', command: 'bash -lc codex', worktreePath: wt, branchName: 'b/shell' });
+      // A re-adopted orphan whose CLI was only guessed carries agent: null on
+      // the session itself, and that provenance beats its resume command —
+      // otherwise a wrong guess would be recorded as fact on the next close.
+      saveActiveSession({ name: 'Guess', command: 'codex resume --last', agent: null, worktreePath: wt, branchName: 'b/guess' });
+      saveActiveSession({ name: 'NoTree', command: 'codex' });
+      expect(config.activeSessions.map(s => [s.name, s.agent])).toEqual([
+        ['Bare', null], ['Back', 'codex'], ['Brew', 'codex'], ['Gemini', null], ['Shell', null], ['Guess', null],
+      ]);
+    } finally {
+      rmSync(wt, { recursive: true, force: true });
+    }
   });
 });
 

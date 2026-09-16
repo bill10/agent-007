@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { app, server, startup, sessions } from '../server.js';
 import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
-import { addJob, deleteJob } from '../server/jobs.js';
+import { addJob, deleteJob, allJobs, updateSettings } from '../server/jobs.js';
 import { config, orphans, codenamePool } from '../server/state.js';
 import WebSocket from 'ws';
 import { tmpdir } from 'os';
-import { mkdirSync, existsSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync } from 'fs';
 import { join } from 'path';
 
 const PORT = 17007; // Use non-default port to avoid conflicts
@@ -736,4 +736,144 @@ describe('ownership is inert when auth is disabled', () => {
       w.close();
     }
   }, 15000);
+
+  // Closing a tab whose worktree cannot be cleaned up parks it as an orphan, and
+  // the explorer's Re-spawn brings it back. What Re-spawn runs must be the CLI
+  // the tab ran: `claude --continue` in a Codex worktree dies at once.
+  //
+  // A fake `codex` first on PATH stands in for the real one, which would try to
+  // resume a real session; the PTY inherits process.env at spawn time. The
+  // worktree is a bare directory with an unreadable .git, which the close path
+  // treats like uncommitted work (git status fails) and the re-adopt path
+  // accepts as a worktree (.git is there).
+  function fakeOrphanWorktree() {
+    const worktreePath = mkdtempSync(join(tmpdir(), 'a007-orphan-wt-'));
+    writeFileSync(join(worktreePath, '.git'), 'not a gitfile\n');
+    return worktreePath;
+  }
+
+  // A fake `codex` first on PATH, as a posix shell script: the Windows leg has
+  // neither the shebang nor the `:` PATH delimiter, so these two skip there.
+  function fakeCodexOnPath() {
+    const bin = mkdtempSync(join(tmpdir(), 'a007-bin-'));
+    writeFileSync(join(bin, 'codex'), '#!/bin/sh\nsleep 5\n', { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${bin}:${savedPath}`;
+    return { bin, restore: () => { process.env.PATH = savedPath; rmSync(bin, { recursive: true, force: true }); } };
+  }
+
+  it.skipIf(process.platform === 'win32')('closing a tab notes its CLI on the orphan, and Re-spawn resumes with that CLI', async () => {
+    const { bin, restore } = fakeCodexOnPath();
+    const worktreePath = fakeOrphanWorktree();
+    const command = `${join(bin, 'codex')} --model o3`;
+    const w = await open();
+    let name, back;
+    try {
+      const created = next(w, (m) => m.type === 'session-created' && m.command === command);
+      w.send(JSON.stringify({ type: 'spawn', command }));
+      const { sessionId, name: spawned } = await created;
+      name = spawned;
+      // A bare spawn has no worktree; give it one, as createWorktree would have.
+      Object.assign(sessions.get(sessionId), { repoPath: tmpdir(), worktreePath, branchName: 'b/orphan-test' });
+
+      const parked = next(w, (m) => m.type === 'orphans-list' && m.orphans.some(o => o.name === name));
+      w.send(JSON.stringify({ type: 'kill', sessionId }));
+      const orphan = (await parked).orphans.find(o => o.name === name);
+      expect(orphan.agent).toBe('codex');   // read off the command, path and flags stripped
+      expect(orphans.get(orphan.id).agent).toBe('codex');
+
+      const readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
+      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
+      back = await readopted;
+      expect(back.command).toBe('codex resume --last');
+      expect(orphans.has(orphan.id)).toBe(false);
+      // The record for the next restart carries the CLI too.
+      expect(config.activeSessions.find(s => s.worktreePath === worktreePath).agent).toBe('codex');
+    } finally {
+      restore();
+      config.activeSessions = config.activeSessions.filter(s => s.worktreePath !== worktreePath);
+      for (const o of [...orphans.values()]) if (o.worktreePath === worktreePath) orphans.delete(o.id);
+      if (back) {
+        // Keep the kill path from orphaning the fake worktree a second time.
+        Object.assign(sessions.get(back.sessionId), { repoPath: null, worktreePath: null });
+        w.send(JSON.stringify({ type: 'kill', sessionId: back.sessionId }));
+      }
+      if (name) codenamePool.recycle(name);
+      rmSync(worktreePath, { recursive: true, force: true });
+      w.close();
+    }
+  }, 15000);
+
+  // An orphan with no note (a record written before the CLI was noted, or a
+  // worktree discovered on disk) resumes by whatever its job card or the
+  // transcripts say — but that answer is a guess, and the new session must
+  // NOT record it as fact, or a wrong one could never be corrected. The card,
+  // when there is one, also lends the resume its permission mode.
+  it.skipIf(process.platform === 'win32')('re-adopting an orphan with no note resumes by card and transcript, under the card\'s mode, and records nothing', async () => {
+    const { bin, restore } = fakeCodexOnPath();
+    const worktreePath = fakeOrphanWorktree();
+    const repoPath = tmpdir();
+    const branchName = 'b/no-note-test';
+    // A Codex rollout whose cwd is the worktree, under a fake CODEX_HOME.
+    const codexHome = mkdtempSync(join(tmpdir(), 'a007-codex-home-'));
+    const day = join(codexHome, 'sessions', '2026', '09', '16');
+    mkdirSync(day, { recursive: true });
+    writeFileSync(join(day, 'rollout-x.jsonl'), JSON.stringify({ type: 'session_meta', payload: { id: 'x', cwd: realpathSync.native(worktreePath), source: 'cli', thread_source: 'user' } }) + '\n');
+    const savedHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = codexHome;
+    const savedRepos = config.repos;
+    config.repos = [...config.repos, { path: repoPath }];
+    const command = `${join(bin, 'codex')} --model o3`;
+    const w = await open();
+    let name, back, jobId;
+    try {
+      const created = next(w, (m) => m.type === 'session-created' && m.command === command);
+      w.send(JSON.stringify({ type: 'spawn', command }));
+      const { sessionId, name: spawned } = await created;
+      name = spawned;
+      Object.assign(sessions.get(sessionId), { repoPath, worktreePath, branchName });
+      const parked = next(w, (m) => m.type === 'orphans-list' && m.orphans.some(o => o.name === name));
+      w.send(JSON.stringify({ type: 'kill', sessionId }));
+      const orphan = (await parked).orphans.find(o => o.name === name);
+      orphans.get(orphan.id).agent = null;   // as a record from before the note, or a discovered worktree
+
+      // No card yet: the transcript answers, bare, and the session keeps no note.
+      let readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
+      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
+      back = await readopted;
+      expect(back.command).toBe('codex resume --last');
+      expect(sessions.get(back.sessionId).agent).toBeNull();
+      expect(config.activeSessions.find(s => s.worktreePath === worktreePath).agent).toBeNull();
+
+      // Park it again; this time a read-only card on the branch is waiting.
+      const reparked = next(w, (m) => m.type === 'orphans-list' && m.orphans.some(o => o.name === name));
+      w.send(JSON.stringify({ type: 'kill', sessionId: back.sessionId }));
+      const again = (await reparked).orphans.find(o => o.name === name);
+      expect(again.agent).toBeNull();   // still no note: nothing was learned for certain
+      const { job } = addJob({ title: 'read only codex', repoPath, agent: 'codex', permissionMode: 'plan' }, () => {});
+      jobId = job.id;
+      Object.assign(job, { state: 'in-progress', branchName, agentSessionId: null });
+      readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== back.sessionId);
+      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: again.id }));
+      back = await readopted;
+      expect(back.command).toBe('codex resume --last --sandbox read-only');
+      expect(allJobs().find(j => j.id === jobId).agentSessionId).toBe(back.sessionId);   // relinked to its card
+      expect(config.activeSessions.find(s => s.worktreePath === worktreePath).agent).toBeNull();
+    } finally {
+      restore();
+      if (savedHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = savedHome;
+      config.repos = savedRepos;
+      config.activeSessions = config.activeSessions.filter(s => s.worktreePath !== worktreePath);
+      for (const o of [...orphans.values()]) if (o.worktreePath === worktreePath) orphans.delete(o.id);
+      if (back && sessions.has(back.sessionId)) {
+        Object.assign(sessions.get(back.sessionId), { repoPath: null, worktreePath: null, jobId: null });
+        w.send(JSON.stringify({ type: 'kill', sessionId: back.sessionId }));
+      }
+      if (jobId) await deleteJob(jobId, () => {});
+      if (name) codenamePool.recycle(name);
+      rmSync(worktreePath, { recursive: true, force: true });
+      rmSync(codexHome, { recursive: true, force: true });
+      w.close();
+    }
+  }, 20000);
 });

@@ -1187,6 +1187,7 @@ describe('relinkSessionToJob', () => {
     expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO, branchName: 'unrelated' }, noopBroadcast)).toBeNull();
     expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO2, branchName: branch }, noopBroadcast)).toBeNull();
     expect(relinkSessionToJob({ id: 's', name: 'X', repoPath: REPO }, noopBroadcast)).toBeNull();
+    expect(relinkSessionToJob(null, noopBroadcast)).toBeNull();
   });
 });
 
