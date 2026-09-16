@@ -5,6 +5,24 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.2.3] - 2026-09-16
+
+### Fixed
+
+- **A Codex agent no longer shows the "needs you" bubble after a dialog it
+  already answered.** Opening `/permissions` (or any Codex dialog) lit the
+  bubble correctly, but it stayed lit after the choice, with the terminal
+  plainly idle at its prompt. Two causes: the dialog detector matched any
+  line containing "allow" or "approve", so the picker's own description
+  ("choose what Codex is allowed to do", "Ask for approval") counted as a
+  question; and Codex redraws its prompt with cursor moves rather than
+  newlines, so those lines stayed the newest the detector remembered until
+  five more real lines arrived. The detector now matches each CLI's actual
+  dialog wording, and for a TUI that repaints in synchronized-output frames
+  (Codex does) it reads the last frame, which is the pane as it stands: the
+  dialog while it is open, the bare prompt once it is answered. Claude Code
+  does not draw such frames and keeps the previous behaviour.
+
 ## [0.4.2.2] - 2026-09-16
 
 ### Fixed

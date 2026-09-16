@@ -57,6 +57,45 @@ function installAsyncSpawnGuard() {
   });
 }
 
+// Synchronized output (DEC mode 2026): a TUI brackets each repaint in
+// ?2026h ... ?2026l so the terminal shows it whole. Codex draws its bottom
+// pane — composer, status line, and every dialog and picker — that way, so
+// the last complete frame is the pane as it stands: the picker while it is
+// open, the bare prompt once it is answered. detectState reads it in place of
+// the five-line window, which for Codex holds whatever last got a newline and
+// so keeps an answered dialog's text long after the screen let it go.
+//
+// A frame may span pty reads, so an open one is carried between chunks
+// (bounded: the agent controls this text). A frame whose text is nothing but
+// cursor-shape remnants and whitespace — Codex blinks those while idle — is
+// not a repaint of the pane and leaves the last real frame in place. A marker
+// cut in half by a read boundary is simply not seen; the next frame sets the
+// pane again, so nothing latches.
+const SYNC_BEGIN = '\x1b[?2026h';
+const SYNC_END = '\x1b[?2026l';
+const FRAME_RAW_MAX = 64 * 1024;
+const FRAME_TEXT_MAX = 2000;
+export function trackSyncFrames(session, data) {
+  let s = data;
+  while (s.length > 0) {
+    if (session.frameOpen === undefined || session.frameOpen === null) {
+      const start = s.indexOf(SYNC_BEGIN);
+      if (start === -1) return;
+      session.frameOpen = '';
+      s = s.slice(start + SYNC_BEGIN.length);
+    }
+    const end = s.indexOf(SYNC_END);
+    if (end === -1) {
+      session.frameOpen = (session.frameOpen + s).slice(-FRAME_RAW_MAX);
+      return;
+    }
+    const text = stripAnsiComplete(session.frameOpen + s.slice(0, end)).replace(/\s+/g, ' ').trim();
+    session.frameOpen = null;
+    s = s.slice(end + SYNC_END.length);
+    if (/\w{3,}/.test(text)) session.lastFrame = text.slice(0, FRAME_TEXT_MAX);
+  }
+}
+
 /**
  * Attach onData + onExit handlers to a PTY process.
  * Shared between createSessionFromConfig and re-adopt-orphan.
@@ -110,6 +149,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     if (lines.length > 0) {
       session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(cap)].slice(-5);
     }
+    trackSyncFrames(session, data);
     broadcast({ type: 'pty-output', sessionId, data: Buffer.from(data).toString('base64') });
     updateState(session, broadcast);
   });
@@ -187,6 +227,8 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     lastResizeAt: 0,
     lastStrippedLine: '',
     recentStrippedLines: [],
+    lastFrame: '',             // text of the last synchronized-output repaint, if the TUI draws them
+    frameOpen: null,           // a frame carried across pty reads
     pendingRaw: '',            // tail of the last pty chunk, past its final newline
     isTUI: isTUI ?? /^(claude|aider|codex|gemini)\b/.test(command),
     // Which CLI this is, as far as anyone KNOWS — 'claude', 'codex' or null.

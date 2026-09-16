@@ -287,6 +287,65 @@ describe('detectState', () => {
     isTUI: false,
   };
 
+  // Codex's permission picker and its aftermath. Its lines say "allowed" and
+  // "approval" without asking anything; a dialog is what asks.
+  it('does not read ordinary prose about permissions as a dialog', () => {
+    const prose = [
+      'choose what Codex is allowed to do',
+      '1. Ask for approval  Codex can read and edit files in the current workspace',
+      '• Permissions updated to Full Access',
+      '• Permissions updated to Ask for approval',
+      'Approval is required to access the internet or edit other files.',
+      'Approved the change and rejected the rest; nothing to deny here',
+      '- 231 of 500 platforms now have a named LinkedIn contact.',
+    ];
+    for (const line of prose) {
+      expect(detectState({ ...BASE, isTUI: true, lastStrippedLine: line }, { now: 50000 }), line).toBe('WAITING');
+      expect(detectState({ ...BASE, isTUI: true, recentStrippedLines: [line] }, { now: 50000 }), line).toBe('WAITING');
+    }
+  });
+
+  it('reads each CLI\'s real dialogs, by their own wording', () => {
+    const dialogs = [
+      'Would you like to run the following command?',
+      'Would you like to make the following edits?',
+      'Would you like to grant these permissions?',
+      'Would you like to send input to the existing terminal?',
+      'Approve app tool call?',
+      'Apply Changes? Press Y to apply, P to preflight, N to cancel.',
+      'Enable full access?',
+      'Update Model Permissions › 1. Ask for approval',
+      '› 1. Yes, proceed',
+      '2. Yes, and don\'t ask again for commands that start with `git`',
+      'No, and tell Codex what to do differently',
+      'No, continue without running it',
+      'Allow for this session',
+      'Always allow',
+      'Do you want to proceed?',
+      'Allow editor to read files',
+    ];
+    for (const line of dialogs) {
+      expect(detectState({ ...BASE, isTUI: true, lastStrippedLine: line }, { now: 50000 }), line).toBe('MESSAGE');
+    }
+  });
+
+  // A TUI that repaints in synchronized-output frames says what is on screen.
+  it('judges a TUI that draws frames by its last frame, not the five-line window', () => {
+    const stale = ['Update Model Permissions', '› 1. Ask for approval  Codex can read and edit files', '2. Approve for me'];
+    // The bug: the answered picker's lines are still the newest newline-
+    // terminated lines, but the last frame is the bare prompt.
+    const answered = { ...BASE, isTUI: true, recentStrippedLines: stale, lastStrippedLine: '• Permissions updated to Full Access', lastFrame: '› Ask Codex to do anything gpt-6-astra medium · ~/wt' };
+    expect(detectState(answered, { now: 50000 })).toBe('WAITING');
+    // While it is open, the frame holds it, whatever the window says.
+    const open = { ...BASE, isTUI: true, recentStrippedLines: ['Everything remains on one sheet.'], lastFrame: 'Update Model Permissions › 1. Ask for approval 2. Approve for me 3. Full Access' };
+    expect(detectState(open, { now: 50000 })).toBe('MESSAGE');
+    // A dialog on the last line itself still counts, frame or no frame.
+    expect(detectState({ ...answered, lastStrippedLine: 'Would you like to run the following command?' }, { now: 50000 })).toBe('MESSAGE');
+    // No frames (Claude Code): the window is all there is, as before.
+    expect(detectState({ ...BASE, isTUI: true, recentStrippedLines: ['Enter to select · Esc to cancel'] }, { now: 50000 })).toBe('MESSAGE');
+    expect(detectState({ ...BASE, isTUI: true, recentStrippedLines: ['Enter to select · Esc to cancel'], lastFrame: '' }, { now: 50000 })).toBe('MESSAGE');
+  });
+
   it('should return DISCONNECTED when session has exited', () => {
     expect(detectState({ ...BASE, exited: true }, { now: 1000 })).toBe('DISCONNECTED');
   });
