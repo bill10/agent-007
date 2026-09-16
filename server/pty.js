@@ -133,7 +133,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin }, broadcast) {
   const { file, args } = parseCommand(command);
   const cwd = worktreePath || homedir();
 
@@ -205,7 +205,12 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     // tightening of the board since. A re-adopt passes its own answer in:
     // the recorded flags it resumed under, or none when a card's mode did.
     permissionFlags: permissionFlags !== undefined ? permissionFlags
-      : (spawnedBy === 'board' ? [] : permissionFlagsFromCommand(command)),
+      : ((origin || spawnedBy) === 'board' ? [] : permissionFlagsFromCommand(command)),
+    // Where the session's lineage began, 'board' or 'user' — unlike spawnedBy
+    // (which says how THIS tab was opened, and is 'user' for a re-adopt) it
+    // survives re-adopts on the records, so a board agent whose card is gone
+    // can still be resumed under the board's mode rather than the CLI's.
+    origin: origin === 'board' || (origin === undefined && spawnedBy === 'board') ? 'board' : 'user',
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client

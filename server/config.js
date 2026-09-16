@@ -109,6 +109,7 @@ export function saveActiveSession(session, broadcast) {
     // null when nobody knows, so the fallbacks get to answer.
     agent: sessionAgent(session),
     permissionFlags: sessionPermissionFlags(session),
+    origin: sessionOrigin(session),
     savedAt: new Date().toISOString(),
   });
   saveConfig(broadcast);
@@ -122,6 +123,11 @@ export function sessionAgent(session) {
 
 // The permission flags the session was spawned with (see createSessionFromConfig);
 // read off the command for a session object that does not carry them.
+// 'board' for a session dispatched by the board, or re-adopted from one, else 'user'.
+export function sessionOrigin(session) {
+  return session.origin === 'board' || (session.origin === undefined && session.spawnedBy === 'board') ? 'board' : 'user';
+}
+
 export function sessionPermissionFlags(session) {
   return Array.isArray(session.permissionFlags) ? session.permissionFlags : permissionFlagsFromCommand(session.command);
 }
@@ -153,6 +159,7 @@ export function recoverCrashedSessions(broadcast) {
       // carried forward as a note.
       agent: isValidJobAgent(s.agent) ? s.agent : null,
       permissionFlags: recordedPermissionFlags(s),
+      origin: s.origin === 'board' ? 'board' : 'user',
       reason: 'server-restart',
       createdAt: new Date().toISOString(),
     };

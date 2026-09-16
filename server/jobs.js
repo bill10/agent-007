@@ -1071,7 +1071,13 @@ export function orphanResumePlan(orphan, homes) {
   const agent = (isValidJobAgent(orphan.agent) ? orphan.agent : null)
     || (card ? jobAgent(card) : null)
     || agentFromTranscripts(orphan.worktreePath, homes);
-  const mode = card ? dispatchPermissionMode(card, boardSettings().permissionMode) : null;
+  // A board agent whose card is gone (done, or deleted) still belongs to the
+  // board: it resumes under the board's current mode, not the CLI's default —
+  // and not the mode it was dispatched with, which the board may have
+  // tightened since.
+  const mode = card ? dispatchPermissionMode(card, boardSettings().permissionMode)
+    : orphan.origin === 'board' ? dispatchPermissionMode(null, boardSettings().permissionMode)
+    : null;
   // The flags it was spawned with, for a hand-spawned agent with no card.
   // They belong to the CLI on the record: a note-less orphan resolved by a
   // transcript has none to pass on, and resumes under that CLI's default.

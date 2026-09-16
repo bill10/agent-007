@@ -422,7 +422,7 @@ export async function scanForOrphanedWorktrees(broadcast) {
           worktreePath, branchName, color: colorCycler.next(),
           // Nothing on disk says which CLI ran here or with what flags; the
           // same shape as the other orphan sites, with nothing in it.
-          agent: null, permissionFlags: [],
+          agent: null, permissionFlags: [], origin: 'user',
           reason: 'discovered', createdAt: new Date().toISOString(),
         };
         orphans.set(orphanId, orphan);

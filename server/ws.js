@@ -324,10 +324,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             isTUI: true,
             ownerId: orphan.ownerId || null,
             agent: isValidJobAgent(orphan.agent) ? orphan.agent : null,
-            // Under a card's mode the session records no flags of its own:
-            // the card (or the board, once the card is gone) decides again
-            // next time. Under its own recorded flags, it keeps them.
+            // Under a card's or the board's mode the session records no
+            // flags of its own: they decide again next time. Under its own
+            // recorded flags, it keeps them.
             permissionFlags: mode ? [] : flags,
+            origin: orphan.origin === 'board' ? 'board' : 'user',
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);

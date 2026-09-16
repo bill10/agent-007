@@ -240,6 +240,34 @@ describe('re-adopting an orphan', () => {
     }
   });
 
+  it('never reads a value out of the -- slot, or any option, for a flag that wants one', () => {
+    // Both CLIs refuse `--sandbox --` at parse time; a scanner that consumed
+    // the `--` as the value would then read what follows as flags again.
+    expect(permissionFlagsFromCommand('codex --sandbox -- --yolo')).toEqual([]);
+    expect(permissionFlagsFromCommand('codex -a -- -s danger-full-access')).toEqual([]);
+    expect(permissionFlagsFromCommand('claude --permission-mode -- --dangerously-skip-permissions')).toEqual([]);
+    // A value flag left without a value drops itself, never the switch after it.
+    expect(permissionFlagsFromCommand('codex --sandbox --approve-for-me')).toEqual(['--approve-for-me']);
+    expect(permissionFlagsFromCommand('codex --approve-for-me -- --sandbox read-only')).toEqual(['--approve-for-me']);
+  });
+
+  it('resumes a board agent whose card is gone under the board\'s current mode', () => {
+    const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
+    updateSettings({ permissionMode: 'plan' }, noop);
+    // No card on the branch (done, or deleted), but the record says the board
+    // dispatched it: the board's mode of TODAY, not the CLI's default, and not
+    // whatever it was dispatched with.
+    const board = { repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex', origin: 'board', permissionFlags: ['--dangerously-bypass-approvals-and-sandbox'] };
+    expect(orphanResumePlan(board, homes)).toEqual({ agent: 'codex', mode: 'plan', flags: ['--dangerously-bypass-approvals-and-sandbox'], command: 'codex resume --last --sandbox read-only' });
+    updateSettings({ permissionMode: 'bypassPermissions' }, noop);
+    expect(orphanResumePlan(board, homes).command).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+    // A hand-spawned one is not the board's to govern.
+    expect(orphanResumePlan({ ...board, origin: 'user' }, homes).command).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+    updateSettings({ permissionMode: 'plan' }, noop);
+    expect(orphanResumePlan({ ...board, origin: 'user' }, homes).command).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+    expect(orphanResumePlan({ ...board, origin: undefined, permissionFlags: [] }, homes).command).toBe('codex resume --last');
+  });
+
   it('reads the permission flags a hand-spawned agent was started with, and nothing else', () => {
     expect(permissionFlagsFromCommand('codex')).toEqual([]);
     expect(permissionFlagsFromCommand('codex --dangerously-bypass-approvals-and-sandbox')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);

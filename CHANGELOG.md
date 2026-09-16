@@ -25,8 +25,9 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   permission sources, such as Claude's `--allowedTools` or a Codex `-c`
   override, are not carried. A board-dispatched agent records no flags of
   its own: its card's mode is re-read at every re-spawn, and once the card is
-  gone the board's current setting decides, so a bypass card retired long
-  ago cannot come back as a bypass agent.
+  gone the board's current setting decides (records now remember which agents
+  the board dispatched), so a bypass card retired long ago cannot come back
+  as a bypass agent.
 
 ## [0.4.2.1] - 2026-09-16
 

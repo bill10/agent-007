@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadConfig, saveActiveSession, recoverCrashedSessions, sessionAgent, sessionPermissionFlags } from '../server/config.js';
+import { loadConfig, saveActiveSession, recoverCrashedSessions, sessionAgent, sessionPermissionFlags, sessionOrigin } from '../server/config.js';
 import { config, orphans } from '../server/state.js';
 import { CONFIG_PATH, CONFIG_DIR } from '../server/state.js';
 
@@ -83,6 +83,7 @@ describe('restart recovery for a running agent', () => {
     // The worktree must exist or the crashed session is skipped as gone.
     const wt = mkdtempSync(join(tmpdir(), 'a007-wt-'));
     const wt2 = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    const wt3 = mkdtempSync(join(tmpdir(), 'a007-wt-'));
     try {
       writeConfig([]);
       loadConfig();
@@ -92,6 +93,8 @@ describe('restart recovery for a running agent', () => {
       // And the permission flags each was started with, for a re-spawn that
       // has no job card to ask.
       expect(config.activeSessions.map(s => s.permissionFlags)).toEqual([['--dangerously-bypass-approvals-and-sandbox'], ['--permission-mode', 'auto']]);
+      saveActiveSession({ name: 'Dispatched', command: 'codex "job"', spawnedBy: 'board', repoPath: '/r', repoSlug: 'r', worktreePath: wt3, branchName: 'b/dispatched', color: '#000', cocktail: 'dispatched' });
+      expect(config.activeSessions.map(s => s.origin)).toEqual(['user', 'user', 'board']);
 
       // What the next start does with that record.
       loadConfig();
@@ -101,11 +104,14 @@ describe('restart recovery for a running agent', () => {
       expect(byName.Onyx.permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(byName.Viper.agent).toBe('claude');
       expect(byName.Viper.permissionFlags).toEqual(['--permission-mode', 'auto']);
+      expect(byName.Dispatched.origin).toBe('board');
+      expect(byName.Onyx.origin).toBe('user');
       expect(config.orphans.find(o => o.name === 'Onyx').permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(config.orphans.find(o => o.name === 'Onyx').agent).toBe('codex');   // persisted, for the restart after this one
     } finally {
       rmSync(wt, { recursive: true, force: true });
       rmSync(wt2, { recursive: true, force: true });
+      rmSync(wt3, { recursive: true, force: true });
     }
   });
 
@@ -137,6 +143,18 @@ describe('restart recovery for a running agent', () => {
       expect(own.session.permissionFlags).toEqual(['--sandbox', 'read-only']);
       expect(board.session.permissionFlags).toEqual([]);
       expect(passed.session.permissionFlags).toEqual(['--approve-for-me']);   // an explicit answer wins
+      // Lineage: a board dispatch is 'board'; a re-adopt opened as a user tab
+      // keeps the orphan's origin it was handed.
+      expect(own.session.origin).toBe('user');
+      expect(board.session.origin).toBe('board');
+      const readopted = spawn({ spawnedBy: undefined, origin: 'board', permissionFlags: [] });
+      try { expect(readopted.session.origin).toBe('board'); expect(readopted.session.spawnedBy).toBe('user'); }
+      finally { try { readopted.session.pty.kill(); } catch {} clearInterval(readopted.session.stateCheckInterval); }
+      // And on the records: the active-session entry and the orphan it becomes.
+      expect(sessionOrigin({ spawnedBy: 'board' })).toBe('board');
+      expect(sessionOrigin({ origin: 'board', spawnedBy: 'user' })).toBe('board');
+      expect(sessionOrigin({ spawnedBy: 'user' })).toBe('user');
+      expect(sessionOrigin({})).toBe('user');
     } finally {
       for (const r of [own, board, passed]) { try { r.session.pty.kill(); } catch {} clearInterval(r.session.stateCheckInterval); }
     }
