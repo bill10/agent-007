@@ -5,6 +5,30 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.2.2] - 2026-09-16
+
+### Fixed
+
+- **A re-spawned hand-spawned agent keeps its permission flags.** Only a job
+  agent got its mode back on Re-spawn, from its card; an agent you started
+  yourself as `codex --dangerously-bypass-approvals-and-sandbox` or
+  `claude --permission-mode plan` came back under the CLI's default, so a
+  bypass agent started asking and a read-only one could write. The board now
+  records the permission flags each agent was spawned with, on the session
+  and on the orphan it becomes, and Re-spawn puts them back on the command.
+  A job card's mode still wins when there is one. What is kept: Codex's
+  `--sandbox`, `--ask-for-approval`, `--approve-for-me` and
+  `--dangerously-bypass-approvals-and-sandbox` (short and `--yolo`
+  spellings included), and Claude Code's `--permission-mode` and
+  `--dangerously-skip-permissions`, each only with values the CLI accepts,
+  so nothing else on the record can reach the command line. Other
+  permission sources, such as Claude's `--allowedTools` or a Codex `-c`
+  override, are not carried. A board-dispatched agent records no flags of
+  its own: its card's mode is re-read at every re-spawn, and once the card is
+  gone the board's current setting decides (records now remember which agents
+  the board dispatched), so a bypass card retired long ago cannot come back
+  as a bypass agent.
+
 ## [0.4.2.1] - 2026-09-16
 
 ### Fixed

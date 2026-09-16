@@ -8,7 +8,7 @@ import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
-import { sessionAgentFromCommand } from '../lib/jobs.js';
+import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 const TRIVIAL_RE = /^[\s.·•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷─━▏▎▍▌▋▊▉█░▒▓⬡◐◑◒◓|\\\/\-*>]+$/;
@@ -133,7 +133,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin }, broadcast) {
   const { file, args } = parseCommand(command);
   const cwd = worktreePath || homedir();
 
@@ -196,6 +196,21 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     // down as fact, or a wrong one could never be corrected — the record
     // outranks every other witness the next time round.
     agent: agent === undefined ? sessionAgentFromCommand(command) : agent,
+    // The permission flags it was spawned with, so a re-spawn with no job
+    // card to ask can run under the same ones. Only a session that OWNS its
+    // flags records them: one a person started by hand. A board dispatch
+    // runs under its card's mode, which the board re-resolves at every
+    // re-spawn against its current setting, so recording the dispatch-time
+    // flags would freeze a bypass past the card's retirement and past any
+    // tightening of the board since. A re-adopt passes its own answer in:
+    // the recorded flags it resumed under, or none when a card's mode did.
+    permissionFlags: permissionFlags !== undefined ? permissionFlags
+      : ((origin || spawnedBy) === 'board' ? [] : permissionFlagsFromCommand(command)),
+    // Where the session's lineage began, 'board' or 'user' — unlike spawnedBy
+    // (which says how THIS tab was opened, and is 'user' for a re-adopt) it
+    // survives re-adopts on the records, so a board agent whose card is gone
+    // can still be resumed under the board's mode rather than the CLI's.
+    origin: origin === 'board' || (origin === undefined && spawnedBy === 'board') ? 'board' : 'user',
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client

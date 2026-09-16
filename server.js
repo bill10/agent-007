@@ -24,7 +24,7 @@ import {
   PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
   codenamePool, colorCycler, nextSessionId,
 } from './server/state.js';
-import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent } from './server/config.js';
+import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
 import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
@@ -134,6 +134,8 @@ async function killSession(sessionId) {
       branchName: session.branchName, color: session.color,
       ownerId: session.ownerId || null,
       agent: sessionAgent(session),
+      permissionFlags: sessionPermissionFlags(session),
+      origin: sessionOrigin(session),
       reason, createdAt: new Date().toISOString(),
     };
     orphans.set(orphanId, orphan);

@@ -310,7 +310,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           // only what the orphan RECORD said (possibly nothing): a CLI picked
           // by a card, a transcript or the default is a guess, and writing it
           // down would make a wrong one permanent.
-          const { command } = orphanResumePlan(orphan);
+          const { command, mode, flags } = orphanResumePlan(orphan);
           const result = createSessionFromConfig({
             sessionId: nextSessionId(),
             name: orphan.name,
@@ -324,6 +324,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             isTUI: true,
             ownerId: orphan.ownerId || null,
             agent: isValidJobAgent(orphan.agent) ? orphan.agent : null,
+            // Under a card's or the board's mode the session records no
+            // flags of its own: they decide again next time. Under its own
+            // recorded flags, it keeps them.
+            permissionFlags: mode ? [] : flags,
+            origin: orphan.origin === 'board' ? 'board' : 'user',
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);

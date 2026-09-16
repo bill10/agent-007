@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { loadConfig, saveActiveSession, recoverCrashedSessions, sessionAgent } from '../server/config.js';
+import { loadConfig, saveActiveSession, recoverCrashedSessions, sessionAgent, sessionPermissionFlags, sessionOrigin } from '../server/config.js';
 import { config, orphans } from '../server/state.js';
 import { CONFIG_PATH, CONFIG_DIR } from '../server/state.js';
 
@@ -83,23 +83,35 @@ describe('restart recovery for a running agent', () => {
     // The worktree must exist or the crashed session is skipped as gone.
     const wt = mkdtempSync(join(tmpdir(), 'a007-wt-'));
     const wt2 = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    const wt3 = mkdtempSync(join(tmpdir(), 'a007-wt-'));
     try {
       writeConfig([]);
       loadConfig();
       saveActiveSession({ name: 'Onyx', command: 'codex --dangerously-bypass-approvals-and-sandbox "do it"', repoPath: '/r', repoSlug: 'r', worktreePath: wt, branchName: 'b/onyx', color: '#000', cocktail: 'onyx' });
       saveActiveSession({ name: 'Viper', command: 'claude --permission-mode auto "do it"', repoPath: '/r', repoSlug: 'r', worktreePath: wt2, branchName: 'b/viper', color: '#000', cocktail: 'viper' });
       expect(config.activeSessions.map(s => s.agent)).toEqual(['codex', 'claude']);
+      // And the permission flags each was started with, for a re-spawn that
+      // has no job card to ask.
+      expect(config.activeSessions.map(s => s.permissionFlags)).toEqual([['--dangerously-bypass-approvals-and-sandbox'], ['--permission-mode', 'auto']]);
+      saveActiveSession({ name: 'Dispatched', command: 'codex "job"', spawnedBy: 'board', repoPath: '/r', repoSlug: 'r', worktreePath: wt3, branchName: 'b/dispatched', color: '#000', cocktail: 'dispatched' });
+      expect(config.activeSessions.map(s => s.origin)).toEqual(['user', 'user', 'board']);
 
       // What the next start does with that record.
       loadConfig();
       recoverCrashedSessions();
       const byName = Object.fromEntries([...orphans.values()].map(o => [o.name, o]));
       expect(byName.Onyx.agent).toBe('codex');
+      expect(byName.Onyx.permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(byName.Viper.agent).toBe('claude');
+      expect(byName.Viper.permissionFlags).toEqual(['--permission-mode', 'auto']);
+      expect(byName.Dispatched.origin).toBe('board');
+      expect(byName.Onyx.origin).toBe('user');
+      expect(config.orphans.find(o => o.name === 'Onyx').permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(config.orphans.find(o => o.name === 'Onyx').agent).toBe('codex');   // persisted, for the restart after this one
     } finally {
       rmSync(wt, { recursive: true, force: true });
       rmSync(wt2, { recursive: true, force: true });
+      rmSync(wt3, { recursive: true, force: true });
     }
   });
 
@@ -110,6 +122,42 @@ describe('restart recovery for a running agent', () => {
     expect(sessionAgent({ command: 'claude --continue' })).toBe('claude');
     expect(sessionAgent({ command: 'gemini' })).toBeNull();
     expect(sessionAgent({})).toBeNull();
+  });
+
+  it('records flags for a session that owns them, and none for a board dispatch', async () => {
+    // A board dispatch runs under its card's mode, which the board resolves
+    // again at every re-spawn against its current setting; freezing the
+    // dispatch-time flags on the session would let a bypass card retired long
+    // ago come back as a bypass agent after the board was tightened.
+    const { createSessionFromConfig } = await import('../server/pty.js');
+    const spawn = (extra) => createSessionFromConfig({
+      sessionId: `s-${Math.random().toString(36).slice(2)}`, name: 'T', color: '#000',
+      command: process.platform === 'win32' ? 'cmd /c exit' : 'true', ...extra,
+    }, () => {});
+    // The command is a stand-in; the flags are judged from its text only when the CLI is one of ours,
+    // so pass them in the way the ws re-adopt does and check the rule, not the parser.
+    const own = spawn({ spawnedBy: 'user', permissionFlags: ['--sandbox', 'read-only'] });
+    const board = spawn({ spawnedBy: 'board', permissionFlags: undefined });
+    const passed = spawn({ spawnedBy: 'board', permissionFlags: ['--approve-for-me'] });
+    try {
+      expect(own.session.permissionFlags).toEqual(['--sandbox', 'read-only']);
+      expect(board.session.permissionFlags).toEqual([]);
+      expect(passed.session.permissionFlags).toEqual(['--approve-for-me']);   // an explicit answer wins
+      // Lineage: a board dispatch is 'board'; a re-adopt opened as a user tab
+      // keeps the orphan's origin it was handed.
+      expect(own.session.origin).toBe('user');
+      expect(board.session.origin).toBe('board');
+      const readopted = spawn({ spawnedBy: undefined, origin: 'board', permissionFlags: [] });
+      try { expect(readopted.session.origin).toBe('board'); expect(readopted.session.spawnedBy).toBe('user'); }
+      finally { try { readopted.session.pty.kill(); } catch {} clearInterval(readopted.session.stateCheckInterval); }
+      // And on the records: the active-session entry and the orphan it becomes.
+      expect(sessionOrigin({ spawnedBy: 'board' })).toBe('board');
+      expect(sessionOrigin({ origin: 'board', spawnedBy: 'user' })).toBe('board');
+      expect(sessionOrigin({ spawnedBy: 'user' })).toBe('user');
+      expect(sessionOrigin({})).toBe('user');
+    } finally {
+      for (const r of [own, board, passed]) { try { r.session.pty.kill(); } catch {} clearInterval(r.session.stateCheckInterval); }
+    }
   });
 
   it('tolerates a session record written before the CLI was noted', () => {
@@ -123,6 +171,74 @@ describe('restart recovery for a running agent', () => {
       loadConfig();
       recoverCrashedSessions();
       expect([...orphans.values()][0].agent).toBeNull();
+      expect([...orphans.values()][0].permissionFlags).toEqual([]);
+    } finally {
+      rmSync(wt, { recursive: true, force: true });
+    }
+  });
+
+  it('passes a stored record\'s flags through the allowlist again, and only with a CLI of ours', () => {
+    // config.json is hand-editable: what comes back onto the resume argv is
+    // whatever the allowlist lets through, not whatever the file says. Each
+    // record needs its own live worktree, or recovery skips it as gone.
+    const wts = Array.from({ length: 5 }, () => mkdtempSync(join(tmpdir(), 'a007-wt-')));
+    try {
+      mkdirSync(CONFIG_DIR, { recursive: true });
+      writeFileSync(CONFIG_PATH, JSON.stringify({
+        version: 1, repos: [], orphans: [], jobs: [],
+        activeSessions: [
+          { name: 'Junk', agent: 'codex', permissionFlags: ['--sandbox', 'nope', '--approve-for-me', '--rm', '-rf', '/'], worktreePath: wts[0], branchName: 'b/junk' },
+          { name: 'Text', agent: 'codex', permissionFlags: '--approve-for-me', worktreePath: wts[1], branchName: 'b/text' },
+          { name: 'Cross', agent: 'claude', permissionFlags: ['--sandbox', 'read-only'], worktreePath: wts[2], branchName: 'b/cross' },
+          { name: 'Alien', agent: 'gemini', permissionFlags: ['--permission-mode', 'plan'], worktreePath: wts[3], branchName: 'b/alien' },
+          { name: 'Older', agent: 'claude', worktreePath: wts[4], branchName: 'b/older' },   // written before the flags were noted
+        ],
+      }));
+      loadConfig();
+      recoverCrashedSessions();
+      const byName = Object.fromEntries([...orphans.values()].map(o => [o.name, [o.agent, o.permissionFlags]]));
+      expect(byName).toEqual({
+        Junk: ['codex', ['--approve-for-me']],
+        Text: ['codex', []],
+        Cross: ['claude', []],
+        Alien: [null, []],
+        Older: ['claude', []],
+      });
+      // And that is what is persisted for the restart after this one.
+      expect(config.orphans.find(o => o.name === 'Junk').permissionFlags).toEqual(['--approve-for-me']);
+      expect(config.activeSessions).toEqual([]);
+    } finally {
+      for (const wt of wts) rmSync(wt, { recursive: true, force: true });
+    }
+  });
+
+  it('takes the flags a session carries over its command, and reads the command only when it carries none', () => {
+    // Every PTY session carries them (createSessionFromConfig reads them off
+    // the command at spawn); a bare object, as a test or an older caller
+    // builds one, gets them read off the command the same way.
+    expect(sessionPermissionFlags({ permissionFlags: ['--approve-for-me'], command: 'codex -s read-only' })).toEqual(['--approve-for-me']);
+    expect(sessionPermissionFlags({ permissionFlags: [], command: 'codex -s read-only' })).toEqual([]);
+    expect(sessionPermissionFlags({ command: 'codex -s read-only' })).toEqual(['--sandbox', 'read-only']);
+    expect(sessionPermissionFlags({ permissionFlags: '--approve-for-me', command: 'claude --permission-mode plan' })).toEqual(['--permission-mode', 'plan']);
+    expect(sessionPermissionFlags({ command: 'bash -lc "codex -s read-only"' })).toEqual([]);
+    expect(sessionPermissionFlags({ command: 'gemini --yolo' })).toEqual([]);
+    expect(sessionPermissionFlags({})).toEqual([]);
+
+    // A re-adopted session's own note goes onto its record verbatim, whatever
+    // its command says: the note came off the command at spawn, and the
+    // record is re-checked against the allowlist on the way back in.
+    const wt = mkdtempSync(join(tmpdir(), 'a007-wt-'));
+    try {
+      writeConfig([]);
+      loadConfig();
+      saveActiveSession({ name: 'Back', command: 'codex resume --last --sandbox read-only', permissionFlags: ['--sandbox', 'read-only'], agent: 'codex', worktreePath: wt, branchName: 'b/back' });
+      saveActiveSession({ name: 'Guess', command: 'codex resume --last --sandbox read-only', permissionFlags: ['--sandbox', 'read-only'], agent: null, worktreePath: wt, branchName: 'b/guess' });
+      saveActiveSession({ name: 'Bare', worktreePath: wt, branchName: 'b/bare' });
+      expect(config.activeSessions.map(s => [s.name, s.agent, s.permissionFlags])).toEqual([
+        ['Back', 'codex', ['--sandbox', 'read-only']],
+        ['Guess', null, ['--sandbox', 'read-only']],
+        ['Bare', null, []],
+      ]);
     } finally {
       rmSync(wt, { recursive: true, force: true });
     }

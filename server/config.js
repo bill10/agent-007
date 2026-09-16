@@ -6,7 +6,7 @@ import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
-import { isScheduled, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent } from '../lib/jobs.js';
+import { isScheduled, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent, permissionFlagsFromCommand, recordedPermissionFlags } from '../lib/jobs.js';
 
 export function loadConfig() {
   try {
@@ -108,6 +108,8 @@ export function saveActiveSession(session, broadcast) {
     // restart: the orphan it becomes inherits it (recoverCrashedSessions).
     // null when nobody knows, so the fallbacks get to answer.
     agent: sessionAgent(session),
+    permissionFlags: sessionPermissionFlags(session),
+    origin: sessionOrigin(session),
     savedAt: new Date().toISOString(),
   });
   saveConfig(broadcast);
@@ -117,6 +119,17 @@ export function saveActiveSession(session, broadcast) {
 // createSessionFromConfig); read off the command otherwise.
 export function sessionAgent(session) {
   return session.agent !== undefined ? session.agent : sessionAgentFromCommand(session.command);
+}
+
+// The permission flags the session was spawned with (see createSessionFromConfig);
+// read off the command for a session object that does not carry them.
+// 'board' for a session dispatched by the board, or re-adopted from one, else 'user'.
+export function sessionOrigin(session) {
+  return session.origin === 'board' || (session.origin === undefined && session.spawnedBy === 'board') ? 'board' : 'user';
+}
+
+export function sessionPermissionFlags(session) {
+  return Array.isArray(session.permissionFlags) ? session.permissionFlags : permissionFlagsFromCommand(session.command);
 }
 
 export function removeActiveSession(worktreePath, broadcast) {
@@ -145,6 +158,8 @@ export function recoverCrashedSessions(broadcast) {
       // one of ours (config.json is hand-editable) is dropped rather than
       // carried forward as a note.
       agent: isValidJobAgent(s.agent) ? s.agent : null,
+      permissionFlags: recordedPermissionFlags(s),
+      origin: s.origin === 'board' ? 'board' : 'user',
       reason: 'server-restart',
       createdAt: new Date().toISOString(),
     };
