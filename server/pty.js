@@ -2,7 +2,10 @@
 
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
-import { stripAnsiComplete, detectState, createRingBuffer, parseCommand } from '../lib/helpers.js';
+import { basename } from 'path';
+import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames } from '../lib/helpers.js';
+// Re-exported so the handler's tests reach the parser through the module they drive.
+export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
@@ -11,8 +14,6 @@ import { broadcastJobs } from './jobs.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
-const TRIVIAL_RE = /^[\s.·•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷─━▏▎▍▌▋▊▉█░▒▓⬡◐◑◒◓|\\\/\-*>]+$/;
-const ESCAPE_REMNANT_RE = /^[\d;]*[a-zA-Z]$/;
 
 // node-pty's Windows backend creates the real process on a worker callback
 // after spawn() has returned, so a CreateProcessW failure surfaces as an
@@ -57,6 +58,14 @@ function installAsyncSpawnGuard() {
   });
 }
 
+// Codex's composer placeholder, or its status row: "<model> <effort> · <cwd>",
+// the cwd abbreviated with ~ but keeping its last segment.
+function isCodexPane(text, worktreePath) {
+  if (text.includes('Ask Codex to do anything')) return true;
+  const tail = worktreePath ? basename(worktreePath) : '';
+  return !!tail && text.includes(' · ') && text.includes(tail);
+}
+
 /**
  * Attach onData + onExit handlers to a PTY process.
  * Shared between createSessionFromConfig and re-adopt-orphan.
@@ -78,7 +87,24 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // Bounded because an agent controls this text and a line that never gets a
     // newline would otherwise grow forever. Trimmed from the left, since the
     // next chunk continues on the right.
-    const raw = (session.pendingRaw || '') + data;
+    const now = Date.now();
+    // Frames first: a synchronized repaint is a whole pane, not line text, so
+    // only what this read contributed OUTSIDE frames goes on to be reassembled
+    // into lines. Codex draws its dialogs and prompt without a newline in
+    // sight — left in the line stream, a cancelled picker's text would still
+    // be "the last line" for as long as the next 2000 bytes took to arrive,
+    // and the last line is checked before the frame.
+    // Frames are trusted for Codex alone. Claude Code draws none today but
+    // carries the option to, and its repaints are diffs — a frame of its
+    // would be one row, not the pane. A Codex frame is the whole pane when it
+    // carries the composer or the status row, which names the directory the
+    // agent runs in; anything else is a partial repaint, merged onto the pane.
+    const { outside, straddle } = session.framesTrusted === false
+      ? { outside: data, straddle: 0 }
+      : trackSyncFrames(session, data, now, { pane: (text) => isCodexPane(text, session.worktreePath) });
+    const recentResize = (now - (session.lastResizeAt || 0)) < 2000;
+    const carry = straddle ? (session.pendingRaw || '').slice(0, -straddle) : (session.pendingRaw || '');
+    const raw = carry + outside;
     const cut = raw.lastIndexOf('\n');
     session.pendingRaw = (cut === -1 ? raw : raw.slice(cut + 1)).slice(-2000);
     const lines = stripAnsiComplete(raw.slice(0, cut + 1)).split('\n').filter(l => l.trim().length > 0);
@@ -91,15 +117,14 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // periodic control sequences could then mask a question dialog for ever —
     // the same failure this carry-over exists to fix, through another door.
     const fresh = stripAnsiComplete(data).trim();
-    const hasContent = [...lines, fresh].some(l => l.length > 3 && !TRIVIAL_RE.test(l) && !ESCAPE_REMNANT_RE.test(l));
-    const recentResize = (Date.now() - (session.lastResizeAt || 0)) < 2000;
-    if (hasContent && !recentResize) session.lastOutputAt = Date.now();
+    const hasContent = [...lines, fresh].some(isRealOutput);
+    if (hasContent && !recentResize) session.lastOutputAt = now;
     // Capped: these lines are matched against MESSAGE_PATTERNS/PROMPT_PATTERNS
-    // on every chunk AND on a 1s per-session interval, and several of those
-    // patterns are quadratic on a long line (`/Allow .+ to (read|edit|...)/`
-    // measured 2s on one 180KB line, which pegs the event loop for every
-    // session). An agent controls this text, and no prompt footer is 400
-    // chars, so bound it here rather than hardening one regex at a time.
+    // on every chunk AND on a 1s per-session interval. An agent controls this
+    // text, and no prompt footer is 400 chars, so bound it here. (The last
+    // synchronized frame, scanned the same way, has its own larger bound in
+    // trackSyncFrames; the patterns with a gap between two literals are
+    // themselves bounded now, so neither cap is carrying a quadratic regex.)
     const cap = l => l.trim().slice(0, 400);
     // The partial goes to lastStrippedLine, which detectState scans but which
     // is a single overwritten slot -- keeping it out of the 5-line window, so
@@ -109,6 +134,8 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     else if (lines.length > 0) session.lastStrippedLine = cap(lines[lines.length - 1]);
     if (lines.length > 0) {
       session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(cap)].slice(-5);
+      // Whole lines outside any frame: what the last frame is weighed against.
+      if (lines.some(isRealOutput)) session.lastLineAt = now;
     }
     broadcast({ type: 'pty-output', sessionId, data: Buffer.from(data).toString('base64') });
     updateState(session, broadcast);
@@ -187,6 +214,13 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     lastResizeAt: 0,
     lastStrippedLine: '',
     recentStrippedLines: [],
+    framesTrusted: sessionAgentFromCommand(command) === 'codex',   // see the onData handler
+    lastFrame: '',             // text of the last synchronized-output repaint, if the TUI draws them
+    lastFrameAt: 0,            // when it closed — the frame speaks for the screen only while no whole line was printed outside one since
+    lastLineAt: 0,             // when a whole real line last arrived outside any frame
+    frameOpenedAt: 0,          // a frame open longer than a second is abandoned
+    frameOpen: null,           // a frame carried across pty reads
+    frameTail: '',             // the last few bytes before one, for a marker that straddles two reads
     pendingRaw: '',            // tail of the last pty chunk, past its final newline
     isTUI: isTUI ?? /^(claude|aider|codex|gemini)\b/.test(command),
     // Which CLI this is, as far as anyone KNOWS — 'claude', 'codex' or null.

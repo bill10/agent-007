@@ -181,7 +181,7 @@ public/
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
 lib/
-  helpers.js       State detection, git parsing, codename/cocktail pools, the file-name sanitiser
+  helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
   cron.js          Five-field cron parser (schedules for scheduled jobs)
 ```
