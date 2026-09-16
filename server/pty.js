@@ -2,6 +2,7 @@
 
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
+import { basename } from 'path';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames } from '../lib/helpers.js';
 // Re-exported so the handler's tests reach the parser through the module they drive.
 export { trackSyncFrames } from '../lib/helpers.js';
@@ -57,6 +58,14 @@ function installAsyncSpawnGuard() {
   });
 }
 
+// Codex's composer placeholder, or its status row: "<model> <effort> · <cwd>",
+// the cwd abbreviated with ~ but keeping its last segment.
+function isCodexPane(text, worktreePath) {
+  if (text.includes('Ask Codex to do anything')) return true;
+  const tail = worktreePath ? basename(worktreePath) : '';
+  return !!tail && text.includes(' · ') && text.includes(tail);
+}
+
 /**
  * Attach onData + onExit handlers to a PTY process.
  * Shared between createSessionFromConfig and re-adopt-orphan.
@@ -85,13 +94,15 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // sight — left in the line stream, a cancelled picker's text would still
     // be "the last line" for as long as the next 2000 bytes took to arrive,
     // and the last line is checked before the frame.
-    // Frames are trusted as the pane for Codex alone: it draws the whole pane
-    // per frame. Claude Code draws none today but carries the option to, and
-    // its repaints are diffs — a frame of its would be one row, not the pane.
-    const recentResize = (now - (session.lastResizeAt || 0)) < 2000;
+    // Frames are trusted for Codex alone. Claude Code draws none today but
+    // carries the option to, and its repaints are diffs — a frame of its
+    // would be one row, not the pane. A Codex frame is the whole pane when it
+    // carries the composer or the status row, which names the directory the
+    // agent runs in; anything else is a partial repaint, merged onto the pane.
     const { outside, straddle } = session.framesTrusted === false
       ? { outside: data, straddle: 0 }
-      : trackSyncFrames(session, data, now, { merge: recentResize });
+      : trackSyncFrames(session, data, now, { pane: (text) => isCodexPane(text, session.worktreePath) });
+    const recentResize = (now - (session.lastResizeAt || 0)) < 2000;
     const carry = straddle ? (session.pendingRaw || '').slice(0, -straddle) : (session.pendingRaw || '');
     const raw = carry + outside;
     const cut = raw.lastIndexOf('\n');
@@ -123,6 +134,8 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     else if (lines.length > 0) session.lastStrippedLine = cap(lines[lines.length - 1]);
     if (lines.length > 0) {
       session.recentStrippedLines = [...session.recentStrippedLines, ...lines.map(cap)].slice(-5);
+      // Whole lines outside any frame: what the last frame is weighed against.
+      if (lines.some(isRealOutput)) session.lastLineAt = now;
     }
     broadcast({ type: 'pty-output', sessionId, data: Buffer.from(data).toString('base64') });
     updateState(session, broadcast);
@@ -203,7 +216,9 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     recentStrippedLines: [],
     framesTrusted: sessionAgentFromCommand(command) === 'codex',   // see the onData handler
     lastFrame: '',             // text of the last synchronized-output repaint, if the TUI draws them
-    lastFrameAt: 0,            // when it closed — the frame speaks for the screen only while nothing newer was printed outside one
+    lastFrameAt: 0,            // when it closed — the frame speaks for the screen only while no whole line was printed outside one since
+    lastLineAt: 0,             // when a whole real line last arrived outside any frame
+    frameOpenedAt: 0,          // a frame open longer than a second is abandoned
     frameOpen: null,           // a frame carried across pty reads
     frameTail: '',             // the last few bytes before one, for a marker that straddles two reads
     pendingRaw: '',            // tail of the last pty chunk, past its final newline

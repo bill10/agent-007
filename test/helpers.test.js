@@ -409,11 +409,14 @@ describe('detectState', () => {
     expect(state('Allow to read files')).toBe('WAITING');   // the gap is at least one character
   });
 
-  it('uses the frame only while it is newer than the last output outside one', () => {
+  it('uses the frame only while it is newer than the last whole line printed outside one', () => {
     // A shell tab that ran a frame-drawing tool and then something that prints
     // plain lines: the frame is history, and the window is current again.
+    // Whole lines, not bytes: Codex writes its window title outside frames
+    // every second while a dialog waits, and a remnant of one split across
+    // two reads must not outrank the dialog — so lastOutputAt does not count.
     const asking = 'Update Model Permissions › 1. Ask for approval';
-    const stale = { ...BASE, isTUI: true, lastFrame: asking, lastFrameAt: 1000, lastOutputAt: 2000, recentStrippedLines: ['Done and committed.'] };
+    const stale = { ...BASE, isTUI: true, lastFrame: asking, lastFrameAt: 1000, lastLineAt: 2000, lastOutputAt: 3000, recentStrippedLines: ['Done and committed.'] };
     expect(detectState(stale, { now: 50000 })).toBe('WAITING');
     // ...and the window is read, not merely the frame skipped.
     expect(detectState({ ...stale, lastFrame: '› Ask Codex to do anything', recentStrippedLines: ['Enter to select · Esc to cancel'] }, { now: 50000 })).toBe('MESSAGE');

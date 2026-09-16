@@ -240,9 +240,11 @@ describe('PTY line reassembly across chunk boundaries', () => {
     expect(session.lastFrame.startsWith('Would you like to run the following command?')).toBe(true);
     expect(session.lastFrame.endsWith('› 1. Yes, proceed')).toBe(true);
     expect(detectState(session)).toBe('MESSAGE');
-    // Under the limit, it is kept whole.
-    write(F('Would you like to run the following command?' + ' x'.repeat(100) + ' › 1. Yes, proceed'));
-    expect(session.lastFrame).not.toContain(' … ');
+    // Under the limit, it is kept whole (a fresh pane: a frame without the
+    // composer or status row would merge onto the one above).
+    const fresh = openSession();
+    fresh.write(F('Would you like to run the following command?' + ' x'.repeat(100) + ' › 1. Yes, proceed'));
+    expect(fresh.session.lastFrame).not.toContain(' … ');
   });
 
   it('ignores a read that is not a string, and a frame that says nothing', () => {
@@ -308,6 +310,10 @@ describe('PTY line reassembly across chunk boundaries', () => {
     expect(detectState(session)).toBe('MESSAGE');
   });
 
+  // A frame that carries the composer or the status row is the pane; any
+  // other is a partial repaint and merges onto it. Codex repaints just the
+  // option rows on arrow keys, re-inserts history boxes after a resize, and
+  // prints each history line as a frame of its own.
   it('keeps the picker through a resize, when Codex repaints the pane and then re-inserts history', () => {
     const { session, write } = openSession();
     write(PICKER);
@@ -318,12 +324,54 @@ describe('PTY line reassembly across chunk boundaries', () => {
     session.lastOutputAt = 0;
     expect(session.lastFrame).toContain('Update Model Permissions');
     expect(detectState(session)).toBe('MESSAGE');
-    // Past the window a frame is the pane again.
-    session.lastResizeAt = 0;
-    write(PROMPT);
+    // Answered straight away, inside what used to be a two-second window: the
+    // prompt repaint carries the composer, so it is the pane and replaces.
+    write(ANSWERED + PROMPT);
+    for (let i = 0; i < 5; i++) write(F('\x1b[0 q \x1b[23;3H'));
     session.lastOutputAt = 0;
     expect(session.lastFrame).not.toContain('Update Model Permissions');
     expect(detectState(session)).toBe('WAITING');
+  });
+
+  it('keeps the picker while the user arrows through it, though Codex repaints only the option rows', () => {
+    const { session, write } = openSession();
+    write(PICKER);
+    write(F('\x1b[20;1H\x1b[K   1. Ask for approval (current)  Codex can read and edit files\x1b[21;1H\x1b[K › 2. Approve for me    Only ask for actions detected as potentially unsafe.'));
+    session.lastOutputAt = 0;
+    expect(session.lastFrame).toContain('Update Model Permissions');
+    expect(detectState(session)).toBe('MESSAGE');
+  });
+
+  it('knows the pane by its status row when the composer is not empty', () => {
+    const { session, write } = openSession();
+    session.worktreePath = '/Users/me/.agent-007/worktrees/video-2df8/Vid-GTM';
+    write(PICKER);
+    write(F('\x1b[21;1H\x1b[K › /perm\x1b[23;3H\x1b[K gpt-6-astra medium · ~/.agent-007/worktrees/video-2df8/Vid-GTM'));
+    session.lastOutputAt = 0;
+    expect(session.lastFrame).not.toContain('Update Model Permissions');
+    expect(detectState(session)).toBe('WAITING');
+  });
+
+  it('is not fooled by a window-title write split across reads while a dialog waits', () => {
+    // Codex writes its title outside any frame every second while an approval
+    // waits; whole, it strips to nothing, but a read boundary inside it leaves
+    // a remnant that looks like output. Only a whole line may outrank a frame.
+    const { session, write } = openSession();
+    write(F('\x1b[19;1H\x1b[K Would you like to run the following command?\x1b[20;1H\x1b[K › 1. Yes, proceed'));
+    const title = '\x1b]0;[ ! ] Action Required | Request approval for probe command | codex\x07';
+    for (let i = 0; i < 6; i++) { write(title.slice(0, 40)); write(title.slice(40)); }
+    session.lastOutputAt = 0;
+    expect(detectState(session)).toBe('MESSAGE');
+  });
+
+  it('abandons a frame left open for more than a second', () => {
+    const session = { frameOpen: null, lastFrame: 'the pane', frameTail: '' };
+    trackSyncFrames(session, '\x1b[?2026hhalf a repaint', 1000);
+    expect(session.frameOpen).toBe('half a repaint');
+    const { outside } = trackSyncFrames(session, 'a plain line\n', 2500);
+    expect(session.frameOpen).toBeNull();
+    expect(outside).toBe('a plain line\n');
+    expect(session.lastFrame).toBe('the pane');
   });
 
   it('does not read frames for a session whose CLI is not Codex', () => {

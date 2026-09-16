@@ -21,11 +21,13 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   dialog wording, and for a TUI that repaints in synchronized-output frames
   (Codex does) it reads the last frame, which is the pane as it stands: the
   dialog while it is open, the bare prompt once it is answered. A frame that
-  straddles two terminal reads is still read whole. Claude Code does not
-  draw such frames and keeps the previous behaviour; a tab that stops drawing
-  them (a shell that ran one such tool, then Claude Code) falls back to it
-  too, since whichever source is newer speaks. Frames are read for Codex
-  agents only. Claude Code's own dialog answers, which arrive with their
+  straddles two terminal reads is still read whole, and a frame that repaints
+  only part of the pane (the option rows as you arrow through a picker, the
+  history Codex re-inserts after a resize) is merged onto it rather than
+  taken for it. Claude Code does not draw such frames and keeps the previous
+  behaviour; a tab that stops drawing them (a shell that ran one such tool,
+  then Claude Code) falls back to it too, since whichever source is newer
+  speaks. Frames are read for Codex agents only. Claude Code's own dialog answers, which arrive with their
   spaces cursor-moved away, now match whether or not the spaces survive, and
   its 2.1 permission dialog ("Yes, and always allow access to …", a "Tab to
   amend" footer) is recognised by a captured fixture rather than by luck.
