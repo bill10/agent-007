@@ -25,7 +25,7 @@ import {
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
-  jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent,
+  jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, normalizePermissionFlags,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -1071,7 +1071,11 @@ export function orphanResumePlan(orphan, homes) {
     || (card ? jobAgent(card) : null)
     || agentFromTranscripts(orphan.worktreePath, homes);
   const mode = card ? dispatchPermissionMode(card, boardSettings().permissionMode) : null;
-  return { agent, mode, command: resumeCommand(agent, mode) };
+  // The flags it was spawned with, for a hand-spawned agent with no card.
+  // They belong to the CLI on the record: a note-less orphan resolved by a
+  // transcript has none to pass on, and resumes under that CLI's default.
+  const flags = isValidJobAgent(orphan.agent) ? normalizePermissionFlags(orphan.agent, orphan.permissionFlags) : [];
+  return { agent, mode, flags, command: resumeCommand(agent, mode, flags) };
 }
 
 export function resumeCommandForOrphan(orphan, homes) {

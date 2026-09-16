@@ -9,7 +9,7 @@ import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import { addJob, updateJob, updateSettings, boardSettings, allJobs, postJobForAgent, dispatchOnce, listJobsForAgent, resumeCommandForOrphan, orphanResumePlan } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
-import { createJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, resumeCommand, sessionAgentFromCommand, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS } from '../lib/jobs.js';
+import { createJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, resumeCommand, sessionAgentFromCommand, permissionFlagsFromCommand, normalizePermissionFlags, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS, PERMISSION_FLAGS } from '../lib/jobs.js';
 import { execSync } from 'child_process';
 import { agentFromTranscripts } from '../server/agent-transcripts.js';
 
@@ -125,6 +125,16 @@ describe.skipIf(!codexOnPath)('CODEX_MODE_FLAGS against the installed codex', ()
       }
     });
   }
+  // And every flag a hand-spawned agent could carry back onto its resume.
+  for (const [flag, values] of Object.entries(PERMISSION_FLAGS.codex)) {
+    for (const value of values || [null]) {
+      const flags = value === null ? flag : `${flag} ${value}`;
+      it(`spawn flag ${flags} parses on codex resume`, () => {
+        const form = `codex resume --last ${flags} --help`;
+        expect(() => execSync(form, { stdio: ['ignore', 'ignore', 'pipe'], timeout: 20000 }), form).not.toThrow();
+      });
+    }
+  }
 });
 
 describe('re-adopting an orphan', () => {
@@ -177,13 +187,63 @@ describe('re-adopting an orphan', () => {
     const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
     // The board mode applies when the card inherits it...
     expect(orphanResumePlan({ repoPath: REPO, branchName: inherits.branchName, worktreePath: '/wt/x', agent: 'codex' }, homes))
-      .toEqual({ agent: 'codex', mode: 'plan', command: 'codex resume --last --sandbox read-only' });
+      .toEqual({ agent: 'codex', mode: 'plan', flags: [], command: 'codex resume --last --sandbox read-only' });
     // ...and the card's own mode when it has one.
     expect(orphanResumePlan({ repoPath: REPO, branchName: own.branchName, worktreePath: '/wt/y', agent: 'codex' }, homes).command)
       .toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
     // A manual agent has no card: no flag, and the resolved agent is reported for noting.
-    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex' }, homes)).toEqual({ agent: 'codex', mode: null, command: 'codex resume --last' });
-    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes)).toEqual({ agent: null, mode: null, command: 'claude --continue' });
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex' }, homes)).toEqual({ agent: 'codex', mode: null, flags: [], command: 'codex resume --last' });
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes)).toEqual({ agent: null, mode: null, flags: [], command: 'claude --continue' });
+  });
+
+  it('reads the permission flags a hand-spawned agent was started with, and nothing else', () => {
+    expect(permissionFlagsFromCommand('codex')).toEqual([]);
+    expect(permissionFlagsFromCommand('codex --dangerously-bypass-approvals-and-sandbox')).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
+    expect(permissionFlagsFromCommand('/opt/homebrew/bin/codex --model o3 -s read-only -a never "do it"')).toEqual(['--sandbox', 'read-only', '--ask-for-approval', 'never']);
+    expect(permissionFlagsFromCommand('codex --sandbox=workspace-write --approve-for-me')).toEqual(['--sandbox', 'workspace-write', '--approve-for-me']);
+    expect(permissionFlagsFromCommand('claude --permission-mode bypassPermissions --add-dir /x')).toEqual(['--permission-mode', 'bypassPermissions']);
+    expect(permissionFlagsFromCommand('claude --dangerously-skip-permissions')).toEqual(['--dangerously-skip-permissions']);
+    // A value the CLI would reject, a flag that is not a permission, a switch
+    // handed a value, a CLI that is neither: none of it comes through.
+    expect(permissionFlagsFromCommand('codex --ask-for-approval untrusted --sandbox nope')).toEqual([]);
+    expect(permissionFlagsFromCommand('codex --dangerously-bypass-approvals-and-sandbox=yes')).toEqual([]);
+    expect(permissionFlagsFromCommand('claude --permission-mode "plan --add-dir /"')).toEqual([]);
+    expect(permissionFlagsFromCommand('bash -lc "codex --sandbox read-only"')).toEqual([]);
+    expect(permissionFlagsFromCommand('gemini --yolo')).toEqual([]);
+    expect(permissionFlagsFromCommand(undefined)).toEqual([]);
+    // A stored record goes through the same allowlist.
+    expect(normalizePermissionFlags('codex', ['--sandbox', 'read-only', '--rm', '-rf', '/'])).toEqual(['--sandbox', 'read-only']);
+    expect(normalizePermissionFlags('claude', 'not an array')).toEqual([]);
+    expect(normalizePermissionFlags('gemini', ['--yolo'])).toEqual([]);
+  });
+
+  it('resumes a hand-spawned agent under the flags it was started with, unless a card knows better', () => {
+    expect(resumeCommand('codex', null, ['--dangerously-bypass-approvals-and-sandbox'])).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+    expect(resumeCommand('codex', null, ['--sandbox', 'read-only', '--ask-for-approval', 'never'])).toBe('codex resume --last --sandbox read-only --ask-for-approval never');
+    expect(resumeCommand('claude', null, ['--permission-mode', 'plan'])).toBe('claude --continue --permission-mode plan');
+    expect(resumeCommand('claude', null, ['--dangerously-skip-permissions'])).toBe('claude --continue --dangerously-skip-permissions');
+    // The card's mode is the board's current word and wins over the old flags.
+    expect(resumeCommand('codex', 'plan', ['--dangerously-bypass-approvals-and-sandbox'])).toBe('codex resume --last --sandbox read-only');
+    // Junk in a stored record never reaches the argv.
+    expect(resumeCommand('codex', null, ['--sandbox', 'read-only; rm -rf /'])).toBe('codex resume --last');
+    expect(resumeCommand('codex', null, ['--permission-mode', 'plan'])).toBe('codex resume --last');   // a Claude flag on a Codex agent
+    expect(resumeCommand('codex', null, undefined)).toBe('codex resume --last');
+    expect(parseCommand(resumeCommand('codex', null, ['--sandbox', 'read-only'])).args).toEqual(['resume', '--last', '--sandbox', 'read-only']);
+  });
+
+  it('carries a hand-spawned orphan\'s flags through the plan, but only with a recorded CLI', () => {
+    const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
+    const bypass = ['--dangerously-bypass-approvals-and-sandbox'];
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex', permissionFlags: bypass }, homes))
+      .toEqual({ agent: 'codex', mode: null, flags: bypass, command: 'codex resume --last --dangerously-bypass-approvals-and-sandbox' });
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'claude', permissionFlags: ['--permission-mode', 'acceptEdits'] }, homes).command)
+      .toBe('claude --continue --permission-mode acceptEdits');
+    // No note (a record from before, or a discovered worktree): the flags on
+    // it have no CLI to belong to, so the resolved CLI runs under its default.
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', permissionFlags: bypass }, homes).command).toBe('claude --continue');
+    // A stored record's flags pass the allowlist again.
+    expect(orphanResumePlan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x', agent: 'codex', permissionFlags: ['--sandbox', 'nope', '--approve-for-me'] }, homes).command)
+      .toBe('codex resume --last --approve-for-me');
   });
 
   it('records a CLI only when the command is literally one of them', () => {
@@ -206,7 +266,7 @@ describe('re-adopting an orphan', () => {
     // at all: the fallbacks run, and the junk is not stamped onto the session.
     const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
     expect(orphanResumePlan({ agent: 'gemini', repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes))
-      .toEqual({ agent: null, mode: null, command: 'claude --continue' });
+      .toEqual({ agent: null, mode: null, flags: [], command: 'claude --continue' });
   });
 
   it('falls back to the job card on the branch for an orphan discovered on disk', async () => {

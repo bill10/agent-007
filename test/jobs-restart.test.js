@@ -89,13 +89,19 @@ describe('restart recovery for a running agent', () => {
       saveActiveSession({ name: 'Onyx', command: 'codex --dangerously-bypass-approvals-and-sandbox "do it"', repoPath: '/r', repoSlug: 'r', worktreePath: wt, branchName: 'b/onyx', color: '#000', cocktail: 'onyx' });
       saveActiveSession({ name: 'Viper', command: 'claude --permission-mode auto "do it"', repoPath: '/r', repoSlug: 'r', worktreePath: wt2, branchName: 'b/viper', color: '#000', cocktail: 'viper' });
       expect(config.activeSessions.map(s => s.agent)).toEqual(['codex', 'claude']);
+      // And the permission flags each was started with, for a re-spawn that
+      // has no job card to ask.
+      expect(config.activeSessions.map(s => s.permissionFlags)).toEqual([['--dangerously-bypass-approvals-and-sandbox'], ['--permission-mode', 'auto']]);
 
       // What the next start does with that record.
       loadConfig();
       recoverCrashedSessions();
       const byName = Object.fromEntries([...orphans.values()].map(o => [o.name, o]));
       expect(byName.Onyx.agent).toBe('codex');
+      expect(byName.Onyx.permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(byName.Viper.agent).toBe('claude');
+      expect(byName.Viper.permissionFlags).toEqual(['--permission-mode', 'auto']);
+      expect(config.orphans.find(o => o.name === 'Onyx').permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(config.orphans.find(o => o.name === 'Onyx').agent).toBe('codex');   // persisted, for the restart after this one
     } finally {
       rmSync(wt, { recursive: true, force: true });
@@ -123,6 +129,7 @@ describe('restart recovery for a running agent', () => {
       loadConfig();
       recoverCrashedSessions();
       expect([...orphans.values()][0].agent).toBeNull();
+      expect([...orphans.values()][0].permissionFlags).toEqual([]);
     } finally {
       rmSync(wt, { recursive: true, force: true });
     }

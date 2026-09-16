@@ -8,7 +8,7 @@ import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
-import { sessionAgentFromCommand } from '../lib/jobs.js';
+import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 const TRIVIAL_RE = /^[\s.·•⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⣾⣽⣻⢿⡿⣟⣯⣷─━▏▎▍▌▋▊▉█░▒▓⬡◐◑◒◓|\\\/\-*>]+$/;
@@ -196,6 +196,10 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     // down as fact, or a wrong one could never be corrected — the record
     // outranks every other witness the next time round.
     agent: agent === undefined ? sessionAgentFromCommand(command) : agent,
+    // The permission flags it was spawned with, so a re-spawn with no job
+    // card to ask can run under the same ones. Unlike `agent` this is never a
+    // guess: it is read off the command itself, resume commands included.
+    permissionFlags: permissionFlagsFromCommand(command),
     ownerId: ownerId || null,   // user who spawned this session (phase 2); null = unowned
     agentToken,                 // bearer for this agent's own board calls; memory + one 0600 file
     // Provenance. 'board' sessions are opened by the job dispatcher: the client

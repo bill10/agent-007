@@ -765,7 +765,8 @@ describe('ownership is inert when auth is disabled', () => {
   it.skipIf(process.platform === 'win32')('closing a tab notes its CLI on the orphan, and Re-spawn resumes with that CLI', async () => {
     const { bin, restore } = fakeCodexOnPath();
     const worktreePath = fakeOrphanWorktree();
-    const command = `${join(bin, 'codex')} --model o3`;
+    // Started with a permission flag, which the re-spawn must carry back.
+    const command = `${join(bin, 'codex')} --model o3 --dangerously-bypass-approvals-and-sandbox`;
     const w = await open();
     let name, back;
     try {
@@ -781,14 +782,17 @@ describe('ownership is inert when auth is disabled', () => {
       const orphan = (await parked).orphans.find(o => o.name === name);
       expect(orphan.agent).toBe('codex');   // read off the command, path and flags stripped
       expect(orphans.get(orphan.id).agent).toBe('codex');
+      expect(orphan.permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
 
       const readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
       w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
       back = await readopted;
-      expect(back.command).toBe('codex resume --last');
+      expect(back.command).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
       expect(orphans.has(orphan.id)).toBe(false);
-      // The record for the next restart carries the CLI too.
-      expect(config.activeSessions.find(s => s.worktreePath === worktreePath).agent).toBe('codex');
+      // The record for the next restart carries the CLI and the flags too.
+      const rec = config.activeSessions.find(s => s.worktreePath === worktreePath);
+      expect(rec.agent).toBe('codex');
+      expect(rec.permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
     } finally {
       restore();
       config.activeSessions = config.activeSessions.filter(s => s.worktreePath !== worktreePath);
