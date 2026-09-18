@@ -29,7 +29,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Works on a phone** -- Below 700px the three panels become one screen at a time, switched from a Files / Office / Terminal bar at the bottom. Tapping a desk or whiteboard in the office lands you in that terminal or the job board, and opening a file diff lands you in the office panel, the same as on a desktop.
 - **Dark/light themes** -- Gold-accented dark theme and a warm low-glare paper light theme tuned for long sessions (see [DESIGN.md](DESIGN.md)). Toggles instantly, terminal colors and office canvas included.
 - **Live sync** -- Branch names, file changes, line-level diff stats (+/-), and agent states update in real time across all panels.
-- **Voice input** -- Dictate prompts instead of typing. Click the mic button floating at the terminal's bottom-right (or `Cmd+D`), allow microphone access on first use, speak, and the transcript is typed into the active terminal; press Enter to send. Uses the browser's Web Speech API (Chrome, Edge, Safari; the recognition language follows your browser's locale) and needs HTTPS or localhost -- for remote access use `tailscale serve` (see `docs/REMOTE.md`). The mic is deliberately bounded: it stops after ~1 minute without delivered speech, always after 5 minutes, on switching or closing agents, when an agent's shell ends, and when the tab is hidden. Two things to know: most browsers process speech on vendor servers (Chrome/Edge send audio to Google/Microsoft; Safari may process on-device), so don't dictate secrets; and transcripts arrive as keystrokes, so a program waiting on a single key (a pager, a y/n prompt) reacts to speech like typing -- watch the prompt while dictating. OS-level dictation (macOS dictation, iOS keyboard mic, Windows `Win+H`) also types straight into the terminal and works in any browser.
+- **Voice input** -- Dictate prompts instead of typing. Click the mic button floating at the terminal's bottom-right (or `Cmd+D`), allow microphone access on first use, speak, and the transcript is typed into the active terminal; press Enter to send. Uses the browser's Web Speech API (Chrome, Edge, Safari; the recognition language follows your browser's locale) and needs HTTPS or localhost -- for remote access use `tailscale serve` (see `docs/REMOTE.md`). The mic is deliberately bounded: it stops after ~1 minute without delivered speech, always after 5 minutes, on switching or closing agents, when an agent's shell ends, when the tab is hidden, and on a phone when you leave the terminal panel. Two things to know: most browsers process speech on vendor servers (Chrome/Edge send audio to Google/Microsoft; Safari may process on-device), so don't dictate secrets; and transcripts arrive as keystrokes, so a program waiting on a single key (a pager, a y/n prompt) reacts to speech like typing -- watch the prompt while dictating. OS-level dictation (macOS dictation, iOS keyboard mic, Windows `Win+H`) also types straight into the terminal and works in any browser.
 
 ## Quick Start
 
@@ -167,7 +167,7 @@ server/
 bin/
   adduser.js       Create a login user (`npm run adduser`)
 public/
-  index.html       Three-panel layout
+  index.html       Three-panel layout, plus the phone's bottom nav
   style.css        Dark/light themes via CSS custom properties
   app.js           Main entry point
   assets/          Pixel art sprites (characters/ MIT with vendored LICENSE; furniture/ mixes Antea CC-BY 4.0 and pixel-agents MIT, see Acknowledgements)
@@ -177,7 +177,7 @@ public/
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
     ws.js          WebSocket client with auto-reload on reconnect
-    state.js       Shared client state (agents, repos, viewer identity, server platform)
+    state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
