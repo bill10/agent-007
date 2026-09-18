@@ -59,6 +59,7 @@ body {
   background: var(--bg-dark);
   color: var(--text);
   height: 100vh;
+  height: 100dvh; /* mobile Safari: 100vh includes the hidden address bar */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1161,6 +1162,47 @@ body {
   .explorer { width: 0 !important; min-width: 0; border-right: none; overflow: hidden; }
   #divider-explorer { display: none; }
   .explorer-reopen-btn { display: none !important; }
+}
+
+/* Phones: one panel at a time, picked by body[data-view] from the bottom
+   nav. The panels' desktop widths (and the explorer's collapsed state) are
+   overridden by id so this wins over .explorer.collapsed and inline widths. */
+.mobile-nav { display: none; }
+@media (max-width: 700px) {
+  .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
+  #explorer-panel, #office-panel, #terminal-panel {
+    display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
+  }
+  body[data-view="files"] #explorer-panel,
+  body[data-view="office"] #office-panel,
+  body[data-view="terminal"] #terminal-panel { display: flex; }
+  .mobile-nav {
+    display: flex;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+    background: var(--bg-dark);
+  }
+  .mobile-nav button {
+    flex: 1;
+    min-height: 44px; /* touch target */
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  .mobile-nav button:hover, .mobile-nav button[aria-current="true"] { color: var(--accent); }
+  /* Overlays sized for desktop */
+  .spawn-form-inner, .dir-browser-inner { width: auto; max-width: 100%; }
+  .spawn-form-main, .spawn-presets { flex-wrap: wrap; }
+  .spawn-form-inner input, .spawn-repo-wrapper input { width: 100%; }
+  .spawn-repo-label { flex: 1 1 100%; }
+  /* iOS zooms into any field smaller than 16px on focus, and never zooms
+     back out. Every form above sets its own size, hence the override. */
+  input, select, textarea { font-size: 16px !important; }
 }
 
 /* --- Login overlay (phase 1) --- */

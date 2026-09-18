@@ -46,6 +46,13 @@ export function canControlAgent(agent) {
   return agent.ownerId === selfUserId;
 }
 
+// Which panel a phone shows (body[data-view], see .mobile-nav in style.css).
+// Set unconditionally: desktop CSS ignores it, so no width check is needed.
+export function setView(view) {
+  document.body.dataset.view = view;
+  for (const b of document.querySelectorAll('.mobile-nav button')) b.setAttribute('aria-current', b.dataset.view === view);
+}
+
 export function stateColor(state) {
   switch (state) {
     case 'WORKING': return 'var(--state-working)';

@@ -2,13 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
   <title>Agent 007</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 4 L16 16 L28 4 Z' fill='%23d4a847' opacity='0.25' stroke='%23d4a847' stroke-width='3' stroke-linejoin='round'/%3E%3Cline x1='16' y1='16' x2='16' y2='26' stroke='%23d4a847' stroke-width='2.5'/%3E%3Cline x1='10' y1='26' x2='22' y2='26' stroke='%23d4a847' stroke-width='3' stroke-linecap='round'/%3E%3Ccircle cx='22' cy='6' r='3' fill='%23d4a847'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-view="office">
   <span class="topbar-status" id="status-bar" style="display:none"></span>
 
   <!-- Spawn form (hidden by default) -->
@@ -218,6 +218,13 @@
       </div>
     </div>
   </div>
+
+  <!-- Phone-width bottom nav: picks the one panel shown (see style.css) -->
+  <nav class="mobile-nav" id="mobile-nav" aria-label="Panels">
+    <button data-view="files">Files</button>
+    <button data-view="office" aria-current="true">Office</button>
+    <button data-view="terminal">Terminal</button>
+  </nav>
 
   <!-- Reconnecting banner -->
   <div class="reconnecting" id="reconnecting" style="display:none">
