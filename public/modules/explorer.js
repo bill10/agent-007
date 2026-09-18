@@ -1,5 +1,5 @@
 // File explorer panel — repo sections, branch trees, inline diffs
-import { agents, repos, orphans, activeSessionId } from './state.js';
+import { agents, repos, orphans, activeSessionId, setView } from './state.js';
 import { send } from './ws.js';
 import { switchToSession } from './terminal.js';
 
@@ -651,6 +651,7 @@ function showDiffViewer() {
   canvas.style.display = 'none';
   empty.style.display = 'none';
   viewer.style.display = 'flex';
+  setView('office');
 
   // Close button
   document.getElementById('diff-viewer-close').onclick = closeDiffViewer;
@@ -667,6 +668,9 @@ export function closeDiffViewer() {
   const viewer = document.getElementById('diff-viewer');
   const canvas = document.getElementById('office-canvas');
   const empty = document.getElementById('office-empty');
+  // A phone was moved to the office panel to read this; send it back to the
+  // file list it picked from (desktop CSS ignores the view).
+  if (viewer && viewer.style.display !== 'none') setView('files');
   if (viewer) viewer.style.display = 'none';
   if (canvas) canvas.style.display = '';
   // Restore empty state if no agents

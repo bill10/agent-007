@@ -5,6 +5,34 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.3.0] - 2026-09-18
+
+### Added
+
+- **The app works on a phone.** Below 700px the three panels no longer fight
+  for a screen that fits one: a Files / Office / Terminal bar along the bottom
+  picks which panel you see. Tapping a desk in the office opens that agent's
+  terminal, tapping a whiteboard opens the job board, and opening a file diff
+  brings you to the office panel where the diff is drawn, with closing it
+  taking you back to the file list. Only your taps move you: an agent
+  spawning, finishing, or coming back after a reconnect changes the tab strip
+  as it always did but leaves you on the panel you are reading. The spawn
+  form and directory browser fit the screen, form fields are sized so iOS
+  stops zooming into them on focus, the page follows the visible area rather
+  than the space behind Safari's address bar, and the terminal shrinks above
+  the software keyboard so the prompt line stays in view. Leaving the
+  terminal panel stops voice input, since its recording cue lives there.
+  Desktop and tablet layouts are unchanged.
+
+### Fixed
+
+- **The office no longer redraws itself while nobody can see it.** The
+  animation loop painted the whole room sixty times a second into a canvas
+  that was hidden (behind the diff viewer, or on a phone showing another
+  panel); it now skips the frame when the canvas has no size. Nothing is
+  lost: every animation runs on the clock, so the room is current the moment
+  it is shown again.
+
 ## [0.4.2.3] - 2026-09-16
 
 ### Fixed

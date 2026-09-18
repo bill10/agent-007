@@ -26,7 +26,7 @@ port-forwarding can't work — use Tailscale.
 ### Setup (Mac mini host)
 
 1. Install Tailscale on the **host** (the Mac mini) and on each **client** (your
-   laptop). Sign both into the same tailnet.
+   laptop, or your phone: the app fits a phone screen). Sign both into the same tailnet.
 2. Note the host's tailnet name, e.g. `mac-mini.tailXXXX.ts.net`.
 3. Start the server so it accepts connections from the tailnet, and tell it which
    remote origin the browser will use:

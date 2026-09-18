@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handleStateChange,
@@ -19,7 +19,7 @@ import {
   handleRepoError as explorerHandleRepoError,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
-import { setupVoice } from './modules/voice.js';
+import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
@@ -444,6 +444,29 @@ function setupResize() {
     renderOffice();
     fitActiveTerminal();
   });
+  // iOS never shrinks the layout viewport for the software keyboard (Android
+  // does, via interactive-widget in the viewport meta), so no resize event
+  // fires and the prompt line sits under the keyboard. Follow the visual
+  // viewport instead, on phones only and only unzoomed: it also tracks
+  // pinch-zoom, which would halve the body. Cleared otherwise, so a rotation
+  // or a widened window never keeps a stale px height.
+  // ponytail: no scroll compensation; add window.scrollTo(0, 0) if iOS still shoves the layout up
+  window.visualViewport?.addEventListener('resize', () => {
+    const vv = window.visualViewport;
+    const phone = window.matchMedia('(max-width: 700px)').matches && vv.scale === 1;
+    document.body.style.height = phone ? `${vv.height}px` : '';
+    renderOffice();
+    fitActiveTerminal();
+  });
+  // Phone bottom nav. The shown panel changes size from 0, so refit after reflow.
+  document.getElementById('mobile-nav').onclick = (e) => {
+    const view = e.target.dataset.view;
+    if (!view) return;
+    // The mic's only "recording" cue lives in the terminal panel.
+    if (view !== 'terminal') stopVoice({ notice: 'Voice input stopped — left the terminal' });
+    setView(view);
+    requestAnimationFrame(() => { renderOffice(); fitActiveTerminal(); });
+  };
 }
 
 // --- WS Message Router ---

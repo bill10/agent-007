@@ -1,5 +1,5 @@
 // Pixel office rendering — canvas drawing, click handling, animation
-import { agents, jobs, activeSessionId, canControlAgent } from './state.js';
+import { agents, jobs, activeSessionId, canControlAgent, setView } from './state.js';
 import { switchToSession } from './terminal.js';
 import { showJobBoard } from './jobs.js';
 
@@ -1868,12 +1868,13 @@ function drawMotion(ctx, w, h, layout) {
     let path;
     if (anim.dir === 'in') {
       const to = deskCharPos(sid, layout);
-      if (!to) {
-        // session-created seen, but the async terminal handler hasn't put the
-        // agent in the map yet — wait briefly, then give up.
-        if (now - anim.queuedAt > 4000) walkAnims.delete(sid);
-        continue;
-      }
+      // session-created seen, but the async terminal handler hasn't put the
+      // agent in the map yet — wait briefly, then give up. The same cutoff
+      // drops a walk-in queued while the canvas was hidden (a phone on another
+      // panel): the loop draws no frames then, so the walk would otherwise
+      // start from the door whenever the office is next shown.
+      if (anim.start === null && now - anim.queuedAt > 4000) { walkAnims.delete(sid); continue; }
+      if (!to) { if (anim.start !== null) walkAnims.delete(sid); continue; }
       if (anim.start === null) anim.start = now;
       // Built on the first frame the desk resolves, not the first frame of
       // the anim — the walk-in waits for the async terminal handler.
@@ -1923,8 +1924,8 @@ function drawMotion(ctx, w, h, layout) {
 // panel's — the panel height includes the header, so a panel-sized canvas
 // overflowed the bottom and clipped the sofa and corner plants. The diff
 // viewer hides the canvas (display:none → 0x0 client box), so remember the
-// last real size: renders and walk-outs captured while hidden still lay out
-// against the room the user will see when it comes back.
+// last real size: a walk-out captured while hidden still lays out against
+// the room the user will see when it comes back.
 let lastCanvasSize = { w: 0, h: 0 };
 function canvasSize(canvas) {
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -2103,7 +2104,10 @@ export function setupOfficeClick() {
     // The painted boards are the office's view of the Jobs tab, so clicking one
     // opens it (showJobBoard repaints the tab strip itself). Checked first: the
     // boards sit against the wall, above every desk and seat.
-    if (hitJobBoard(x, y, rect.width)) { showJobBoard(); return; }
+    // Only a tap here moves a phone to the terminal panel: switchToSession
+    // and showJobBoard are also reached by spawns, exits and the reconnect
+    // replay, none of which should yank a phone off the view it is on.
+    if (hitJobBoard(x, y, rect.width)) { showJobBoard(); setView('terminal'); return; }
     // A seated agent's visible character is at the conference table or on a
     // sofa, so click-to-focus follows it there (the empty desk still works).
     // The claim indexes the pooled seat list, NOT conf.seats — a sofa claim is
@@ -2113,6 +2117,7 @@ export function setupOfficeClick() {
       if (!s) continue;
       if (x >= s.x - Z && x <= s.x + CHAR_W + Z && y >= s.y - Z && y <= s.y + CHAR_H + Z) {
         switchToSession(sid);
+        setView('terminal');
         return;
       }
     }
@@ -2123,6 +2128,7 @@ export function setupOfficeClick() {
       if (x >= pos.x - Z && x <= pos.x + sw + Z &&
           y >= pos.y - Z && y <= pos.y + sh + Z) {
         switchToSession(sessionId);
+        setView('terminal');
         return;
       }
     }
@@ -2132,8 +2138,11 @@ export function setupOfficeClick() {
 export function startAnimationLoop() {
   function loop() {
     const hasLiving = [...agents.values()].some(a => a.state !== 'DISCONNECTED');
-    // hasMotion keeps the walk-out of the last departing agent rendering
-    if (hasLiving || hasMotion()) renderOffice();
+    // hasMotion keeps the walk-out of the last departing agent rendering.
+    // A hidden canvas (phone on another view, or the diff viewer open) has no
+    // client box: skip the redraw rather than paint 60fps into nothing. Every
+    // animation runs on wall-clock time, so frames skipped here are not owed.
+    if ((hasLiving || hasMotion()) && document.getElementById('office-canvas').clientWidth) renderOffice();
     requestAnimationFrame(loop);
   }
   loop();

@@ -162,6 +162,16 @@ Three-panel layout with per-panel headers:
   terminal, so `activeSessionId` is deliberately left untouched while the board shows
 - Panel widths persisted to localStorage
 - Below 900px: explorer auto-hidden
+- Below 700px: one panel at a time, chosen by `body[data-view]` from a
+  Files / Office / Terminal bar at the bottom. Only user navigation sets the
+  view (`setView` in `state.js`): a tap on a desk or whiteboard goes to the
+  terminal panel, opening a diff goes to the office panel and closing it back
+  to files. `switchToSession` and `showJobBoard` deliberately do not, since
+  spawns, exits and the reconnect replay reach them too. The office loop
+  skips drawing while its canvas has no client box, and a walk-in queued
+  while hidden expires rather than playing when the office next shows. The
+  visual viewport, not the layout viewport, sizes the body on phones so the
+  terminal refits above the software keyboard
 
 ## Pixel Office
 
