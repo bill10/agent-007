@@ -5,6 +5,15 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.3.1] - 2026-09-20
+
+### Changed
+
+- **The README's Features section is short enough to read.** Each feature is
+  now one or two sentences; the full tour, with every detail and caveat, moved
+  word for word to [docs/FEATURES.md](docs/FEATURES.md), which the README links
+  to.
+
 ## [0.4.3.0] - 2026-09-18
 
 ### Added
