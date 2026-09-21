@@ -116,7 +116,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
   return { session };
 }
 
-async function killSession(sessionId) {
+async function killSession(sessionId, { discardChanges = false } = {}) {
   const session = sessions.get(sessionId);
   if (!session) return;
   clearInterval(session.stateCheckInterval);
@@ -124,7 +124,7 @@ async function killSession(sessionId) {
   try { session.pty.kill(); } catch {}
 
   removeActiveSession(session.worktreePath, broadcast);
-  const { orphaned, reason } = await removeWorktree(session);
+  const { orphaned, reason } = await removeWorktree(session, { discardChanges });
 
   if (orphaned) {
     const orphanId = `orphan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

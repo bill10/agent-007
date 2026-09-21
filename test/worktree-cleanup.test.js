@@ -71,6 +71,42 @@ describe('removeWorktree after a job opens its PR', () => {
     expect(existsSync(wt)).toBe(true);
   });
 
+  it('discards uncommitted files when asked, but still keeps unpushed commits', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/scratch', { commit: true, push: true, dirty: true });
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/scratch' }, { discardChanges: true });
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+
+    const wt2 = worktreeOn(repo, root, 'bill10/scratch-ahead', { commit: true, push: false, dirty: true });
+    const result2 = await removeWorktree({ worktreePath: wt2, repoPath: repo, branchName: 'bill10/scratch-ahead' }, { discardChanges: true });
+    expect(result2).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt2)).toBe(true);
+  });
+
+  it('keeps a branch when the repo has no base branch to compare against', async () => {
+    // A remote whose default is neither main nor master, cloned before it had
+    // any commits, so origin/HEAD was never written: resolveBaseBranch answers
+    // null. With nothing to diff against, the branch could hold commits nobody
+    // else has, and `branch -D` would destroy them — even with discardChanges.
+    const root = mkdtempSync(join(tmpdir(), 'a007-cleanup-'));
+    const bare = join(root, 'remote.git');
+    execFileSync('git', ['init', '-q', '--bare', bare]);
+    const repo = join(root, 'repo');
+    execFileSync('git', ['clone', '-q', bare, repo], { stdio: 'ignore' });
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'bill10']);
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t']);
+    writeFileSync(join(repo, 'README.md'), 'base');
+    execFileSync('git', ['-C', repo, 'add', '-A']);
+    execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'base']);
+    execFileSync('git', ['-C', repo, 'branch', '-M', 'trunk']);
+    execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'trunk']);
+    const wt = worktreeOn(repo, root, 'bill10/no-base', { commit: true, push: false, dirty: true });
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/no-base' }, { discardChanges: true });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+
   it('keeps a branch whose commits never reached the remote', async () => {
     const { root, repo } = repoWithRemote();
     const wt = worktreeOn(repo, root, 'bill10/local-only', { commit: true, push: false });

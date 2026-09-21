@@ -312,17 +312,22 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
   return { error: `Could not find a free branch name after ${tries} attempts` };
 }
 
-export async function removeWorktree(session) {
+// discardChanges: uncommitted and untracked files are not worth keeping — a
+// scheduled run's scratch output, retired by the next run. Commits the remote
+// does not have are still protected; only the status check is skipped.
+export async function removeWorktree(session, { discardChanges = false } = {}) {
   if (!session.worktreePath || !session.repoPath) return { orphaned: false };
   if (!existsSync(join(session.worktreePath, '.git'))) {
     return existsSync(session.worktreePath) ? { orphaned: true, reason: 'broken-worktree' } : { orphaned: false };
   }
   try {
     let reason = null;
-    try {
-      const status = await gitExec(['-C', session.worktreePath, 'status', '--porcelain']);
-      if (status.trim()) reason = 'uncommitted';
-    } catch { reason = 'uncommitted'; }
+    if (!discardChanges) {
+      try {
+        const status = await gitExec(['-C', session.worktreePath, 'status', '--porcelain']);
+        if (status.trim()) reason = 'uncommitted';
+      } catch { reason = 'uncommitted'; }
+    }
     // Fully pushed to its upstream? Then nothing is at risk locally — the
     // commits are on the remote. This is exactly the state right after
     // `gh pr create`, so a finished job's worktree and local branch can be
@@ -345,7 +350,11 @@ export async function removeWorktree(session) {
     }
     if (!reason && !fullyPushed) {
       const baseBranch = await resolveBaseBranch(session.repoPath);
-      if (baseBranch) {
+      // No base branch to compare against means no way to know whether the
+      // branch holds commits nobody else has. Keep it: `branch -D` below is
+      // the one step here that can destroy work.
+      if (!baseBranch) reason = 'unpushed';
+      else {
         try {
           const log = await gitExec(['-C', session.repoPath, 'log', `${baseBranch}..${session.branchName}`, '--oneline']);
           if (log.trim()) reason = 'unpushed';
@@ -353,8 +362,12 @@ export async function removeWorktree(session) {
       }
     }
     if (reason) return { orphaned: true, reason };
-    try { await gitExec(['-C', session.repoPath, 'worktree', 'remove', session.worktreePath]); } catch {
-      try { await gitExec(['-C', session.repoPath, 'worktree', 'remove', '--force', session.worktreePath]); } catch (err) {
+    // Deleting a worktree with node_modules in it can outlast the auto timeout;
+    // a SIGTERM mid-rm leaves a half-deleted directory and a cleanup-failed
+    // orphan, which is worse than waiting.
+    const slow = { timeout: GIT_USER_TIMEOUT };
+    try { await gitExec(['-C', session.repoPath, 'worktree', 'remove', session.worktreePath], slow); } catch {
+      try { await gitExec(['-C', session.repoPath, 'worktree', 'remove', '--force', session.worktreePath], slow); } catch (err) {
         console.error('Force worktree remove failed:', err.message);
         return { orphaned: true, reason: 'cleanup-failed' };
       }

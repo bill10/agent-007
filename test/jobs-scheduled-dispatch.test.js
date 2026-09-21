@@ -212,12 +212,77 @@ describe('finishScheduledRuns', () => {
     expect(job.agentSessionId).toBe('session-1');
   });
 
+  it('retires an exited previous run too, discarding its scratch files but nothing else', async () => {
+    // The kept agent may have exited on its own by the time the next run is
+    // due. Its worktree is just as stale as a live one's, so it is retired the
+    // same way. Only killSession's caller here says "discard": the worktree is
+    // a finished run's scratch, and the alternative was one orphan per run.
+    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
+    await finishScheduledRuns(noopBroadcast);
+    sessions.get('s1').exited = true;
+    job.nextRunAt = past();
+
+    const killed = [];
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast, {
+      killSession: async (id, opts) => { killed.push({ id, opts }); sessions.delete(id); },
+    });
+
+    expect(killed).toEqual([{ id: 's1', opts: { discardChanges: true } }]);
+    expect(job.lastRunSessionId).toBeNull();
+    expect(job.lastRunAgentName).toBeNull();
+    expect(job.agentSessionId).toBe('session-1');
+  });
+
+  it('still dispatches when retiring the previous run throws, and drops the stale pointer', async () => {
+    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
+    await finishScheduledRuns(noopBroadcast);
+    job.nextRunAt = past();
+
+    const dispatched = await dispatchOnce(fakeCreateSession([]), noopBroadcast, {
+      killSession: async () => { throw new Error('worktree busy'); },
+    });
+
+    expect(dispatched).toHaveLength(1);
+    expect(job.state).toBe('in-progress');
+    expect(job.agentSessionId).toBe('session-1');
+    expect(job.lastRunSessionId).toBeNull();
+  });
+
+  it('forgets a previous run whose session a restart already dropped', async () => {
+    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
+    await finishScheduledRuns(noopBroadcast);
+    sessions.delete('s1');     // gone with the server; only the card remembers it
+    job.nextRunAt = past();
+
+    const killed = [];
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast, { killSession: fakeKillSession(killed) });
+
+    expect(killed).toEqual([]);
+    expect(job.lastRunSessionId).toBeNull();
+    expect(job.lastRunAgentName).toBeNull();
+    expect(job.state).toBe('in-progress');
+  });
+
   it('retires the kept agent when the card is deleted', async () => {
     const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
     await finishScheduledRuns(noopBroadcast);
     const killed = [];
-    await deleteJob(job.id, noopBroadcast, { killSession: fakeKillSession(killed) });
-    expect(killed).toEqual(['s1']);
+    await deleteJob(job.id, noopBroadcast, { killSession: async (...args) => { killed.push(args); sessions.delete(args[0]); } });
+    // No discard option: deleting a card is not a scheduled retire, so a
+    // dirty worktree still becomes an orphan rather than being thrown away.
+    expect(killed).toEqual([['s1']]);
+    expect(allJobs()).toHaveLength(0);
+  });
+
+  it('retires an exited kept agent when the card is deleted', async () => {
+    // The client never sends kill for a dead tab, so without this the session
+    // entry and its worktree would outlive the card until a restart.
+    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
+    await finishScheduledRuns(noopBroadcast);
+    sessions.get('s1').exited = true;
+    const killed = [];
+    await deleteJob(job.id, noopBroadcast, { killSession: async (...args) => { killed.push(args); sessions.delete(args[0]); } });
+    expect(killed).toEqual([['s1']]);
     expect(allJobs()).toHaveLength(0);
   });
 

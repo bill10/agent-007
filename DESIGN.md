@@ -541,17 +541,22 @@ those cards have always been.
   the next dispatch retires it, or the user closes it by hand; deleting the
   card retires it too. Bounded at one kept agent, and so one worktree, per
   card between runs.
-- **A run that leaves a dirty worktree orphans it, every time.** `removeWorktree`
+- **The next run discards the last run's scratch files.** `removeWorktree`
   keeps a worktree whose tree is dirty or whose commits are unpushed, which is
   the right call for a one-time job — that is somebody's work. Recurrence
-  amplifies it: a scheduled job that reliably leaves a modified file orphans
-  one worktree per run, hourly, each one when the next run retires the kept
-  agent. Deliberately not capped here. The orphan
-  notification fires on every run, so it is visible rather than silent, and the
-  fix belongs in the job (stop leaving files behind), not in a policy that
-  starts deleting work the rest of the app promises to keep. `git status
-  --porcelain` respects `.gitignore`, so build output in an ignored path does
-  not trigger it.
+  turned it into a leak: a scheduled job that reliably leaves a file behind (a
+  report it wrote, or the board's own `.uploads/` attachments folder) orphaned
+  one worktree per run, hourly, and nothing ever collected them. So the
+  retirement at dispatch passes `discardChanges`, which skips only the
+  dirty-tree check: by the time the next run exists, the last run's files are
+  of no use to anyone, and its terminal — the output the board promises to
+  keep — is what was already read. Commits the remote does not have still
+  orphan the worktree; an untracked file is scratch, an unpushed commit is
+  work. Every other path to `killSession` (closing a tab, deleting a card,
+  retiring a one-time job) keeps the conservative default. The same block now
+  retires a previous run whose agent had already exited, which the old
+  `!prev.exited` guard skipped, leaving a dead session and its worktree
+  behind until a restart rediscovered it as an orphan.
 - **The PR watcher and the merge sweep both skip scheduled cards.** A scheduled
   run that happens to open a pull request must not be moved to Review, and one
   whose pull request merges must not be filed away as done — either would take
