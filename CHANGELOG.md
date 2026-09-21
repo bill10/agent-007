@@ -5,6 +5,26 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.3.2] - 2026-09-21
+
+### Fixed
+
+- **A scheduled job's next run cleans up after the last one.** When a scheduled
+  card dispatches again, the previous run's worktree is now deleted even if that
+  run left files behind, such as a report it wrote or the board's own
+  attachments folder. Before, those files kept the worktree around as an orphan
+  in the left panel after every run. Unpushed commits are still protected and
+  still orphan the worktree. A previous run whose agent had already exited is
+  now retired too, where before it was skipped and its dead session and
+  worktree lingered until a restart. Deleting a scheduled card retires an
+  exited last run the same way.
+- **Worktree cleanup never deletes commits it cannot account for.** In a repo
+  whose default branch is neither `main` nor `master` and has no remote HEAD
+  recorded, cleanup could not tell whether a branch held unpushed commits and
+  deleted it anyway. It now keeps such a worktree as an orphan. Removing a
+  worktree also gets the longer git timeout, so one with `node_modules` in it
+  is no longer cut off mid-delete and left half-removed.
+
 ## [0.4.3.1] - 2026-09-20
 
 ### Changed

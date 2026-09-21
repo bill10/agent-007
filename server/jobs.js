@@ -702,11 +702,13 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
     }
   }
   // Both the live agent and a scheduled card's kept last-run agent: with the
-  // card gone, nothing else would ever retire either of them.
+  // card gone, nothing else would ever retire either of them. An exited one
+  // too — its session entry and worktree are just as stranded, and killSession
+  // copes with a dead process.
   for (const sessionId of [removed.agentSessionId, removed.lastRunSessionId]) {
     if (!sessionId || !killSession) continue;
     const session = sessions.get(sessionId);
-    if (session && !session.exited) {
+    if (session) {
       try {
         await killSession(sessionId);
       } catch (err) {
@@ -984,8 +986,11 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // retire (see finishScheduledRuns). Retiring before the spawn meant a
     // failed createSession destroyed the last run's only output and left no new
     // run behind it — the card showed a dispatch error and the summary the
-    // board promises to keep was gone. removeWorktree still protects the work:
-    // dirty or unpushed changes become an orphan rather than being deleted.
+    // board promises to keep was gone. The worktree is scratch by then — a
+    // run's output files are of no use once the next run exists — so
+    // uncommitted files are discarded rather than orphaned. Unpushed commits
+    // still become an orphan. An exited agent is retired the same way: its
+    // worktree is just as stale, and killSession copes with a dead process.
     //
     // AFTER the claim above, not before it, and that ordering is load-bearing:
     // this block awaits, and an await between the recheck and the claim is the
@@ -997,9 +1002,9 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // than it did before rather than less.
     if (isScheduled(job) && job.lastRunSessionId) {
       const prev = sessions.get(job.lastRunSessionId);
-      if (prev && !prev.exited && killSession) {
+      if (prev && killSession) {
         try {
-          await killSession(job.lastRunSessionId);
+          await killSession(job.lastRunSessionId, { discardChanges: true });
         } catch (err) {
           console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
         }
