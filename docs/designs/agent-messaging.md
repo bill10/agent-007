@@ -100,9 +100,12 @@ its prompt.
   (`takesMcpConfig`). A plain shell tab would run the message as a command.
 - **Never uphill into an agent that never asks.** An agent spawned with
   `bypassPermissions`, `--dangerously-skip-permissions`, Codex's
-  `--dangerously-bypass-approvals-and-sandbox` or `--sandbox danger-full-access`
-  (`isUnguarded`, read off its command) takes messages only from another such
-  agent. Without this a read-only job reading an untrusted issue could get a
+  `--dangerously-bypass-approvals-and-sandbox`, `--sandbox danger-full-access`,
+  `--ask-for-approval never`, `--approve-for-me`, `--full-auto` or any
+  `-c`/`--profile` override (`isUnguarded`, read off its command) takes
+  messages only from another such agent. Claude's `auto` counts as guarded:
+  its classifier reviews every action. Config-file defaults are invisible to
+  this check. Without this a read-only job reading an untrusted issue could get a
   bypass agent to run what the issue said. (Added in the pre-landing review.)
 
 ### Loops
@@ -130,6 +133,20 @@ this but do not sandbox it. Nothing can: this is the same trust as
 `post_job`, whose card text becomes another agent's prompt. The FEATURES.md
 entry has to say this in plain words, alongside the existing `bypassPermissions`
 warning.
+
+## Known limits (from the pre-landing review)
+
+- **WAITING is "no recognised dialog", not "composer seen".** A dialog missing
+  from `MESSAGE_PATTERNS` reads as WAITING, and the Enter answers it. Neither
+  CLI's idle composer has a reliable pattern yet (Codex's `›` has none;
+  Claude Code's last line is usually its status footer). The Enter is at least
+  checked against a fresh read of the screen, and skipped if a dialog shows.
+- **A skipped Enter leaves the message in the composer.** Further messages are
+  held until a person has typed in that terminal, and queue meanwhile.
+- **Replies go by name.** A codename freed by an exited agent can be handed to
+  a new one, which would then get a reply meant for the old.
+- **Pairs are rate-limited, not stopped.** Two agents can keep exchanging a
+  message a minute each way for as long as both run.
 
 ## Not doing
 

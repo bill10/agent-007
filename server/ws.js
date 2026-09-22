@@ -403,7 +403,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           }
           writeFileSync(join(uploadsDir, finalName), buf);
           const relativePath = `.uploads/${finalName}`;
-          if (!session.exited) session.pty.write(relativePath);
+          if (!session.exited) {
+            // Typed into the composer like a keystroke: holds agent messages back.
+            session.lastUserInputAt = Date.now();
+            session.pty.write(relativePath);
+          }
           ws.send(JSON.stringify({ type: 'upload-complete', sessionId: msg.sessionId, path: relativePath, filename: finalName }));
           break;
         }

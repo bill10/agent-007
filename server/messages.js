@@ -18,8 +18,8 @@
 // (server/pty.js) retries every second. Kept free of node-pty and of the
 // session Map so it is testable on its own: sessions come in as parameters.
 
-import { parseCommand } from '../lib/helpers.js';
-import { permissionFlagsFromCommand } from '../lib/jobs.js';
+import { parseCommand, detectState } from '../lib/helpers.js';
+import { permissionFlagsFromCommand, sessionAgentFromCommand } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
@@ -52,13 +52,26 @@ const isAgent = (session) => takesMcpConfig(parseCommand(session.command || '').
 // acts on with its own permissions, so if any agent could message one, every
 // agent could borrow them — a read-only job reading an untrusted issue could
 // have it run whatever the issue said. Only another such agent may.
+//
+// ponytail: read off the command line only. A bare `claude` whose settings.json
+// defaults to bypassPermissions, or a `codex` whose config.toml never asks,
+// reads as guarded here; the user's own config usually applies to the sender
+// too, but a repo's .claude/settings.json does not.
 export function isUnguarded(session) {
-  const flags = permissionFlagsFromCommand(session.command);
+  const command = session.command || '';
+  const flags = permissionFlagsFromCommand(command);
   const value = (flag) => { const i = flags.indexOf(flag); return i === -1 ? undefined : flags[i + 1]; };
-  return flags.includes('--dangerously-skip-permissions')
-    || value('--permission-mode') === 'bypassPermissions'
-    || flags.includes('--dangerously-bypass-approvals-and-sandbox')
-    || value('--sandbox') === 'danger-full-access';
+  if (flags.includes('--dangerously-skip-permissions') || value('--permission-mode') === 'bypassPermissions') return true;
+  if (flags.includes('--dangerously-bypass-approvals-and-sandbox') || flags.includes('--approve-for-me')
+    || value('--sandbox') === 'danger-full-access' || value('--ask-for-approval') === 'never') return true;
+  if (sessionAgentFromCommand(command) !== 'codex') return false;
+  // Codex also takes config overrides and profiles, which can set any of the
+  // above where the allowlist cannot see it. What they set is unknown, so any
+  // of them counts as never asking.
+  const { args } = parseCommand(command);
+  const end = args.indexOf('--');
+  return (end === -1 ? args : args.slice(0, end))
+    .some(a => /^(-c|--config|-p|--profile|--full-auto)(=|$)/.test(a) || /^-c\S/.test(a));
 }
 
 export function messageableAgents(from, sessions) {
@@ -68,9 +81,13 @@ export function messageableAgents(from, sessions) {
     && (fromUnguarded || !isUnguarded(s)));
 }
 
+// Header fields lose newlines as well: a name is renamable, and one carrying a
+// newline could start a line of its own outside the quoted body.
+const oneLine = (s) => clean(s).replace(/[\n\t]/g, ' ');
+
 export function formatMessage(from, text) {
-  const where = [from.agent, from.repoSlug, from.branchName].filter(Boolean).map(clean).join(' · ');
-  const name = clean(from.name);
+  const where = [from.agent, from.repoSlug, from.branchName].filter(Boolean).map(oneLine).join(' · ');
+  const name = oneLine(from.name);
   // Every body line quoted, so a body cannot close the message with a footer
   // of its own and carry on as if it were the user speaking.
   const body = clean(text).split('\n').map(line => `> ${line}`).join('\n');
@@ -81,22 +98,39 @@ export function formatMessage(from, text) {
 
 // Whether a message may be typed into this session right now.
 export function canDeliver(session, now = Date.now()) {
-  if (session.exited || session.state !== 'WAITING') return false;
+  // Both: the stored state is up to a second old, and a dialog that opened
+  // since is what this must not type into.
+  if (session.exited || session.state !== 'WAITING' || detectState(session, { now }) !== 'WAITING') return false;
   if (now - (session.lastUserInputAt || 0) < USER_TYPING_HOLD_MS) return false;
+  // A message left in the composer, its Enter skipped: another pasted after it
+  // would be submitted with it. Held until a person has been at that terminal.
+  if (session.messageUnsubmittedAt && (session.lastUserInputAt || 0) <= session.messageUnsubmittedAt) return false;
   // Delivered since it last came to rest: it has not picked that one up yet.
   return !(session.messageDeliveredAt && session.messageDeliveredAt >= (session.stateChangedAt || 0));
 }
 
+// From a timer or the state interval, so a pty torn down but not yet marked
+// exited must not throw: nothing up the stack would catch it.
+function write(session, data) {
+  try { session.pty.write(data); return true; } catch { return false; }
+}
+
 function deliver(session, text, now) {
   session.messageDeliveredAt = now;
-  session.pty.write(`\x1b[200~${text}\x1b[201~`);
+  write(session, `\x1b[200~${text}\x1b[201~`);
   // Checked again at the Enter: in those 150 ms a dialog may have opened, which
   // the Enter would answer, or a person may have started typing, whose text
   // would go with it. Left unsent, the message sits in the composer instead.
-  // (Not state === 'WAITING': the paste itself is output, and reads as WORKING.)
+  // The screen is read afresh rather than through session.state, which lags a
+  // second behind and reads WORKING for three after any output — the paste's
+  // own echo included.
   setTimeout(() => {
-    if (session.exited || session.state === 'MESSAGE' || (session.lastUserInputAt || 0) > now) return;
-    session.pty.write('\r');
+    if (session.exited) return;
+    if (detectState(session, { stateTimeoutMs: 0 }) === 'MESSAGE' || (session.lastUserInputAt || 0) > now) {
+      session.messageUnsubmittedAt = Date.now();
+      return;
+    }
+    write(session, '\r');
   }, SUBMIT_DELAY_MS);
 }
 
@@ -172,17 +206,18 @@ export function dropMessages(sessionId) {
 }
 
 // Whether a pty-input write is someone typing, as opposed to the terminal
-// answering a query or reporting focus: those arrive as escape sequences on
-// their own and add nothing to the composer.
+// answering a query or reporting focus. Only those replies are left out;
+// anything else counts, arrow keys and Tab included, since up-arrow recalls a
+// history line into the composer as surely as typing it would.
 const TERMINAL_REPLY_RE = new RegExp([
-  /\x1b\[[0-9;?<>]*[ -\/]*[@-~]/.source,   // CSI: cursor reports, focus in/out, arrow keys
-  /\x1b\][^\x07\x1b]*(\x07|\x1b\\)/.source, // OSC: colour and title query replies
-  /\x1bO./.source,                         // SS3: application-mode arrow and F keys
+  /\x1b\[[IO]/.source,                        // focus in / out
+  /\x1b\[\d+;\d+R/.source,                     // cursor position report
+  /\x1b\[[?>=][\d;]*c/.source,                 // device attributes
+  /\x1b\[\?[\d;]*\$y/.source,                  // mode report
+  /\x1b\][^\x07\x1b]*(\x07|\x1b\\)/.source,     // OSC: colour and title replies
+  /\x1bP[^\x1b]*\x1b\\/.source,                // DCS: terminal version and the like
 ].join('|'), 'g');
 
 export function isTyping(data) {
-  const text = String(data);
-  return /[^\x00-\x1f\x7f]/.test(text.replace(TERMINAL_REPLY_RE, ''))
-    // Enter, backspace: no printable text, but a person at the keyboard.
-    || /[\r\x7f\x08]/.test(text);
+  return String(data).replace(TERMINAL_REPLY_RE, '').length > 0;
 }

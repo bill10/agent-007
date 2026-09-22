@@ -652,7 +652,7 @@ describe('messaging another agent through the tools', () => {
   // the wiring picks the right sender and does not hand a session over whole.
   const peer = (id, name, fields = {}) => ({
     id, name, command: 'codex', agent: 'codex', repoSlug: 'agent-007', branchName: `b-${name}`,
-    state: 'WAITING', stateChangedAt: 0, ownerId: null, exited: false,
+    state: 'WAITING', stateChangedAt: 0, isTUI: true, lastOutputAt: 0, recentStrippedLines: [], ownerId: null, exited: false,
     agentToken: `secret-${id}`, pty: { write: vi.fn() }, ...fields,
   });
 
