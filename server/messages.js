@@ -31,8 +31,9 @@ export const PAIR_WINDOW_MS = 10 * 60 * 1000;
 // still gets the message appended to what they typed.
 export const USER_TYPING_HOLD_MS = 30 * 1000;
 // Between the paste and its Enter. Claude Code submits with no gap at all
-// (checked against 2.x); Codex was not checked, and it treats fast keystrokes as
-// a paste burst in which Enter is a newline, so give the paste time to land.
+// (checked against 2.x). Codex treats fast keystrokes as a paste burst in which
+// Enter is a newline; with this gap codex-cli 0.155.1 takes paste and Enter as
+// one turn (checked in review).
 export const SUBMIT_DELAY_MS = 150;
 
 const queues = new Map();   // recipient session id -> [formatted text]

@@ -166,12 +166,14 @@ warning.
 ## Build steps
 
 1. **Checked by hand.** Claude Code 2.x submits `<bracketed paste>\r` as one
-   turn with no gap between them. Codex could not be checked, so `deliver()`
-   waits 150 ms before the Enter (`SUBMIT_DELAY_MS`), because Codex reads fast
-   keystrokes as a paste burst in which Enter is a newline. While checking, a
-   paste typed into a fresh Codex session answered its folder-trust dialog. That
-   dialog read as `WAITING`, not `MESSAGE`, so `lib/helpers.js` now matches
-   "Trust and continue".
+   turn with no gap between them. `deliver()` waits 150 ms before the Enter
+   (`SUBMIT_DELAY_MS`), because Codex reads fast keystrokes as a paste burst in
+   which Enter is a newline. The PR reviewer confirmed that gap is enough for
+   codex-cli 0.155.1, in both directions. While checking, a paste typed into a
+   fresh Codex session answered its folder-trust dialog, which read as
+   `WAITING`, not `MESSAGE`. `lib/helpers.js` now matches "Trust and continue",
+   and, from review, Codex's "Hooks need review" prompt and the hooks browser
+   it opens, both of which had the same fault.
 2. `server/messages.js`: `sendMessage({ from, to, text })`,
    `flushMessages(session)`, the queue, the pair rate limiter and
    `formatMessage`. It takes `sessions` as a parameter, in the style of

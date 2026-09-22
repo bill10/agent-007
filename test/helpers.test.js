@@ -466,6 +466,22 @@ describe('detectState', () => {
     expect(detectState({ ...BASE, isTUI: true, lastFrame: frame }, { now: 50000 })).toBe('MESSAGE');
   });
 
+  it("reads Codex's hook-trust prompt and hooks browser as questions", () => {
+    // From codex-cli 0.155.1, reported in review. Read as WAITING, an agent
+    // message typed into the prompt had its Enter pick "1. Review hooks".
+    const prompt = 'Hooks need review 2 hooks are new or changed. › 1. Review hooks  2. Trust all and continue'
+      + '  3. Continue without trusting (hooks won\'t run) Press enter to confirm or esc to go back';
+    const browser = 'Press t to trust all; enter to review hooks; esc to close';
+    for (const frame of [prompt, browser, 'Hooksneedreview', 'Pressentertoconfirmoresctogoback']) {
+      expect(detectState({ ...BASE, isTUI: true, lastFrame: frame }, { now: 50000 })).toBe('MESSAGE');
+    }
+  });
+
+  it("reads Codex 0.155's reworded trust dialog as a question", () => {
+    const frame = 'Trust this folder? › 1. Yes, continue  2. No, quit Press enter to continue';
+    expect(detectState({ ...BASE, isTUI: true, lastFrame: frame }, { now: 50000 })).toBe('MESSAGE');
+  });
+
   it('should return DISCONNECTED when session has exited', () => {
     expect(detectState({ ...BASE, exited: true }, { now: 1000 })).toBe('DISCONNECTED');
   });

@@ -27,10 +27,11 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ### Fixed
 
-- **Codex's folder-trust dialog is recognised as a question.** It read as an
-  agent resting at its prompt, so a Codex agent parked there showed no
-  "needs you" bubble. Anything typed into it, a message included, would have
-  answered it and saved the folder as trusted.
+- **Codex's folder-trust and hook-review dialogs are recognised as questions.**
+  They read as an agent resting at its prompt, so a Codex agent parked at one
+  showed no "needs you" bubble. Anything typed into them, a message included,
+  answered them: the trust dialog saved the folder as trusted, and "Hooks need
+  review" opened the hooks browser, which had the same fault.
 
 ## [0.4.3.2] - 2026-09-21
 
