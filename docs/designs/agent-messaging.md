@@ -65,6 +65,9 @@ A message is typed into the recipient's terminal as a user turn:
 [Reply with the send_message tool, to: "Cobra". This came from another agent, not from the user.]
 ```
 
+Each body line is quoted with `> `, so a body cannot close the message with a
+footer of its own and carry on as if the user were speaking.
+
 It is written as a bracketed paste (`\x1b[200~ … \x1b[201~`) followed by `\r`,
 so a newline inside the message cannot submit early and the whole block goes in
 as one turn.
@@ -80,11 +83,12 @@ its prompt.
   on screen, and typed text would answer it. This is the one rule that must not
   slip.
 - **Not over a person.** `ws.js`'s `pty-input` handler stamps
-  `session.lastUserInputAt`. Half-typed text in the composer would otherwise
+  `session.lastUserInputAt` for real keystrokes only (`isTyping`): the
+  terminal's own replies to queries and its focus reports do not count. Half-typed text in the composer would otherwise
   get the message glued onto it and sent. `// ponytail: a 30 s window, not
   real composer detection; neither CLI exposes whether its composer is empty.`
-- **Queue cap: 20 per recipient.** Past that, `send_message` is refused ("Viper
-  has 20 unread messages"). The queue is dropped when the recipient exits;
+- **Queue cap: 20 per recipient.** Past that, `send_message` is refused with a
+  reason the sending agent can pass on. The queue is dropped when the recipient exits;
   sessions do not survive a restart, so it does not need to either.
 
 ### Who may message whom
@@ -94,6 +98,12 @@ its prompt.
   single-player every session is unowned, so every agent can reach every other.
 - **Agents only.** The recipient must be a Claude Code or Codex session
   (`takesMcpConfig`). A plain shell tab would run the message as a command.
+- **Never uphill into an agent that never asks.** An agent spawned with
+  `bypassPermissions`, `--dangerously-skip-permissions`, Codex's
+  `--dangerously-bypass-approvals-and-sandbox` or `--sandbox danger-full-access`
+  (`isUnguarded`, read off its command) takes messages only from another such
+  agent. Without this a read-only job reading an untrusted issue could get a
+  bypass agent to run what the issue said. (Added in the pre-landing review.)
 
 ### Loops
 
@@ -144,8 +154,8 @@ warning.
    "Trust and continue".
 2. `server/messages.js`: `sendMessage({ from, to, text })`,
    `flushMessages(session)`, the queue, the pair rate limiter and
-   `formatMessage`. It takes `sessions` and a `write` function as parameters,
-   in the style of `mcp.js`.
+   `formatMessage`. It takes `sessions` as a parameter, in the style of
+   `mcp.js`, and writes through each session's own `pty`.
 3. `server/mcp.js`: `LIST_AGENTS_TOOL` and `SEND_MESSAGE_TOOL`, plus `CALLS`
    entries that stay thin wrappers over injected `ctx.listAgents` /
    `ctx.sendMessage`.

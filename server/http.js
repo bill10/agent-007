@@ -12,7 +12,7 @@ import {
 import {
   postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
-import { messageableAgents, sendMessage, pendingMessages } from './messages.js';
+import { agentSummaries, sendMessage } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -108,12 +108,8 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
         session: req.agentSession,
         user: userById(req.agentSession.ownerId),
       }, broadcast),
-      // Picked, not spread: a session carries its pty and its board token.
-      listAgents: () => messageableAgents(req.agentSession, sessions).map(s => ({
-        name: s.name, agent: s.agent, repoSlug: s.repoSlug, branchName: s.branchName, state: s.state,
-        jobTitle: s.jobId ? allJobs().find(job => job.id === s.jobId)?.title : null,
-        pending: pendingMessages(s.id),
-      })),
+      listAgents: () => agentSummaries(req.agentSession, sessions,
+        (jobId) => allJobs().find(job => job.id === jobId)?.title),
       sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
     });
     // A notification gets no body. 202 is what the MCP HTTP transport expects.

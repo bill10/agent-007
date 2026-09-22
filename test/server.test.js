@@ -578,6 +578,46 @@ describe('ownership authorization', () => {
     a.close(); b.close();
   }, 15000);
 
+  it('marks a terminal as being typed in only for real keystrokes from its owner', async () => {
+    // lastUserInputAt holds agent messages back (server/messages.js). A focus
+    // report arrives every time the tab is clicked; counting it would stall
+    // messages for 30 s on every glance at the terminal.
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep 9/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'sleep 9' }));
+    const { sessionId } = await created;
+    const b = await connect(tokenB);
+    const session = sessions.get(sessionId);
+    // Messages on one socket are handled in order: a later rename landing
+    // means every earlier pty-input on that socket has been processed.
+    const settled = async (ws, name) => {
+      const done = nextMatching(a, (m) => m.type === 'session-renamed' && m.name === name);
+      ws.send(JSON.stringify({ type: 'rename-session', sessionId, name }));
+      await done;
+    };
+
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: '\x1b[I' }));
+    await settled(a, 'focus');
+    expect(session.lastUserInputAt).toBeUndefined();
+
+    // A viewer's keystrokes never reach the pty, so they hold nothing back.
+    const refused = nextMatching(b, (m) => m.type === 'notification' && /read-only/i.test(m.message || ''));
+    b.send(JSON.stringify({ type: 'pty-input', sessionId, data: 'x' }));
+    b.send(JSON.stringify({ type: 'rename-session', sessionId, name: 'nope' }));
+    expect(await refused).toBeTruthy();
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: '\x1b[O' }));
+    await settled(a, 'blur');
+    expect(session.lastUserInputAt).toBeUndefined();
+
+    const before = Date.now();
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: 'x' }));
+    await settled(a, 'typed');
+    expect(session.lastUserInputAt).toBeGreaterThanOrEqual(before);
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
   it('rejects refresh-tree and upload-file from a non-owner', async () => {
     const a = await connect(tokenA);
     const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep/.test(m.command || ''));

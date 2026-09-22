@@ -372,7 +372,7 @@ const CALLS = {
     // answer that cannot come until the other one stops working.
     return toolText(result.delivered
       ? `Delivered to ${result.to.name}. Its reply, if any, will arrive as a message in this terminal.`
-      : `Queued for ${result.to.name}, which is busy (position ${result.queued}); it gets the message when it next stops at its prompt. Its reply, if any, will arrive as a message in this terminal.`);
+      : `Queued for ${result.to.name} (position ${result.queued}); it gets the message once it is next free at its prompt. Its reply, if any, will arrive as a message in this terminal.`);
   },
 };
 

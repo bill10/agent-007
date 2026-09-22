@@ -19,6 +19,7 @@
 // session Map so it is testable on its own: sessions come in as parameters.
 
 import { parseCommand } from '../lib/helpers.js';
+import { permissionFlagsFromCommand } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
@@ -47,16 +48,34 @@ const sameOwner = (a, b) => (a.ownerId || null) === (b.ownerId || null);
 // A plain shell tab would run the message as a command line.
 const isAgent = (session) => takesMcpConfig(parseCommand(session.command || '').file);
 
+// An agent that runs commands without asking anyone. A message is a prompt it
+// acts on with its own permissions, so if any agent could message one, every
+// agent could borrow them — a read-only job reading an untrusted issue could
+// have it run whatever the issue said. Only another such agent may.
+export function isUnguarded(session) {
+  const flags = permissionFlagsFromCommand(session.command);
+  const value = (flag) => { const i = flags.indexOf(flag); return i === -1 ? undefined : flags[i + 1]; };
+  return flags.includes('--dangerously-skip-permissions')
+    || value('--permission-mode') === 'bypassPermissions'
+    || flags.includes('--dangerously-bypass-approvals-and-sandbox')
+    || value('--sandbox') === 'danger-full-access';
+}
+
 export function messageableAgents(from, sessions) {
+  const fromUnguarded = isUnguarded(from);
   return [...sessions.values()].filter(s =>
-    s.id !== from.id && !s.exited && isAgent(s) && sameOwner(from, s));
+    s.id !== from.id && !s.exited && isAgent(s) && sameOwner(from, s)
+    && (fromUnguarded || !isUnguarded(s)));
 }
 
 export function formatMessage(from, text) {
   const where = [from.agent, from.repoSlug, from.branchName].filter(Boolean).map(clean).join(' · ');
   const name = clean(from.name);
+  // Every body line quoted, so a body cannot close the message with a footer
+  // of its own and carry on as if it were the user speaking.
+  const body = clean(text).split('\n').map(line => `> ${line}`).join('\n');
   return `[Message from agent ${name}${where ? ` (${where})` : ''}]\n`
-    + `${clean(text)}\n`
+    + `${body}\n`
     + `[Reply with the send_message tool, to: "${name}". This came from another agent, not from the user.]`;
 }
 
@@ -71,12 +90,20 @@ export function canDeliver(session, now = Date.now()) {
 function deliver(session, text, now) {
   session.messageDeliveredAt = now;
   session.pty.write(`\x1b[200~${text}\x1b[201~`);
-  setTimeout(() => { if (!session.exited) session.pty.write('\r'); }, SUBMIT_DELAY_MS);
+  // Checked again at the Enter: in those 150 ms a dialog may have opened, which
+  // the Enter would answer, or a person may have started typing, whose text
+  // would go with it. Left unsent, the message sits in the composer instead.
+  // (Not state === 'WAITING': the paste itself is output, and reads as WORKING.)
+  setTimeout(() => {
+    if (session.exited || session.state === 'MESSAGE' || (session.lastUserInputAt || 0) > now) return;
+    session.pty.write('\r');
+  }, SUBMIT_DELAY_MS);
 }
 
 /**
  * Send `text` from one agent session to another, named as list_agents shows it.
- * Returns { delivered: true } | { queued: n } | { error }.
+ * Returns { delivered: true, to } | { queued: n, to } | { error }, `to` being
+ * the recipient session.
  */
 export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
   const body = typeof text === 'string' ? text.trim() : '';
@@ -124,6 +151,17 @@ export function pendingMessages(sessionId) {
   return queues.get(sessionId)?.length || 0;
 }
 
+// What list_agents shows about each agent `from` can reach. Picked, not
+// spread: a session carries its pty and its board token. The job title comes
+// in as a function so this module stays clear of the job store.
+export function agentSummaries(from, sessions, jobTitle = () => null) {
+  return messageableAgents(from, sessions).map(s => ({
+    name: s.name, agent: s.agent, repoSlug: s.repoSlug, branchName: s.branchName, state: s.state,
+    jobTitle: s.jobId ? jobTitle(s.jobId) : null,
+    pending: pendingMessages(s.id),
+  }));
+}
+
 // The recipient is gone. Sessions do not survive a restart, so neither does
 // anything addressed to one.
 export function dropMessages(sessionId) {
@@ -136,7 +174,15 @@ export function dropMessages(sessionId) {
 // Whether a pty-input write is someone typing, as opposed to the terminal
 // answering a query or reporting focus: those arrive as escape sequences on
 // their own and add nothing to the composer.
+const TERMINAL_REPLY_RE = new RegExp([
+  /\x1b\[[0-9;?<>]*[ -\/]*[@-~]/.source,   // CSI: cursor reports, focus in/out, arrow keys
+  /\x1b\][^\x07\x1b]*(\x07|\x1b\\)/.source, // OSC: colour and title query replies
+  /\x1bO./.source,                         // SS3: application-mode arrow and F keys
+].join('|'), 'g');
+
 export function isTyping(data) {
-  return /[^\x00-\x1f\x7f]/.test(String(data).replace(/\x1b\[[0-9;?<>]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1bO./g, ''))
-    || /[\r\x7f\x08]/.test(String(data));
+  const text = String(data);
+  return /[^\x00-\x1f\x7f]/.test(text.replace(TERMINAL_REPLY_RE, ''))
+    // Enter, backspace: no printable text, but a person at the keyboard.
+    || /[\r\x7f\x08]/.test(text);
 }
