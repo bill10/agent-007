@@ -159,7 +159,8 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, list_agents, send_message)
+  messages.js      Agent-to-agent messages (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)
