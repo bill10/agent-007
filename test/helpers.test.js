@@ -458,6 +458,14 @@ describe('detectState', () => {
     expect(detectState({ ...BASE, isTUI: true, lastFrame: 'Entertoselect·↑/↓tonavigate·Esctocancel' }, { now: 50000 })).toBe('MESSAGE');
   });
 
+  it("reads Codex's folder-trust dialog as a question, not a resting prompt", () => {
+    // Captured from Codex 0.156. Read as WAITING, an agent message typed into it
+    // answered it: the Enter chose "Trust and continue" and saved the folder.
+    const frame = 'Trustthisfolder?Codexcanread,edit,andrunfileshere,subjecttoyourpermissionsettings.'
+      + '› 1. Trust and continue 2.Quitenter continue · esc quit';
+    expect(detectState({ ...BASE, isTUI: true, lastFrame: frame }, { now: 50000 })).toBe('MESSAGE');
+  });
+
   it('should return DISCONNECTED when session has exited', () => {
     expect(detectState({ ...BASE, exited: true }, { now: 1000 })).toBe('DISCONNECTED');
   });

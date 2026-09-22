@@ -11,6 +11,7 @@ import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, load
 import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
+import { isTyping } from './messages.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent } from '../lib/jobs.js';
 import {
@@ -178,7 +179,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'pty-input': {
           const session = sessions.get(msg.sessionId);
           // Non-owners are read-only: silently drop input (no per-keystroke error).
-          if (session && !session.exited && owns(ws, session.ownerId)) session.pty.write(msg.data);
+          if (session && !session.exited && owns(ws, session.ownerId)) {
+            // Holds agent messages back while a person is mid-line (messages.js).
+            if (isTyping(msg.data)) session.lastUserInputAt = Date.now();
+            session.pty.write(msg.data);
+          }
           break;
         }
         case 'pty-resize': {

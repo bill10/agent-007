@@ -134,7 +134,7 @@ describe('the handshake over HTTP', () => {
     expect(init.result.serverInfo.name).toBe('agent-007-board');
 
     const list = await (await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
-    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job']);
+    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']);
   });
 
   it('answers a notification with 202 and an empty body', async () => {
@@ -474,7 +474,7 @@ describe('reading and editing the board through the tools', () => {
     // /mcp is the agent door: a person reads and edits through the board's own
     // API, and their token does not resolve here at all.
     const userToken = withUser();
-    for (const name of ['list_jobs', 'read_job', 'edit_job']) {
+    for (const name of ['list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']) {
       expect((await callNamed(name, { id: 'job-1' }, userToken)).status, name).toBe(401);
     }
   });

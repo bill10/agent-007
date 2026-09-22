@@ -1,5 +1,5 @@
 ---
-status: DRAFT
+status: BUILT
 ---
 # Agents message each other, whichever CLI they run on
 
@@ -45,7 +45,8 @@ card title when it is a board agent. The caller is left out.
 - `to`: the recipient's session name as `list_agents` prints it (the codename,
   e.g. `Viper`). Session names are unique among live sessions. Unknown or exited
   names are refused with the list of valid ones.
-- `message`: plain text, capped at 8 KB.
+- `message`: plain text, capped at 8000 characters. Control characters are
+  stripped, so a message cannot close the bracketed paste and type keystrokes.
 - It returns at once with `delivered` or `queued (Viper is working; it will
   get this when it next stops)`. It never waits for a reply: the reply is a
   message coming back the same way.
@@ -70,9 +71,10 @@ as one turn.
 
 **When it is written.** Only when the recipient is `WAITING` and no person has
 typed into that terminal in the last 30 s. Otherwise it waits in a per-session
-in-memory queue, which `updateState` in `server/pty.js` flushes on the next
-transition to `WAITING`, one message per transition (the agent's turn on the
-first message moves it back to `WORKING`).
+in-memory queue, which `updateState` in `server/pty.js` retries on every
+one-second state check. At most one message goes in each time the agent comes
+to rest: the next one waits until it has worked on that one and come back to
+its prompt.
 
 - **Never into `MESSAGE`.** In that state a permission or question dialog is
   on screen, and typed text would answer it. This is the one rule that must not
@@ -133,11 +135,13 @@ warning.
 
 ## Build steps
 
-1. **Check the one unknown by hand first.** In a Claude Code tab and a Codex
-   tab, write `\x1b[200~line one\nline two\x1b[201~\r` to the PTY and confirm
-   both submit it as a single turn. Claude Code may collapse a long paste into
-   `[Pasted text #1]`; confirm `\r` still submits it. If either CLI needs a
-   delay between the paste and `\r`, put it in `deliver()` and note why.
+1. **Checked by hand.** Claude Code 2.x submits `<bracketed paste>\r` as one
+   turn with no gap between them. Codex could not be checked, so `deliver()`
+   waits 150 ms before the Enter (`SUBMIT_DELAY_MS`), because Codex reads fast
+   keystrokes as a paste burst in which Enter is a newline. While checking, a
+   paste typed into a fresh Codex session answered its folder-trust dialog. That
+   dialog read as `WAITING`, not `MESSAGE`, so `lib/helpers.js` now matches
+   "Trust and continue".
 2. `server/messages.js`: `sendMessage({ from, to, text })`,
    `flushMessages(session)`, the queue, the pair rate limiter and
    `formatMessage`. It takes `sessions` and a `write` function as parameters,
@@ -146,8 +150,8 @@ warning.
    entries that stay thin wrappers over injected `ctx.listAgents` /
    `ctx.sendMessage`.
 4. `server/http.js`: inject both into the `/mcp` handler's context.
-5. `server/pty.js` `updateState`: call `flushMessages` on a transition to
-   `WAITING`. Drop the queue in `onExit`.
+5. `server/pty.js` `updateState`: call `flushMessages` on every check (a
+   message held back for a typing person has no later transition to wait for). Drop the queue in `onExit`.
 6. `server/ws.js` `pty-input`: set `session.lastUserInputAt = Date.now()`.
 7. Tests, in `test/messages.test.js`:
    - a message is written when the recipient is `WAITING`, and queued when it is `WORKING` or `MESSAGE`
