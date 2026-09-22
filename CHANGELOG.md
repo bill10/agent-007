@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.4.1] - 2026-09-22
+
+### Fixed
+
+- **The test suite passes on Node 26.** Node 25 and later define their own
+  `localStorage`, which is undefined unless Node starts with
+  `--localstorage-file`. Vitest's happy-dom environment skips any browser global
+  Node already has, so the 17 client tests that read or write storage found
+  nothing there and failed. The test setup now installs happy-dom's storage in
+  its place. The app's browser code is unchanged.
+
 ## [0.4.4.0] - 2026-09-22
 
 ### Added
