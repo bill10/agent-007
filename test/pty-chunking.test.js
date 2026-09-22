@@ -158,9 +158,16 @@ describe('PTY line reassembly across chunk boundaries', () => {
     expect(session.lastFrame).toBeUndefined();
     session.lastOutputAt = 0;
     expect(detectState(session)).toBe('MESSAGE');
-    // After one: a plain history line neither opens nor replaces it.
-    write(PROMPT);
-    write('• Ran git status -sb\n');
+    // After one: a plain history line neither opens nor replaces it. Both
+    // reads share one clock tick, so the tie goes to the frame; a line in a
+    // later millisecond would outrank it, which the shell-tab test below owns.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      write(PROMPT);
+      write('• Ran git status -sb\n');
+    } finally {
+      clock.mockRestore();
+    }
     expect(session.frameOpen).toBeNull();
     expect(session.lastFrame).toContain('Ask Codex to do anything');
     session.lastOutputAt = 0;

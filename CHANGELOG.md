@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.4.2] - 2026-09-22
+
+### Fixed
+
+- **The pty-chunking test "leaves the last frame alone when a read draws no
+  frame" no longer fails at random.** It wrote a Codex frame and then a history
+  line and expected the frame to win, which held only when both landed in the
+  same millisecond; a clock tick between them let the newer line outrank the
+  frame, as the product rule intends. The test now pins the clock across the
+  two writes. No product behaviour changed.
+
 ## [0.4.4.1] - 2026-09-22
 
 ### Fixed
