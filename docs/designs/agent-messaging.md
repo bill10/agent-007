@@ -143,6 +143,9 @@ warning.
   checked against a fresh read of the screen, and skipped if a dialog shows.
 - **A skipped Enter leaves the message in the composer.** Further messages are
   held until a person has typed in that terminal, and queue meanwhile.
+  A short message that itself reads like a dialog ("Do you want to proceed?")
+  echoes onto the screen and trips the same check, so it too waits for a person.
+  That errs the safe way.
 - **Replies go by name.** A codename freed by an exited agent can be handed to
   a new one, which would then get a reply meant for the old.
 - **Pairs are rate-limited, not stopped.** Two agents can keep exchanging a
