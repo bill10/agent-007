@@ -16,3 +16,15 @@ process.env.AGENT007_WORKTREE_DIR = mkdtempSync(join(tmpdir(), 'a007-worktrees-'
 // ~/.agent-007/config.json, so any test that adds a repo, a job, or an orphan
 // would otherwise wipe the developer's real repo list and orphan records.
 process.env.AGENT007_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'a007-config-'));
+
+// Node 25+ ships its own Web Storage globals (localStorage, sessionStorage,
+// Storage); without --localstorage-file, localStorage is undefined. Vitest's
+// happy-dom environment only copies window keys that are NOT already on the
+// global, so under Node 26 the happy-dom storage never arrives and every
+// client test touching localStorage fails. Install happy-dom's in their place.
+if (globalThis.happyDOM) {
+  const { Storage } = await import('happy-dom');
+  for (const [key, value] of [['Storage', Storage], ['localStorage', new Storage()], ['sessionStorage', new Storage()]]) {
+    Object.defineProperty(globalThis, key, { value, configurable: true, writable: true });
+  }
+}
