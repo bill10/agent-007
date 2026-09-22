@@ -1,5 +1,22 @@
 # TODOS
 
+## Agent messages go into anything that is not a recognised dialog
+- **What:** `server/messages.js` types a message plus Enter into an agent whose
+  state is WAITING, and WAITING means "no MESSAGE_PATTERNS match", not "its idle
+  composer is on screen". A dialog a new CLI release words differently reads as
+  WAITING and the Enter answers it (usually option 1, "Yes"). Deliver only on a
+  positive match of each CLI's composer instead: Codex's `›` row and its
+  "<model> · <cwd>" status row (see `isCodexPane` in server/pty.js), and a
+  Claude Code equivalent, both verified against captured PTY output.
+- **Why:** The Codex trust dialog was already answered this way once during
+  development; patching MESSAGE_PATTERNS one dialog at a time is a denylist.
+- **Effort:** M (human: ~1 day / CC: ~45 min, most of it capturing real panes)
+- **Priority:** P2
+- **Depends on:** Agent messaging (v0.4.4.0)
+- **Context:** Raised by the security specialist, red team and adversarial
+  review during /ship (2026-09-22); listed under Known limits in
+  docs/designs/agent-messaging.md.
+
 ## Office canvas has no vertical overflow handling for many pods
 - **What:** `computePodLayout` clamps only the top of the arrangement; enough
   pods (e.g. many single-agent repos) flow past `panelHeight`, so those desks

@@ -4,14 +4,15 @@ import { existsSync, readdirSync, realpathSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { resolve } from 'path';
-import { isAllowedOrigin } from './state.js';
+import { isAllowedOrigin, sessions } from './state.js';
 import {
   authEnabled, resolveToken, resolveAgentToken,
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
 import {
-  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, attachmentPath,
+  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
+import { agentSummaries, sendMessage } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -107,6 +108,9 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
         session: req.agentSession,
         user: userById(req.agentSession.ownerId),
       }, broadcast),
+      listAgents: () => agentSummaries(req.agentSession, sessions,
+        (jobId) => allJobs().find(job => job.id === jobId)?.title),
+      sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
     });
     // A notification gets no body. 202 is what the MCP HTTP transport expects.
     if (!reply) return res.status(202).end();

@@ -5,6 +5,34 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.4.0] - 2026-09-22
+
+### Added
+
+- **Agents message each other, whichever CLI they run on.** Tell an agent "ask
+  Viper what it changed in jobs.js" and it sends the question itself, whether
+  Viper runs on Claude Code or Codex. Before, only Claude Code agents could
+  reach each other, through Claude Code's own messaging. Every agent now has two
+  more tools on the board's MCP server, `list_agents` and `send_message`. A
+  message is typed into the other agent's terminal as a new turn, headed with
+  who sent it and quoted line by line, and the reply comes back the same way.
+  It goes in only while that agent rests at its prompt. It never goes into a
+  permission or trust dialog the app recognises, and never within 30 seconds of
+  you typing in that terminal. Until then it queues. An agent reaches only
+  agents with the same owner, never a shell tab, and at most 10 messages per
+  pair every 10 minutes. An agent that never asks before acting only takes
+  messages from another agent like it, so a careful agent cannot borrow a
+  bypass agent's permissions by asking it. The design, and the limits that
+  remain, are in [docs/designs/agent-messaging.md](docs/designs/agent-messaging.md).
+
+### Fixed
+
+- **Codex's folder-trust and hook-review dialogs are recognised as questions.**
+  They read as an agent resting at its prompt, so a Codex agent parked at one
+  showed no "needs you" bubble. Anything typed into them, a message included,
+  answered them: the trust dialog saved the folder as trusted, and "Hooks need
+  review" opened the hooks browser, which had the same fault.
+
 ## [0.4.3.2] - 2026-09-21
 
 ### Fixed

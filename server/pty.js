@@ -11,6 +11,7 @@ import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
+import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
@@ -53,6 +54,7 @@ function installAsyncSpawnGuard() {
     clearInterval(session.stateCheckInterval);
     clearTimeout(session.scanTimer);
     removeMcpConfig(session.id);
+    dropMessages(session.id);
     updateState(session, broadcast);
     if (broadcast) broadcast({ type: 'session-ended', sessionId: session.id, reason });
   });
@@ -149,6 +151,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // already stops honouring the token the moment `exited` is set, so this is
     // about not leaving credentials lying in the filesystem, not about access.
     removeMcpConfig(sessionId);
+    dropMessages(sessionId);
     updateState(session, broadcast);
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
   });
@@ -279,6 +282,7 @@ export function updateState(session, broadcast) {
   const newState = detectState(session);
   if (newState !== prevState) {
     session.state = newState;
+    session.stateChangedAt = Date.now();   // messages.js: one message per stop
     if (broadcast) broadcast({ type: 'state-change', sessionId: session.id, state: newState });
     // A job card's "needs you" badge is derived from its agent's state, so the
     // board has to be re-sent when that state moves. The browser recomputes the
@@ -289,4 +293,7 @@ export function updateState(session, broadcast) {
     // actual transition, so it is a handful of messages per job.
     if (session.jobId && broadcast) broadcastJobs(broadcast);
   }
+  // Every check, not only on arriving at WAITING: a message held back because
+  // someone was typing has no later transition to wait for.
+  flushMessages(session);
 }

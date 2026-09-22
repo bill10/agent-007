@@ -58,10 +58,10 @@ describe('handshake', () => {
 });
 
 describe('tools/list', () => {
-  it('offers the four board tools, with post_job needing a title', () => {
+  it('offers the board and messaging tools, with post_job needing a title', () => {
     const reply = handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {});
     expect(reply.result.tools).toEqual(TOOLS);
-    expect(reply.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job']);
+    expect(reply.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']);
     expect(POST_JOB_TOOL.inputSchema.required).toEqual(['title']);
     expect(POST_JOB_TOOL.inputSchema.properties.agent.enum).toEqual(['claude', 'codex']);
   });

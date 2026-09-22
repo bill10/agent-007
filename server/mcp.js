@@ -169,7 +169,44 @@ export const EDIT_JOB_TOOL = {
   },
 };
 
-export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL];
+// Messaging lives on this same server because it is the one both CLIs already
+// load: Claude Code's own SendMessage reaches only other Claude Code sessions.
+export const LIST_AGENTS_TOOL = {
+  name: 'list_agents',
+  description:
+    'List the other agents running in Agent 007 that you can message with '
+    + 'send_message — Claude Code and Codex alike — with the repo and branch each '
+    + 'is on, what it is doing, and its job card if it has one. Use this when the '
+    + 'user asks you to ask, tell or coordinate with another agent.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
+export const SEND_MESSAGE_TOOL = {
+  name: 'send_message',
+  description:
+    'Send a message to another agent running in Agent 007, whether it runs on '
+    + 'Claude Code or Codex. It arrives in that agent\'s terminal as a new turn '
+    + 'once the agent is idle at its prompt, marked as coming from you, and any '
+    + 'reply comes back to you the same way — this call does not wait for one. '
+    + 'Use it when the user asks you to ask, tell or coordinate with another '
+    + 'agent; do not start conversations of your own accord. Names come from '
+    + 'list_agents.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      to: { type: 'string', description: 'The agent\'s name, as list_agents prints it.' },
+      message: {
+        type: 'string',
+        description: 'What to say. The recipient was not in this conversation, so '
+          + 'include the context it needs to answer.',
+      },
+    },
+    required: ['to', 'message'],
+    additionalProperties: false,
+  },
+};
+
+export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -315,13 +352,36 @@ const CALLS = {
       `Updated ${result.changed.join(', ')} on "${job.title}" (${job.repo}), still in To do.${fires}`,
     );
   },
+
+  [LIST_AGENTS_TOOL.name]: (args, ctx) => {
+    const agents = ctx.listAgents();
+    if (!agents.length) return toolText('No other agents are running that you can message.');
+    const lines = agents.map(a => {
+      const bits = [a.agent, a.repoSlug, a.branchName, a.state?.toLowerCase(),
+        a.jobTitle ? `job: ${a.jobTitle}` : null,
+        a.pending ? `${a.pending} message(s) waiting for it` : null];
+      return `  ${a.name}\n    ${bits.filter(Boolean).join(' · ')}`;
+    });
+    return toolText(`${agents.length} agent(s) you can message:\n${lines.join('\n')}`);
+  },
+
+  [SEND_MESSAGE_TOOL.name]: (args, ctx) => {
+    const result = ctx.sendMessage({ to: args.to, text: args.message });
+    if (result.error) return toolText(result.error, true);
+    // Say which, so an agent does not report "asked it" and then wait on an
+    // answer that cannot come until the other one stops working.
+    return toolText(result.delivered
+      ? `Delivered to ${result.to.name}. Its reply, if any, will arrive as a message in this terminal.`
+      : `Queued for ${result.to.name} (position ${result.queued}); it gets the message once it is next free at its prompt. Its reply, if any, will arrive as a message in this terminal.`);
+  },
 };
 
 /**
  * Handle one JSON-RPC message.
  *
  * @param msg      parsed JSON-RPC request or notification
- * @param ctx      { session, postJob, listJobs, readJob, editJob } — the agent
+ * @param ctx      { session, postJob, listJobs, readJob, editJob, listAgents,
+ *                 sendMessage } — the agent
  *                 this token belongs to, and the injected board functions
  *                 (server/jobs.js, the write ones bound to a broadcast), kept
  *                 as parameters so this module never imports the job store.

@@ -25,6 +25,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste, draggable tabs, and renaming.
 - **Job board** -- Queue work instead of babysitting it. Each queued job spawns a fresh agent on its own worktree and branch, moves To do -> In progress -> Review as the agent works and opens a pull request, and files itself away when the PR merges. A card can also run on a cron schedule. Per-board and per-card permission modes; Claude Code or Codex per card.
 - **Agents post jobs too** -- Tell an agent "add that to the job board" and it files the card itself over MCP.
+- **Agents message each other** -- Claude Code and Codex agents alike: "ask Viper what it changed" sends the question to that agent's terminal over MCP, and the reply comes back the same way.
 - **Works on a phone** -- Below 700px the three panels become one screen at a time.
 - **Dark/light themes** (see [DESIGN.md](DESIGN.md)), **live sync** across every connected browser, and **voice input** (`Cmd+D`) for dictating prompts.
 
@@ -158,7 +159,8 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, list_agents, send_message)
+  messages.js      Agent-to-agent messages (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)

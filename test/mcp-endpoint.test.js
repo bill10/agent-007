@@ -2,7 +2,7 @@
 // boundary between a person's token and one agent's session token, and the
 // round trip that puts a card on the board.
 
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import express from 'express';
 import { createServer } from 'http';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
@@ -18,6 +18,7 @@ const { config, sessions } = await import('../server/state.js');
 const { setupRoutes } = await import('../server/http.js');
 const { allJobs, boardSettings, updateSettings } = await import('../server/jobs.js');
 const { mintAgentToken, hashToken } = await import('../server/auth.js');
+const { dropMessages } = await import('../server/messages.js');
 
 const AGENT_TOKEN = mintAgentToken();
 const broadcasts = [];
@@ -134,7 +135,7 @@ describe('the handshake over HTTP', () => {
     expect(init.result.serverInfo.name).toBe('agent-007-board');
 
     const list = await (await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
-    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job']);
+    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']);
   });
 
   it('answers a notification with 202 and an empty body', async () => {
@@ -474,7 +475,7 @@ describe('reading and editing the board through the tools', () => {
     // /mcp is the agent door: a person reads and edits through the board's own
     // API, and their token does not resolve here at all.
     const userToken = withUser();
-    for (const name of ['list_jobs', 'read_job', 'edit_job']) {
+    for (const name of ['list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']) {
       expect((await callNamed(name, { id: 'job-1' }, userToken)).status, name).toBe(401);
     }
   });
@@ -642,5 +643,55 @@ describe('reading and editing the board through the tools', () => {
     expect(text).not.toContain('/wt/9');
     expect(text).not.toContain(REPO);
     expect(text).toContain(basename(REPO));
+  });
+});
+
+describe('messaging another agent through the tools', () => {
+  // The route builds list_agents' rows and binds send_message to the calling
+  // session; mcp-protocol and messages.test.js stub both, so only this proves
+  // the wiring picks the right sender and does not hand a session over whole.
+  const peer = (id, name, fields = {}) => ({
+    id, name, command: 'codex', agent: 'codex', repoSlug: 'agent-007', branchName: `b-${name}`,
+    state: 'WAITING', stateChangedAt: 0, isTUI: true, lastOutputAt: 0, recentStrippedLines: [], ownerId: null, exited: false,
+    agentToken: `secret-${id}`, pty: { write: vi.fn() }, ...fields,
+  });
+
+  beforeEach(() => {
+    for (const id of ['session-1', 'session-2', 'session-3', 'session-4']) dropMessages(id);
+    sessions.get('session-1').command = 'claude';
+  });
+
+  it('lists other agents with their job title and backlog, and not shell tabs', async () => {
+    config.jobs = [{ id: 'job-9', title: 'Fix cron', repoPath: REPO, state: 'running' }];
+    sessions.set('session-2', peer('session-2', 'Viper', { state: 'WORKING', jobId: 'job-9' }));
+    sessions.set('session-3', peer('session-3', 'Asp', { command: 'bash' }));
+    await callNamed('send_message', { to: 'Viper', message: 'hi' });
+    const text = await toolText(await callNamed('list_agents', {}));
+    expect(text).toContain('1 agent(s) you can message');
+    expect(text).toContain('Viper\n    codex · agent-007 · b-Viper · working · job: Fix cron · 1 message(s) waiting');
+    expect(text).not.toContain('Asp');
+    expect(text).not.toContain('Onyx');           // never itself
+    expect(text).not.toContain('secret');
+  });
+
+  it('types the message into the named agent, signed by the caller', async () => {
+    const viper = peer('session-2', 'Viper');
+    sessions.set('session-2', viper);
+    const { text, failed } = await toolResult(await callNamed('send_message', { to: 'Viper', message: 'can you rebase?' }));
+    expect(failed).toBeFalsy();
+    expect(text).toMatch(/^Delivered to Viper/);
+    const typed = viper.pty.write.mock.calls[0][0];
+    expect(typed).toContain('[Message from agent Onyx]');
+    expect(typed).toContain('can you rebase?');
+  });
+
+  it('refuses an agent owned by someone else, as a tool error', async () => {
+    sessions.get('session-1').ownerId = 'u1';
+    const theirs = peer('session-4', 'Mamba', { ownerId: 'u2' });
+    sessions.set('session-4', theirs);
+    const { text, failed } = await toolResult(await callNamed('send_message', { to: 'Mamba', message: 'hi' }));
+    expect(failed).toBe(true);
+    expect(text).toMatch(/No agent named "Mamba"/);
+    expect(theirs.pty.write).not.toHaveBeenCalled();
   });
 });
