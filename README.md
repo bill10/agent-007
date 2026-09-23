@@ -5,9 +5,9 @@
 
 A pixel office for managing AI terminal agents. Spawn Claude Code (or any CLI) instances into isolated git worktrees and watch them work side-by-side in a retro pixel art office.
 
-![Agent 007 — spawning an agent, posting a job, and an agent turning orange when it needs an answer](docs/demo.gif)
+![An agent walks to its desk and starts work, a job card is posted and dispatched to a second desk, and an agent turns orange when it stops to ask a question](docs/demo.gif)
 
-<sub>Spawning an agent, posting a job to the board, and an agent turning orange when it needs your answer. ([still screenshot](docs/screenshot.png))</sub>
+*Recorded from the running app. If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
 
 ## Why?
 
