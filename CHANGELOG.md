@@ -5,6 +5,30 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.5.0] - 2026-09-22
+
+### Fixed
+
+- **Several people can watch the same terminal without its text scrambling.**
+  A terminal has one size and every browser gets the same output, but each
+  browser resized it to fit its own window. Whoever resized last saw it right;
+  everyone else got output drawn for the wrong width, until they resized it
+  back and scrambled it for the first person. A terminal now takes the size of
+  the smallest of its owner's windows showing it, as tmux does, and every
+  browser draws it at exactly that size. A bigger window shows some empty
+  space, and nothing is reflowed. A window stops counting as soon as it isn't
+  showing that terminal: it switched tabs, opened the job board or another
+  phone view, went to a background browser tab, or closed.
+- **A new or reconnecting browser shows a terminal's history at the right
+  width.** It used to replay the history into a blank 80x24 terminal before
+  sizing it, which wrapped every longer line.
+- **Terminals get a UTF-8 locale when the server has none.** A server started
+  by launchd, systemd or a bare ssh command has no `LANG`, so every terminal
+  ran in the plain POSIX locale, and so did any server reached from one over
+  ssh (ssh forwards `LANG`). Accented text, box-drawing lines and emoji came
+  out as `?` or junk in shells, vim and tmux. A locale you set yourself is
+  still left alone.
+
 ## [0.4.4.2] - 2026-09-22
 
 ### Fixed
