@@ -84,7 +84,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows } = msg;
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
@@ -100,6 +100,9 @@ export async function handleSessionCreated(msg) {
   }
 
   const term = new Terminal({
+    // The pty's size, so the replayed scrollback lands at the width it was
+    // drawn for. fitAgent() below then settles the size with the server.
+    ...(cols && rows ? { cols, rows } : {}),
     theme: getTerminalTheme(),
     // Agents inside the PTY (e.g. Claude Code) pick their own truecolor text
     // for prompts and can't see the browser theme — dark-on-dark otherwise.
@@ -156,17 +159,10 @@ export async function handleSessionCreated(msg) {
     // The job board uses it to tell "still working" from "parked at a prompt,
     // probably waiting on a human" without any extra server traffic.
     lastOutputAt: Date.now(),
+    ptySize: cols && rows ? { cols, rows } : null,   // kept current by pty-size
   });
 
-  if (fitAddon) {
-    requestAnimationFrame(() => {
-      if (termEl.offsetWidth > 0) {
-        fitAddon.fit();
-        // Only the owner drives the PTY size; viewers fit locally without resizing it.
-        if (canControlAgent(agents.get(sessionId))) send({ type: 'pty-resize', sessionId, cols: term.cols, rows: term.rows });
-      }
-    });
-  }
+  requestAnimationFrame(() => fitAgent(sessionId));
 
   term.onData((data) => {
     // Read-only for non-owners: don't forward keystrokes (server enforces too).
@@ -192,6 +188,31 @@ export function handlePtyOutput(msg) {
   const bytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
   agent.lastOutputAt = Date.now();
   agent.term.write(bytes);
+}
+
+// Tell the server how big this window could show the terminal. The pty takes
+// the smallest size among the windows showing it (ws.js fitPtyToWatchers) and
+// answers with pty-size, so the copy here is only ever resized to that, never
+// to this window alone. A view-only window may not resize the pty at all and
+// goes straight to its size.
+function fitAgent(sessionId) {
+  const agent = agents.get(sessionId);
+  if (!agent || !agent.fitAddon || agent.termEl.offsetWidth === 0) return;
+  if (!canControlAgent(agent)) {
+    if (agent.ptySize) agent.term.resize(agent.ptySize.cols, agent.ptySize.rows);
+    return;
+  }
+  const dims = agent.fitAddon.proposeDimensions();
+  if (dims && dims.cols > 0 && dims.rows > 0) send({ type: 'pty-resize', sessionId, cols: dims.cols, rows: dims.rows });
+}
+
+// Render at the pty's size, not this window's, so its output is never
+// reflowed into a width it wasn't drawn for.
+export function handlePtySize(msg) {
+  const agent = agents.get(msg.sessionId);
+  if (!agent) return;
+  agent.ptySize = { cols: msg.cols, rows: msg.rows };
+  if (agent.term.cols !== msg.cols || agent.term.rows !== msg.rows) agent.term.resize(msg.cols, msg.rows);
 }
 
 export function handleStateChange(msg) {
@@ -281,10 +302,7 @@ export function switchToSession(sessionId) {
   // Double rAF ensures browser has reflowed after display change
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      if (agent.fitAddon && agent.termEl.offsetWidth > 0) {
-        agent.fitAddon.fit();
-        if (canControlAgent(agent)) send({ type: 'pty-resize', sessionId, cols: agent.term.cols, rows: agent.term.rows });
-      }
+      fitAgent(sessionId);
       agent.term.scrollToBottom();
       agent.term.focus();
     });
@@ -479,13 +497,7 @@ export function updateStatusBar() {
 }
 
 export function fitActiveTerminal() {
-  if (activeSessionId) {
-    const agent = agents.get(activeSessionId);
-    if (agent && agent.fitAddon && agent.termEl.offsetWidth > 0) {
-      agent.fitAddon.fit();
-      if (canControlAgent(agent)) send({ type: 'pty-resize', sessionId: activeSessionId, cols: agent.term.cols, rows: agent.term.rows });
-    }
-  }
+  if (activeSessionId) fitAgent(activeSessionId);
 }
 
 // --- File Upload ---

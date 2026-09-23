@@ -2,7 +2,7 @@
 import { agents, repos, selfUserId, setSelf, shellPreset, setView } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
-  handleSessionCreated, handlePtyOutput, handleStateChange,
+  handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
   handleSpawnError, handleSessionEnded, switchToSession,
   removeSession, updateTabs, updateStatusBar, fitActiveTerminal,
   setOnSessionChanged, handleUploadComplete, setupUpload,
@@ -485,6 +485,7 @@ function onMessage(msg) {
       scheduleTabRestore();
       break;
     case 'pty-output': handlePtyOutput(msg); break;
+    case 'pty-size': handlePtySize(msg); break;
     case 'state-change':
       // A process exit broadcasts DISCONNECTED here BEFORE session-ended, so
       // this alive->dead transition is where the walk-out must be captured —

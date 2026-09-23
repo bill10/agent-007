@@ -50,7 +50,32 @@ export function sessionPayload(session) {
     ownerColor: owner ? owner.color : null,
     spawnedBy: session.spawnedBy || 'user',
     jobId: session.jobId || null,
+    // So a client builds its xterm at the pty's size before the scrollback
+    // replay lands, instead of reflowing it into xterm's default 80x24.
+    cols: session.pty.cols,
+    rows: session.pty.rows,
   };
+}
+
+// A pty has one size, and every window showing it gets the same bytes. So it
+// takes the smallest of the windows showing it (as tmux does): each sees the
+// whole screen at the right width, a bigger one with some empty space. Every
+// window is told the size and renders its copy at exactly that.
+function fitPtyToWatchers(session) {
+  let cols = Infinity, rows = Infinity;
+  for (const ws of clients) {
+    const w = ws.watching;
+    if (ws.readyState === 1 && w && w.sessionId === session.id) {
+      cols = Math.min(cols, w.cols);
+      rows = Math.min(rows, w.rows);
+    }
+  }
+  if (cols === Infinity) return;   // nobody is showing it: keep the last size
+  if (cols !== session.pty.cols || rows !== session.pty.rows) {
+    session.lastResizeAt = Date.now();
+    session.pty.resize(cols, rows);
+  }
+  broadcast({ type: 'pty-size', sessionId: session.id, cols, rows });
 }
 
 export function broadcastOrphansList() {
@@ -189,9 +214,14 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'pty-resize': {
           const session = sessions.get(msg.sessionId);
           // Only the owner drives PTY dimensions; viewers render at their own size.
-          if (session && !session.exited && owns(ws, session.ownerId)) {
-            session.lastResizeAt = Date.now();
-            session.pty.resize(msg.cols, msg.rows);
+          const valid = Number.isInteger(msg.cols) && Number.isInteger(msg.rows) && msg.cols > 0 && msg.rows > 0;
+          if (session && !session.exited && valid && owns(ws, session.ownerId)) {
+            // A window shows one terminal at a time, so this one stops
+            // counting towards whichever it showed before.
+            const prev = ws.watching && ws.watching.sessionId !== session.id ? sessions.get(ws.watching.sessionId) : null;
+            ws.watching = { sessionId: session.id, cols: msg.cols, rows: msg.rows };
+            if (prev && !prev.exited) fitPtyToWatchers(prev);
+            fitPtyToWatchers(session);
           }
           break;
         }
@@ -490,6 +520,12 @@ export function setupWebSocket(wss, { createSession, killSession }) {
       }
     });
 
-    ws.on('close', () => { clients.delete(ws); broadcastPresence(); });
+    ws.on('close', () => {
+      clients.delete(ws);
+      // The terminal it was showing can grow back to the windows still open.
+      const watched = ws.watching && sessions.get(ws.watching.sessionId);
+      if (watched && !watched.exited) fitPtyToWatchers(watched);
+      broadcastPresence();
+    });
   });
 }

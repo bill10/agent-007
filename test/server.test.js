@@ -376,6 +376,58 @@ describe('PTY lifecycle', () => {
   }, 15000);
 });
 
+describe('pty size with two windows', () => {
+  const open = () => new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl);
+    ws.on('open', () => resolve(ws));
+    ws.on('error', reject);
+  });
+  const next = (ws, pred) => new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timeout')), 5000);
+    const on = (data) => {
+      const msg = JSON.parse(data.toString());
+      if (pred(msg)) { clearTimeout(timer); ws.off('message', on); resolve(msg); }
+    };
+    ws.on('message', on);
+  });
+
+  it('takes the smallest of the windows showing it', async () => {
+    const a = await open();
+    const b = await open();
+    const created = next(a, m => m.type === 'session-created');
+    a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
+    const { sessionId } = await created;
+    const show = (ws, cols, rows) => ws.send(JSON.stringify({ type: 'pty-resize', sessionId, cols, rows }));
+    // Every window hears every size, so wait for the one expected; a wrong
+    // size never arriving fails on the timeout.
+    const size = (ws, cols, rows) => next(ws, m => m.type === 'pty-size' && m.sessionId === sessionId && m.cols === cols && m.rows === rows);
+
+    let got = size(b, 100, 30);
+    show(a, 100, 30);
+    await got;
+
+    // A smaller second window shrinks it for both.
+    got = size(a, 60, 30);
+    show(b, 60, 40);
+    await got;
+
+    // A bigger one can't grow it past the smaller window still showing it.
+    got = size(b, 60, 40);
+    show(a, 200, 50);
+    await got;
+
+    // Once the smaller window closes, it grows back to the one left.
+    got = size(a, 200, 50);
+    b.close();
+    await got;
+
+    const ended = next(a, m => m.type === 'session-ended' && m.sessionId === sessionId);
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    await ended;
+    a.close();
+  }, 15000);
+});
+
 // --- Auth enforcement (phase 1) ---
 // Runs LAST: writes a user to the hermetic users path so the running server
 // (which started auth-disabled) picks it up live, then removes it so nothing
