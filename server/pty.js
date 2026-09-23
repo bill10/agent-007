@@ -3,7 +3,7 @@
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { basename } from 'path';
-import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames } from '../lib/helpers.js';
+import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames, ptyEnv } from '../lib/helpers.js';
 // Re-exported so the handler's tests reach the parser through the module they drive.
 export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd } from './command-path.js';
@@ -197,7 +197,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
       cols: 120,
       rows: 30,
       cwd,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env: ptyEnv(process.env),
     });
   } catch (err) {
     removeMcpConfig(sessionId);   // nothing will ever read it now
