@@ -101,7 +101,7 @@ the source of truth — never trust the client.
 |--------------------|:-----:|:---------:|-------|
 | `spawn`            |  n/a  |    n/a    | Any authed user; new session owned by them |
 | `pty-input`        |  ✅   |    ❌     | **The core read-only gate** |
-| `pty-resize`       |  ✅   |    ❌     | Only the owner drives PTY dimensions (see below) |
+| `pty-resize`       |  ✅   |    ✅*    | *Accepted, but only the owner's windows count towards the size (see below) |
 | `kill`             |  ✅   |    ❌     | |
 | `upload-file`      |  ✅   |    ❌     | |
 | `refresh-tree`     |  ✅   |    ❌     | Mutates scan state; owner only |
@@ -111,6 +111,7 @@ the source of truth — never trust the client.
 | `get-diff`         |  ✅   |    ✅     | Read-only; allowed for all |
 | `get-full-tree`    |  ✅   |    ✅     | Read-only; allowed for all |
 | `pty-output` (recv)|  ✅   |    ✅     | Broadcast to all — this is how viewing works |
+| `pty-size` (recv)  |  ✅   |    ✅     | Broadcast to all when a PTY's size changes |
 
 Rejected mutations get a `{ type: 'notification', level: 'error', message:
 'Read-only — owned by <name>' }` back to the sender, not silent drops.
@@ -118,14 +119,18 @@ Rejected mutations get a `{ type: 'notification', level: 'error', message:
 ## The read-only terminal (trickiest bit)
 
 Output already broadcasts to every client (`server/pty.js:28`), so viewers
-receive the stream for free. The hard part is **sizing**: today every browser
-calls `pty-resize`, but a PTY has one set of dimensions. Rule:
+receive the stream for free. The hard part is **sizing**: a PTY has one set of
+dimensions, and every window gets the same bytes. Rule (as tmux does it):
 
-- **Only the owner's active client drives `pty-resize`.** Viewers never send it.
-- Viewer terminals render the owner's stream **display-only**: `xterm` with input
-  disabled, no resize emitted, content wrapped/letterboxed to fit. Minor visual
-  imperfection when viewer and owner window sizes differ is acceptable for
-  view-only.
+- Every window sends `pty-resize` with the terminal it is showing and how much
+  of it fits, or `sessionId: null` when it shows none (job board, another phone
+  view, a background browser tab).
+- The PTY takes the **smallest of the owner's windows** showing it. Viewers'
+  windows have no say. When the size changes the server broadcasts `pty-size`.
+- **Every** window, owner or viewer, renders its xterm at exactly that size,
+  never at its own: a bigger window shows empty space, nothing is reflowed or
+  scrambled. `session-created` carries the current size too, so a new window's
+  scrollback replay lands at the right width.
 - Viewer UI: a "view-only — owned by <name>" banner and a disabled input line.
 
 ## Office UI changes (`public/modules/office.js`)
@@ -159,8 +164,9 @@ Each phase is independently shippable and leaves the app working.
 - **Phase 2 — Ownership & authorization.** ✅ **Shipped.**
   `ownerId` on sessions + orphans + persistence; `sessionPayload` carries
   `ownerId`/`ownerName`/`ownerColor`; the authorization matrix is enforced
-  server-side (`owns()` in `server/ws.js`) with rejection notifications — input/
-  resize are silently dropped for non-owners, discrete actions (kill, upload,
+  server-side (`owns()` in `server/ws.js`) with rejection notifications — input
+  is silently dropped for non-owners and their windows have no say in a
+  terminal's size, discrete actions (kill, upload,
   refresh, orphan re-adopt/delete) get a read-only notice; read paths stay open.
   A minimal client guard blocks typing into terminals you don't own. Read-only is
   now *enforced* even if the UI lies. (Enforcement only when auth is enabled.)
@@ -168,7 +174,7 @@ Each phase is independently shippable and leaves the app working.
 
 - **Phase 3 — Multiplayer office UI.**
   Dimmed colleague tiles + name/color labels, read-only terminal (input disabled,
-  no viewer resize), presence strip. Effort: **M–L**.
+  rendered at the owner's size), presence strip. Effort: **M–L**.
 
 - **Phase 4 — Polish & safety.**
   Per-user spawn caps/rate limiting, an audit log of spawn/kill/repo actions,

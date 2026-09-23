@@ -157,7 +157,7 @@ server/
   jobs.js          Job board dispatcher (scan, spawn, PR watch, scheduled runs, attachment files)
   command-path.js  Resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
-  ws.js            WebSocket (message routing, broadcast, origin check)
+  ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, list_agents, send_message)
   messages.js      Agent-to-agent messages (who can reach whom, rate limit, queued until the recipient rests at its prompt)

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { safeFilename,
   createCodenamePool, createCocktailPool, createColorCycler,
   stripAnsiComplete, detectState, parseGitStatus, buildFileTree,
-  createRingBuffer, repoDirName, parseCommand,
+  createRingBuffer, repoDirName, parseCommand, ptyEnv,
   CODENAMES, COCKTAILS, AGENT_COLORS, STATE_TIMEOUT_MS,
 } from '../lib/helpers.js';
 
@@ -738,5 +738,16 @@ describe('safeFilename', () => {
     expect(safeFilename('nul')).toBe('_nul');
     expect(safeFilename('console.log')).toBe('console.log');
     expect(safeFilename(undefined)).toBe('');
+  });
+});
+
+describe('ptyEnv', () => {
+  it('fills in a UTF-8 LANG only when no locale is set', () => {
+    expect(ptyEnv({ PATH: '/bin' })).toEqual({ PATH: '/bin', TERM: 'xterm-256color', LANG: 'en_US.UTF-8' });
+    expect(ptyEnv({ LANG: 'de_DE.UTF-8' }).LANG).toBe('de_DE.UTF-8');
+    expect(ptyEnv({ LC_ALL: 'C' }).LANG).toBeUndefined();
+    expect(ptyEnv({ TERM: 'dumb' }).TERM).toBe('xterm-256color');
+    expect(ptyEnv({ LC_CTYPE: 'UTF-8' }).LANG).toBeUndefined();
+    expect(ptyEnv({ LANG: '' }).LANG).toBe('en_US.UTF-8');   // empty is unset
   });
 });

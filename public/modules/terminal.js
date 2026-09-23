@@ -84,7 +84,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows } = msg;
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
@@ -94,12 +94,17 @@ export async function handleSessionCreated(msg) {
     a.ownerId = ownerId || null;
     a.ownerName = ownerName || null;
     a.ownerColor = ownerColor || null;
+    // A reconnect missed any pty-size sent while this window was away.
+    if (cols && rows) handlePtySize({ sessionId, cols, rows });
     updateStatusBar();
     if (onSessionChanged) onSessionChanged();
     return;
   }
 
   const term = new Terminal({
+    // The pty's size, so the replayed scrollback lands at the width it was
+    // drawn for. fitAgent() below then settles the size with the server.
+    ...(cols && rows ? { cols, rows } : {}),
     theme: getTerminalTheme(),
     // Agents inside the PTY (e.g. Claude Code) pick their own truecolor text
     // for prompts and can't see the browser theme — dark-on-dark otherwise.
@@ -158,14 +163,12 @@ export async function handleSessionCreated(msg) {
     lastOutputAt: Date.now(),
   });
 
-  if (fitAddon) {
-    requestAnimationFrame(() => {
-      if (termEl.offsetWidth > 0) {
-        fitAddon.fit();
-        // Only the owner drives the PTY size; viewers fit locally without resizing it.
-        if (canControlAgent(agents.get(sessionId))) send({ type: 'pty-resize', sessionId, cols: term.cols, rows: term.rows });
-      }
-    });
+  requestAnimationFrame(() => fitAgent(sessionId));
+  // Showing or hiding a terminal (tab switch, job board, phone views, panel
+  // drags) changes its size, so this one place keeps the server told which
+  // terminal this window is showing, or that it shows none.
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { if (activeSessionId === sessionId) fitActiveTerminal(); }).observe(termEl);
   }
 
   term.onData((data) => {
@@ -192,6 +195,25 @@ export function handlePtyOutput(msg) {
   const bytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
   agent.lastOutputAt = Date.now();
   agent.term.write(bytes);
+}
+
+// Tell the server how big this window could show the terminal. The pty takes
+// the smallest size among the owner's windows showing it (ws.js
+// fitPtyToWatchers) and answers with pty-size, so the copy here is only ever
+// resized to that, never to this window alone. A view-only window reports
+// too, which is how the server learns it moved off a terminal it owns.
+function fitAgent(sessionId) {
+  const agent = agents.get(sessionId);
+  if (!agent || !agent.fitAddon || agent.termEl.offsetWidth === 0) return;
+  const dims = agent.fitAddon.proposeDimensions();
+  if (dims && dims.cols > 0 && dims.rows > 0) send({ type: 'pty-resize', sessionId, cols: dims.cols, rows: dims.rows });
+}
+
+// Render at the pty's size, not this window's, so its output is never
+// reflowed into a width it wasn't drawn for.
+export function handlePtySize(msg) {
+  const agent = agents.get(msg.sessionId);
+  if (agent && (agent.term.cols !== msg.cols || agent.term.rows !== msg.rows)) agent.term.resize(msg.cols, msg.rows);
 }
 
 export function handleStateChange(msg) {
@@ -281,10 +303,7 @@ export function switchToSession(sessionId) {
   // Double rAF ensures browser has reflowed after display change
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      if (agent.fitAddon && agent.termEl.offsetWidth > 0) {
-        agent.fitAddon.fit();
-        if (canControlAgent(agent)) send({ type: 'pty-resize', sessionId, cols: agent.term.cols, rows: agent.term.rows });
-      }
+      fitAgent(sessionId);
       agent.term.scrollToBottom();
       agent.term.focus();
     });
@@ -478,14 +497,13 @@ export function updateStatusBar() {
   updateTopbarAgent();
 }
 
+// Report the terminal on screen, or that none is: a window on the job board,
+// another phone view or a background browser tab must not hold a terminal at
+// its size.
 export function fitActiveTerminal() {
-  if (activeSessionId) {
-    const agent = agents.get(activeSessionId);
-    if (agent && agent.fitAddon && agent.termEl.offsetWidth > 0) {
-      agent.fitAddon.fit();
-      if (canControlAgent(agent)) send({ type: 'pty-resize', sessionId: activeSessionId, cols: agent.term.cols, rows: agent.term.rows });
-    }
-  }
+  const agent = activeSessionId && agents.get(activeSessionId);
+  if (agent && agent.termEl.offsetWidth > 0 && !document.hidden) fitAgent(activeSessionId);
+  else send({ type: 'pty-resize', sessionId: null });
 }
 
 // --- File Upload ---
