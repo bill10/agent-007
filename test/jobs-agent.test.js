@@ -592,6 +592,9 @@ describe('re-adopting an orphan', () => {
     const old = '01a0c536-ca47-7511-a2ef-fefc94dd1073';
     codexFor('/wt/sid/Old', t, { id: null, extra: { session_id: old } });
     expect(codexSessionIdFor('/wt/sid/Old', homes)).toBe(old);
+    // An `id` that is not a session id does not hide a session_id that is.
+    codexFor('/wt/sid/Handle', t, { id: 'thread_abc123', extra: { session_id: old } });
+    expect(codexSessionIdFor('/wt/sid/Handle', homes)).toBe(old);
     // A rollout with no id at all still marks the worktree as Codex's, but
     // there is nothing to pin the resume to: the picker, never --last.
     codexFor('/wt/sid/None', t, { id: null });

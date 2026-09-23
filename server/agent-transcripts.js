@@ -18,6 +18,7 @@
 import { readdirSync, statSync, openSync, readSync, closeSync, realpathSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { isCodexSessionId } from '../lib/jobs.js';
 
 function claudeHome() { return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'); }
 function codexHome() { return process.env.CODEX_HOME || join(homedir(), '.codex'); }
@@ -87,7 +88,10 @@ function rolloutMeta(file) {
     const { source, thread_source: thread } = meta.payload;
     if (source !== undefined && source !== 'cli') return null;
     if (thread !== undefined && thread !== 'user') return null;
-    return { cwd: meta.payload.cwd, id: meta.payload.id || meta.payload.session_id || null };
+    // The first field that is a session id: a newer schema's `id` could be
+    // some other kind of handle while `session_id` still holds the UUID.
+    const id = [meta.payload.id, meta.payload.session_id].find(isCodexSessionId) ?? null;
+    return { cwd: meta.payload.cwd, id };
   } catch {
     return null;
   } finally {
@@ -99,8 +103,13 @@ function rolloutMeta(file) {
 // Only files newer than `floor` are considered — transcriptsFor passes the
 // Claude transcript's mtime, since a Codex session no newer than that can
 // never win the comparison and so need not be opened; codexSessionIdFor
-// passes none, so a miss there reads up to ROLLOUT_SCAN_CAP first lines. Stat everything first (cheap), then read first lines newest
-// first and stop at the first cwd match: a hit costs a few reads however many
+// passes none, so a miss there reads up to ROLLOUT_SCAN_CAP first lines —
+// each up to ROLLOUT_LINE_CAP_BYTES, though a real one is some 22 KB. The cap
+// counts every rollout, `codex exec` runs and other repos' sessions included,
+// so a worktree whose last session is older than that many gets no id.
+//
+// Stat everything first (cheap), then read first lines newest first and stop
+// at the first cwd match: a hit costs a few reads however many
 // months of sessions sit on disk, and this runs on the ws thread, where every
 // millisecond is one nobody's terminal gets. A miss would otherwise read
 // every file newer than the floor, bounded only by history, so the scan stops
