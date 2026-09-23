@@ -689,7 +689,10 @@ or `codex`, so a shell tab or a guessed re-spawn leaves it blank rather than
 hardening a guess into a fact); the job card on its branch; and last, whichever
 CLI left the newer transcript for that worktree under its own home
 (`server/agent-transcripts.js`, honouring `CLAUDE_CONFIG_DIR` and `CODEX_HOME`;
-only interactive Codex sessions count, the ones `resume --last` can reach).
+only interactive Codex sessions count, the ones a resume can reach). A Codex
+agent resumes by id, `codex resume <id>` on that worktree's newest session:
+`--last` scopes by repo, so sibling worktrees would take each other's
+conversations; with no session to name it opens the picker instead.
 With none of those it is Claude Code, the board's default. When the card is
 known its permission mode rides along too, since neither CLI remembers the
 sandbox it was dispatched under. An agent spawned by hand has no card, so the

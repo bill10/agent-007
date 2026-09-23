@@ -117,8 +117,8 @@ describe('restart recovery for a running agent', () => {
 
   it('prefers the session\'s own note over its command, and derives one only when there is none', () => {
     expect(sessionAgent({ agent: 'codex', command: 'bash -lc codex' })).toBe('codex');
-    expect(sessionAgent({ agent: 'claude', command: 'codex resume --last' })).toBe('claude');
-    expect(sessionAgent({ agent: null, command: 'codex resume --last' })).toBeNull();
+    expect(sessionAgent({ agent: 'claude', command: 'codex resume' })).toBe('claude');
+    expect(sessionAgent({ agent: null, command: 'codex resume' })).toBeNull();
     expect(sessionAgent({ command: 'claude --continue' })).toBe('claude');
     expect(sessionAgent({ command: 'gemini' })).toBeNull();
     expect(sessionAgent({})).toBeNull();
@@ -231,8 +231,8 @@ describe('restart recovery for a running agent', () => {
     try {
       writeConfig([]);
       loadConfig();
-      saveActiveSession({ name: 'Back', command: 'codex resume --last --sandbox read-only', permissionFlags: ['--sandbox', 'read-only'], agent: 'codex', worktreePath: wt, branchName: 'b/back' });
-      saveActiveSession({ name: 'Guess', command: 'codex resume --last --sandbox read-only', permissionFlags: ['--sandbox', 'read-only'], agent: null, worktreePath: wt, branchName: 'b/guess' });
+      saveActiveSession({ name: 'Back', command: 'codex resume --sandbox read-only', permissionFlags: ['--sandbox', 'read-only'], agent: 'codex', worktreePath: wt, branchName: 'b/back' });
+      saveActiveSession({ name: 'Guess', command: 'codex resume --sandbox read-only', permissionFlags: ['--sandbox', 'read-only'], agent: null, worktreePath: wt, branchName: 'b/guess' });
       saveActiveSession({ name: 'Bare', worktreePath: wt, branchName: 'b/bare' });
       expect(config.activeSessions.map(s => [s.name, s.agent, s.permissionFlags])).toEqual([
         ['Back', 'codex', ['--sandbox', 'read-only']],
@@ -245,7 +245,7 @@ describe('restart recovery for a running agent', () => {
   });
 
   it('notes a CLI only for a command that is literally one, and codex by the binary alone', () => {
-    // A re-adopted agent already on `codex resume --last` and one spawned as
+    // A re-adopted agent already on `codex resume` and one spawned as
     // /opt/homebrew/bin/codex each record what their own re-adopt would need.
     // A plain terminal tab, a gemini, and a Codex started from inside a shell
     // record nothing: the note outranks every other witness at re-adopt time,
@@ -257,14 +257,14 @@ describe('restart recovery for a running agent', () => {
       writeConfig([]);
       loadConfig();
       saveActiveSession({ name: 'Bare', worktreePath: wt, branchName: 'b/bare' });
-      saveActiveSession({ name: 'Back', command: 'codex resume --last', worktreePath: wt, branchName: 'b/back' });
+      saveActiveSession({ name: 'Back', command: 'codex resume', worktreePath: wt, branchName: 'b/back' });
       saveActiveSession({ name: 'Brew', command: '/opt/homebrew/bin/codex --model o3', worktreePath: wt, branchName: 'b/brew' });
       saveActiveSession({ name: 'Gemini', command: 'gemini', worktreePath: wt, branchName: 'b/gemini' });
       saveActiveSession({ name: 'Shell', command: 'bash -lc codex', worktreePath: wt, branchName: 'b/shell' });
       // A re-adopted orphan whose CLI was only guessed carries agent: null on
       // the session itself, and that provenance beats its resume command —
       // otherwise a wrong guess would be recorded as fact on the next close.
-      saveActiveSession({ name: 'Guess', command: 'codex resume --last', agent: null, worktreePath: wt, branchName: 'b/guess' });
+      saveActiveSession({ name: 'Guess', command: 'codex resume', agent: null, worktreePath: wt, branchName: 'b/guess' });
       saveActiveSession({ name: 'NoTree', command: 'codex' });
       expect(config.activeSessions.map(s => [s.name, s.agent])).toEqual([
         ['Bare', null], ['Back', 'codex'], ['Brew', 'codex'], ['Gemini', null], ['Shell', null], ['Guess', null],
