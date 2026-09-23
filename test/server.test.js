@@ -692,7 +692,10 @@ describe('ownership authorization', () => {
     expect(await owners).toMatchObject({ cols: 100, rows: 30 });
 
     // B's smaller window is a viewer's: it renders at 100x30, it doesn't shrink it.
-    const shrunk = nextMatching(a, (m) => m.type === 'pty-size' && m.sessionId === sessionId, 1500);
+    // A's own copy of the 100x30 broadcast may still be in flight, so only a
+    // different size counts as a shrink.
+    const shrunk = nextMatching(a, (m) => m.type === 'pty-size' && m.sessionId === sessionId
+      && (m.cols !== 100 || m.rows !== 30), 1500);
     show(b, 50, 20);
     expect(await shrunk).toBeNull();
     expect([sessions.get(sessionId).pty.cols, sessions.get(sessionId).pty.rows]).toEqual([100, 30]);
