@@ -57,24 +57,36 @@ export function sessionPayload(session) {
   };
 }
 
+// Every window renders at the size it is sent, so one client's report reaches
+// every browser: far past any real screen, and xterm allocates cols x rows.
+const MAX_PTY_COLS = 1000;
+const MAX_PTY_ROWS = 500;
+
 // A pty has one size, and every window showing it gets the same bytes. So it
-// takes the smallest of the windows showing it (as tmux does): each sees the
-// whole screen at the right width, a bigger one with some empty space. Every
-// window is told the size and renders its copy at exactly that.
+// takes the smallest of the owner's windows showing it (as tmux does): each
+// sees the whole screen at the right width, a bigger one with some empty
+// space. A view-only window has no say. Every window is told the size when it
+// changes and renders its copy at exactly that.
 function fitPtyToWatchers(session) {
   let cols = Infinity, rows = Infinity;
   for (const ws of clients) {
     const w = ws.watching;
-    if (ws.readyState === 1 && w && w.sessionId === session.id) {
+    if (ws.readyState === 1 && w && w.sessionId === session.id && owns(ws, session.ownerId)) {
       cols = Math.min(cols, w.cols);
       rows = Math.min(rows, w.rows);
     }
   }
-  if (cols === Infinity) return;   // nobody is showing it: keep the last size
-  if (cols !== session.pty.cols || rows !== session.pty.rows) {
-    session.lastResizeAt = Date.now();
+  if (cols === Infinity) return;   // no owner window is showing it: keep the last size
+  if (cols === session.pty.cols && rows === session.pty.rows) return;
+  try {
     session.pty.resize(cols, rows);
+  } catch (err) {
+    // The pty can die a moment before onExit marks the session exited, and
+    // this runs from the socket close handler too, outside any try.
+    console.warn(`pty resize failed for ${session.id}: ${err.message}`);
+    return;
   }
+  session.lastResizeAt = Date.now();
   broadcast({ type: 'pty-size', sessionId: session.id, cols, rows });
 }
 
@@ -212,17 +224,19 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           break;
         }
         case 'pty-resize': {
-          const session = sessions.get(msg.sessionId);
-          // Only the owner drives PTY dimensions; viewers render at their own size.
-          const valid = Number.isInteger(msg.cols) && Number.isInteger(msg.rows) && msg.cols > 0 && msg.rows > 0;
-          if (session && !session.exited && valid && owns(ws, session.ownerId)) {
-            // A window shows one terminal at a time, so this one stops
-            // counting towards whichever it showed before.
-            const prev = ws.watching && ws.watching.sessionId !== session.id ? sessions.get(ws.watching.sessionId) : null;
-            ws.watching = { sessionId: session.id, cols: msg.cols, rows: msg.rows };
-            if (prev && !prev.exited) fitPtyToWatchers(prev);
-            fitPtyToWatchers(session);
-          }
+          // A window reports the terminal it is showing and how much of it
+          // fits, or sessionId null when it shows none (the job board,
+          // another view, a hidden browser tab). One terminal at a time, so
+          // it stops counting towards whichever it showed before. Any window
+          // may report; fitPtyToWatchers counts only the owner's.
+          const session = msg.sessionId == null ? null : sessions.get(msg.sessionId);
+          const fits = Number.isInteger(msg.cols) && Number.isInteger(msg.rows)
+            && msg.cols > 0 && msg.rows > 0 && msg.cols <= MAX_PTY_COLS && msg.rows <= MAX_PTY_ROWS;
+          if (msg.sessionId != null && !(session && !session.exited && fits)) break;
+          const prev = ws.watching && sessions.get(ws.watching.sessionId);
+          ws.watching = session ? { sessionId: session.id, cols: msg.cols, rows: msg.rows } : null;
+          if (prev && prev !== session && !prev.exited) fitPtyToWatchers(prev);
+          if (session) fitPtyToWatchers(session);
           break;
         }
         case 'kill': {

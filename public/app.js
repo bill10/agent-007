@@ -440,6 +440,7 @@ function setupDivider(dividerId, leftId, rightId, leftMin, rightMin) {
 
 // --- Resize ---
 function setupResize() {
+  document.addEventListener('visibilitychange', fitActiveTerminal);
   window.addEventListener('resize', () => {
     renderOffice();
     fitActiveTerminal();

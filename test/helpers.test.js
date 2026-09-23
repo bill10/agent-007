@@ -747,5 +747,7 @@ describe('ptyEnv', () => {
     expect(ptyEnv({ LANG: 'de_DE.UTF-8' }).LANG).toBe('de_DE.UTF-8');
     expect(ptyEnv({ LC_ALL: 'C' }).LANG).toBeUndefined();
     expect(ptyEnv({ TERM: 'dumb' }).TERM).toBe('xterm-256color');
+    expect(ptyEnv({ LC_CTYPE: 'UTF-8' }).LANG).toBeUndefined();
+    expect(ptyEnv({ LANG: '' }).LANG).toBe('en_US.UTF-8');   // empty is unset
   });
 });

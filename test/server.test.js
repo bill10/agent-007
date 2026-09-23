@@ -426,6 +426,55 @@ describe('pty size with two windows', () => {
     await ended;
     a.close();
   }, 15000);
+
+  it('ignores bad sizes and lets go of a terminal a window switches away from', async () => {
+    const a = await open();
+    const b = await open();
+    const spawn = async () => {
+      const created = next(a, m => m.type === 'session-created');
+      a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
+      return created;
+    };
+    const first = await spawn();
+    // The xterm is built at the pty's size before any resize arrives.
+    expect([first.cols, first.rows]).toEqual([120, 30]);
+    const s1 = first.sessionId;
+    const { sessionId: s2 } = await spawn();
+    const show = (ws, sessionId, cols, rows) => ws.send(JSON.stringify({ type: 'pty-resize', sessionId, cols, rows }));
+    const anySize = (ws, sessionId) => next(ws, m => m.type === 'pty-size' && m.sessionId === sessionId);
+
+    // Bad sizes are dropped: the first size heard is the valid one after them.
+    let got = anySize(a, s1);
+    show(a, s1, 0, 30);
+    show(a, s1, '100', 30);
+    show(a, s1, 100, 1.5);
+    show(a, s1, 1e9, 1e9);   // every browser would build an xterm this big
+    show(a, s1, 100, 30);
+    expect(await got).toMatchObject({ cols: 100, rows: 30 });
+
+    got = next(a, m => m.type === 'pty-size' && m.sessionId === s1 && m.cols === 60);
+    show(b, s1, 60, 30);
+    await got;
+
+    // b switches to s2, so s1 grows back to a's window alone.
+    got = next(a, m => m.type === 'pty-size' && m.sessionId === s1 && m.cols === 100);
+    show(b, s2, 80, 24);
+    await got;
+
+    // A window showing no terminal at all (job board, hidden tab) lets go too.
+    got = next(b, m => m.type === 'pty-size' && m.sessionId === s2 && m.cols === 100);
+    show(a, s2, 100, 30);   // a is bigger, so b still holds s2 at 80x24
+    b.send(JSON.stringify({ type: 'pty-resize', sessionId: null }));
+    await got;
+
+    for (const sessionId of [s1, s2]) {
+      const ended = next(a, m => m.type === 'session-ended' && m.sessionId === sessionId);
+      a.send(JSON.stringify({ type: 'kill', sessionId }));
+      await ended;
+    }
+    a.close();
+    b.close();
+  }, 15000);
 });
 
 // --- Auth enforcement (phase 1) ---
@@ -625,6 +674,28 @@ describe('ownership authorization', () => {
       && Buffer.from(m.data || '', 'base64').toString().includes(own), 3000);
     a.send(JSON.stringify({ type: 'pty-input', sessionId, data: own + '\n' }));
     expect(await echoOfA).toBeTruthy();
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
+  it("sizes a terminal to its owner's windows only, never a viewer's", async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep 11/.test(m.command || ''));
+    a.send(JSON.stringify({ type: 'spawn', command: 'sleep 11' }));
+    const { sessionId } = await created;
+    const b = await connect(tokenB);
+    const show = (ws, cols, rows) => ws.send(JSON.stringify({ type: 'pty-resize', sessionId, cols, rows }));
+
+    const owners = nextMatching(b, (m) => m.type === 'pty-size' && m.sessionId === sessionId);
+    show(a, 100, 30);
+    expect(await owners).toMatchObject({ cols: 100, rows: 30 });
+
+    // B's smaller window is a viewer's: it renders at 100x30, it doesn't shrink it.
+    const shrunk = nextMatching(a, (m) => m.type === 'pty-size' && m.sessionId === sessionId, 1500);
+    show(b, 50, 20);
+    expect(await shrunk).toBeNull();
+    expect([sessions.get(sessionId).pty.cols, sessions.get(sessionId).pty.rows]).toEqual([100, 30]);
 
     a.send(JSON.stringify({ type: 'kill', sessionId }));
     a.close(); b.close();

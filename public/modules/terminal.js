@@ -94,6 +94,8 @@ export async function handleSessionCreated(msg) {
     a.ownerId = ownerId || null;
     a.ownerName = ownerName || null;
     a.ownerColor = ownerColor || null;
+    // A reconnect missed any pty-size sent while this window was away.
+    if (cols && rows) handlePtySize({ sessionId, cols, rows });
     updateStatusBar();
     if (onSessionChanged) onSessionChanged();
     return;
@@ -159,10 +161,15 @@ export async function handleSessionCreated(msg) {
     // The job board uses it to tell "still working" from "parked at a prompt,
     // probably waiting on a human" without any extra server traffic.
     lastOutputAt: Date.now(),
-    ptySize: cols && rows ? { cols, rows } : null,   // kept current by pty-size
   });
 
   requestAnimationFrame(() => fitAgent(sessionId));
+  // Showing or hiding a terminal (tab switch, job board, phone views, panel
+  // drags) changes its size, so this one place keeps the server told which
+  // terminal this window is showing, or that it shows none.
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => { if (activeSessionId === sessionId) fitActiveTerminal(); }).observe(termEl);
+  }
 
   term.onData((data) => {
     // Read-only for non-owners: don't forward keystrokes (server enforces too).
@@ -191,17 +198,13 @@ export function handlePtyOutput(msg) {
 }
 
 // Tell the server how big this window could show the terminal. The pty takes
-// the smallest size among the windows showing it (ws.js fitPtyToWatchers) and
-// answers with pty-size, so the copy here is only ever resized to that, never
-// to this window alone. A view-only window may not resize the pty at all and
-// goes straight to its size.
+// the smallest size among the owner's windows showing it (ws.js
+// fitPtyToWatchers) and answers with pty-size, so the copy here is only ever
+// resized to that, never to this window alone. A view-only window reports
+// too, which is how the server learns it moved off a terminal it owns.
 function fitAgent(sessionId) {
   const agent = agents.get(sessionId);
   if (!agent || !agent.fitAddon || agent.termEl.offsetWidth === 0) return;
-  if (!canControlAgent(agent)) {
-    if (agent.ptySize) agent.term.resize(agent.ptySize.cols, agent.ptySize.rows);
-    return;
-  }
   const dims = agent.fitAddon.proposeDimensions();
   if (dims && dims.cols > 0 && dims.rows > 0) send({ type: 'pty-resize', sessionId, cols: dims.cols, rows: dims.rows });
 }
@@ -210,9 +213,7 @@ function fitAgent(sessionId) {
 // reflowed into a width it wasn't drawn for.
 export function handlePtySize(msg) {
   const agent = agents.get(msg.sessionId);
-  if (!agent) return;
-  agent.ptySize = { cols: msg.cols, rows: msg.rows };
-  if (agent.term.cols !== msg.cols || agent.term.rows !== msg.rows) agent.term.resize(msg.cols, msg.rows);
+  if (agent && (agent.term.cols !== msg.cols || agent.term.rows !== msg.rows)) agent.term.resize(msg.cols, msg.rows);
 }
 
 export function handleStateChange(msg) {
@@ -496,8 +497,13 @@ export function updateStatusBar() {
   updateTopbarAgent();
 }
 
+// Report the terminal on screen, or that none is: a window on the job board,
+// another phone view or a background browser tab must not hold a terminal at
+// its size.
 export function fitActiveTerminal() {
-  if (activeSessionId) fitAgent(activeSessionId);
+  const agent = activeSessionId && agents.get(activeSessionId);
+  if (agent && agent.termEl.offsetWidth > 0 && !document.hidden) fitAgent(activeSessionId);
+  else send({ type: 'pty-resize', sessionId: null });
 }
 
 // --- File Upload ---
