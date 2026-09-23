@@ -482,7 +482,9 @@ function onMessage(msg) {
       // A genuinely new session walks in; re-emits and the connect replay don't
       if (!agents.has(msg.sessionId)) noteAgentArrival(msg.sessionId);
       handleSessionCreated(msg);
-      if (window._onSessionCreatedCloseSpawn) window._onSessionCreatedCloseSpawn();
+      // Only this window's own spawn closes its form; someone else's must not
+      // hide a half-filled form or re-arm a Start still waiting on its reply.
+      if (msg.focus && window._onSessionCreatedCloseSpawn) window._onSessionCreatedCloseSpawn();
       scheduleTabRestore();
       break;
     case 'pty-output': handlePtyOutput(msg); break;
@@ -614,7 +616,12 @@ function scheduleTabRestore() {
         updateTabs();
       }
     } catch {}
-    if (savedActiveTab && agents.has(savedActiveTab)) switchToSession(savedActiveTab);
+    // Once only, for the connect replay: a later session-created (someone
+    // else's spawn) must not drag this window back to its page-load tab.
+    if (savedActiveTab && agents.has(savedActiveTab)) {
+      switchToSession(savedActiveTab);
+      savedActiveTab = null;
+    }
     restoreTimer = null;
   }, 100);
 }
