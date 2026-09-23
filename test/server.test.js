@@ -953,7 +953,7 @@ describe('ownership is inert when auth is disabled', () => {
       const readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
       w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
       back = await readopted;
-      expect(back.command).toBe('codex resume --last --dangerously-bypass-approvals-and-sandbox');
+      expect(back.command).toBe('codex resume --dangerously-bypass-approvals-and-sandbox');
       expect(orphans.has(orphan.id)).toBe(false);
       // The record for the next restart carries the CLI and the flags too.
       const rec = config.activeSessions.find(s => s.worktreePath === worktreePath);
@@ -1011,7 +1011,7 @@ describe('ownership is inert when auth is disabled', () => {
       let readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
       w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
       back = await readopted;
-      expect(back.command).toBe('codex resume --last');
+      expect(back.command).toBe('codex resume');
       expect(sessions.get(back.sessionId).agent).toBeNull();
       expect(config.activeSessions.find(s => s.worktreePath === worktreePath).agent).toBeNull();
 
@@ -1026,7 +1026,7 @@ describe('ownership is inert when auth is disabled', () => {
       readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== back.sessionId);
       w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: again.id }));
       back = await readopted;
-      expect(back.command).toBe('codex resume --last --sandbox read-only');
+      expect(back.command).toBe('codex resume --sandbox read-only');
       expect(allJobs().find(j => j.id === jobId).agentSessionId).toBe(back.sessionId);   // relinked to its card
       const rec = config.activeSessions.find(s => s.worktreePath === worktreePath);
       expect(rec.agent).toBeNull();

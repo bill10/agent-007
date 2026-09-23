@@ -15,7 +15,7 @@ import { basename, dirname, join, resolve, sep } from 'path';
 import { config, sessions, CONFIG_DIR } from './state.js';
 import { saveConfig } from './config.js';
 import { gitExec } from './git.js';
-import { agentFromTranscripts } from './agent-transcripts.js';
+import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
 import { safeFilename } from '../lib/helpers.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
@@ -1067,15 +1067,20 @@ export function findJobForBranch({ repoPath, branchName }) {
 // the command when no card supplies a mode. The returned `agent` is what was
 // resolved (null when nothing was).
 //
+// A Codex agent's command names its session: the newest one recorded in
+// exactly its worktree (`codex resume <id>`), or Codex's picker when there is
+// none — never `--last`, which would reach a sibling worktree's session.
+//
 // `homes` is for tests, which must not probe the developer's real ~/.codex.
 export function orphanResumePlan(orphan, homes) {
   const card = findJobForBranch(orphan);
   // The note is trusted only when it is one of ours: config.json is hand-
   // editable, and a stray value would otherwise be stamped onto the new
   // session as if it had been seen.
-  const agent = (isValidJobAgent(orphan.agent) ? orphan.agent : null)
-    || (card ? jobAgent(card) : null)
-    || agentFromTranscripts(orphan.worktreePath, homes);
+  const known = (isValidJobAgent(orphan.agent) ? orphan.agent : null)
+    || (card ? jobAgent(card) : null);
+  const probed = known ? null : transcriptsFor(orphan.worktreePath, homes);
+  const agent = known || probed.agent;
   // A board agent whose card is gone (done, or deleted) still belongs to the
   // board: it resumes under the board's current mode, not the CLI's default —
   // and not the mode it was dispatched with, which the board may have
@@ -1087,7 +1092,12 @@ export function orphanResumePlan(orphan, homes) {
   // They belong to the CLI on the record: a note-less orphan resolved by a
   // transcript has none to pass on, and resumes under that CLI's default.
   const flags = recordedPermissionFlags(orphan);
-  return { agent, mode, flags, command: resumeCommand(agent, mode, flags) };
+  // A Codex agent is pinned to its own worktree's session by id — the one
+  // the transcript probe already found, when that is how its CLI was known.
+  const sessionId = agent !== 'codex' ? null
+    : probed ? probed.codexSessionId
+    : codexSessionIdFor(orphan.worktreePath, homes);
+  return { agent, mode, flags, command: resumeCommand(agent, mode, flags, sessionId) };
 }
 
 export function resumeCommandForOrphan(orphan, homes) {

@@ -12,11 +12,13 @@
 // ran with one would be looked for in the wrong place.
 //
 // Where both left something, the newer transcript wins: it is the session
-// `--continue` / `resume --last` would pick up anyway.
+// `--continue` / a Codex resume of that worktree's newest session would pick
+// up anyway.
 
 import { readdirSync, statSync, openSync, readSync, closeSync, realpathSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { isCodexSessionId } from '../lib/jobs.js';
 
 function claudeHome() { return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'); }
 function codexHome() { return process.env.CODEX_HOME || join(homedir(), '.codex'); }
@@ -56,7 +58,9 @@ function transcriptMtime(path) {
 const ROLLOUT_CHUNK_BYTES = 16 * 1024;
 const ROLLOUT_LINE_CAP_BYTES = 1024 * 1024;
 
-function rolloutCwd(file) {
+// The session's cwd and id, or null for a rollout that is not an
+// interactive, top-level session.
+function rolloutMeta(file) {
   let fd;
   try {
     fd = openSync(file, 'r');
@@ -75,7 +79,7 @@ function rolloutCwd(file) {
     if (line === null) return null;   // capped out without a newline
     const meta = JSON.parse(line.toString('utf8'));
     if (!meta || meta.type !== 'session_meta' || !meta.payload) return null;
-    // Only an interactive, top-level session counts: `codex resume --last`
+    // Only an interactive, top-level session counts: Codex's resume picker
     // skips `codex exec` runs and subagent threads, so a rollout of either
     // kind is not evidence that anything can be resumed here — and a Claude
     // agent shelling out to `codex exec` in its own worktree leaves exactly
@@ -84,7 +88,10 @@ function rolloutCwd(file) {
     const { source, thread_source: thread } = meta.payload;
     if (source !== undefined && source !== 'cli') return null;
     if (thread !== undefined && thread !== 'user') return null;
-    return meta.payload.cwd;
+    // The first field that is a session id: a newer schema's `id` could be
+    // some other kind of handle while `session_id` still holds the UUID.
+    const id = [meta.payload.id, meta.payload.session_id].find(isCodexSessionId) ?? null;
+    return { cwd: meta.payload.cwd, id };
   } catch {
     return null;
   } finally {
@@ -92,11 +99,17 @@ function rolloutCwd(file) {
   }
 }
 
-// Newest matching rollout's mtime, or null. Only files newer than `floor`
-// are considered — the caller passes the Claude transcript's mtime, since a
-// Codex session no newer than that can never win the comparison and so need
-// not be opened. Stat everything first (cheap), then read first lines newest
-// first and stop at the first cwd match: a hit costs a few reads however many
+// Newest matching rollout as { m, id } (its mtime and session id), or null.
+// Only files newer than `floor` are considered — transcriptsFor passes the
+// Claude transcript's mtime, since a Codex session no newer than that can
+// never win the comparison and so need not be opened; codexSessionIdFor
+// passes none, so a miss there reads up to ROLLOUT_SCAN_CAP first lines —
+// each up to ROLLOUT_LINE_CAP_BYTES, though a real one is some 22 KB. The cap
+// counts every rollout, `codex exec` runs and other repos' sessions included,
+// so a worktree whose last session is older than that many gets no id.
+//
+// Stat everything first (cheap), then read first lines newest first and stop
+// at the first cwd match: a hit costs a few reads however many
 // months of sessions sit on disk, and this runs on the ws thread, where every
 // millisecond is one nobody's terminal gets. A miss would otherwise read
 // every file newer than the floor, bounded only by history, so the scan stops
@@ -119,10 +132,12 @@ function newestCodexTranscript(worktreePaths, home, floor = -Infinity) {
       if (m !== null && m > floor) candidates.push({ path, m });
     }
   };
+  // gstack-shortcut(dec-75da2913-0e19-4bf8-95c9-429bcbdaa95c): stats every rollout in history, synchronously, upgrade when Codex history reaches thousands of rollouts or a re-spawn stalls terminals.
   walk(join(home, 'sessions'), 0);
   candidates.sort((a, b) => b.m - a.m);
   for (const { path, m } of candidates.slice(0, ROLLOUT_SCAN_CAP)) {
-    if (worktreePaths.includes(rolloutCwd(path))) return m;
+    const meta = rolloutMeta(path);
+    if (meta && worktreePaths.includes(meta.cwd)) return { m, id: meta.id };
   }
   return null;
 }
@@ -134,20 +149,41 @@ function maxOf(values) {
 
 function safeReaddir(dir, opts) { try { return readdirSync(dir, opts); } catch { return []; } }
 
-// 'claude', 'codex', or null when neither CLI has a transcript for the path.
+// Which CLI last worked in the path — 'claude', 'codex', or null when neither
+// has a transcript for it — and, when it is Codex, that session's id, from
+// the same scan.
 //
 // Both CLIs record the physical directory they ran in (getcwd), so a worktree
 // reached through a symlink — /tmp on macOS is /private/tmp, a linked home —
 // is filed under the resolved path. Looked up under both forms.
-export function agentFromTranscripts(worktreePath, { claude = claudeHome(), codex = codexHome() } = {}) {
-  if (!worktreePath) return null;
+function pathForms(worktreePath) {
   let real = worktreePath;
   try { real = realpathSync.native(worktreePath); } catch {}
-  const forms = real === worktreePath ? [worktreePath] : [worktreePath, real];
+  return real === worktreePath ? [worktreePath] : [worktreePath, real];
+}
+
+export function transcriptsFor(worktreePath, { claude = claudeHome(), codex = codexHome() } = {}) {
+  const none = { agent: null, codexSessionId: null };
+  if (!worktreePath) return none;
+  const forms = pathForms(worktreePath);
   const c = maxOf(forms.map(p => newestClaudeTranscript(p, claude)));
   const x = newestCodexTranscript(forms, codex, c === null ? -Infinity : c);
-  if (c === null && x === null) return null;
-  if (x === null) return 'claude';
-  if (c === null) return 'codex';
-  return x > c ? 'codex' : 'claude';
+  if (c === null && x === null) return none;
+  if (x === null || (c !== null && x.m <= c)) return { agent: 'claude', codexSessionId: null };
+  return { agent: 'codex', codexSessionId: x.id };
+}
+
+export function agentFromTranscripts(worktreePath, homes) {
+  return transcriptsFor(worktreePath, homes).agent;
+}
+
+// The id of the newest interactive Codex session that ran in exactly this
+// worktree, or null. `codex resume --last` cannot be trusted with this: its
+// cwd filter treats every worktree of one repo as the same place, so an agent
+// re-spawned in one worktree resumed whichever sibling's session was newest —
+// and, with that sibling still running, stalled on "This conversation is open
+// in another app". Resuming by id pins each agent to its own conversation.
+export function codexSessionIdFor(worktreePath, { codex = codexHome() } = {}) {
+  if (!worktreePath) return null;
+  return newestCodexTranscript(pathForms(worktreePath), codex)?.id ?? null;
 }

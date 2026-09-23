@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.6.0] - 2026-09-23
+
+### Fixed
+
+- **A re-spawned Codex agent comes back to its own conversation.** Re-spawn
+  ran `codex resume --last`, and Codex counts every worktree of a repo as one
+  place, so an agent in one worktree picked up whichever sibling agent's
+  conversation was newest. With that sibling still running, it stopped on
+  "This conversation is open in another app"; with the sibling closed, it
+  carried on the wrong agent's work. Re-spawn now names the session: the
+  newest one Codex recorded in exactly that worktree, with the same permission
+  flags as before. A worktree with no session of its own opens Codex's session
+  picker rather than guessing.
+
 ## [0.4.5.1] - 2026-09-22
 
 ### Changed
