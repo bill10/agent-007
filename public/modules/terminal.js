@@ -84,7 +84,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus } = msg;
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
@@ -177,11 +177,12 @@ export async function handleSessionCreated(msg) {
     send({ type: 'pty-input', sessionId, data });
   });
 
-  // A board-dispatched agent opens its tab quietly. The dispatcher fires
-  // unattended every few minutes, so auto-switching would yank the user out of
-  // whatever they were typing — the tab dot, the office character and the job
-  // card all still announce it, and clicking any of them jumps here.
-  const stealFocus = (spawnedBy || 'user') !== 'board' || !activeSessionId;
+  // Only the window that spawned or adopted this agent switches to it (the
+  // server marks that copy `focus`). Board dispatches and other people's
+  // spawns open quietly — the tab dot, the office character and the job card
+  // still announce them, and clicking any of them jumps here. A window showing
+  // nothing takes it, unless that nothing is the job board being worked on.
+  const stealFocus = focus || (!activeSessionId && !boardActive);
   if (stealFocus) switchToSession(sessionId);
   updateTabs();
   updateStatusBar();

@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.7.0] - 2026-09-23
+
+### Fixed
+
+- **Opening a tab no longer yanks everyone else's screen.** When several
+  people share one server, spawning an agent made every other browser flash
+  to the new tab and then land on whatever tab it had open when the page
+  loaded. Now only the browser that spawned (or re-spawned) the agent
+  switches to it; everyone else gets the new tab in their strip and stays
+  where they were. Someone else's spawn also no longer closes your
+  half-filled spawn form, and no longer closes the job board while you're
+  working in it.
+
 ## [0.4.6.0] - 2026-09-23
 
 ### Fixed

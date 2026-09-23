@@ -391,6 +391,17 @@ describe('pty size with two windows', () => {
     ws.on('message', on);
   });
 
+  it('tells only the spawning window to switch to the new tab', async () => {
+    const a = await open();
+    const b = await open();
+    const mine = next(a, m => m.type === 'session-created');
+    const theirs = next(b, m => m.type === 'session-created');
+    a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
+    expect((await mine).focus).toBe(true);
+    expect((await theirs).focus).toBeUndefined();
+    a.close(); b.close();
+  });
+
   it('takes the smallest of the windows showing it', async () => {
     const a = await open();
     const b = await open();
@@ -934,7 +945,7 @@ describe('ownership is inert when auth is disabled', () => {
     // Started with a permission flag, which the re-spawn must carry back.
     const command = `${join(bin, 'codex')} --model o3 --dangerously-bypass-approvals-and-sandbox`;
     const w = await open();
-    let name, back;
+    let name, back, other;
     try {
       const created = next(w, (m) => m.type === 'session-created' && m.command === command);
       w.send(JSON.stringify({ type: 'spawn', command }));
@@ -950,10 +961,16 @@ describe('ownership is inert when auth is disabled', () => {
       expect(orphans.get(orphan.id).agent).toBe('codex');
       expect(orphan.permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
 
-      const readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
+      const isBack = (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId;
+      const readopted = next(w, isBack);
+      other = await open();
+      const theirs = next(other, isBack);
       w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
       back = await readopted;
       expect(back.command).toBe('codex resume --dangerously-bypass-approvals-and-sandbox');
+      // Only the window that clicked Re-spawn switches to the revived tab.
+      expect(back.focus).toBe(true);
+      expect((await theirs).focus).toBeUndefined();
       expect(orphans.has(orphan.id)).toBe(false);
       // The record for the next restart carries the CLI and the flags too.
       const rec = config.activeSessions.find(s => s.worktreePath === worktreePath);
@@ -971,6 +988,7 @@ describe('ownership is inert when auth is disabled', () => {
       if (name) codenamePool.recycle(name);
       rmSync(worktreePath, { recursive: true, force: true });
       w.close();
+      other?.close();
     }
   }, 15000);
 

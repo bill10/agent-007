@@ -713,9 +713,13 @@ the only route onto the argv: a stored record passes through it again on the
 way back, so nothing hand-edited into `config.json` can smuggle a second flag.
 
 ### Board-spawned agents
-A dispatched agent is an ordinary agent with one difference: its tab opens
-without taking focus (`spawnedBy: 'board'`), because an unattended dispatcher
-firing every five minutes would otherwise move the user's cursor mid-sentence.
+A dispatched agent is an ordinary agent. Its tab opens without taking focus,
+because an unattended dispatcher firing every five minutes would otherwise
+move the user's cursor mid-sentence. The server marks `session-created` with
+`focus: true` only on the copy sent to the window that spawned or adopted the
+agent. A dispatch has no such window, so every browser adds the tab quietly
+(so does every browser but the spawner's, for a person's spawn). A window
+showing no terminal takes the new tab, unless it is showing the job board.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired.
 

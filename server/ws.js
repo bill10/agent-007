@@ -30,6 +30,16 @@ export function broadcast(message) {
   }
 }
 
+// Everyone gets the new tab, but only the window that asked for it switches to
+// it — otherwise one person's spawn yanks every other browser off their tab.
+function announceSession(session, requester) {
+  const data = JSON.stringify(sessionPayload(session));
+  const mine = JSON.stringify({ ...sessionPayload(session), focus: true });
+  for (const ws of clients) {
+    if (ws.readyState === 1) ws.send(ws === requester ? mine : data);
+  }
+}
+
 export function sessionPayload(session) {
   const owner = userById(session.ownerId);
   return {
@@ -209,7 +219,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           if (result.error) {
             ws.send(JSON.stringify({ type: 'spawn-error', command: msg.command || 'claude', error: result.error }));
           } else if (result.session) {
-            broadcast(sessionPayload(result.session));
+            announceSession(result.session, ws);
           }
           break;
         }
@@ -400,7 +410,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           adoptingOrphans.delete(msg.orphanId);
           orphans.delete(msg.orphanId);
           syncOrphansToConfig(broadcast);
-          broadcast(sessionPayload(session));
+          announceSession(session, ws);
           broadcastOrphansList();
           break;
         }
