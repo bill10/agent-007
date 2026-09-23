@@ -5,6 +5,15 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.5.1] - 2026-09-22
+
+### Changed
+
+- **The README opens with the app running.** A short screen capture — spawning
+  an agent, posting a job to the board, and an agent turning orange when it
+  needs an answer — replaces the static screenshot above the fold, so the
+  states the office is built to show are visible before you read a word.
+
 ## [0.4.5.0] - 2026-09-22
 
 ### Fixed
