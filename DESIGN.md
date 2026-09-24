@@ -425,7 +425,7 @@ a fact about the board, not about a PTY.
 |---|---|---|
 | Dispatched | To do → In progress | Created |
 | The agent calls `finish_job`, or the PR poll finds its PR | → Review | Kept |
-| Its PR merges, or you move it to Done | → Done | Retired, worktree removed |
+| Its PR merges or is closed, or you move it to Done | → Done | Retired, worktree removed |
 | You move it back to To do | → To do | Retired, worktree removed |
 
 Each one-time card says whether its work ends in a pull request
@@ -718,8 +718,8 @@ showing no terminal takes the new tab, unless it is showing the job board.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired.
 
-A one-time job's agent is retired when its card reaches Done — its PR merged,
-or the user filed it away — or is moved back to To do. Review keeps it (see
+A one-time job's agent is retired when its card reaches Done — its PR merged
+or closed, or the user filed it away — or is moved back to To do. Review keeps it (see
 "How a one-time card moves"). A schedule's runs are one-time cards, so the
 same rule covers them; a superseded run is retired as it is filed to Done.
 
