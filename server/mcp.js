@@ -371,7 +371,7 @@ const CALLS = {
         + `${job.postedByAgent ? ` (typed by ${job.postedByAgent})` : ''}`,
       job.agentName ? `agent: ${job.agentName}, started ${when(job.startedAt)}` : null,
       job.branchName ? `branch: ${job.branchName}` : null,
-      job.prUrl ? `pull request: ${job.prUrl}${job.prMergedAt ? ` (merged ${when(job.prMergedAt)})` : ''}` : null,
+      job.prUrl ? `pull request: ${job.prUrl}${job.prMergedAt ? ` (merged ${when(job.prMergedAt)})` : job.prClosedAt ? ` (closed without merging ${when(job.prClosedAt)})` : ''}` : null,
       job.resultSummary ? `result: ${job.resultSummary}` : null,
       job.attachments.length ? `attachments: ${job.attachments.join(', ')}` : null,
       // Whoever last changed the text, so a card an agent rewrote never reads

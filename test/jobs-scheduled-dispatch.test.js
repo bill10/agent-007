@@ -5,7 +5,7 @@ import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import {
   addJob, updateJob, moveJob, dispatchOnce, fireSchedules, supersedeRuns, finishJobForAgent, pruneFinishedRuns,
-  runScan, allJobs, boardSettings, jobsPayload, postJobForAgent, setJobPaused,
+  runScan, allJobs, boardSettings, jobsPayload, postJobForAgent, setJobPaused, checkMergedPullRequests,
 } from '../server/jobs.js';
 import { jobType } from '../lib/jobs.js';
 
@@ -44,6 +44,22 @@ function fakeKillSession(killed) {
     killed.push(id);
     sessions.delete(id);
   };
+}
+
+// The closed-PR path acts on the second of two readings a scan apart, once
+// the card's agent is idle, and only when nothing is open on the branch. This
+// runs the sweep that way.
+async function closedSweep(broadcast, opts) {
+  for (const s of sessions.values()) if (!s.exited) s.state = 'WAITING';
+  for (let i = 0; i < 2; i++) {
+    await checkMergedPullRequests(broadcast, { findPr: async () => ({ pr: null }), ...opts });
+    ageClosedReadings();
+  }
+}
+
+// Stands in for the minute a closed reading must hold before it counts.
+function ageClosedReadings() {
+  for (const j of allJobs()) if (j.prClosedSeenAt) j.prClosedSeenAt = new Date(Date.now() - 120_000).toISOString();
 }
 
 const past = () => new Date(Date.now() - 60_000).toISOString();
@@ -396,5 +412,271 @@ describe('pruning finished runs', () => {
     allJobs().find(j => j.id === 'run-0').agentSessionId = 'alive';
     expect(pruneFinishedRuns(noopBroadcast)).toEqual([]);
     expect(runsOf(schedule)).toHaveLength(51);
+  });
+});
+
+describe('a card whose PR was closed without merging', () => {
+  async function prRunInReview() {
+    const schedule = dueSchedule({ requiresPr: true });
+    const [run] = fireSchedules(noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const pr = { url: 'https://github.com/o/r/pull/7', number: 7 };
+    await finishJobForAgent({ session: sessions.get(run.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    return { schedule, run };
+  }
+  const notMerged = async () => ({ pr: null });
+
+  it('files the run to Done, closes its agent, and lets the schedule fire again', async () => {
+    const { schedule, run } = await prRunInReview();
+    const agent = run.agentSessionId;
+    const killed = [];
+    await closedSweep(noopBroadcast, {
+      findMerged: notMerged,
+      findClosed: async (repo, branch, { prNumber }) => ({ pr: prNumber === 7 ? { url: 'u', number: 7 } : null }),
+      killSession: fakeKillSession(killed),
+    });
+    expect(run.state).toBe('done');
+    expect(run.prClosedAt).toBeTruthy();
+    expect(run.prMergedAt).toBeFalsy();
+    expect(killed).toEqual([agent]);
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toHaveLength(1);
+  });
+
+  it('leaves the run waiting while its PR is still open', async () => {
+    const { schedule, run } = await prRunInReview();
+    await closedSweep(noopBroadcast, { findMerged: notMerged, findClosed: async () => ({ pr: null }), killSession: fakeKillSession([]) });
+    expect(run.state).toBe('review');
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
+  });
+
+  it('files a one-time card to Done the same way, closing its agent', async () => {
+    const { job } = addJob({ title: 'plain', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const agent = job.agentSessionId;
+    const pr = { url: 'https://github.com/o/r/pull/9', number: 9 };
+    await finishJobForAgent({ session: sessions.get(agent), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    const killed = [];
+    await closedSweep(noopBroadcast, { findMerged: notMerged, findClosed: async () => ({ pr }), killSession: fakeKillSession(killed) });
+    expect(job.state).toBe('done');
+    expect(job.prClosedAt).toBeTruthy();
+    expect(killed).toEqual([agent]);
+  });
+
+  it('asks nothing about a card still In progress, which has no PR of record yet', async () => {
+    const { job } = addJob({ title: 'going', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    let asked = false;
+    await closedSweep(noopBroadcast, { findMerged: notMerged, findClosed: async () => { asked = true; return { pr: null }; } });
+    expect(asked).toBe(false);
+    expect(job.state).toBe('in-progress');
+  });
+});
+
+describe('a closed PR, at the edges', () => {
+  async function prCardInReview(over = {}) {
+    const { job } = addJob({ title: 'plain', repoPath: REPO, ...over }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const pr = { url: 'https://github.com/o/r/pull/9', number: 9 };
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    return { job, pr };
+  }
+  const notMerged = async () => ({ pr: null });
+
+  it('leaves the card alone when it moves while the closed check is out', async () => {
+    const { job, pr } = await prCardInReview();
+    const killed = [];
+    await closedSweep(noopBroadcast, {
+      findMerged: notMerged,
+      findClosed: async () => { job.state = 'in-progress'; return { pr }; },
+      killSession: fakeKillSession(killed),
+    });
+    expect(job.state).toBe('in-progress');
+    expect(job.prClosedAt).toBeFalsy();
+    expect(killed).toEqual([]);
+  });
+
+  it('leaves the card alone when its PR of record changes while the closed check is out', async () => {
+    const { job, pr } = await prCardInReview();
+    await closedSweep(noopBroadcast, {
+      findMerged: notMerged,
+      findClosed: async () => { job.prNumber = 10; return { pr }; },
+      killSession: fakeKillSession([]),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prClosedAt).toBeFalsy();
+  });
+
+  it('keeps the card in Review when the closed check itself fails', async () => {
+    const { job } = await prCardInReview();
+    await closedSweep(noopBroadcast, {
+      findMerged: notMerged,
+      findClosed: async () => ({ pr: null, error: 'Could not resolve to a Repository' }),
+      killSession: fakeKillSession([]),
+    });
+    expect(job.state).toBe('review');
+    expect(job.prCheckError).toMatch(/closed — Could not resolve/);
+  });
+
+  it('does not ask about a closed PR when the merge check failed, or when the card has no PR number', async () => {
+    const { job } = await prCardInReview();
+    let asked = 0;
+    const findClosed = async () => { asked++; return { pr: null }; };
+    await closedSweep(noopBroadcast, { findMerged: async () => ({ pr: null, error: 'nope' }), findClosed });
+    job.prNumber = null;
+    await closedSweep(noopBroadcast, { findMerged: notMerged, findClosed });
+    expect(asked).toBe(0);
+    expect(job.state).toBe('review');
+  });
+
+  it('says the PR was closed, and only says the schedule can run again for a run', async () => {
+    const { pr } = await prCardInReview();
+    const notes = [];
+    await closedSweep(m => notes.push(m), { findMerged: notMerged, findClosed: async () => ({ pr }), killSession: fakeKillSession([]) });
+    const note = notes.find(m => m.type === 'notification');
+    expect(note.message).toMatch(/PR #9 was closed without merging/);
+    expect(note.message).not.toMatch(/schedule/);
+
+    resetBoard();
+    dueSchedule({ requiresPr: true });
+    const [run] = fireSchedules(noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    await finishJobForAgent({ session: sessions.get(run.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    const runNotes = [];
+    await closedSweep(m => runNotes.push(m), { findMerged: notMerged, findClosed: async () => ({ pr }), killSession: fakeKillSession([]) });
+    expect(runNotes.find(m => m.type === 'notification').message).toMatch(/Its schedule can run again/);
+  });
+
+  it('closes only the linked agent, never a hand-opened session on the same branch', async () => {
+    const { job, pr } = await prCardInReview();
+    sessions.delete(job.agentSessionId);   // the linked agent is gone, so only the branch could match
+    const byHand = { id: 'by-hand', name: 'Hand', repoPath: REPO, branchName: job.branchName, exited: false };
+    sessions.set(byHand.id, byHand);
+    const killed = [];
+    await closedSweep(noopBroadcast, { findMerged: notMerged, findClosed: async () => ({ pr }), killSession: fakeKillSession(killed) });
+    expect(job.state).toBe('done');
+    expect(killed).toEqual([]);
+    expect(sessions.has('by-hand')).toBe(true);
+  });
+
+  it('is swept by a scan, which forwards findClosed', async () => {
+    const { job, pr } = await prCardInReview();
+    sessions.get(job.agentSessionId).state = 'WAITING';
+    for (let i = 0; i < 2; i++) {
+      await runScan(fakeCreateSession([]), noopBroadcast, {
+        killSession: fakeKillSession([]), findPr: async () => ({}), findMerged: notMerged, findClosed: async () => ({ pr }),
+      });
+      ageClosedReadings();
+    }
+    expect(job.state).toBe('done');
+    expect(job.prClosedAt).toBeTruthy();
+  });
+});
+
+describe('a closed PR and the card\'s files', () => {
+  it('clears the attachments of a card filed away for a closed PR', async () => {
+    const { job } = addJob({ title: 'with a file', repoPath: REPO, attachments: [{ name: 'a.png', data: Buffer.from('x').toString('base64') }] }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const pr = { url: 'https://github.com/o/r/pull/3', number: 3 };
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    const file = job.attachments[0].path;
+    await closedSweep(noopBroadcast, { findMerged: async () => ({ pr: null }), findClosed: async () => ({ pr }), killSession: fakeKillSession([]) });
+    const { existsSync } = await import('fs');
+    expect(job.state).toBe('done');
+    expect(job.attachments).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+  });
+});
+
+describe('the closed-PR guards', () => {
+  async function prCardInReview() {
+    const { job } = addJob({ title: 'guarded', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const pr = { url: 'https://github.com/o/r/pull/41', number: 41 };
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    sessions.get(job.agentSessionId).state = 'WAITING';
+    return { job, pr };
+  }
+  const opts = (over = {}) => ({ findMerged: async () => ({ pr: null }), findClosed: async () => ({ pr: { url: 'u', number: 41 } }), findPr: async () => ({ pr: null }), killSession: fakeKillSession([]), ...over });
+
+  it('waits for a second closed reading a minute later before filing the card', async () => {
+    const { job } = await prCardInReview();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    expect(job.state).toBe('review');
+    expect(job.prClosedSeenAt).toBeTruthy();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    expect(job.state).toBe('review');   // seconds later, e.g. Run now: not yet
+    ageClosedReadings();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    expect(job.state).toBe('done');
+  });
+
+  it('treats the same PR open again as not closed, and a failed open-PR lookup as undecided', async () => {
+    const { job, pr } = await prCardInReview();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    ageClosedReadings();
+    await checkMergedPullRequests(noopBroadcast, opts({ findPr: async () => ({ pr }) }));   // reopened in between
+    expect(job.state).toBe('review');
+    expect(job.prClosedSeenAt).toBeNull();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    ageClosedReadings();
+    await checkMergedPullRequests(noopBroadcast, opts({ findPr: async () => ({ pr: null, error: 'rate limited' }) }));
+    expect(job.state).toBe('review');
+    expect(job.prCheckError).toMatch(/replacement pull request — rate limited/);
+  });
+
+  it('forgets a closed reading once the PR is reopened', async () => {
+    const { job } = await prCardInReview();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    await checkMergedPullRequests(noopBroadcast, opts({ findClosed: async () => ({ pr: null }) }));
+    expect(job.prClosedSeenAt).toBeNull();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    expect(job.state).toBe('review');
+  });
+
+  it('adopts the replacement PR opened on the same branch instead of filing the card', async () => {
+    const { job } = await prCardInReview();
+    const killed = [];
+    const next = { url: 'https://github.com/o/r/pull/42', number: 42 };
+    for (let i = 0; i < 2; i++) {
+      await checkMergedPullRequests(noopBroadcast, opts({ findPr: async () => ({ pr: next }), killSession: fakeKillSession(killed) }));
+    }
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(42);
+    expect(killed).toEqual([]);
+  });
+
+  it('waits while the agent is busy, and files the card once it is quiet', async () => {
+    const { job } = await prCardInReview();
+    sessions.get(job.agentSessionId).state = 'MESSAGE';
+    await checkMergedPullRequests(noopBroadcast, opts());
+    ageClosedReadings();
+    await checkMergedPullRequests(noopBroadcast, opts());
+    expect(job.state).toBe('review');
+    sessions.get(job.agentSessionId).state = 'WAITING';
+    await checkMergedPullRequests(noopBroadcast, opts());
+    expect(job.state).toBe('done');
+  });
+
+  it('lets finish_job in Review adopt a replacement PR on the card\'s branch', async () => {
+    const { job } = await prCardInReview();
+    const next = { url: 'https://github.com/o/r/pull/42', number: 42 };
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: next.url }, noopBroadcast, { findPr: async () => ({ pr: next }) });
+    expect(job.prNumber).toBe(42);
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: 'https://github.com/o/r/pull/99' }, noopBroadcast, { findPr: async () => ({ pr: next }) });
+    expect(job.prNumber).toBe(42);   // not the branch's open PR, so ignored
+  });
+});
+
+describe('a closed reading and leaving Review', () => {
+  it('is forgotten when the card leaves Review, so a later closed PR needs two fresh readings', async () => {
+    const { job } = addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const pr = { url: 'https://github.com/o/r/pull/5', number: 5 };
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    job.prClosedSeenAt = new Date(Date.now() - 120_000).toISOString();
+    await moveJob(job.id, 'in-progress', noopBroadcast);
+    expect(job.prClosedSeenAt).toBeNull();
   });
 });

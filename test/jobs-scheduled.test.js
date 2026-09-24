@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createJob, resolveJobType, jobType, isScheduled, isJobDue, selectDispatchableJobs,
-  buildJobPrompt, scheduleHold, supersededRuns, createRunJob, runsToPrune,
+  buildJobPrompt, scheduleHold, supersededRuns, createRunJob, runsToPrune, parseClosedPr,
   JOB_TYPES, DEFAULT_JOB_TYPE,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
@@ -218,5 +218,29 @@ describe('runsToPrune', () => {
   it('leaves unfinished runs and one-time cards alone', () => {
     const jobs = [done('a', '2026-01-01'), { ...done('live', '2026-01-02'), state: 'review' }, { ...make(), id: 'plain', state: 'done' }];
     expect(runsToPrune(jobs, 0).map(j => j.id)).toEqual(['a']);
+  });
+});
+
+describe('parseClosedPr', () => {
+  const list = (prs) => JSON.stringify(prs);
+
+  it('finds the card\'s own PR when it was closed without merging', () => {
+    expect(parseClosedPr(list([{ number: 7, url: 'u7', state: 'CLOSED', mergedAt: null }]), 7)).toEqual({ url: 'u7', number: 7 });
+  });
+
+  it('never calls a merged PR closed, nor someone else\'s PR, nor bad output', () => {
+    expect(parseClosedPr(list([{ number: 7, state: 'MERGED', mergedAt: '2026-01-01' }]), 7)).toBeNull();
+    expect(parseClosedPr(list([{ number: 8, state: 'CLOSED' }]), 7)).toBeNull();
+    expect(parseClosedPr('not json', 7)).toBeNull();
+    expect(parseClosedPr(list([{ number: 7, state: 'CLOSED' }]), null)).toBeNull();
+  });
+
+  it('reads gh\'s state case-blind, reads the one object gh pr view prints, and never counts an open PR', () => {
+    expect(parseClosedPr(list([{ number: 7, state: 'closed' }]), 7)).toEqual({ url: null, number: 7 });
+    expect(parseClosedPr(list([{ number: 7, state: 'OPEN' }]), 7)).toBeNull();
+    expect(parseClosedPr(list({ number: 7, state: 'CLOSED' }), 7)).toEqual({ url: null, number: 7 });
+    expect(parseClosedPr(list({ number: 7, state: 'CLOSED', mergedAt: '2026-01-01' }), 7)).toBeNull();
+    expect(parseClosedPr('5', 7)).toBeNull();
+    expect(parseClosedPr(list([null, { number: 7, state: 'CLOSED', url: 'u' }]), 7)).toEqual({ url: 'u', number: 7 });
   });
 });
