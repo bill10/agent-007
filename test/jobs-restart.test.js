@@ -44,6 +44,17 @@ describe('restart recovery for in-flight jobs', () => {
     expect(job.lastError).toMatch(/bill\/add-thing/);
   });
 
+  // Nothing watches a no-PR card, so its note must not say the board is.
+  it('points a no-PR job at re-adopting its agent, not at a PR watch', () => {
+    writeConfig([{
+      id: 'j1', title: 'research', repoPath: '/r', state: 'in-progress', requiresPr: false,
+      agentSessionId: 'session-9', agentName: 'Viper', branchName: 'bill/research',
+    }]);
+    loadConfig();
+    expect(config.jobs[0].lastError).toMatch(/re-adopt/);
+    expect(config.jobs[0].lastError).not.toMatch(/watching for its PR/);
+  });
+
   it('requeues a job that never got as far as a branch', () => {
     writeConfig([{
       id: 'j2', title: 'never started', repoPath: '/r', state: 'in-progress',

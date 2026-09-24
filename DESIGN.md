@@ -419,6 +419,29 @@ durable (persisted in `config.json`). What a live agent is *doing* is derived;
 what the board could not do — a PR check that failed — is stored, because it is
 a fact about the board, not about a PTY.
 
+### How a one-time card moves
+
+| Event | Card | Agent and worktree |
+|---|---|---|
+| Dispatched | To do → In progress | Created |
+| The agent calls `finish_job`, or the PR poll finds its PR | → Review | Kept |
+| Its PR merges, or you move it to Done | → Done | Retired, worktree removed |
+| You move it back to To do | → To do | Retired, worktree removed |
+
+Each one-time card says whether its work ends in a pull request
+(`requiresPr`, default true). A card that requires one gets the `/ship` hint in
+its prompt and must hand `finish_job` the open PR on its own branch; the board
+checks that before moving it. A card that requires none gets no `/ship` hint —
+telling a research job to ship pushed it into inventing a change — and must
+hand `finish_job` a summary instead, which the Review card shows. The PR poll is
+the fallback for an agent that opened its PR but forgot to call `finish_job`.
+
+Review keeps the agent because the work is finished but may not be right: the
+reviewer can click straight into its terminal. The per-repo cap only counts In
+progress, so a kept agent idling in Review does not hold a slot. A restart
+kills every agent, so a Review card may reach Done with no live agent; its
+worktree then comes back as an orphan record, and Done releases it through that.
+
 ### The fourth state has no column
 
 A job whose PR has merged is `done`, and `done` is the one state with no
@@ -429,8 +452,7 @@ things a human still has to look at becomes an archive nobody reads.
 The sweep covers In progress as well as Review: a PR can open and merge inside
 one scan interval, and `--state open` cannot see it afterwards, so a
 Review-only sweep would leave that card in In progress forever reading "agent
-gone" for work that had shipped. Finishing from In progress retires the agent
-(that is what the per-repo cap counts); finishing from Review does not.
+gone" for work that had shipped. Finishing retires the agent from either column.
 
 The job itself is kept, never deleted: it is the record of what an agent did and
 where the PR is. It is reached through **View finished jobs** in the toolbar,
@@ -444,8 +466,8 @@ return to Review, and it could not be made safe: the card keeps the PR that
 finished it, and `reviewAt` is the sweep's time floor, so a job walked back to
 In progress carried a spent PR of record into its new attempt. The sweep matched
 that same old merge on the very next scan and filed the card away again — and
-because finishing from in-progress retires an agent, it killed whatever terminal
-had been re-adopted on the branch. Clearing those fields instead would trade the
+because finishing retires an agent, it killed whatever terminal had been
+re-adopted on the branch. Clearing those fields instead would trade the
 bug for a card whose history is gone, which defeats the point of keeping it.
 Work that follows a merged PR is a new job; the archive keeps the old one to
 point at.
@@ -468,21 +490,17 @@ Four rules keep the transition honest:
   from a card filed away by hand: a manual `✓ Done` stamps `doneAt` but not
   `prMergedAt`, because the board is recording that the *user* called the job
   finished, which is not a claim about GitHub.
-- **The sweep never retires an agent it finds in Review.** Unlike the one-shot
-  kill at the PR, this runs every scan; an agent you re-adopted on a shipped
-  branch to address review comments is yours. Finishing from In progress is the
-  one exception, and barely one: that is a job leaving in-progress, which is
-  exactly what the per-repo cap counts. A manual move to Done retires it too,
-  because that is the user saying the job is over. Exactly one manual move keeps
-  an agent — a move into In progress, taking the work back up; every other one
-  retires it.
+- **Only cards that require a PR are swept.** One that requires none has no PR
+  of its own, and a merge on a matching branch name proves nothing about it;
+  it reaches Done by hand.
 
 ### One-time and scheduled cards
 
 Two kinds of card share those three columns.
 
 A **one-time** job is the original: dispatched once, it crosses the board and
-stops in Review when its pull request appears. A **scheduled** job is a standing
+stops in Review when its agent calls `finish_job` (or the board spots its pull
+request), and leaves the board at Done. A **scheduled** job is a standing
 card fired by a cron schedule; it cycles To do -> In progress -> To do and never
 reaches Review. Cards written before types existed carry no `type` at all, so
 every read goes through `jobType()` — a missing type is one-time, which is what
@@ -497,9 +515,9 @@ those cards have always been.
   one-time queue. A scheduled card neither counts toward it nor waits behind
   it: it is already bounded — one run at a time, at cron pace — and holding it
   under the cap would let two long one-time jobs silently starve every
-  schedule on the repo, with the missed firings never replayed. The cap's
-  invariant is unchanged for what it actually governs: one-time in-progress
-  cards and their live agents remain the same set.
+  schedule on the repo, with the missed firings never replayed. The cap
+  counts one-time In progress cards whose agent is live; agents kept with
+  their cards in Review are deliberately outside it.
 - **The prompt is the task, plus one line.** A scheduled job need not be code
   at all, so the review/ship instruction is gone — telling an agent that
   summarises yesterday's commits to run `/ship` would push it into inventing a
@@ -723,27 +741,27 @@ showing no terminal takes the new tab, unless it is showing the job board.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired.
 
-Retirement happens when a one-time job LEAVES In progress — to Review when its
-pull request appears, or straight to Done when that pull request opened and
-merged inside a single scan — and on a manual move to Done, which is the user
-saying the job is over. A scheduled run's agent is the exception: it outlives
+A one-time job's agent is retired when its card reaches Done — its PR merged,
+or the user filed it away — or is moved back to To do. Review keeps it (see
+"How a one-time card moves"). A scheduled run's agent is the exception: it outlives
 its run as the kept terminal and is retired by the next dispatch, by the user
 closing the tab, or with the card's deletion (see "One-time and scheduled
-cards"). It never happens as a recurring sweep over jobs already in
-Review, and never over a card in the archive, which no longer has an agent to
-retire. An agent you re-adopt on a shipped branch to address review comments is
-yours; a poll that killed it every five minutes would make Review permanently
-hostile to working on your own PR.
+cards").
 
 ### Agent-posted jobs
 An agent you are talking to can put a card on the board when you ask it to, so
 "add that to the job board" does not mean leaving the conversation to type it.
-The board exposes four MCP tools — `post_job`, `list_jobs`, `read_job` and
-`edit_job` — over streamable HTTP from the app's own Express server
+The board exposes MCP tools — `post_job`, `list_jobs`, `read_job`, `edit_job`,
+and `finish_job` for a dispatched agent to report its own card done — over streamable HTTP from the app's own Express server
 (`server/mcp.js`), and every spawned Claude Code or Codex agent is connected to it by
 `server/agent-mcp.js`. Claude reads `--mcp-config`; Codex gets a per-launch
 `-c mcp_servers.agent-007-board=...` override that starts a local stdio bridge.
 
+- **Only the linked agent can finish a card.** `finish_job` acts on the card
+  whose `agentSessionId` is the caller's session, never on an id it is handed,
+  so no agent can close out another's work. On a card that requires a PR the
+  URL must be the open PR on that card's own branch, since it lands on the card
+  as the link a reviewer follows.
 - **Reading is its own tool, so asking costs nothing.** `list_jobs` answers
   "what is on the board?" without a card being posted to find out, and returns
   the id of each so `read_job` and `edit_job` have something to name. The board
@@ -930,8 +948,8 @@ the same shape as the terminal's upload, and land under
 - **Freed at Done.** A card is a few lines of JSON and stays forever; its
   files can be megabytes and were inputs to a run that is now over. When a
   card reaches Done — by hand or by the merge sweep — its files and their
-  links are removed, except while a live agent is still attached (a re-adopted
-  Review agent keeps the paths its prompt named). The merge sweep retries
+  links are removed, except while a live agent is still attached (one whose
+  retirement at Done failed keeps the paths its prompt named). The merge sweep retries
   stragglers every scan, so a deferred or OS-refused removal is reclaimed
   later instead of leaking. Deleting a card earlier removes its directory too.
 

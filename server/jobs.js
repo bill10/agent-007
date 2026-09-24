@@ -12,9 +12,9 @@ import { execFile } from 'child_process';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
-import { config, sessions, CONFIG_DIR } from './state.js';
-import { saveConfig } from './config.js';
-import { gitExec } from './git.js';
+import { config, sessions, orphans, adoptingOrphans, codenamePool, CONFIG_DIR } from './state.js';
+import { saveConfig, syncOrphansToConfig } from './config.js';
+import { gitExec, removeWorktree } from './git.js';
 import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
 import { safeFilename } from '../lib/helpers.js';
 import {
@@ -23,7 +23,7 @@ import {
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
-  MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType,
+  MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   isScheduledRunOver, scheduledRunReset, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
 } from '../lib/jobs.js';
@@ -265,8 +265,8 @@ function clearAttachments(job) {
 
 // True while a live agent may still be reading this card's files: its prompt
 // named their absolute paths at dispatch — the same hazard updateJob's To-do
-// gate exists for — and the merge sweep deliberately keeps a re-adopted
-// Review agent running when its PR lands.
+// gate exists for — and a Review agent is kept until its card is done, so a
+// kill that failed at Done leaves it holding the files until it exits.
 function attachmentsInUse(job) {
   const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
   return !!session && !session.exited;
@@ -288,8 +288,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -350,7 +350,7 @@ function scheduleTypeError(schedule) {
     : null;
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, type, agent, session, user }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, type, agent, requiresPr, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -368,6 +368,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, se
   if (agent != null && typeof agent !== 'string') {
     return { error: 'agent must be a string — "claude" or "codex"' };
   }
+  if (requiresPr != null && typeof requiresPr !== 'boolean') {
+    return { error: 'requires_pr must be true or false' };
+  }
 
   const result = addJob({
     // Typed explicitly: this comes off the wire, and a non-string would be
@@ -384,6 +387,7 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, se
     // Unnamed, the card runs on the same CLI as the agent posting it; a person
     // at the HTTP door with no session gets the board default.
     agent: agent || (session ? jobAgentFromCommand(session.command) : undefined),
+    requiresPr,
     // No permissionMode: an agent posting a card must not be able to pick the
     // mode the board will spawn with, which would be a way around every gate
     // its own session runs under. A card an agent files inherits the board's.
@@ -429,6 +433,7 @@ function jobSummary(job) {
     state: job.state,
     type: jobType(job),
     agent: jobAgent(job),
+    requiresPr: jobRequiresPr(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
     repo: basename(job.repoPath || ''),
@@ -491,6 +496,7 @@ export function readJobForAgent(jobId) {
       branchName: job.branchName || null,
       startedAt: job.startedAt || null,
       prMergedAt: job.prMergedAt || null,
+      resultSummary: job.resultSummary || null,
       editedAt: job.editedAt || null,
       lastRunAt: job.lastRunAt || null,
       runCount: job.runCount || 0,
@@ -517,7 +523,7 @@ export function readJobForAgent(jobId) {
 // land says so out loud and leaves its name on the card, because the whole
 // hazard is an edit nobody sees. Reading stays board-wide — every browser
 // already sees every card — but writing does not.
-export function editJobForAgent({ id, title, detail, repo, schedule, session, user }, broadcast) {
+export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr, session, user }, broadcast) {
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No job with id "${id}" — list the board to see the ids.` };
   const gate = editableInPlace(job);
@@ -561,9 +567,13 @@ export function editJobForAgent({ id, title, detail, repo, schedule, session, us
     fields.type = text ? 'scheduled' : 'one-time';
     if (text !== (job.schedule || '')) changed.push('schedule');
   }
+  if (requiresPr !== undefined) {
+    if (typeof requiresPr !== 'boolean') return { error: 'requires_pr must be true or false' };
+    if (requiresPr !== (job.requiresPr !== false)) { fields.requiresPr = requiresPr; changed.push('requires_pr'); }
+  }
 
   if (!changed.length) {
-    return { error: 'Nothing to change — pass a new title, detail, repo or schedule.' };
+    return { error: 'Nothing to change — pass a new title, detail, repo, schedule or requires_pr.' };
   }
   const result = updateJob(job.id, fields, broadcast);
   if (result.error) return result;
@@ -577,6 +587,85 @@ export function editJobForAgent({ id, title, detail, repo, schedule, session, us
     });
   }
   return { job: jobSummary(result.job), changed };
+}
+
+// The agent's own "I am done". A one-time card moves to Review on this call,
+// with its agent and worktree kept. Only the agent the card is linked to may
+// finish it, so an agent cannot close out someone else's work.
+//
+// A card that requires a PR must name one, and it must be the open PR on this
+// card's own branch: the link lands on the card, so a made-up or unrelated URL
+// would send the reviewer to the wrong place. A card that requires none must
+// carry a summary, since that is the whole of what Review has to show.
+export async function finishJobForAgent({ session, summary, prUrl }, broadcast, { findPr = findPrForBranch } = {}) {
+  const job = session ? allJobs().find(j => j.agentSessionId === session.id) : null;
+  if (!job) return { error: 'This agent is not working a job on the board, so there is nothing to finish.' };
+  if (isScheduled(job)) return { error: 'This is a scheduled job — its run ends on its own when you stop, so there is nothing to call.' };
+  if (summary != null && typeof summary !== 'string') return { error: 'summary must be a string' };
+  // Already in Review: the PR poll can find the PR /ship opened before the
+  // agent calls in, or someone moved the card by hand. The agent is right that
+  // it is done, so this is a success, and a summary it brings still lands.
+  if (job.state === 'review') {
+    const note = String(summary || '').trim().slice(0, MAX_DETAIL_LEN);
+    if (note) {
+      job.resultSummary = note;
+      persist(broadcast);
+    }
+    return { job: jobSummary(job) };
+  }
+  if (job.state !== 'in-progress') {
+    return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state} already, so there is nothing to finish.` };
+  }
+  if (prUrl != null && typeof prUrl !== 'string') return { error: 'pr_url must be a string' };
+  const text = String(summary || '').trim().slice(0, MAX_DETAIL_LEN);
+  const requiresPr = jobRequiresPr(job);
+  // The same skill under each CLI's spelling, as the prompt names it.
+  const ship = jobAgent(job) === 'codex' ? '$ship' : '/ship';
+  let pr = null;
+  if (requiresPr) {
+    if (!prUrl || !prUrl.trim()) {
+      return { error: `This job requires a pull request — run ${ship}, wait for it to open the PR, then call finish_job with its URL as pr_url.` };
+    }
+    const askedBranch = job.branchName;
+    const found = await findPr(job.repoPath, askedBranch);
+    if (found.error) return { error: `Could not check the pull request — ${found.error}` };
+    // Re-validate after the network call, as every other PR path does.
+    // The PR poll can move the card to Review during this very lookup; that is
+    // the same finish, so it takes the already-in-Review success above.
+    if (allJobs().includes(job) && job.state === 'review' && job.branchName === askedBranch) {
+      return finishJobForAgent({ session, summary }, broadcast, { findPr });
+    }
+    if (!allJobs().includes(job) || job.state !== 'in-progress' || job.branchName !== askedBranch) {
+      return { error: `"${job.title}" moved while its pull request was being checked, so it was left as it is now.` };
+    }
+    if (!found.pr) return { error: `There is no open pull request on ${askedBranch} yet — run ${ship} first.` };
+    const norm = u => String(u).trim().replace(/\/+$/, '').toLowerCase();
+    if (norm(prUrl) !== norm(found.pr.url)) {
+      return { error: `${prUrl} is not this job's pull request — the open one on ${askedBranch} is ${found.pr.url}.` };
+    }
+    pr = found.pr;
+  } else if (!text) {
+    return { error: 'This job needs no pull request, so the summary is its result — pass what you did or found as summary.' };
+  }
+
+  job.state = 'review';
+  job.reviewAt = new Date().toISOString();
+  job.resultSummary = text || null;
+  if (pr) {
+    job.prUrl = pr.url;
+    job.prNumber = pr.number;
+  }
+  job.lastError = null;
+  job.lastErrorAt = null;
+  clearPrCheckError(job);
+  persist(broadcast);
+  if (broadcast) {
+    broadcast({
+      type: 'notification', level: 'info',
+      message: `Job "${job.title}" moved to Review — ${pr ? `PR #${pr.number}` : `${session.name} finished`}`,
+    });
+  }
+  return { job: jobSummary(job) };
 }
 
 // A card stops being editable the moment it leaves To do, whoever is asking.
@@ -656,6 +745,9 @@ export function updateJob(jobId, fields, broadcast) {
     // overdue schedule and eat the firing that was about to happen.
     if (changes) job.nextRunAt = resolved.schedule ? nextCronIso(resolved.schedule) : null;
   }
+  // After the type is settled, and on createJob's rule: never false on a
+  // scheduled card, so one later turned one-time is not silently no-PR.
+  if (typeof fields.requiresPr === 'boolean') job.requiresPr = isScheduled(job) || fields.requiresPr;
   persist(broadcast);
   return { job };
 }
@@ -726,10 +818,9 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
 // Moving back to To do also RETIRES the job's agent. Unlinking it without
 // killing it left a running agent that no job pointed at: it no longer counted
 // toward the per-repo cap, so the board would dispatch a replacement alongside
-// it, and repeating the move walks straight past the cap. Retiring it keeps the
-// same invariant the PR path relies on — in-progress jobs and live board agents
-// are the same set. removeWorktree still protects the work: uncommitted or
-// unpushed changes become an orphan rather than being deleted.
+// it, and repeating the move walks straight past the cap. removeWorktree still
+// protects the work: uncommitted or unpushed changes become an orphan rather
+// than being deleted.
 export async function moveJob(jobId, state, broadcast, { killSession, findPr = findPrForBranch } = {}) {
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
@@ -743,7 +834,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // carried a spent PR of record into its new attempt: checkMergedPullRequests
   // re-matched that same old merge on the very next scan and filed the card
   // away again — killing whatever agent had been re-adopted on the branch,
-  // because finishing from in-progress retires one. Clearing those fields would
+  // because finishing retires one. Clearing those fields would
   // just trade that for a card whose history is gone. Work that follows a
   // merged PR is a new job, and the archive keeps the old one to point at.
   if (job.state === 'done') {
@@ -763,22 +854,17 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (state === 'in-progress' && !job.branchName) {
     return { error: 'That job has never been dispatched — leave it in To do so the board can pick it up' };
   }
-  // Any manual move OUT of in-progress retires the agent, not just the requeue.
-  // "→ Review" means the PR was opened outside the board, so the agent is as
-  // done as it would be on the automatic path. Leaving it running would break
-  // the invariant the cap depends on — in-progress jobs and live board agents
-  // being the same set — because countInFlightByRepo stops counting a job the
-  // moment it leaves in-progress. The agent would keep a worktree and a PTY
-  // while the board dispatched a replacement past the cap.
+  // Two moves retire the agent: back to To do, and to Done. Review keeps it —
+  // the work is finished, the agent idles at its prompt, and it is right there
+  // if the review turns up something to fix. The per-repo cap only counts In
+  // progress, so a kept Review agent does not hold a slot.
   //
-  // "Done" retires it for the same reason and one more: a finished card is off
-  // the board, so an agent still attached to it would be running with nothing
-  // visible pointing at it. (The automatic merge sweep deliberately does NOT do
-  // this — see checkMergedPullRequests.)
-  //
-  // One move keeps the agent, and it is the one that means "I am still working
-  // on this": a move INTO in-progress, taking the work back up.
-  const retiringSessionId = state === 'in-progress' ? null : job.agentSessionId;
+  // To do retires it because the next dispatch spawns a fresh one. Done retires
+  // it, worktree and all, because a finished card is off the board and nothing
+  // visible would point at an agent left running.
+  const retiringSessionId = state === 'todo' || state === 'done' ? job.agentSessionId : null;
+  // Captured before To do clears them, for the orphan release at the end.
+  const attempt = { branchName: job.branchName, repoPath: job.repoPath };
   job.state = state;
   if (state === 'todo') {
     // A scheduled card returning to To do is re-armed, not blanked: it keeps its
@@ -793,6 +879,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     job.prUrl = null;
     job.prNumber = null;
     job.reviewAt = null;
+    job.resultSummary = null;   // the last attempt's result, not this one's
   }
   if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
   // Stamped on arrival, and never cleared, because nothing leaves done. A job
@@ -812,7 +899,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // A manual move means "the PR was opened outside the board". Look it up, or
   // the card sits in Review with no link to the thing it produced — nothing
   // else backfills it, since the watcher only examines in-progress jobs.
-  if (state === 'review' && !job.prNumber && job.branchName) {
+  if (state === 'review' && jobRequiresPr(job) && !job.prNumber && job.branchName) {
     // Best-effort: a lookup that fails must not abandon the move half-applied,
     // with the state changed in memory but never persisted and the agent never
     // retired. The card just goes without its link, as it did before.
@@ -859,7 +946,35 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
       persist(broadcast);
     }
   }
+  if (state === 'done' || state === 'todo') await releaseOrphanedWorktree(attempt, broadcast);
   return { job };
+}
+
+// A restart kills every agent, and a kept agent's worktree comes back as an
+// orphan record rather than a session. A card that reaches Done (or goes back
+// to To do) before anyone re-adopts it has no agent to retire, so the worktree
+// is released through that orphan instead — the same removeWorktree killSession uses, so
+// unpushed or dirty work still stays behind as the orphan.
+async function releaseOrphanedWorktree({ branchName, repoPath }, broadcast) {
+  if (!branchName) return false;
+  const entry = [...orphans.values()].find(o => o.branchName === branchName && o.repoPath === repoPath);
+  if (!entry || adoptingOrphans.has(entry.id)) return false;
+  // Held for the whole removal, which is several awaited git calls: a re-adopt
+  // clicked in that window would spawn an agent in a worktree about to go.
+  adoptingOrphans.add(entry.id);
+  let orphaned;
+  try {
+    ({ orphaned } = await removeWorktree(entry));
+  } finally {
+    adoptingOrphans.delete(entry.id);
+  }
+  if (orphaned) return false;
+  codenamePool.recycle(entry.name);
+  if (entry.worktreePath) codenamePool.recycle(basename(entry.worktreePath)); // differs after a rename
+  orphans.delete(entry.id);
+  syncOrphansToConfig(broadcast);
+  if (broadcast) broadcast({ type: 'orphans-list', orphans: [...orphans.values()] });
+  return true;
 }
 
 export function updateSettings(fields, broadcast) {
@@ -1045,7 +1160,10 @@ export function findJobForBranch({ repoPath, branchName }) {
     j.branchName === branchName
     && j.repoPath === repoPath
     && (j.state === 'in-progress' || j.state === 'review')
-    && !j.agentSessionId,   // never steal a job that already has a live agent
+    // Never steal a job that already has a live agent. A link to a session
+    // that is gone or exited is not one: an agent closed by hand or crashed
+    // leaves its id behind, and re-adopting it must still reach the card.
+    && (!j.agentSessionId || !sessions.get(j.agentSessionId) || sessions.get(j.agentSessionId).exited),
   );
   // Prefer work still in flight: if an old review job and a new in-progress job
   // share a branch, the agent belongs to the one that is not finished.
@@ -1349,35 +1467,31 @@ export async function findMergedPrForBranch(repoPath, branchName, {
 }
 
 // Close the agent that delivered a job, resolving it by branch when the stored
-// link is gone. This is what keeps the per-repo cap meaningful: in-progress jobs
-// and live agents stay the same set, so nothing accumulates. killSession ->
-// removeWorktree deletes the worktree and the local branch (fully pushed by
-// then); the PR is untouched. The card keeps the whole record — agent name,
-// branch, PR link — so nothing is lost by the terminal going away, and the work
-// itself is on the remote.
+// link is gone. killSession -> removeWorktree deletes the worktree and the local
+// branch (fully pushed by then); the PR is untouched. The card keeps the whole
+// record — agent name, branch, PR link — so nothing is lost by the terminal
+// going away, and the work itself is on the remote.
 //
-// Resolved by branch because a restart nulls every agentSessionId, so a job
-// whose PR is discovered afterwards would otherwise have nothing to retire and
-// its agent would hold a worktree for already-delivered work indefinitely. The
-// branch finds it: created per job, not reused while it exists, durable across
-// restarts.
+// Resolved by branch because a restart nulls every agentSessionId, and an agent
+// re-adopted afterwards is found by its branch: created per job, not reused
+// while it exists, durable across restarts.
 //
-// Called ONLY at the moment a job leaves in-progress — to Review when its PR
-// appears, or straight to Done when the merge sweep catches a PR that opened and
-// merged inside one scan — never over jobs already in Review. An agent you
-// re-adopt on a shipped branch to address review comments is yours; a poll that
-// killed it every five minutes would make Review permanently hostile to working
-// on your own PR.
+// Called when the merge sweep files a card as Done. The PR poll and finish_job
+// keep the agent — Review is finished work with its agent still on hand — and
+// manual moves retire it in moveJob, by the linked session.
 //
 // Returns whether it actually closed something. A failure is logged and
 // swallowed: the work has shipped either way, so a cleanup that did not work
-// must not strand the card in In progress.
-async function retireAgentForJob(job, askedBranch, askedSessionId, killSession) {
+// must not strand the card.
+// byBranch: false restricts it to the linked session. A Review card's agent is
+// always linked (a re-adopt relinks it), so an unlinked session on that branch
+// is one someone opened by hand, and a merge is no reason to close it.
+async function retireAgentForJob(job, askedBranch, askedSessionId, killSession, { byBranch = true } = {}) {
   if (!killSession) return false;
   const linked = askedSessionId && askedSessionId === job.agentSessionId
     ? sessions.get(askedSessionId)
     : null;
-  const session = linked || [...sessions.values()].find(candidate =>
+  const session = linked || byBranch && [...sessions.values()].find(candidate =>
     candidate && !candidate.exited
     && candidate.branchName === askedBranch
     && candidate.repoPath === job.repoPath,
@@ -1398,11 +1512,16 @@ async function retireAgentForJob(job, askedBranch, askedSessionId, killSession) 
 // an internal call to findPrForBranch is bound directly by the module system
 // and cannot be substituted from outside, so the PR-to-review transition would
 // otherwise only be testable by talking to GitHub.
-export async function checkPullRequests(broadcast, { killSession, findPr = findPrForBranch } = {}) {
-  // One-time jobs only. A scheduled card is not trying to produce a pull
-  // request, and moving it to Review on the strength of one would take it out of
-  // rotation permanently — the column it cycles through is To do, not Review.
-  const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName && !isScheduled(j));
+//
+// The fallback for an agent that opened its PR but never called finish_job:
+// the same move, found by polling. Cards that require no PR are skipped — their
+// agent reports its own finish, and a PR on one proves nothing about that.
+// The agent is kept, as finish_job keeps it; Done is what retires it.
+export async function checkPullRequests(broadcast, { findPr = findPrForBranch } = {}) {
+  // jobRequiresPr is false for scheduled cards too. A scheduled card is not
+  // trying to produce a pull request, and moving it to Review on the strength of
+  // one would take it out of rotation permanently.
+  const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName && jobRequiresPr(j));
   if (inProgress.length === 0) return [];
   const moved = [];
   let noted = false;   // a PR-check failure was recorded on some card
@@ -1412,7 +1531,6 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     // a job that has since moved on — silently undoing the user's action, or
     // killing an agent that belongs to a different attempt.
     const askedBranch = job.branchName;
-    const askedSessionId = job.agentSessionId;
     const { pr, error } = await findPr(job.repoPath, askedBranch);
 
     // Re-validate before touching the job at all. findPr is a network call and
@@ -1452,14 +1570,8 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
     job.lastError = null;
     job.lastErrorAt = null;
     moved.push(job);
-
-    const closed = await retireAgentForJob(job, askedBranch, askedSessionId, killSession);
     if (broadcast) {
-      broadcast({
-        type: 'notification', level: 'info',
-        message: `Job "${job.title}" moved to Review — PR #${pr.number}`
-          + (closed ? ` · ${job.agentName} closed, worktree released` : ''),
-      });
+      broadcast({ type: 'notification', level: 'info', message: `Job "${job.title}" moved to Review — PR #${pr.number}` });
     }
   }
   if (moved.length > 0 || noted) persist(broadcast);
@@ -1486,12 +1598,11 @@ export async function checkPullRequests(broadcast, { killSession, findPr = findP
 //  - Only MERGED counts, and only THIS card's merge (see parseMergedPr). A PR
 //    closed without merging left the work undelivered and someone still has to
 //    decide what to do about it, so its card stays.
-//  - No agent is retired when finishing from REVIEW. An agent you re-adopted on
-//    a shipped branch to address review comments is yours, and this runs every
-//    scan — the same reasoning that keeps checkPullRequests' kill at the moment
-//    of transition only. Finishing from IN PROGRESS does retire it, because
-//    that is a job leaving in-progress, which is exactly what the per-repo cap
-//    counts. A manual move to Done retires it too, for the same reason.
+//  - Only cards that require a PR. One that does not has no PR of its own to
+//    watch, and a branch name matching some merge proves nothing about it.
+//
+// Reaching Done retires the agent and releases its worktree from either
+// column, the same as a manual move to Done: merged means finished.
 export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch } = {}) {
   // prMergedAt is only ever written alongside state 'done', and done is
   // terminal, so the state filter already excludes every stamped job. Kept as a
@@ -1503,7 +1614,7 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   // its straggler files freed.
   const recleared = clearFinishedAttachments();
   const candidates = allJobs().filter(j =>
-    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && !isScheduled(j));
+    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && jobRequiresPr(j));
   if (candidates.length === 0) {
     if (recleared) persist(broadcast);
     return [];
@@ -1516,7 +1627,6 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
     // apply the answer to a job that has since moved on.
     const askedBranch = job.branchName;
     const askedState = job.state;
-    const askedSessionId = job.agentSessionId;
     // What makes the answer about this card and not about the branch name: its
     // PR of record when it has one, otherwise the earliest merge that could be
     // its work. Board branch names outlive their branches and get reused.
@@ -1554,20 +1664,21 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
     if (!job.reviewAt) job.reviewAt = job.doneAt;
     finished.push(job);
 
-    // Leaving in-progress is what the cap counts, so that agent goes — same
-    // rule as the PR transition. A card already in Review keeps its agent.
-    const closed = askedState === 'in-progress'
-      ? await retireAgentForJob(job, askedBranch, askedSessionId, killSession)
-      : false;
-    // After the retire, so a just-killed agent no longer counts as in use.
-    // A card whose live agent was kept holds its files; the retry pass at the
-    // top of this sweep frees them once that session exits.
+    // The link as it is now, not as it was asked about: an agent re-adopted
+    // during the lookup is the one to retire, or it outlives its card.
+    const closed = await retireAgentForJob(job, askedBranch, job.agentSessionId, killSession,
+      { byBranch: askedState === 'in-progress' });
+    const released = !closed && await releaseOrphanedWorktree(job, broadcast);
+    // After the retire, so a just-killed agent no longer counts as in use. A
+    // kill that failed leaves the files held; the retry pass at the top of
+    // this sweep frees them once that session exits.
     if (!attachmentsInUse(job)) clearAttachments(job);
     if (broadcast) {
       broadcast({
         type: 'notification', level: 'info',
         message: `Job "${job.title}" is done — PR #${job.prNumber} merged. It moved to Finished jobs.`
-          + (closed ? ` · ${job.agentName} closed, worktree released` : ''),
+          + (closed ? ` · ${job.agentName} closed, worktree released` : '')
+          + (released ? ' · its orphaned worktree was released' : ''),
       });
     }
   }
@@ -1640,7 +1751,7 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   scanInFlight = true;
   try {
     await finishScheduledRuns(broadcast);
-    await checkPullRequests(broadcast, { killSession, findPr });
+    await checkPullRequests(broadcast, { findPr });
     await checkMergedPullRequests(broadcast, { killSession, findMerged });
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
     return { skipped: false };

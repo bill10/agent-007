@@ -178,6 +178,12 @@
                   <option value="plan" data-claude-only>plan — read-only</option>
                 </select>
               </label>
+              <label id="job-pr-field" title="Whether the work ends in a pull request. Choose Not required for research, investigations or chores that change no code: the agent reports a summary instead.">Pull request
+                <select id="job-requires-pr">
+                  <option value="yes">Required</option>
+                  <option value="no">Not required</option>
+                </select>
+              </label>
               <label class="job-form-schedule" id="job-schedule-field" style="display:none">Schedule
                 <input type="text" id="job-schedule" placeholder="0 9 * * 1-5" spellcheck="false" autocomplete="off" maxlength="120">
                 <span class="job-form-hint" id="job-schedule-hint">min hour day month weekday, or @daily · server local time</span>

@@ -135,7 +135,7 @@ describe('the handshake over HTTP', () => {
     expect(init.result.serverInfo.name).toBe('agent-007-board');
 
     const list = await (await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/list' })).json();
-    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']);
+    expect(list.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'finish_job', 'list_agents', 'send_message']);
   });
 
   it('answers a notification with 202 and an empty body', async () => {
@@ -475,7 +475,7 @@ describe('reading and editing the board through the tools', () => {
     // /mcp is the agent door: a person reads and edits through the board's own
     // API, and their token does not resolve here at all.
     const userToken = withUser();
-    for (const name of ['list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']) {
+    for (const name of ['list_jobs', 'read_job', 'edit_job', 'finish_job', 'list_agents', 'send_message']) {
       expect((await callNamed(name, { id: 'job-1' }, userToken)).status, name).toBe(401);
     }
   });
@@ -643,6 +643,24 @@ describe('reading and editing the board through the tools', () => {
     expect(text).not.toContain('/wt/9');
     expect(text).not.toContain(REPO);
     expect(text).toContain(basename(REPO));
+  });
+});
+
+describe('finishing a no-PR job through the tool', () => {
+  it('posts it, lets its own agent finish it with a summary, and reads the result back', async () => {
+    const posted = await toolText(await callTool({ title: 'Why is pty.js leaking', requires_pr: false }));
+    expect(posted).toMatch(/\(To do, no pull request\)/);
+    const job = allJobs()[0];
+    expect(job.requiresPr).toBe(false);
+    // As if the board had dispatched it to session-1.
+    Object.assign(job, { state: 'in-progress', agentSessionId: 'session-1', agentName: 'Onyx', branchName: 'board/why' });
+    const done = await toolResult(await callNamed('finish_job', { summary: 'An unclosed onData listener.' }));
+    expect(done.failed).toBeFalsy();
+    expect(done.text).toMatch(/is in Review/);
+    expect(job.state).toBe('review');
+    const text = await toolText(await callNamed('read_job', { id: job.id }));
+    expect(text).toContain('schedule: runs once, no pull request');
+    expect(text).toContain('result: An unclosed onData listener.');
   });
 });
 

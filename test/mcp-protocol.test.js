@@ -61,7 +61,7 @@ describe('tools/list', () => {
   it('offers the board and messaging tools, with post_job needing a title', () => {
     const reply = handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, {});
     expect(reply.result.tools).toEqual(TOOLS);
-    expect(reply.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'list_agents', 'send_message']);
+    expect(reply.result.tools.map(t => t.name)).toEqual(['post_job', 'list_jobs', 'read_job', 'edit_job', 'finish_job', 'list_agents', 'send_message']);
     expect(POST_JOB_TOOL.inputSchema.required).toEqual(['title']);
     expect(POST_JOB_TOOL.inputSchema.properties.agent.enum).toEqual(['claude', 'codex']);
   });
@@ -295,5 +295,20 @@ describe('editing a card', () => {
     expect(EDIT_JOB_TOOL.inputSchema.required).toEqual(['id']);
     expect(READ_JOB_TOOL.inputSchema.required).toEqual(['id']);
     expect(EDIT_JOB_TOOL.inputSchema.properties.detail.description).toMatch(/not appended/);
+  });
+});
+
+describe('finishing a job', () => {
+  it('answers through a promise, since the PR check has to wait', async () => {
+    const finishJob = vi.fn(async () => ({ job: { ...CARD, state: 'review' } }));
+    const pending = callTool('finish_job', { pr_url: 'https://github.com/o/r/pull/5', summary: 'Assumed UTC.' }, { finishJob });
+    expect(pending).toBeInstanceOf(Promise);
+    const reply = await pending;
+    expect(finishJob).toHaveBeenCalledWith({ prUrl: 'https://github.com/o/r/pull/5', summary: 'Assumed UTC.' });
+    expect(reply.id).toBe(7);
+    expect(textOf(reply)).toMatch(/"Add rate limiting" is in Review\. You are done/);
+    const refused = await callTool('finish_job', {}, { finishJob: async () => ({ error: 'This job requires a pull request' }) });
+    expect(refused.result.isError).toBe(true);
+    expect(textOf(refused)).toMatch(/requires a pull request/);
   });
 });

@@ -479,6 +479,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             // card follows the board if that changes before it is dispatched.
             permissionMode: msg.permissionMode,
             agent: msg.agent,
+            requiresPr: msg.requiresPr,
             postedBy: ws.user ? ws.user.id : null,
             postedByName: ws.user ? ws.user.displayName : null,
           }, broadcast);
@@ -489,7 +490,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           const result = updateJob(msg.jobId, {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
             type: msg.jobType, schedule: msg.schedule, attachments: msg.attachments,
-            permissionMode: msg.permissionMode, agent: msg.agent,
+            permissionMode: msg.permissionMode, agent: msg.agent, requiresPr: msg.requiresPr,
           }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;

@@ -61,6 +61,21 @@
   changelog can flip a quiet agent to MESSAGE by accident — which argues for
   treating this as ordinary-operation breakage rather than a hardening task.
 
+## Bound the agents kept in Review
+- **What:** Put a limit on the live agents a repo keeps in Review: an idle
+  timeout after `reviewAt` that closes the PTY but keeps the worktree as an
+  orphan to re-adopt, or a second, higher per-repo cap that counts them.
+- **Why:** Since v0.4.8.0 a Review card keeps its agent (a CLI process, a PTY,
+  a ring buffer and a worktree) until the card is done, and the per-repo cap
+  only counts In progress. A card that needs no PR, or whose PR closed without
+  merging, only reaches Done by hand, so on a board nobody tidies these add up.
+- **Effort:** S (human: ~3 hours / CC: ~20 min)
+- **Priority:** P2
+- **Depends on:** Review keeps its agent (v0.4.8.0)
+- **Context:** Raised by the performance specialist and the adversarial review
+  during /ship (2026-09-24). Keeping Review agents outside the cap was a
+  deliberate choice; this is the guard for when it bites.
+
 ## Back off the merge check on long-lived Review cards
 - **What:** Record a `lastMergeCheckAt` on each job and let `checkMergedPullRequests`
   skip cards it checked recently — every scan for the first hour after `reviewAt`,

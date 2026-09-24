@@ -25,7 +25,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 - **Multi-repo support** -- Add any number of repos and manage every agent from one window.
 - **Live file explorer** -- Real-time file tree with git status, inline diffs, and a changes-only filter.
 - **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste, draggable tabs, and renaming.
-- **Job board** -- Queue work instead of babysitting it. Each queued job spawns a fresh agent on its own worktree and branch, moves To do -> In progress -> Review as the agent works and opens a pull request, and files itself away when the PR merges. A card can also run on a cron schedule. Per-board and per-card permission modes; Claude Code or Codex per card.
+- **Job board** -- Queue work instead of babysitting it. Each queued job spawns a fresh agent on its own worktree and branch, moves To do -> In progress -> Review as the agent works and reports back (with a pull request, or a summary for work that needs none), and files itself away when the PR merges or you mark it done. A card can also run on a cron schedule. Per-board and per-card permission modes; Claude Code or Codex per card.
 - **Agents post jobs too** -- Tell an agent "add that to the job board" and it files the card itself over MCP.
 - **Agents message each other** -- Claude Code and Codex agents alike: "ask Viper what it changed" sends the question to that agent's terminal over MCP, and the reply comes back the same way.
 - **Works on a phone** -- Below 700px the three panels become one screen at a time.
@@ -63,7 +63,7 @@ up a stale local base or whatever unrelated branch you happen to have checked
 out. Override it per agent with **Advanced -> Start from** when you want to
 branch off work in progress.
 
-The job board reuses that same machinery: a dispatched job is an ordinary agent, with a real terminal you can type into and take over at any point. Each job gets its own worktree and branch, so a job maps one-to-one onto a branch and a pull request. When the PR appears the board closes the agent and releases its worktree and local branch; the PR itself is untouched, and work that was never pushed is kept as an orphan rather than deleted. **Re-spawn** on an orphan picks that conversation back up with the CLI it ran, `codex resume <session-id>` (the newest Codex session recorded in that exact worktree) or `claude --continue`, under the permission mode its job card was dispatched with (a board agent whose card is already finished or deleted follows the board's current setting), or, for an agent you spawned by hand, under the permission flags you started it with. When the PR merges the job is filed away as finished -- the record is kept, the card is not.
+The job board reuses that same machinery: a dispatched job is an ordinary agent, with a real terminal you can type into and take over at any point. Each job gets its own worktree and branch, so a job maps one-to-one onto a branch and a pull request. When the agent finishes it calls the board's `finish_job` tool (a card that requires a pull request hands over the PR it opened; one that does not hands over a summary), and the card moves to Review with the agent still running, so you can click straight into it to ask about the work. When the card reaches Done the board closes the agent and releases its worktree and local branch; the PR itself is untouched, and work that was never pushed is kept as an orphan rather than deleted. **Re-spawn** on an orphan picks that conversation back up with the CLI it ran, `codex resume <session-id>` (the newest Codex session recorded in that exact worktree) or `claude --continue`, under the permission mode its job card was dispatched with (a board agent whose card is already finished or deleted follows the board's current setting), or, for an agent you spawned by hand, under the permission flags you started it with. When the PR merges the job is filed away as finished -- the record is kept, the card is not.
 
 ```
 ┌─────────────┬──────────────┬────────────────────┐
@@ -161,7 +161,7 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, list_agents, send_message)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message)
   messages.js      Agent-to-agent messages (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint

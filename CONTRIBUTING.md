@@ -75,7 +75,7 @@ server/
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
   http.js          HTTP routes and the user/agent auth gates
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, list_agents, send_message)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message)
   messages.js      Agent-to-agent messages (reach, rate limit, delivery queue)
   agent-mcp.js     Per-session MCP config for spawned Claude Code and Codex agents
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint

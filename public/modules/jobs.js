@@ -3,7 +3,7 @@
 // toggle, and drives the dispatcher settings.
 //
 // Two kinds of card share those columns. A one-time job crosses them once and
-// stops in Review. A scheduled job cycles To do -> In progress -> To do on its
+// stops in Review, its agent kept until the card is done. A scheduled job cycles To do -> In progress -> To do on its
 // cron schedule, so it lives in To do between runs with its next run time on it
 // and never reaches Review.
 //
@@ -222,7 +222,7 @@ function renderFinishedToggle(count) {
     : `View finished jobs${count ? ` (${count})` : ''}`;
   btn.title = showingFinished
     ? 'Back to the To do / In progress / Review columns'
-    : 'Jobs whose pull request has merged. They leave the board but are kept here.';
+    : 'Jobs whose pull request has merged, or that were filed away as done. They leave the board but are kept here.';
   btn.setAttribute('aria-pressed', String(showingFinished));
   btn.classList.toggle('showing', showingFinished);
 }
@@ -237,11 +237,12 @@ function renderCard(job) {
   card.className = 'job-card' + (displayStatus ? ` status-${displayStatus}` : '');
   card.dataset.jobId = job.id;
 
-  // An in-progress job whose agent is still around is a jump target. The badge
-  // below stays clickable, but the whole card is a far bigger hit area than a
+  // A card whose agent is still around is a jump target — In progress, and
+  // Review, where the agent is kept until the card is done. The badge below
+  // stays clickable, but the whole card is a far bigger hit area than a
   // one-line pill, and "click the job to see the agent" is what the columns
   // already imply.
-  const liveAgentId = job.state === 'in-progress' && job.agentSessionId && agents.has(job.agentSessionId)
+  const liveAgentId = (job.state === 'in-progress' || job.state === 'review') && job.agentSessionId && agents.has(job.agentSessionId)
     ? job.agentSessionId
     : null;
 
@@ -263,6 +264,13 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'codex';
     chip.title = 'Runs on Codex instead of Claude Code';
+    title.appendChild(chip);
+  }
+  if (!isScheduled(job) && job.requiresPr === false) {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = 'no PR';
+    chip.title = 'Finishes with a summary from its agent instead of a pull request';
     title.appendChild(chip);
   }
   if (job.permissionMode) {
@@ -396,12 +404,26 @@ function renderCard(job) {
     card.appendChild(badge);
   }
 
-  // On a review card the agent is usually gone (closed when the PR opened), so
-  // say so rather than leaving a bare agent name that no longer resolves.
+  // What the agent reported through finish_job. On a card that opens no PR
+  // this is the result itself, so it is shown in full rather than clipped.
+  if (job.resultSummary) {
+    const result = document.createElement('div');
+    result.className = 'job-card-result';
+    result.textContent = job.resultSummary;
+    // It scrolls, so it must take focus for keyboard users to reach the rest.
+    result.tabIndex = 0;
+    result.setAttribute('role', 'region');
+    result.setAttribute('aria-label', 'Agent summary');
+    result.title = '';   // the card's "open terminal" tooltip does not apply here
+    card.appendChild(result);
+  }
+
+  // A Review card keeps its agent until it is done, so a missing one went with
+  // a restart or was closed by hand — say so rather than leaving a bare name.
   if (job.state === 'review' && job.agentName && !agents.has(job.agentSessionId)) {
     const note = document.createElement('div');
     note.className = 'job-card-retired';
-    note.textContent = 'agent closed · worktree released';
+    note.textContent = 'agent closed';
     card.appendChild(note);
   }
 
@@ -456,7 +478,8 @@ function renderCard(job) {
     card.onclick = (e) => {
       // The buttons and the PR link own their own clicks, and a click that ends
       // a selection inside this card is someone reading it, not asking to leave.
-      if (e.target.closest && e.target.closest('button, a')) return;
+      // So is a click in the agent's summary, which scrolls.
+      if (e.target.closest && e.target.closest('button, a, .job-card-result')) return;
       const sel = window.getSelection?.();
       if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
       switchToSession(liveAgentId);
@@ -505,7 +528,7 @@ function renderCardActions(job) {
       }
     }));
   } else if (job.state === 'in-progress') {
-    actions.appendChild(mk('→ Review', 'Mark as ready for review (use when the PR was opened outside the board)', () => send({ type: 'job-move', jobId: job.id, state: 'review' })));
+    actions.appendChild(mk('→ Review', 'Mark as ready for review (use when the agent finished without calling finish_job). The agent is kept.', () => send({ type: 'job-move', jobId: job.id, state: 'review' })));
     actions.appendChild(mk('← To do', 'Requeue this job and close its agent. Uncommitted or unpushed work is kept as an orphan.', () => {
       if (confirm(`Return "${job.title}" to To do?\n\n${job.agentName || 'The agent'} is closed and its worktree released, then the board dispatches a fresh agent for this job. Any uncommitted or unpushed work is kept as an orphan.`)) {
         send({ type: 'job-move', jobId: job.id, state: 'todo' });
@@ -520,7 +543,7 @@ function renderCardActions(job) {
     // board — so it asks first, the way Delete does.
     actions.appendChild(mk('✓ Done', 'File this job away as finished. This is final: the card leaves the board for Finished jobs and cannot be brought back.', () => {
       // Names the agent for the same reason Delete does: this move retires it,
-      // and an agent re-adopted on a shipped branch is one someone is using.
+      // and a Review agent is one someone may still be talking to.
       const agentNote = job.agentSessionId
         ? `${job.agentName || 'Its agent'} is closed and its worktree released. `
         : '';
@@ -629,9 +652,12 @@ function addAttachments(files, fallbackName) {
 
 // The cron box only means anything for a scheduled job, so it is hidden rather
 // than left sitting there inert next to a one-time card.
+// The pull-request choice is its one-time counterpart: a scheduled job never
+// opens one.
 function syncScheduleField() {
   const scheduled = document.getElementById('job-type').value === 'scheduled';
   document.getElementById('job-schedule-field').style.display = scheduled ? 'flex' : 'none';
+  document.getElementById('job-pr-field').style.display = scheduled ? 'none' : '';
 }
 
 // A Codex card is offered "board default", auto and bypassPermissions, so the
@@ -701,6 +727,7 @@ function openForm(jobId) {
   const scheduleEl = document.getElementById('job-schedule');
   const permEl = document.getElementById('job-permission-mode-field');
   const agentEl = document.getElementById('job-agent');
+  const prEl = document.getElementById('job-requires-pr');
   const saveBtn = document.getElementById('btn-job-save');
 
   repoEl.innerHTML = '';
@@ -728,6 +755,7 @@ function openForm(jobId) {
   // which would silently freeze the card onto today's setting.
   if (permEl) permEl.value = job && job.permissionMode ? job.permissionMode : '';
   if (agentEl) agentEl.value = job && job.agent === 'codex' ? 'codex' : 'claude';
+  prEl.value = job && job.requiresPr === false ? 'no' : 'yes';
   syncAgentField();   // also marks the danger colour on the permission select
   pendingAttachments = job && Array.isArray(job.attachments) ? job.attachments.map(a => ({ name: a.name })) : [];
   renderAttachments();
@@ -763,6 +791,7 @@ function saveForm() {
   const schedule = document.getElementById('job-schedule').value.trim();
   const permissionMode = document.getElementById('job-permission-mode-field')?.value || '';
   const agent = document.getElementById('job-agent')?.value || 'claude';
+  const requiresPr = document.getElementById('job-requires-pr').value !== 'no';
   if (!title) return showFormError('Give the job a title.');
   if (!repoPath) return showFormError('Add a repository in the explorer first — a job needs one to run in.');
   if (jobType === 'scheduled' && !schedule) return showFormError('A scheduled job needs a cron schedule, for example "0 9 * * 1-5".');
@@ -773,7 +802,7 @@ function saveForm() {
   // The form always holds the complete list; an empty one on an edit means
   // "none left".
   const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
-  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, attachments };
+  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, requiresPr, attachments };
   if (editingJobId) send({ type: 'job-update', jobId: editingJobId, ...fields });
   else send({ type: 'job-create', ...fields });
   closeForm();

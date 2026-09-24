@@ -48,6 +48,12 @@ const BOARD_HTML = `
           <option value="claude">Claude Code</option>
           <option value="codex">Codex</option>
         </select>
+        <label id="job-pr-field">
+          <select id="job-requires-pr">
+            <option value="yes">Required</option>
+            <option value="no">Not required</option>
+          </select>
+        </label>
         <select id="job-permission-mode-field">
           <option value=""></option>
           <option value="auto">auto</option>
@@ -270,16 +276,23 @@ describe('live status badge', () => {
     expect(switchToSession).not.toHaveBeenCalled();
   });
 
-  it('does not make todo or review cards clickable', () => {
+  it('does not make todo cards clickable', () => {
     agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
     handleJobsList({
-      jobs: [
-        JOB({ id: 'j1', state: 'todo', agentSessionId: 's1', agentName: 'Viper' }),
-        JOB({ id: 'j2', state: 'review', agentSessionId: 's1', agentName: 'Viper' }),
-      ],
+      jobs: [JOB({ id: 'j1', state: 'todo', agentSessionId: 's1', agentName: 'Viper' })],
       settings: {},
     });
     expect(document.querySelectorAll('.job-card-live')).toHaveLength(0);
+  });
+
+  // Review keeps its agent until the card is done, so it is a jump target too.
+  it('makes a review card with a kept agent clickable', () => {
+    agents.set('s1', { name: 'Viper', state: 'WAITING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({
+      jobs: [JOB({ id: 'j2', state: 'review', agentSessionId: 's1', agentName: 'Viper' })],
+      settings: {},
+    });
+    expect(document.querySelectorAll('.job-card-live')).toHaveLength(1);
   });
 
   it('shows no badge on todo or review cards', () => {
@@ -391,7 +404,7 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', attachments: [],
+      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, attachments: [],
     });
   });
 
@@ -536,6 +549,44 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).not.toHaveBeenCalled();
     expect(document.getElementById('job-form-error').textContent).toMatch(/repository/i);
+  });
+});
+
+describe('cards that need no pull request', () => {
+  it('chips a no-PR card, shows its result in full, and leaves a plain card unchipped', () => {
+    handleJobsList({
+      jobs: [
+        JOB({ id: 'a', state: 'review', requiresPr: false, resultSummary: 'An unclosed onData listener in pty.js.' }),
+        JOB({ id: 'b', state: 'todo', requiresPr: true }),
+        JOB({ id: 'c', state: 'todo', type: 'scheduled', schedule: '@daily', requiresPr: false }),
+      ],
+      settings: {},
+    });
+    const [review] = columnCards('review');
+    expect([...review.querySelectorAll('.job-card-type')].map(c => c.textContent)).toEqual(['no PR']);
+    expect(review.querySelector('.job-card-result').textContent).toBe('An unclosed onData listener in pty.js.');
+    const [plain, scheduled] = columnCards('todo');
+    expect(plain.querySelector('.job-card-result')).toBeNull();
+    expect([...plain.querySelectorAll('.job-card-type')].map(c => c.textContent)).not.toContain('no PR');
+    expect([...scheduled.querySelectorAll('.job-card-type')].map(c => c.textContent)).not.toContain('no PR');
+  });
+
+  it('opens a no-PR card on "Not required", sends it back, and hides the choice for a scheduled job', () => {
+    handleJobsList({ jobs: [JOB({ requiresPr: false })], settings: {} });
+    document.querySelector('.job-card-btn').click();   // Edit
+    const pr = document.getElementById('job-requires-pr');
+    expect(pr.value).toBe('no');
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-update', jobId: 'job-1', requiresPr: false }));
+    document.getElementById('btn-new-job').click();
+    expect(pr.value).toBe('yes');
+    const type = document.getElementById('job-type');
+    type.value = 'scheduled';
+    type.dispatchEvent(new Event('change'));
+    expect(document.getElementById('job-pr-field').style.display).toBe('none');
+    type.value = 'one-time';
+    type.dispatchEvent(new Event('change'));
+    expect(document.getElementById('job-pr-field').style.display).toBe('');
   });
 });
 

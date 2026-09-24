@@ -494,6 +494,7 @@ describe('re-adopting an orphan', () => {
     // No card on that branch, no note, no transcript: Claude Code, the default.
     expect(resumeCommandForOrphan({ repoPath: REPO, branchName: 'nobody/here', worktreePath: '/wt/x' }, homes)).toBe('claude --continue');
     // A card that already has a live agent is not this orphan's card.
+    sessions.set('someone-else', { id: 'someone-else', exited: false });
     job.agentSessionId = 'someone-else';
     expect(resumeCommandForOrphan(discovered, homes)).toBe('claude --continue');
   });
