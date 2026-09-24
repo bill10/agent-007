@@ -42,7 +42,8 @@ export const POST_JOB_TOOL = {
     + 'dispatches each card to a fresh agent in its own git worktree and branch, so '
     + 'the detail must be everything that agent needs to do the work unattended: it '
     + 'will not have this conversation. Pass `schedule` to make it a recurring job '
-    + 'that runs on a cron schedule instead of once.',
+    + 'instead: the card becomes a schedule, and each time it comes due it posts a '
+    + 'run card of its own that goes through the board like any job.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -68,9 +69,10 @@ export const POST_JOB_TOOL = {
           'Optional. Supplying this makes the card a SCHEDULED job that runs again '
           + 'on every match instead of once: a five-field cron expression in the '
           + "server's local time (\"0 9 * * 1-5\" = 09:00 on weekdays), or one of "
-          + '@hourly, @daily, @weekly, @monthly, @yearly. A scheduled job need not be '
-          + 'a coding task and is not expected to open a pull request. Omit this for '
-          + 'ordinary work that should happen once.',
+          + '@hourly, @daily, @weekly, @monthly, @yearly. Its runs report a summary '
+          + 'unless requires_pr is true. A schedule holds off while its last run is '
+          + 'still going or its PR is open, and a newer no-PR run replaces the last '
+          + 'one in Review. Omit this for ordinary work that should happen once.',
       },
       agent: {
         type: 'string',
@@ -82,8 +84,9 @@ export const POST_JOB_TOOL = {
       requires_pr: {
         type: 'boolean',
         description:
-          'Optional, one-time jobs only. Whether the work ends in a pull request. '
-          + 'Defaults to true; pass false for work that is not a code change — '
+          'Optional. Whether the work ends in a pull request (on a schedule: whether '
+          + 'each run does). Defaults to true for a one-time job and false for a '
+          + 'schedule; pass false for work that is not a code change — '
           + 'research, an investigation, an ops chore — so the agent reports a '
           + 'summary instead of opening a PR.',
       },
@@ -279,8 +282,9 @@ function summaryLine(job) {
   const bits = [job.repo];
   if (job.agent === 'codex') bits.push('codex');
   if (job.type === 'scheduled') {
-    bits.push(`scheduled ${scheduleText(job)}`);
+    bits.push(`schedule ${scheduleText(job)}`);
   }
+  if (job.scheduleId) bits.push('a scheduled run');
   // The live state of the agent working it, when there is one, is the part a
   // person actually asks about ("is it stuck?").
   if (job.agentName) bits.push(`${job.agentName}${job.status ? ` ${job.status}` : ''}`);
@@ -357,8 +361,11 @@ const CALLS = {
       job.agent === 'codex' ? 'runs on: codex' : null,
       job.type === 'scheduled'
         ? `schedule: ${scheduleText(job, ' — next ')}`
-          + `${job.runCount ? ` — run ${job.runCount} time(s), last ${when(job.lastRunAt)}` : ''}`
-        : `schedule: runs once${job.requiresPr ? '' : ', no pull request'}`,
+          + `${job.runCount ? ` — posted ${job.runCount} run(s), last ${when(job.lastRunAt)}` : ''}`
+          + `${job.requiresPr ? ', each run opens a pull request' : ''}`
+          + `${job.lastSkipReason ? ` — last held off: ${job.lastSkipReason}` : ''}`
+        : `schedule: runs once${job.requiresPr ? '' : ', no pull request'}`
+          + `${job.scheduleId ? ` (a run of schedule ${job.scheduleId})` : ''}`,
       `posted: ${when(job.postedAt)}`
         + `${job.postedByName ? ` by ${job.postedByName}` : ''}`
         + `${job.postedByAgent ? ` (typed by ${job.postedByAgent})` : ''}`,

@@ -312,9 +312,9 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
   return { error: `Could not find a free branch name after ${tries} attempts` };
 }
 
-// discardChanges: uncommitted and untracked files are not worth keeping — a
-// scheduled run's scratch output, retired by the next run. Commits the remote
-// does not have are still protected; only the status check is skipped.
+// discardChanges: uncommitted and untracked files are not worth keeping, for
+// a caller that knows the tree is scratch. Commits the remote does not have
+// are still protected; only the status check is skipped.
 export async function removeWorktree(session, { discardChanges = false } = {}) {
   if (!session.worktreePath || !session.repoPath) return { orphaned: false };
   if (!existsSync(join(session.worktreePath, '.git'))) {

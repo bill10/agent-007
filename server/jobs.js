@@ -9,7 +9,7 @@
 // forms a cycle with ws.js or server.js.
 
 import { execFile } from 'child_process';
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
 import { config, sessions, orphans, adoptingOrphans, codenamePool, CONFIG_DIR } from './state.js';
@@ -24,7 +24,7 @@ import {
   JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
-  isScheduledRunOver, scheduledRunReset, STATE_LABELS,
+  scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
@@ -436,6 +436,8 @@ function jobSummary(job) {
     requiresPr: jobRequiresPr(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
+    scheduleId: job.scheduleId || null,
+    lastSkipReason: job.lastSkipReason || null,
     repo: basename(job.repoPath || ''),
     editedByAgent: job.editedByAgent || null,
     // Derived fresh, never stored: it describes a PTY that exists right now.
@@ -569,7 +571,10 @@ export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr,
   }
   if (requiresPr !== undefined) {
     if (typeof requiresPr !== 'boolean') return { error: 'requires_pr must be true or false' };
-    if (requiresPr !== (job.requiresPr !== false)) { fields.requiresPr = requiresPr; changed.push('requires_pr'); }
+    // Always passed on, so a type change in the same call cannot swap it for
+    // the new type's default; only reported when it changes what the card does.
+    fields.requiresPr = requiresPr;
+    if (requiresPr !== jobRequiresPr(job)) changed.push('requires_pr');
   }
 
   if (!changed.length) {
@@ -600,7 +605,6 @@ export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr,
 export async function finishJobForAgent({ session, summary, prUrl }, broadcast, { findPr = findPrForBranch } = {}) {
   const job = session ? allJobs().find(j => j.agentSessionId === session.id) : null;
   if (!job) return { error: 'This agent is not working a job on the board, so there is nothing to finish.' };
-  if (isScheduled(job)) return { error: 'This is a scheduled job — its run ends on its own when you stop, so there is nothing to call.' };
   if (summary != null && typeof summary !== 'string') return { error: 'summary must be a string' };
   // Already in Review: the PR poll can find the PR /ship opened before the
   // agent calls in, or someone moved the card by hand. The agent is right that
@@ -674,9 +678,8 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
 // paths in its prompt at dispatch, so a later edit changes nothing about the
 // run and leaves the card describing work nobody was asked to do; repointing
 // repoPath misattributes work already under way in a worktree; and flipping an
-// in-flight one-time card to scheduled frees its per-repo cap slot while its
-// agent still runs, after which finishScheduledRuns quietly closes that run out
-// and re-arms it forever.
+// in-flight card to a schedule would strand its agent on a card that is never
+// dispatched and never moves.
 //
 // The board's own form has only ever offered Edit on a To do card, so this is
 // the rule the interface always implied — now enforced for every door into the
@@ -737,17 +740,23 @@ export function updateJob(jobId, fields, broadcast) {
   if (fields.repoPath) job.repoPath = fields.repoPath;
   if (mode) job.permissionMode = mode.permissionMode;
   if (cli) job.agent = cli.agent;
+  const typeChanged = !!resolved && resolved.type !== jobType(job);
   if (resolved) {
     job.type = resolved.type;
+    // A run turned into a schedule is no longer that schedule's run; left
+    // linked, it would sit in To do and hold its parent off for good.
+    if (typeChanged && resolved.type === 'scheduled') delete job.scheduleId;
     job.schedule = resolved.schedule;
     // Recompute only on a real change: the old due time belongs to the old
     // cron, but a save that merely retitled the card must not re-arm an
     // overdue schedule and eat the firing that was about to happen.
     if (changes) job.nextRunAt = resolved.schedule ? nextCronIso(resolved.schedule) : null;
   }
-  // After the type is settled, and on createJob's rule: never false on a
-  // scheduled card, so one later turned one-time is not silently no-PR.
-  if (typeof fields.requiresPr === 'boolean') job.requiresPr = isScheduled(job) || fields.requiresPr;
+  // A type change without an explicit choice takes the new type's default
+  // (see jobRequiresPr), so a schedule turned one-time does not silently keep
+  // a no-PR setting that only ever meant "its runs".
+  if (typeof fields.requiresPr === 'boolean') job.requiresPr = fields.requiresPr;
+  else if (typeChanged) job.requiresPr = defaultRequiresPr(job.type);
   persist(broadcast);
   return { job };
 }
@@ -793,19 +802,15 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
       console.error(`Failed to remove attachments for deleted job "${removed.title}":`, err.message);
     }
   }
-  // Both the live agent and a scheduled card's kept last-run agent: with the
-  // card gone, nothing else would ever retire either of them. An exited one
-  // too — its session entry and worktree are just as stranded, and killSession
-  // copes with a dead process.
-  for (const sessionId of [removed.agentSessionId, removed.lastRunSessionId]) {
-    if (!sessionId || !killSession) continue;
-    const session = sessions.get(sessionId);
-    if (session) {
-      try {
-        await killSession(sessionId);
-      } catch (err) {
-        console.error(`Failed to close agent for deleted job "${removed.title}":`, err.message);
-      }
+  // With the card gone, nothing else would ever retire its agent. An exited
+  // one too — its session entry and worktree are just as stranded, and
+  // killSession copes with a dead process.
+  const sessionId = removed.agentSessionId;
+  if (sessionId && killSession && sessions.get(sessionId)) {
+    try {
+      await killSession(sessionId);
+    } catch (err) {
+      console.error(`Failed to close agent for deleted job "${removed.title}":`, err.message);
     }
   }
   return { job: removed };
@@ -821,7 +826,9 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
 // it, and repeating the move walks straight past the cap. removeWorktree still
 // protects the work: uncommitted or unpushed changes become an orphan rather
 // than being deleted.
-export async function moveJob(jobId, state, broadcast, { killSession, findPr = findPrForBranch } = {}) {
+// discardChanges: only for a caller that knows the worktree is scratch (a
+// superseded run, whose result is its summary); unpushed commits stay protected.
+export async function moveJob(jobId, state, broadcast, { killSession, findPr = findPrForBranch, discardChanges = false } = {}) {
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
@@ -840,13 +847,11 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (job.state === 'done') {
     return { error: 'That job is finished — post a new job for follow-up work, or delete this card' };
   }
-  // A scheduled card cycles To do <-> In progress, and nothing on the board
-  // ever touches one parked in Review — both PR sweeps skip the type, and the
-  // run finisher only reads In progress — while done is terminal, so either
-  // move ends a standing schedule for good. The UI hides those buttons on a
-  // scheduled card; the raw message has to be refused too.
-  if (isScheduled(job) && (state === 'review' || state === 'done')) {
-    return { error: 'A scheduled job cycles between To do and In progress — delete the card to retire its schedule' };
+  // A schedule is never dispatched, so it has nowhere to move: its runs are
+  // the cards that cross the board. The UI offers it no moves; the raw
+  // message has to be refused too.
+  if (isScheduled(job)) {
+    return { error: 'A schedule stays in To do — its runs are the cards that move. Pause or delete it instead.' };
   }
   // A job with no branch has never been dispatched, so nothing can move it out
   // of in-progress again: the dispatcher only looks at todo, and the PR watcher
@@ -864,13 +869,10 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // visible would point at an agent left running.
   const retiringSessionId = state === 'todo' || state === 'done' ? job.agentSessionId : null;
   // Captured before To do clears them, for the orphan release at the end.
-  const attempt = { branchName: job.branchName, repoPath: job.repoPath };
+  const attempt = { branchName: job.branchName, repoPath: job.repoPath, worktreePath: job.worktreePath };
+  const fromState = job.state;
   job.state = state;
   if (state === 'todo') {
-    // A scheduled card returning to To do is re-armed, not blanked: it keeps its
-    // schedule and gets the next due time. Without this a manual requeue would
-    // leave nextRunAt in the past and the card would fire again immediately.
-    if (isScheduled(job)) job.nextRunAt = job.schedule ? nextCronIso(job.schedule) : null;
     job.agentSessionId = null;
     job.agentName = null;
     job.startedAt = null;
@@ -881,7 +883,11 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     job.reviewAt = null;
     job.resultSummary = null;   // the last attempt's result, not this one's
   }
-  if (state === 'review' && !job.reviewAt) job.reviewAt = new Date().toISOString();
+  // Restamped when the work comes back from In progress: a run sent back for a
+  // follow-up is the newest result again (see supersededRuns).
+  // Only on a card that needs no PR: on one that does, reviewAt is also the
+  // merge sweep's time floor, which must not move past a merge.
+  if (state === 'review' && (!job.reviewAt || (fromState === 'in-progress' && !jobRequiresPr(job)))) job.reviewAt = new Date().toISOString();
   // Stamped on arrival, and never cleared, because nothing leaves done. A job
   // finished by hand gets a doneAt but no prMergedAt: the board is recording
   // that the USER called it finished, which is not a claim about GitHub.
@@ -928,7 +934,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     const session = sessions.get(retiringSessionId);
     if (session && !session.exited) {
       try {
-        await killSession(retiringSessionId);
+        await killSession(retiringSessionId, { discardChanges });
         // Only after it succeeded: a failed kill leaves the agent running, and
         // the card must keep pointing at it rather than become unreachable.
         if (job.agentSessionId === retiringSessionId) {
@@ -946,7 +952,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
       persist(broadcast);
     }
   }
-  if (state === 'done' || state === 'todo') await releaseOrphanedWorktree(attempt, broadcast);
+  if (state === 'done' || state === 'todo') await releaseOrphanedWorktree(attempt, broadcast, { discardChanges });
   return { job };
 }
 
@@ -955,16 +961,19 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
 // to To do) before anyone re-adopts it has no agent to retire, so the worktree
 // is released through that orphan instead — the same removeWorktree killSession uses, so
 // unpushed or dirty work still stays behind as the orphan.
-async function releaseOrphanedWorktree({ branchName, repoPath }, broadcast) {
+async function releaseOrphanedWorktree({ branchName, repoPath, worktreePath }, broadcast, { discardChanges = false } = {}) {
   if (!branchName) return false;
-  const entry = [...orphans.values()].find(o => o.branchName === branchName && o.repoPath === repoPath);
+  // By worktree path when the card recorded one: a schedule's runs share a
+  // title, so a later run can reuse an earlier one's branch name.
+  const entry = [...orphans.values()].find(o => o.repoPath === repoPath
+    && (worktreePath ? o.worktreePath === worktreePath : o.branchName === branchName));
   if (!entry || adoptingOrphans.has(entry.id)) return false;
   // Held for the whole removal, which is several awaited git calls: a re-adopt
   // clicked in that window would spawn an agent in a worktree about to go.
   adoptingOrphans.add(entry.id);
   let orphaned;
   try {
-    ({ orphaned } = await removeWorktree(entry));
+    ({ orphaned } = await removeWorktree(entry, { discardChanges }));
   } finally {
     adoptingOrphans.delete(entry.id);
   }
@@ -1068,7 +1077,10 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // was just made. Abandoning the spawn hands it the same remedy every
     // other change in this window gets: the card stays in To do and the next
     // tick dispatches it again, as it now reads.
-    const stillQueued = allJobs().includes(job) && job.state === 'todo'
+    // A card turned into a schedule during the spawn builds the same argv (the
+    // prompt no longer depends on the type), so the type is checked outright:
+    // a schedule claimed as In progress could never move again.
+    const stillQueued = allJobs().includes(job) && job.state === 'todo' && !isScheduled(job)
       && buildJobCommand(job, { permissionMode: boardSettings().permissionMode }) === command
       && job.repoPath === spawnedRepo;
     if (!stillQueued) {
@@ -1085,48 +1097,10 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.agentSessionId = session.id;
     job.agentName = session.name;
     job.startedAt = new Date().toISOString();
-    if (isScheduled(job)) {
-      // Counted at dispatch, not at completion: the run happened whether or not
-      // the agent got anywhere, and a card that keeps failing should still show
-      // that it has been trying.
-      job.runCount = (Number(job.runCount) || 0) + 1;
-      job.lastRunAt = job.startedAt;
-    }
     job.branchName = session.branchName;
     job.worktreePath = session.worktreePath;
     job.lastError = null;
     job.lastErrorAt = null;
-
-    // Only once the replacement run is real does the previous run's kept agent
-    // retire (see finishScheduledRuns). Retiring before the spawn meant a
-    // failed createSession destroyed the last run's only output and left no new
-    // run behind it — the card showed a dispatch error and the summary the
-    // board promises to keep was gone. The worktree is scratch by then — a
-    // run's output files are of no use once the next run exists — so
-    // uncommitted files are discarded rather than orphaned. Unpushed commits
-    // still become an orphan. An exited agent is retired the same way: its
-    // worktree is just as stale, and killSession copes with a dead process.
-    //
-    // AFTER the claim above, not before it, and that ordering is load-bearing:
-    // this block awaits, and an await between the recheck and the claim is the
-    // very window the recheck exists to close. Sitting above the claim it
-    // reopened that window for every scheduled card on its second or later run
-    // — the common case, since a run's agent is deliberately kept alive to be
-    // read. The claim is now the first thing after the recheck, with nothing
-    // suspending in between, and "the run is real" holds more strictly here
-    // than it did before rather than less.
-    if (isScheduled(job) && job.lastRunSessionId) {
-      const prev = sessions.get(job.lastRunSessionId);
-      if (prev && killSession) {
-        try {
-          await killSession(job.lastRunSessionId, { discardChanges: true });
-        } catch (err) {
-          console.error(`Failed to close the last run's agent for "${job.title}":`, err.message);
-        }
-      }
-      job.lastRunSessionId = null;
-      job.lastRunAgentName = null;
-    }
 
     dispatched.push({ job, session });
   }
@@ -1518,9 +1492,6 @@ async function retireAgentForJob(job, askedBranch, askedSessionId, killSession, 
 // agent reports its own finish, and a PR on one proves nothing about that.
 // The agent is kept, as finish_job keeps it; Done is what retires it.
 export async function checkPullRequests(broadcast, { findPr = findPrForBranch } = {}) {
-  // jobRequiresPr is false for scheduled cards too. A scheduled card is not
-  // trying to produce a pull request, and moving it to Review on the strength of
-  // one would take it out of rotation permanently.
   const inProgress = allJobs().filter(j => j.state === 'in-progress' && j.branchName && jobRequiresPr(j));
   if (inProgress.length === 0) return [];
   const moved = [];
@@ -1607,9 +1578,8 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   // prMergedAt is only ever written alongside state 'done', and done is
   // terminal, so the state filter already excludes every stamped job. Kept as a
   // cheap assertion of that invariant rather than a live condition.
-  // Scheduled cards are excluded for the same reason checkPullRequests skips
-  // them, only more so: done is terminal, so a scheduled run whose work merged
-  // would leave the board for good instead of re-arming for its next run.
+  // A schedule has no branch, so it never matches. A run whose PR merges goes
+  // to Done here like any card, which is what lets its schedule fire again.
   // Before the early return, so a card with nothing left to merge still gets
   // its straggler files freed.
   const recleared = clearFinishedAttachments();
@@ -1686,49 +1656,133 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   return finished;
 }
 
-// --- Scheduled runs ---
+// --- Schedules ---
 
-// Close out scheduled runs that are over and re-arm their cards.
+// Post a run for every schedule that has come due, or note why it held off
+// (see scheduleHold). Either way the schedule moves on to its next time, so a
+// firing it skipped is not replayed later — the same rule a pause follows.
 //
-// This is the scheduled counterpart of checkPullRequests: the point in the scan
-// where a finished run is noticed and its card re-armed. It runs FIRST, so a
-// run that ended since the last tick has its card back in To do in time for the
-// same scan to dispatch whatever was waiting behind it.
-//
-// The agent is deliberately NOT killed here. Its terminal is the run's only
-// output — a scheduled job need not produce code, and the summary it wrote
-// lives in the session's ring buffer, which a kill would destroy before anyone
-// could read it. The card keeps a pointer (lastRunSessionId) and the tab stays
-// open; the next dispatch retires it, or the user closes it. Bounded at one
-// kept agent per card. The cap is unaffected: scheduled cards are exempt from
-// it in both directions (see selectDispatchableJobs).
-export async function finishScheduledRuns(broadcast) {
-  const running = allJobs().filter(j => isScheduled(j) && j.state === 'in-progress');
-  if (running.length === 0) return [];
-  const finished = [];
-  for (const job of running) {
-    const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
-    if (!isScheduledRunOver(job, session)) continue;
+// Runs FIRST in the dispatch half of the scan, so a run it posts goes out on
+// this same scan rather than waiting a whole interval in To do.
+export function fireSchedules(broadcast, { now = Date.now() } = {}) {
+  const fired = [];
+  let changed = false;
+  for (const schedule of allJobs().filter(j => isScheduled(j) && j.state === 'todo')) {
+    if (!isJobDue(schedule, now)) continue;
+    changed = true;
+    schedule.nextRunAt = schedule.schedule ? nextCronIso(schedule.schedule, now) : null;
+    const hold = scheduleHold(schedule, allJobs());
+    if (hold) {
+      schedule.lastSkipAt = new Date(now).toISOString();
+      schedule.lastSkipReason = hold;
+      continue;
+    }
+    const result = createRunJob(schedule);
+    if (result.error) {
+      schedule.lastError = `Could not post this run: ${result.error}`;
+      schedule.lastErrorAt = new Date(now).toISOString();
+      continue;
+    }
+    // The run gets its own copy of the schedule's files, so neither card's
+    // cleanup — a run filed to Done, the schedule deleted or edited — can take
+    // a file out from under the other.
+    const copied = copyRunAttachments(result.job, schedule);
+    if (copied.error) {
+      schedule.lastError = `Could not post this run: ${copied.error}`;
+      schedule.lastErrorAt = new Date(now).toISOString();
+      continue;
+    }
+    allJobs().push(result.job);
+    schedule.runCount = (Number(schedule.runCount) || 0) + 1;
+    schedule.lastRunAt = new Date(now).toISOString();
+    schedule.lastRunJobId = result.job.id;
+    schedule.lastSkipAt = null;
+    schedule.lastSkipReason = null;
+    schedule.lastError = null;
+    schedule.lastErrorAt = null;
+    fired.push(result.job);
+  }
+  if (changed) persist(broadcast);
+  return fired;
+}
 
-    const agentName = job.agentName;
-    Object.assign(job, scheduledRunReset(job));
-    finished.push(job);
+function copyRunAttachments(run, schedule) {
+  const files = (schedule.attachments || []).filter(a => a && a.path && insideAttachments(a.path) && existsSync(a.path));
+  if (!files.length) { run.attachments = []; return {}; }
+  const dir = attachmentDir(run.id);
+  try {
+    mkdirSync(dir, { recursive: true });
+    run.attachments = files.map(a => {
+      const path = join(dir, safeFilename(a.name));
+      copyFileSync(a.path, path);
+      return { name: basename(path), path };
+    });
+    return {};
+  } catch (err) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* the error below is what matters */ }
+    return { error: `copying its files failed: ${err.message}` };
+  }
+}
+
+// Keep each schedule's finished runs to the newest MAX_FINISHED_RUNS (see
+// runsToPrune), attachment folders included. One pass and one save, however
+// many go: deleteJob per run would rewrite config.json and rebroadcast the
+// board once for each. A run whose agent is still alive (a kill at Done that
+// failed) is left for a later scan, so no agent loses the card pointing at it.
+export function pruneFinishedRuns(broadcast) {
+  const pruned = runsToPrune(allJobs()).filter(run => !attachmentsInUse(run));
+  if (!pruned.length) return [];
+  const gone = new Set(pruned.map(run => run.id));
+  config.jobs = allJobs().filter(job => !gone.has(job.id));
+  persist(broadcast);
+  for (const run of pruned) {
+    const dir = attachmentDir(run.id);
+    if (!insideAttachments(dir)) continue;
+    try { rmSync(dir, { recursive: true, force: true }); } catch (err) {
+      console.error(`Failed to remove attachments for pruned run "${run.title}":`, err.message);
+    }
+  }
+  return pruned;
+}
+
+// File away every no-PR run that a newer run of the same schedule has
+// replaced in Review, and retire its agent — through moveJob, so it is the
+// same Done as a person pressing the button. The newest run records how many
+// it replaced, so a board nobody read for a day says so.
+export async function supersedeRuns(broadcast, { killSession } = {}) {
+  const replaced = [];
+  for (const { old, by } of supersededRuns(allJobs())) {
+    // Rechecked per run: each move awaits a kill and git, and a person can
+    // requeue or delete either card in the meantime.
+    if (!allJobs().includes(old) || !allJobs().includes(by) || old.state !== 'review' || by.state !== 'review') continue;
+    // An agent working a follow-up or asking something is someone's live
+    // conversation; it is superseded on a later scan, once it is quiet.
+    const session = old.agentSessionId ? sessions.get(old.agentSessionId) : null;
+    if (session && !session.exited && session.state !== 'WAITING') continue;
+    // Its result is the summary it reported, so what it left in the worktree is
+    // scratch; an hourly schedule would otherwise orphan a worktree a run.
+    const result = await moveJob(old.id, 'done', broadcast, { killSession, discardChanges: true });
+    if (result.error) continue;
+    old.supersededBy = by.id;
+    by.supersededRuns = (Number(by.supersededRuns) || 0) + 1 + (Number(old.supersededRuns) || 0);
+    replaced.push(old);
+  }
+  if (replaced.length) {
+    persist(broadcast);
     if (broadcast) {
       broadcast({
         type: 'notification', level: 'info',
-        message: `Scheduled job "${job.title}" finished its run`
-          + (agentName ? ` · ${agentName} kept open to read` : '')
-          + (job.nextRunAt ? ` · next ${new Date(job.nextRunAt).toLocaleString()}` : ''),
+        message: `Filed ${replaced.length} earlier run${replaced.length === 1 ? '' : 's'} to Finished — a newer run is in Review`,
       });
     }
   }
-  if (finished.length > 0) persist(broadcast);
-  return finished;
+  return replaced;
 }
 
 // --- Scan ---
 
-// One scan = close out finished scheduled runs, check for PRs, then dispatch.
+// One scan = find PRs, file away superseded and merged runs, fire due
+// schedules, then dispatch.
 // Both entry points (the interval timer and the "Run now" button) go through
 // here, behind a single in-flight flag.
 //
@@ -1750,9 +1804,11 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
-    await finishScheduledRuns(broadcast);
     await checkPullRequests(broadcast, { findPr });
+    await supersedeRuns(broadcast, { killSession });
     await checkMergedPullRequests(broadcast, { killSession, findMerged });
+    pruneFinishedRuns(broadcast);
+    fireSchedules(broadcast);
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
     return { skipped: false };
   } finally {

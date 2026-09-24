@@ -1597,6 +1597,7 @@ describe('done after a restart', () => {
     await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
     sessions.clear();
     job.agentSessionId = null;
+    job.worktreePath = GONE_WORKTREE;
     orphans.set('orphan-1', { id: 'orphan-1', name: 'Viper', repoPath: REPO, branchName: job.branchName,
       worktreePath: GONE_WORKTREE });   // already gone from disk
     await moveJob(job.id, 'todo', noopBroadcast);
@@ -1619,14 +1620,6 @@ describe('finishJobForAgent refusals', () => {
 
   it('refuses with no session at all', async () => {
     expect((await finishJobForAgent({}, noopBroadcast)).error).toMatch(/not working a job/);
-  });
-
-  it('refuses a scheduled card, whose run ends on its own', async () => {
-    const { job, session } = await running({ requiresPr: false });
-    job.type = 'scheduled';
-    job.schedule = '@daily';
-    expect((await finishJobForAgent({ session, summary: 'x' }, noopBroadcast)).error).toMatch(/scheduled job/);
-    expect(job.state).toBe('in-progress');
   });
 
   // The poller can find the PR /ship opened before the agent calls in.
@@ -1717,12 +1710,13 @@ describe('finishJobForAgent refusals', () => {
 describe('cards that need no pull request', () => {
   beforeEach(resetBoard);
 
-  it('defaults to requiring one, reads a missing field as true, and never on a scheduled card', () => {
+  it('defaults to requiring one on a one-time card and not on a schedule', () => {
     expect(addJob({ title: 'a', repoPath: REPO }, noopBroadcast).job.requiresPr).toBe(true);
     expect(addJob({ title: 'b', repoPath: REPO, requiresPr: false }, noopBroadcast).job.requiresPr).toBe(false);
     expect(jobRequiresPr({ title: 'old' })).toBe(true);
     expect(jobRequiresPr({ requiresPr: false })).toBe(false);
-    expect(jobRequiresPr({ type: 'scheduled', schedule: '@daily', requiresPr: true })).toBe(false);
+    expect(jobRequiresPr({ type: 'scheduled', schedule: '@daily' })).toBe(false);
+    expect(jobRequiresPr({ type: 'scheduled', schedule: '@daily', requiresPr: true })).toBe(true);
   });
 
   it('skips the PR lookup on a manual move to review', async () => {
@@ -1776,6 +1770,7 @@ describe('releasing an orphaned worktree on done', () => {
 
   it('leaves an orphan that is being re-adopted', async () => {
     const job = await restartedReviewCard();
+    job.worktreePath = GONE_WORKTREE;   // the card recorded the worktree the orphan holds
     orphans.set('orphan-1', orphanFor(job, GONE_WORKTREE));
     adoptingOrphans.add('orphan-1');
     await moveJob(job.id, 'done', noopBroadcast);
@@ -1796,6 +1791,7 @@ describe('releasing an orphaned worktree on done', () => {
 
   it('leaves an orphan on another repo with the same branch name alone', async () => {
     const job = await restartedReviewCard();
+    job.worktreePath = GONE_WORKTREE;   // the card recorded the worktree the orphan holds
     orphans.set('orphan-1', { ...orphanFor(job, GONE_WORKTREE), repoPath: REPO2 });
     await moveJob(job.id, 'done', noopBroadcast);
     expect(orphans.has('orphan-1')).toBe(true);
@@ -1803,6 +1799,7 @@ describe('releasing an orphaned worktree on done', () => {
 
   it('is what the merge sweep falls back to when no agent is left to retire', async () => {
     const job = await restartedReviewCard();
+    job.worktreePath = GONE_WORKTREE;   // the card recorded the worktree the orphan holds
     orphans.set('orphan-1', orphanFor(job, GONE_WORKTREE));
     const finished = await checkMergedPullRequests(noopBroadcast, {
       findMerged: async () => ({ pr: { url: 'u', number: 42, mergedAt: '2026-08-28T10:00:00Z' } }),
@@ -1837,9 +1834,9 @@ describe('adversarial review regressions', () => {
     expect(job.agentSessionId).toBe('session-77');
   });
 
-  it('never stores requiresPr false on a scheduled card', () => {
-    addJob({ title: 's', repoPath: REPO, schedule: '@daily', requiresPr: false }, noopBroadcast);
-    expect(allJobs()[0].requiresPr).toBe(true);
+  it('defaults a schedule to no-PR runs, and keeps an explicit choice', () => {
+    expect(addJob({ title: 's', repoPath: REPO, schedule: '@daily' }, noopBroadcast).job.requiresPr).toBe(false);
+    expect(addJob({ title: 't', repoPath: REPO, schedule: '@daily', requiresPr: true }, noopBroadcast).job.requiresPr).toBe(true);
   });
 
   it('holds the orphan against re-adoption only while its worktree is removed', async () => {
@@ -1848,6 +1845,7 @@ describe('adversarial review regressions', () => {
     const job = allJobs()[0];
     sessions.clear();
     job.agentSessionId = null;
+    job.worktreePath = GONE_WORKTREE;   // the card recorded the worktree the orphan holds
     orphans.set('orphan-9', { id: 'orphan-9', name: 'Viper', repoPath: REPO, branchName: job.branchName, worktreePath: GONE_WORKTREE });
     await moveJob(job.id, 'done', noopBroadcast);
     expect(orphans.has('orphan-9')).toBe(false);
@@ -1891,11 +1889,25 @@ describe('red team regressions', () => {
 describe('pass 3 regressions', () => {
   beforeEach(resetBoard);
 
-  it('never stores requiresPr false through updateJob on a card made scheduled', () => {
-    addJob({ title: 'x', repoPath: REPO, requiresPr: false }, noopBroadcast);
+  it('resets requiresPr to the new type\'s default on a type change with no choice made', () => {
+    addJob({ title: 'x', repoPath: REPO, schedule: '@daily' }, noopBroadcast);
     const job = allJobs()[0];
-    updateJob(job.id, { jobType: undefined, type: 'scheduled', schedule: '@daily', requiresPr: false }, noopBroadcast);
+    expect(job.requiresPr).toBe(false);
+    updateJob(job.id, { type: 'one-time', schedule: '' }, noopBroadcast);
     expect(job.requiresPr).toBe(true);
+    updateJob(job.id, { type: 'scheduled', schedule: '@daily', requiresPr: true }, noopBroadcast);
+    expect(job.requiresPr).toBe(true);
+  });
+
+  it('keeps requiresPr when a save resends the same type, and defaults a card turned schedule to no PR', () => {
+    addJob({ title: 'y', repoPath: REPO, schedule: '@daily', requiresPr: true }, noopBroadcast);
+    const job = allJobs()[0];
+    updateJob(job.id, { title: 'y2', type: 'scheduled', schedule: '@daily' }, noopBroadcast);
+    expect(job.requiresPr).toBe(true);
+    addJob({ title: 'z', repoPath: REPO }, noopBroadcast);
+    const plain = allJobs()[1];
+    updateJob(plain.id, { type: 'scheduled', schedule: '@daily' }, noopBroadcast);
+    expect(plain.requiresPr).toBe(false);
   });
 });
 
@@ -1917,5 +1929,34 @@ describe('outside review regressions', () => {
       killSession: async (id) => { killed.push(id); sessions.delete(id); },
     });
     expect(killed).toEqual(['readopted']);
+  });
+});
+
+describe('red team regressions', () => {
+  beforeEach(resetBoard);
+
+  it('leaves another run\'s orphan alone when it merely shares the branch name', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    sessions.clear();
+    job.agentSessionId = null;
+    orphans.set('theirs', { id: 'theirs', name: 'Other', repoPath: REPO, branchName: job.branchName, worktreePath: GONE_WORKTREE + '-other' });
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(orphans.has('theirs')).toBe(true);
+  });
+
+  it('restamps reviewAt on a no-PR card returned from In progress, not on a PR card', async () => {
+    for (const requiresPr of [false, true]) {
+      resetBoard();
+      addJob({ title: 'x', repoPath: REPO, requiresPr }, noopBroadcast);
+      await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+      const job = allJobs()[0];
+      await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
+      job.reviewAt = '2026-01-01T00:00:00.000Z';
+      await moveJob(job.id, 'in-progress', noopBroadcast);
+      await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
+      expect(job.reviewAt === '2026-01-01T00:00:00.000Z').toBe(requiresPr);
+    }
   });
 });
