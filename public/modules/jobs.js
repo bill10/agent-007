@@ -3,9 +3,9 @@
 // toggle, and drives the dispatcher settings.
 //
 // Two kinds of card share those columns. A one-time job crosses them once and
-// stops in Review, its agent kept until the card is done. A scheduled job cycles To do -> In progress -> To do on its
-// cron schedule, so it lives in To do between runs with its next run time on it
-// and never reaches Review.
+// stops in Review, its agent kept until the card is done. A schedule stays in
+// To do and posts a one-time run card each time it comes due; the runs are
+// what cross the board.
 //
 // Card *state* comes from the server (durable, persisted). The "needs you"
 // badge is computed here from the live agent map, because it describes a PTY
@@ -125,16 +125,6 @@ const STATUS_TEXT = {
   'gone': 'agent gone',
 };
 
-// "Quiet" means two different things depending on the card. On a one-time job it
-// is a warning — the agent may be waiting on you and its PR never appeared. On a
-// scheduled run it is the completion signal itself: the board reads that same
-// quiet as "done" and re-arms the card on its next scan (keeping the agent's
-// terminal open to read), so telling the user they might be needed would be
-// the opposite of true.
-function statusText(job, status) {
-  if (isScheduled(job) && (status === 'stalled' || status === 'gone')) return 'run finished';
-  return STATUS_TEXT[status] || status;
-}
 
 // --- Rendering ---
 
@@ -230,11 +220,7 @@ function renderFinishedToggle(count) {
 function renderCard(job) {
   const card = document.createElement('div');
   const status = liveStatus(job);
-  // A scheduled run that has gone quiet or whose agent exited is a run that
-  // FINISHED (statusText says so in words) — so style it idle-gray, not the
-  // alarm red/gray of a one-time card whose agent died mid-job.
-  const displayStatus = isScheduled(job) && (status === 'gone' || status === 'stalled') ? 'stalled' : status;
-  card.className = 'job-card' + (displayStatus ? ` status-${displayStatus}` : '');
+  card.className = 'job-card' + (status ? ` status-${status}` : '');
   card.dataset.jobId = job.id;
 
   // A card whose agent is still around is a jump target — In progress, and
@@ -256,7 +242,14 @@ function renderCard(job) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = 'scheduled';
-    chip.title = 'Runs again on its schedule instead of finishing in Review';
+    chip.title = 'Posts a run card each time it comes due; the runs are the cards that move';
+    title.appendChild(chip);
+  }
+  if (job.scheduleId) {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = 'run';
+    chip.title = 'Posted by its schedule';
     title.appendChild(chip);
   }
   if (job.agent === 'codex') {
@@ -264,6 +257,15 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'codex';
     chip.title = 'Runs on Codex instead of Claude Code';
+    title.appendChild(chip);
+  }
+  // A chip marks the setting that differs from its type's default: no PR on a
+  // one-time card, PR runs on a schedule.
+  if (isScheduled(job) && job.requiresPr === true) {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = 'PR runs';
+    chip.title = 'Each run opens a pull request';
     title.appendChild(chip);
   }
   if (!isScheduled(job) && job.requiresPr === false) {
@@ -314,12 +316,7 @@ function renderCard(job) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
     const bits = [`<span class="job-card-cron">${escapeHtml(job.schedule || '')}</span>`];
-    // While a run is in flight nextRunAt still points at the run that is
-    // happening, so showing it would read as a second run being due. The next
-    // one is only decided when this one finishes.
-    if (job.state === 'in-progress') {
-      bits.push(`<span class="job-card-next">running now${job.paused ? ', paused after this run' : ''}</span>`);
-    } else if (job.paused) {
+    if (job.paused) {
       // The stored nextRunAt is not shown: it is the due time the pause is
       // holding, and resuming re-arms from that moment instead of running it.
       bits.push('<span class="job-card-next job-card-paused">paused</span>');
@@ -334,20 +331,34 @@ function renderCard(job) {
     // config.json, which a person can edit by hand.
     const runs = Number(job.runCount) || 0;
     if (runs) bits.push(`<span class="job-card-runs">· ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
+    // Where its latest run is, so the schedule points at the card to look at.
+    const latest = job.lastRunJobId ? jobs.get(job.lastRunJobId) : null;
+    const column = latest && (COLUMNS.find(c => c.state === latest.state)?.label || (latest.state === 'done' ? 'Finished' : null));
     sched.innerHTML = bits.join(' ');
     card.appendChild(sched);
+    // The way to the card to look at: its agent when it has a live one,
+    // otherwise the card itself on the board.
+    if (column) {
+      const link = document.createElement('button');
+      link.className = 'job-card-lastrun';
+      link.textContent = `latest run: ${column}`;
+      link.title = latest.agentSessionId && agents.has(latest.agentSessionId) ? 'Open its agent' : 'Show the run';
+      link.onclick = (e) => {
+        e.stopPropagation();
+        if (latest.agentSessionId && agents.has(latest.agentSessionId)) return switchToSession(latest.agentSessionId);
+        if (latest.state === 'done' && !showingFinished) { showingFinished = true; renderBoard(); }
+        document.querySelector(`[data-job-id="${CSS.escape(latest.id)}"]`)?.scrollIntoView({ block: 'nearest' });
+      };
+      card.appendChild(link);
+    }
 
-    // The last run's agent is kept open so its terminal can be read (the next
-    // run replaces it). Only rendered while that tab actually exists — after a
-    // restart, or once the user closes it, the pointer is stale and the row
-    // would lead nowhere.
-    if (job.state !== 'in-progress' && job.lastRunSessionId && agents.has(job.lastRunSessionId)) {
-      const last = document.createElement('button');
-      last.className = 'job-card-lastrun';
-      last.textContent = `last run: ${job.lastRunAgentName || 'agent'} — open terminal`;
-      last.title = "Read what the last run wrote. The tab stays until the next run starts or you close it.";
-      last.onclick = (e) => { e.stopPropagation(); switchToSession(job.lastRunSessionId); };
-      card.appendChild(last);
+    // A firing it held off (see scheduleHold), said out loud: a schedule that
+    // quietly stops posting runs is the failure this is here to prevent.
+    if (job.lastSkipReason && !job.paused) {
+      const skip = document.createElement('div');
+      skip.className = 'job-card-held';
+      skip.textContent = `held off ${relativeTime(job.lastSkipAt)}: ${job.lastSkipReason}`;
+      card.appendChild(skip);
     }
   }
 
@@ -390,8 +401,8 @@ function renderCard(job) {
 
   if (status) {
     const badge = document.createElement('button');
-    badge.className = `job-card-status job-status-${displayStatus}`;
-    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml(statusText(job, status))}`;
+    badge.className = `job-card-status job-status-${status}`;
+    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml((STATUS_TEXT[status] || status))}`;
     const canJump = !!liveAgentId;
     badge.title = canJump
       ? `Open ${job.agentName}'s terminal`
@@ -416,6 +427,18 @@ function renderCard(job) {
     result.setAttribute('aria-label', 'Agent summary');
     result.title = '';   // the card's "open terminal" tooltip does not apply here
     card.appendChild(result);
+  }
+
+  // How many runs of the same schedule this one replaced in Review, and on an
+  // archived run, that it was replaced — so the archive does not read as if
+  // nobody ever looked at a result that was simply overtaken.
+  if (job.supersededRuns || job.supersededBy) {
+    const note = document.createElement('div');
+    note.className = 'job-card-retired';
+    note.textContent = job.supersededBy
+      ? 'superseded by a newer run'
+      : `filed ${job.supersededRuns} earlier run${job.supersededRuns === 1 ? '' : 's'} to Finished`;
+    card.appendChild(note);
   }
 
   // A Review card keeps its agent until it is done, so a missing one went with
@@ -508,26 +531,17 @@ function renderCardActions(job) {
   if (job.state === 'todo') {
     actions.appendChild(mk('Edit', 'Edit this job', () => openForm(job.id)));
   }
-  // Pause holds the NEXT firing, so it is offered in both states a scheduled
-  // card lives in: between runs, and during one (where "End run" stops the run
-  // itself but leaves the schedule armed).
-  if (isScheduled(job) && job.state !== 'done') {
+  // Pause holds the schedule's next firing; a run already posted is its own
+  // card and is left alone.
+  if (isScheduled(job)) {
     actions.appendChild(job.paused
       ? mk('Resume', 'Resume this schedule. The next run is set from now, so a firing missed while paused is not replayed.',
         () => send({ type: 'job-pause', jobId: job.id, paused: false }))
       : mk('Pause', 'Hold this schedule. The card stays in To do and no further runs go out until you resume; a run already under way is left alone.',
         () => send({ type: 'job-pause', jobId: job.id, paused: true })));
   }
-  if (job.state === 'in-progress' && isScheduled(job)) {
-    // No "→ Review" here: a scheduled card has no finished state to move to.
-    // Its only manual control is ending the run early, which is the same move
-    // the board makes for it when the agent goes quiet.
-    actions.appendChild(mk('End run', 'End this run now and re-arm the schedule. The agent is closed and its worktree released; uncommitted or unpushed work is kept as an orphan.', () => {
-      if (confirm(`End this run of "${job.title}"?\n\n${job.agentName || 'The agent'} is closed and its worktree released. The card returns to To do and runs again at its next scheduled time. Any uncommitted or unpushed work is kept as an orphan.`)) {
-        send({ type: 'job-move', jobId: job.id, state: 'todo' });
-      }
-    }));
-  } else if (job.state === 'in-progress') {
+  // A schedule never moves (the server refuses it too); its runs do.
+  if (job.state === 'in-progress' && !isScheduled(job)) {
     actions.appendChild(mk('→ Review', 'Mark as ready for review (use when the agent finished without calling finish_job). The agent is kept.', () => send({ type: 'job-move', jobId: job.id, state: 'review' })));
     actions.appendChild(mk('← To do', 'Requeue this job and close its agent. Uncommitted or unpushed work is kept as an orphan.', () => {
       if (confirm(`Return "${job.title}" to To do?\n\n${job.agentName || 'The agent'} is closed and its worktree released, then the board dispatches a fresh agent for this job. Any uncommitted or unpushed work is kept as an orphan.`)) {
@@ -535,7 +549,7 @@ function renderCardActions(job) {
       }
     }));
   }
-  if (job.state === 'review') {
+  if (job.state === 'review' && !isScheduled(job)) {
     actions.appendChild(mk('← In progress', 'Send back to In progress', () => send({ type: 'job-move', jobId: job.id, state: 'in-progress' })));
     // The board files a card away by itself once its PR merges; this is the
     // same move by hand, for a PR the board cannot see or work that landed
@@ -652,12 +666,18 @@ function addAttachments(files, fallbackName) {
 
 // The cron box only means anything for a scheduled job, so it is hidden rather
 // than left sitting there inert next to a one-time card.
-// The pull-request choice is its one-time counterpart: a scheduled job never
-// opens one.
+// The pull-request choice applies to both: on a schedule it is what its runs
+// get. Its default follows the type (see jobRequiresPr in lib/jobs.js), so a
+// new card switched to scheduled flips to Not required unless picked by hand.
 function syncScheduleField() {
   const scheduled = document.getElementById('job-type').value === 'scheduled';
   document.getElementById('job-schedule-field').style.display = scheduled ? 'flex' : 'none';
-  document.getElementById('job-pr-field').style.display = scheduled ? 'none' : '';
+}
+
+let prPicked = false;   // the user touched the PR select on this form
+function syncPrDefault() {
+  if (prPicked) return;
+  document.getElementById('job-requires-pr').value = document.getElementById('job-type').value === 'scheduled' ? 'no' : 'yes';
 }
 
 // A Codex card is offered "board default", auto and bypassPermissions, so the
@@ -755,7 +775,8 @@ function openForm(jobId) {
   // which would silently freeze the card onto today's setting.
   if (permEl) permEl.value = job && job.permissionMode ? job.permissionMode : '';
   if (agentEl) agentEl.value = job && job.agent === 'codex' ? 'codex' : 'claude';
-  prEl.value = job && job.requiresPr === false ? 'no' : 'yes';
+  prPicked = false;
+  prEl.value = job ? (job.requiresPr === false || (isScheduled(job) && job.requiresPr !== true) ? 'no' : 'yes') : 'yes';
   syncAgentField();   // also marks the danger colour on the permission select
   pendingAttachments = job && Array.isArray(job.attachments) ? job.attachments.map(a => ({ name: a.name })) : [];
   renderAttachments();
@@ -867,7 +888,9 @@ export function setupJobBoard() {
     if (e.key === 'Enter') { e.preventDefault(); saveForm(); }
     if (e.key === 'Escape') closeForm();
   });
-  document.getElementById('job-type').onchange = syncScheduleField;
+  document.getElementById('job-type').onchange = () => { syncScheduleField(); syncPrDefault(); };
+  const prSelect = document.getElementById('job-requires-pr');
+  if (prSelect) prSelect.onchange = () => { prPicked = true; };
   document.getElementById('job-schedule').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); saveForm(); }
     if (e.key === 'Escape') closeForm();
