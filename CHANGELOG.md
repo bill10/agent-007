@@ -5,6 +5,39 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.9.0] - 2026-09-24
+
+### Changed
+
+- **A schedule posts a run card each time it comes due.** A scheduled card
+  used to run itself, cycling To do -> In progress -> To do, and the board
+  had to guess when a run was over. Now the schedule stays in To do, and each
+  firing posts an ordinary job card for that run. The run goes through the
+  board like any other job: its agent reports back with `finish_job`, the
+  result waits in Review with the agent still running, and the agent is
+  released at Done. Runs count toward the per-repo agent limit.
+- **Scheduled jobs can't flood the board.** A schedule holds off while its
+  last run is still waiting or running, and while that run's pull request is
+  open. When a newer summary-only run reaches Review, the older one moves to
+  Finished jobs, keeping its summary, and its agent is closed. The newest
+  card says how many earlier runs it replaced, and the schedule card says
+  why it last held off and links to its latest run. Finished jobs keeps a
+  schedule's newest 50 runs.
+- **A schedule's runs report a summary unless you ask for a PR.** The job
+  form's Pull request field now applies to schedules too, and starts at Not
+  required. Set it to Required for a recurring code change, such as a weekly
+  dependency bump. Such schedules carry a "PR runs" chip.
+
+### Removed
+
+- The "End run" button and the kept last-run terminal link on scheduled
+  cards. A run is its own card now, with the usual buttons.
+
+### Fixed
+
+- A schedule no longer loses firings silently when a run gets stuck: the run
+  shows its status on its own card, and the schedule says it is holding off.
+
 ## [0.4.8.0] - 2026-09-24
 
 ### Added
