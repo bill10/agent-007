@@ -5,6 +5,18 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.8.1] - 2026-09-24
+
+### Added
+
+- **A template for an orchestrator agent.** One agent can now run the others
+  using tools the office already has: it messages each agent its next task,
+  checks what comes back, posts jobs for work nobody owns, and asks you only
+  about money, access and one-way decisions. `templates/orchestrator/` has a
+  charter and the notes files it keeps its memory in, and
+  `docs/ORCHESTRATOR.md` covers setting it up, why it and its agents need the
+  same permission mode, and what it cannot do.
+
 ## [0.4.8.0] - 2026-09-24
 
 ### Added
