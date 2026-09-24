@@ -5,6 +5,42 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.8.0] - 2026-09-24
+
+### Added
+
+- **Jobs that don't need a pull request.** A one-time job can now be marked
+  "Pull request: Not required" on the job form, or with `requires_pr: false`
+  when an agent posts or edits it. Its agent is not told to run `/ship`, so
+  research, investigations and chores no longer invent a code change to
+  ship. It reports back with a summary instead, and the summary shows on the
+  card in Review. Cards marked this way carry a "no PR" chip.
+- **Agents say when they're done.** A dispatched agent now finishes its job
+  by calling the board's new `finish_job` tool: with the pull request `/ship`
+  opened, or with a summary for a job that needs none. The board checks that
+  the PR is the open one on that card's own branch before moving the card,
+  and only the agent working a card can finish it. The board still spots a
+  PR on its own if an agent forgets to call in.
+
+### Changed
+
+- **A card in Review keeps its agent.** The agent used to be closed the
+  moment its PR appeared. It now stays running until the card is done, so
+  you can click a Review card to open the agent's terminal and ask about the
+  work. The agent and its worktree are released when the PR merges or you
+  mark the card done (or move it back to To do). Agents waiting in Review do
+  not count toward the per-repo limit.
+- **Done cleans up after a restart too.** A Review card moved to Done or
+  back to To do after the server restarted now releases the worktree its
+  agent left behind, instead of leaving it in the orphans list.
+
+### Fixed
+
+- Re-adopting an agent that was closed by hand now reconnects it to its job
+  card, even without a restart.
+- A merge no longer closes a terminal you opened yourself on a Review card's
+  branch.
+
 ## [0.4.7.0] - 2026-09-23
 
 ### Fixed
