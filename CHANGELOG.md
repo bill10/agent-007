@@ -5,6 +5,32 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.10.0] - 2026-09-24
+
+### Changed
+
+- **A closed pull request files its card away, like a merge does.** A card
+  whose PR was closed without merging used to sit in Review indefinitely,
+  holding a live agent and worktree, and for a schedule's run it held the
+  schedule off for good. Now it moves to Finished jobs, marked "PR closed
+  without merging" rather than "merged", and its agent is closed. Anything
+  unpushed in its worktree is kept as an orphan. A schedule whose run's PR
+  was closed can run again.
+- The board is careful about when it counts a PR as closed:
+  - If the agent opened a replacement PR on the same branch, the card follows
+    the new PR instead.
+  - Closing and reopening a PR (to re-run CI, say) doesn't file anything,
+    because the closed state has to hold across two scans.
+  - An agent that is still working or asking you something isn't closed
+    until it's quiet.
+
+### Fixed
+
+- The board no longer adopts a pull request from someone else's fork that
+  happens to use the same branch name.
+- An agent that reworks its PR and calls `finish_job` again with the new link
+  now updates its card.
+
 ## [0.4.9.0] - 2026-09-24
 
 ### Changed

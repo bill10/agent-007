@@ -40,8 +40,9 @@
   orphan to re-adopt, or a second, higher per-repo cap that counts them.
 - **Why:** Since v0.4.8.0 a Review card keeps its agent (a CLI process, a PTY,
   a ring buffer and a worktree) until the card is done, and the per-repo cap
-  only counts In progress. A card that needs no PR, or whose PR closed without
-  merging, only reaches Done by hand, so on a board nobody tidies these add up.
+  only counts In progress. A card that needs no PR only reaches Done by hand
+  (a closed PR files its card since v0.4.10.0), so on a board nobody tidies
+  these add up.
   Schedules are bounded since v0.4.9.0 (at most one unfinished run each, and
   newer no-PR runs supersede older ones), so this is about one-time cards.
 - **Effort:** S (human: ~3 hours / CC: ~20 min)
@@ -56,6 +57,8 @@
   skip cards it checked recently — every scan for the first hour after `reviewAt`,
   then hourly. Optionally memo "no account can see this repo" for the rest of a
   scan so N jobs in one unreachable repo do not each walk every gh account.
+- **Note:** Since v0.4.10.0 a closed PR files its card too, so only open PRs
+  and superseded PR numbers remain here.
 - **Why:** Unlike In progress, the Review set does not self-drain. A PR closed
   without merging, or a card whose `prNumber` was superseded by a PR the board
   never saw, is polled every five minutes for the life of the board. Each poll is

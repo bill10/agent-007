@@ -349,7 +349,7 @@ describe('gh pr list queries', () => {
   // These pin the one flag that decides whether a card stays on the board.
   it('asks for OPEN pull requests on the branch, with the fields parsePrList reads', () => {
     expect(openPrListArgs('bill/x')).toEqual(
-      ['pr', 'list', '--head', 'bill/x', '--state', 'open', '--json', 'number,url,state,isDraft']);
+      ['pr', 'list', '--head', 'bill/x', '--state', 'open', '--json', 'number,url,state,isDraft,isCrossRepository']);
   });
 
   it('asks for MERGED pull requests on the branch, with the fields parseMergedPr reads', () => {
@@ -533,5 +533,12 @@ describe('permission mode validation', () => {
   it('falls back to the default rather than emitting an empty flag', () => {
     const parsed = parseCommand(buildJobCommand(job(), { permissionMode: '' }));
     expect(parsed.args[1]).toBe(DEFAULT_PERMISSION_MODE);
+  });
+});
+
+describe('adopting a PR from someone else\'s fork', () => {
+  it('never takes a cross-repository PR that shares the head ref name', () => {
+    expect(parsePrList(JSON.stringify([{ number: 5, url: 'u5', state: 'OPEN', isCrossRepository: true }]))).toBeNull();
+    expect(parsePrList(JSON.stringify([{ number: 5, url: 'u5', state: 'OPEN', isCrossRepository: true }, { number: 6, url: 'u6', state: 'OPEN' }])).number).toBe(6);
   });
 });

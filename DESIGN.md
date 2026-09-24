@@ -425,7 +425,7 @@ a fact about the board, not about a PTY.
 |---|---|---|
 | Dispatched | To do → In progress | Created |
 | The agent calls `finish_job`, or the PR poll finds its PR | → Review | Kept |
-| Its PR merges, or you move it to Done | → Done | Retired, worktree removed |
+| Its PR merges or is closed, or you move it to Done | → Done | Retired, worktree removed |
 | You move it back to To do | → To do | Retired, worktree removed |
 
 Each one-time card says whether its work ends in a pull request
@@ -474,9 +474,19 @@ point at.
 
 Four rules keep the transition honest:
 
-- **Only MERGED finishes a job.** A PR closed without merging left the work
-  undelivered, and someone still has to decide what to do about it — its card
-  stays on the board.
+- **A merged or closed PR finishes a job.** A card in Review whose own PR
+  (asked by number, `gh pr view`) was closed without merging goes to Done
+  marked `prClosedAt`, and the archive says "PR closed without merging"
+  rather than "merged". Three guards come first: an open PR on the same branch
+  becomes the card's PR instead (the agent closed and replaced it); the closed
+  reading must hold on two scans (`prClosedSeenAt`), so a close-and-reopen
+  never files it; and an agent that is working or asking waits until it is
+  quiet. A PR reopened after that does not revive the card — Done is terminal,
+  so re-post the job. Closing a PR is already someone's decision, and a card
+  left in Review would hold a live agent and worktree for work nobody will
+  land; on a schedule's run it would also hold the schedule off. The agent is
+  retired; unpushed work stays behind as an orphan. Follow-up work is a new
+  job, as after a merge.
 - **Only THIS card's merge finishes it.** `gh pr list --head <branch>` matches
   the head ref *name*, and that name outlives the branch: a merged PR stays in
   the listing forever, and board branch names are reused once the branch is
@@ -522,8 +532,9 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   job nobody reads cannot fill the board:
   - a run still in To do or In progress: the firing is skipped. Two runs at
     once would race each other.
-  - a run in Review that opened a PR: skipped until that PR is merged or the
-    card is done. A second dependency-bump PR on an unmerged one is noise.
+  - a run in Review that opened a PR: skipped until that PR is merged or
+    closed, or the card is done. A second dependency-bump PR on an unmerged
+    one is noise.
   - a run in Review with no PR: the schedule fires, and the new run
     **supersedes** the old one once it reaches Review itself.
 
@@ -707,8 +718,8 @@ showing no terminal takes the new tab, unless it is showing the job board.
 Its tab dot carries a faint outline to show where it came from, and the tab is
 disposed automatically when the agent is retired.
 
-A one-time job's agent is retired when its card reaches Done — its PR merged,
-or the user filed it away — or is moved back to To do. Review keeps it (see
+A one-time job's agent is retired when its card reaches Done — its PR merged
+or closed, or the user filed it away — or is moved back to To do. Review keeps it (see
 "How a one-time card moves"). A schedule's runs are one-time cards, so the
 same rule covers them; a superseded run is retired as it is filed to Done.
 
