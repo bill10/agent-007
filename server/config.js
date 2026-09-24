@@ -6,7 +6,7 @@ import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
-import { isScheduled, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent, permissionFlagsFromCommand, recordedPermissionFlags } from '../lib/jobs.js';
+import { isScheduled, jobRequiresPr, scheduledRunReset, sessionAgentFromCommand, isValidJobAgent, permissionFlagsFromCommand, recordedPermissionFlags } from '../lib/jobs.js';
 
 export function loadConfig() {
   try {
@@ -64,7 +64,11 @@ export function loadConfig() {
         job.startedAt = null;
         continue;
       }
-      job.lastError = `Server restarted — agent lost. Work is on ${job.branchName}; the board is still watching for its PR (recover the worktree from the orphans list if it never opened one).`;
+      // A card that needs no PR has nothing for the board to watch: only its
+      // agent can finish it, so the note points at re-adopting it instead.
+      job.lastError = jobRequiresPr(job)
+        ? `Server restarted — agent lost. Work is on ${job.branchName}; the board is still watching for its PR (recover the worktree from the orphans list if it never opened one).`
+        : `Server restarted — agent lost. Work is on ${job.branchName}; re-adopt it from the orphans list so it can finish, or move this card by hand.`;
       job.lastErrorAt = new Date().toISOString();
     }
     for (const o of config.orphans) {

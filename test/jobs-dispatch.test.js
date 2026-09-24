@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { config, sessions } from '../server/state.js';
-import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath } from '../server/jobs.js';
+import { config, sessions, orphans, adoptingOrphans } from '../server/state.js';
+import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
-import { buildJobCommand as buildCommand, DEFAULT_PERMISSION_MODE } from '../lib/jobs.js';
+import { buildJobCommand as buildCommand, buildJobPrompt, jobRequiresPr, DEFAULT_PERMISSION_MODE } from '../lib/jobs.js';
 
 // A real directory, because dispatchOnce filters to repos that exist on disk.
 const REPO = mkdtempSync(join(tmpdir(), 'a007-jobrepo-'));
@@ -14,12 +14,16 @@ const REPO2 = mkdtempSync(join(tmpdir(), 'a007-jobrepo2-'));
 // Swallow config writes: saveConfig targets the developer's real ~/.agent-007.
 const noopBroadcast = () => {};
 
+// A worktree path guaranteed not to exist, for orphans whose directory is gone.
+const GONE_WORKTREE = join(mkdtempSync(join(tmpdir(), 'a007-gone-')), 'worktree');
+
 function resetBoard() {
   config.repos = [{ path: REPO }, { path: REPO2 }];
   config.jobs = [];
   config.jobBoard = null;
   boardSettings();
   sessions.clear();
+  orphans.clear();
 }
 
 // Stand-in for server.js's createSession: records its arguments and hands back
@@ -351,21 +355,24 @@ describe('checkPullRequests closing the agent', () => {
     expect(Date.parse(job.reviewAt)).not.toBeNaN();
   });
 
-  it('closes the agent by default', async () => {
+  // Review is finished work with its agent kept on hand; Done retires it.
+  it('keeps the agent when the card moves to review', async () => {
     const job = await dispatched();
-    const sid = job.agentSessionId;   // captured before: the link is cleared on a successful kill
+    const sid = job.agentSessionId;
     const findPr = withPr({ url: 'u', number: 1 });
     const killed = [];
-    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => killed.push(id) });
-    expect(killed).toEqual([sid]);
+    await checkPullRequests(noopBroadcast, { findPr });
+    expect(job.state).toBe('review');
+    expect(job.agentSessionId).toBe(sid);
+    expect(sessions.has(sid)).toBe(true);
   });
 
-  it('still moves the job to review if closing the agent throws', async () => {
-    // The PR is open either way — a cleanup failure must not strand the card.
-    await dispatched();
-    const findPr = withPr({ url: 'u', number: 2 });
-    await checkPullRequests(noopBroadcast, { findPr, killSession: async () => { throw new Error('worktree busy'); } });
-    expect(allJobs()[0].state).toBe('review');
+  it('leaves a card that needs no PR to its agent, even when a PR exists', async () => {
+    addJob({ title: 'research', repoPath: REPO, requiresPr: false }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await checkPullRequests(noopBroadcast, { findPr: withPr({ url: 'u', number: 1 }) });
+    expect(job.state).toBe('in-progress');
   });
 
   it('keeps the credit on the card after the agent is gone', async () => {
@@ -374,7 +381,7 @@ describe('checkPullRequests closing the agent', () => {
     const job = await dispatched();
     const agentName = job.agentName, branch = job.branchName, started = job.startedAt;
     const findPr = withPr({ url: 'u', number: 3 });
-    await checkPullRequests(noopBroadcast, { findPr, killSession: async (id) => sessions.delete(id) });
+    await checkPullRequests(noopBroadcast, { findPr });
     expect(job.agentName).toBe(agentName);
     expect(job.branchName).toBe(branch);
     expect(job.startedAt).toBe(started);
@@ -418,9 +425,14 @@ describe('checkMergedPullRequests', () => {
 
   it('takes a merged job off the board and records when it merged', async () => {
     const job = await inReview();
+    const sid = job.agentSessionId;
+    const killed = [];
     const finished = await checkMergedPullRequests(noopBroadcast, {
       findMerged: merged({ url: 'https://gh/o/r/pull/5', number: 5, mergedAt: '2026-08-28T10:00:00Z' }),
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
     });
+    // Merged means finished: the agent kept through Review goes now.
+    expect(killed).toEqual([sid]);
     expect(finished).toHaveLength(1);
     expect(job.state).toBe('done');
     expect(job.prMergedAt).toBe('2026-08-28T10:00:00Z');
@@ -752,16 +764,15 @@ describe('moving a job to done', () => {
   });
 });
 
-// --- Nothing accumulates, because every agent is retired at its PR ---
+// --- Kept Review agents do not hold cap slots ---
 
 describe('agents do not pile up across many jobs', () => {
   beforeEach(resetBoard);
 
   it('never runs more agents than the cap, and drains the whole queue', async () => {
-    // The cap counts in-progress jobs, which is only equal to the number of
-    // live agents because an agent is ALWAYS closed when its PR opens. This is
-    // the test that keeps those two facts tied together: if agents ever stopped
-    // being retired, they would accumulate here.
+    // The cap counts in-progress jobs. Agents kept with their cards in Review
+    // are idle and do not count, so this measures the agents on In progress
+    // cards: if the cap ever counted wrong, more than two would be working.
     updateSettings({ maxPerRepo: 2 }, noopBroadcast);
     for (let i = 0; i < 8; i++) addJob({ title: `J${i}`, repoPath: REPO }, noopBroadcast);
 
@@ -772,13 +783,15 @@ describe('agents do not pile up across many jobs', () => {
     let peak = 0;
     for (let cycle = 0; cycle < 6; cycle++) {
       await dispatchOnce(create, noopBroadcast);
-      peak = Math.max(peak, [...sessions.values()].filter(s => !s.exited).length);
-      await checkPullRequests(noopBroadcast, { findPr, killSession: kill });
+      peak = Math.max(peak, allJobs().filter(j => j.state === 'in-progress' && sessions.has(j.agentSessionId)).length);
+      await checkPullRequests(noopBroadcast, { findPr });
     }
 
     expect(peak).toBeLessThanOrEqual(2);
-    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
     expect(allJobs().filter(j => j.state === 'review')).toHaveLength(8);
+    // Done is what retires them.
+    for (const job of allJobs()) await moveJob(job.id, 'done', noopBroadcast, { killSession: kill });
+    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
   });
 });
 
@@ -889,31 +902,18 @@ describe('requeueing a job retires its agent', () => {
     expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
   });
 
-  it('also retires the agent on a manual move to review', async () => {
-    // Same hole as the requeue, via the other button: countInFlightByRepo stops
-    // counting a job the moment it leaves in-progress, so an agent left running
-    // here keeps a worktree and a PTY while the board dispatches past the cap.
+  it('keeps the agent on a manual move to review, and retires it on done', async () => {
     addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
-    const sid = allJobs()[0].agentSessionId;
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
     const killed = [];
-    await moveJob(allJobs()[0].id, 'review', noopBroadcast, {
-      killSession: async (id) => { killed.push(id); sessions.delete(id); },
-    });
+    const killSession = async (id) => { killed.push(id); sessions.delete(id); };
+    await moveJob(job.id, 'review', noopBroadcast, { killSession, findPr: async () => ({ pr: null }) });
+    expect(killed).toEqual([]);
+    expect(job.agentSessionId).toBe(sid);
+    await moveJob(job.id, 'done', noopBroadcast, { killSession });
     expect(killed).toEqual([sid]);
-  });
-
-  it('keeps the cap honest when jobs are shunted to review by hand', async () => {
-    updateSettings({ maxPerRepo: 1 }, noopBroadcast);
-    for (let i = 0; i < 4; i++) addJob({ title: `J${i}`, repoPath: REPO }, noopBroadcast);
-    const create = fakeCreateSession([]);
-    const kill = async (id) => { sessions.delete(id); };
-    for (let i = 0; i < 4; i++) {
-      await dispatchOnce(create, noopBroadcast);
-      const running = allJobs().find(j => j.state === 'in-progress');
-      if (running) await moveJob(running.id, 'review', noopBroadcast, { killSession: kill });
-    }
-    expect([...sessions.values()].filter(s => !s.exited)).toHaveLength(0);
   });
 });
 
@@ -1244,15 +1244,15 @@ describe('retiring the agent when the link is missing', () => {
     return { job, running };
   }
 
-  it('finds the agent by branch and retires it as the job moves to review', async () => {
+  it('finds the agent by branch and retires it as the merged job moves to done', async () => {
     const { job, running } = await unlinkedButRunning();
     const killed = [];
-    await checkPullRequests(noopBroadcast, {
-      findPr: async () => ({ pr: { url: 'u', number: 42 } }),
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 42, mergedAt: '2026-08-28T10:00:00Z' } }),
       killSession: async (id) => { killed.push(id); sessions.delete(id); },
     });
     expect(killed).toEqual([running.id]);
-    expect(job.state).toBe('review');
+    expect(job.state).toBe('done');
     expect(job.agentName).toBe('Ghost');      // credit recorded before it went
     expect(job.agentSessionId).toBeNull();
   });
@@ -1398,9 +1398,9 @@ describe('review cards keep their record', () => {
 describe('a manual move survives a bad PR lookup', () => {
   beforeEach(resetBoard);
 
-  it('still moves and still retires the agent when the lookup throws', async () => {
-    // The lookup runs before persist and before the kill; a throw there would
-    // leave the job changed in memory, never saved, agent never retired.
+  it('still moves, keeping the agent, when the lookup throws', async () => {
+    // The lookup runs before persist; a throw there would leave the job
+    // changed in memory and never saved.
     addJob({ title: 'lookup explodes', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
@@ -1413,7 +1413,8 @@ describe('a manual move survives a bad PR lookup', () => {
     });
     expect(result.error).toBeUndefined();
     expect(job.state).toBe('review');
-    expect(killed).toEqual([sid]);
+    expect(killed).toEqual([]);           // Review keeps its agent
+    expect(job.agentSessionId).toBe(sid);
     expect(job.prNumber).toBeNull();      // no link, as before
   });
 
@@ -1421,9 +1422,8 @@ describe('a manual move survives a bad PR lookup', () => {
     addJob({ title: 'linked then retired', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
-    await moveJob(job.id, 'review', noopBroadcast, {
+    await moveJob(job.id, 'done', noopBroadcast, {
       killSession: async (id) => sessions.delete(id),
-      findPr: async () => ({ pr: null }),
     });
     expect(job.agentSessionId).toBeNull();
   });
@@ -1433,15 +1433,14 @@ describe('a manual move survives a bad PR lookup', () => {
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
     const sid = job.agentSessionId;
-    await moveJob(job.id, 'review', noopBroadcast, {
+    await moveJob(job.id, 'done', noopBroadcast, {
       killSession: async () => { throw new Error('worktree busy'); },
-      findPr: async () => ({ pr: null }),
     });
     expect(job.agentSessionId).toBe(sid);
   });
 });
 
-describe('moving to review when the agent is already gone', () => {
+describe('moving to done when the agent is already gone', () => {
   beforeEach(resetBoard);
 
   it('drops the dead link rather than leaving a stale id on the card', async () => {
@@ -1453,9 +1452,8 @@ describe('moving to review when the agent is already gone', () => {
     sessions.get(job.agentSessionId).exited = true;
 
     const killed = [];
-    await moveJob(job.id, 'review', noopBroadcast, {
+    await moveJob(job.id, 'done', noopBroadcast, {
       killSession: async (id) => killed.push(id),
-      findPr: async () => ({ pr: null }),
     });
     expect(killed).toEqual([]);              // nothing to kill
     expect(job.agentSessionId).toBeNull();   // but the link still goes
@@ -1519,5 +1517,405 @@ describe('a manual move that races a requeue', () => {
     });
     expect(job.prNumber).toBe(18);
     expect(job.prCheckError).toBeNull();
+  });
+});
+
+// --- finish_job: the agent reports its own finish ---
+
+describe('finishJobForAgent', () => {
+  beforeEach(resetBoard);
+
+  async function running(fields = {}) {
+    addJob({ title: 'work', repoPath: REPO, ...fields }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    return { job, session: sessions.get(job.agentSessionId) };
+  }
+  const openPr = (pr) => async () => ({ pr });
+
+  it('moves a PR job to review with the PR it names, keeping the agent', async () => {
+    const { job, session } = await running();
+    const result = await finishJobForAgent({ session, prUrl: 'https://github.com/o/r/pull/5/' }, noopBroadcast,
+      { findPr: openPr({ url: 'https://github.com/o/r/pull/5', number: 5 }) });
+    expect(result.error).toBeUndefined();
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBe(5);
+    expect(job.agentSessionId).toBe(session.id);
+  });
+
+  it('refuses a PR job with no PR url, or one that is not the branch PR', async () => {
+    const { job, session } = await running();
+    const findPr = openPr({ url: 'https://github.com/o/r/pull/5', number: 5 });
+    expect((await finishJobForAgent({ session }, noopBroadcast, { findPr })).error).toMatch(/\/ship/);
+    expect((await finishJobForAgent({ session, prUrl: 'https://github.com/o/r/pull/6' }, noopBroadcast, { findPr })).error)
+      .toMatch(/pull\/5/);
+    expect((await finishJobForAgent({ session, prUrl: 'https://github.com/o/r/pull/5' }, noopBroadcast,
+      { findPr: openPr(null) })).error).toMatch(/no open pull request/);
+    expect(job.state).toBe('in-progress');
+  });
+
+  it('moves a no-PR job to review with its summary, and needs one', async () => {
+    const { job, session } = await running({ requiresPr: false });
+    expect((await finishJobForAgent({ session }, noopBroadcast)).error).toMatch(/summary/);
+    const result = await finishJobForAgent({ session, summary: 'Found the leak in pty.js.' }, noopBroadcast);
+    expect(result.error).toBeUndefined();
+    expect(job.state).toBe('review');
+    expect(job.resultSummary).toBe('Found the leak in pty.js.');
+    expect(job.agentSessionId).toBe(session.id);
+  });
+
+  it('only lets the linked agent finish its own card', async () => {
+    const { job } = await running({ requiresPr: false });
+    const stranger = { id: 'session-other', name: 'Stranger' };
+    expect((await finishJobForAgent({ session: stranger, summary: 'x' }, noopBroadcast)).error).toMatch(/not working a job/);
+    expect(job.state).toBe('in-progress');
+  });
+});
+
+describe('the one-time prompt', () => {
+  it('asks for /ship then finish_job with the PR on a PR job, and no /ship otherwise', () => {
+    const pr = buildJobPrompt({ title: 't', requiresPr: true });
+    expect(pr).toContain('/ship');
+    expect(pr).toMatch(/finish_job[\s\S]*pr_url/);
+    const noPr = buildJobPrompt({ title: 't', requiresPr: false });
+    expect(noPr).not.toContain('ship');
+    expect(noPr).toMatch(/finish_job[\s\S]*summary/);
+  });
+});
+
+describe('done after a restart', () => {
+  beforeEach(resetBoard);
+
+  // A restart leaves a kept Review agent's worktree as an orphan record, not a
+  // session. Done must still release it.
+  // Done's release is covered below; To do clears the branch off the card
+  // first, so the release has to work from what the card held before.
+  it('releases the orphaned worktree of a review card moved back to To do', async () => {
+    addJob({ title: 'kept then restarted', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
+    sessions.clear();
+    job.agentSessionId = null;
+    orphans.set('orphan-1', { id: 'orphan-1', name: 'Viper', repoPath: REPO, branchName: job.branchName,
+      worktreePath: GONE_WORKTREE });   // already gone from disk
+    await moveJob(job.id, 'todo', noopBroadcast);
+    expect(orphans.has('orphan-1')).toBe(false);
+    expect(job.branchName).toBeNull();
+  });
+});
+
+// --- finish_job refusals, and the no-PR / orphan edges of Review and Done ---
+
+describe('finishJobForAgent refusals', () => {
+  beforeEach(resetBoard);
+
+  async function running(fields = {}) {
+    addJob({ title: 'work', repoPath: REPO, ...fields }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    return { job, session: sessions.get(job.agentSessionId) };
+  }
+
+  it('refuses with no session at all', async () => {
+    expect((await finishJobForAgent({}, noopBroadcast)).error).toMatch(/not working a job/);
+  });
+
+  it('refuses a scheduled card, whose run ends on its own', async () => {
+    const { job, session } = await running({ requiresPr: false });
+    job.type = 'scheduled';
+    job.schedule = '@daily';
+    expect((await finishJobForAgent({ session, summary: 'x' }, noopBroadcast)).error).toMatch(/scheduled job/);
+    expect(job.state).toBe('in-progress');
+  });
+
+  // The poller can find the PR /ship opened before the agent calls in.
+  it('succeeds when the card is already in Review, keeping a new summary', async () => {
+    const { job, session } = await running();
+    const pr = { url: 'https://github.com/o/r/pull/5', number: 5 };
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr }) });
+    const result = await finishJobForAgent({ session, prUrl: pr.url, summary: 'shipped' }, noopBroadcast,
+      { findPr: async () => ({ pr }) });
+    expect(result.error).toBeUndefined();
+    expect(job.state).toBe('review');
+    expect(job.resultSummary).toBe('shipped');
+  });
+
+  it('refuses a card that has already been filed away as done', async () => {
+    const { job, session } = await running({ requiresPr: false });
+    job.state = 'done';
+    expect((await finishJobForAgent({ session, summary: 'x' }, noopBroadcast)).error).toMatch(/Finished already/);
+  });
+
+  it('refuses when the card is deleted or re-branched during the PR lookup', async () => {
+    const { job, session } = await running();
+    const pr = { url: 'https://github.com/o/r/pull/5', number: 5 };
+    const rebranch = async () => { job.branchName = 'bill/other'; return { pr }; };
+    expect((await finishJobForAgent({ session, prUrl: pr.url }, noopBroadcast, { findPr: rebranch })).error).toMatch(/moved/);
+    expect(job.prNumber).toBeNull();
+    const vanish = async () => { config.jobs = []; return { pr }; };
+    expect((await finishJobForAgent({ session, prUrl: pr.url }, noopBroadcast, { findPr: vanish })).error).toMatch(/moved/);
+    expect(job.prNumber).toBeNull();
+  });
+
+  it('sets requiresPr through updateJob, ignoring a non-boolean', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    const job = allJobs()[0];
+    updateJob(job.id, { requiresPr: 'no' }, noopBroadcast);
+    expect(job.requiresPr).toBe(true);
+    updateJob(job.id, { requiresPr: false }, noopBroadcast);
+    expect(job.requiresPr).toBe(false);
+  });
+
+  it('refuses a non-string summary or pr_url off the wire', async () => {
+    const { job, session } = await running({ requiresPr: false });
+    expect((await finishJobForAgent({ session, summary: 42 }, noopBroadcast)).error).toMatch(/summary must be a string/);
+    expect((await finishJobForAgent({ session, summary: 'x', prUrl: {} }, noopBroadcast)).error).toMatch(/pr_url must be a string/);
+    expect(job.state).toBe('in-progress');
+  });
+
+  it('refuses a blank pr_url, and a blank summary on a no-PR card', async () => {
+    const { session } = await running();
+    expect((await finishJobForAgent({ session, prUrl: '   ' }, noopBroadcast, { findPr: async () => { throw new Error('not called'); } })).error)
+      .toMatch(/requires a pull request/);
+    resetBoard();
+    const noPr = await running({ requiresPr: false });
+    expect((await finishJobForAgent({ session: noPr.session, summary: '  \n ' }, noopBroadcast)).error).toMatch(/summary/);
+  });
+
+  it('passes a PR lookup failure back, leaving the card alone', async () => {
+    const { job, session } = await running();
+    const result = await finishJobForAgent({ session, prUrl: 'https://github.com/o/r/pull/5' }, noopBroadcast,
+      { findPr: async () => ({ error: 'gh is not installed' }) });
+    expect(result.error).toMatch(/Could not check the pull request — gh is not installed/);
+    expect(job.state).toBe('in-progress');
+  });
+
+  it('leaves a card that moved while its PR was being looked up', async () => {
+    const { job, session } = await running();
+    const result = await finishJobForAgent({ session, prUrl: 'https://github.com/o/r/pull/5' }, noopBroadcast, {
+      findPr: async () => { job.state = 'todo'; return { pr: { url: 'https://github.com/o/r/pull/5', number: 5 } }; },
+    });
+    expect(result.error).toMatch(/moved while its pull request was being checked/);
+    expect(job.state).toBe('todo');
+    expect(job.prNumber).toBeNull();
+  });
+
+  it('keeps an optional summary on a PR job, and clears its old errors', async () => {
+    const { job, session } = await running();
+    job.lastError = 'stale';
+    const notes = [];
+    await finishJobForAgent({ session, prUrl: 'https://github.com/O/R/pull/5', summary: 'Assumed UTC.' }, (m) => notes.push(m),
+      { findPr: async () => ({ pr: { url: 'https://github.com/o/r/pull/5', number: 5 } }) });
+    expect(job.state).toBe('review');
+    expect(job.resultSummary).toBe('Assumed UTC.');
+    expect(job.lastError).toBeNull();
+    expect(notes.some(m => m.type === 'notification' && /PR #5/.test(m.message))).toBe(true);
+  });
+});
+
+describe('cards that need no pull request', () => {
+  beforeEach(resetBoard);
+
+  it('defaults to requiring one, reads a missing field as true, and never on a scheduled card', () => {
+    expect(addJob({ title: 'a', repoPath: REPO }, noopBroadcast).job.requiresPr).toBe(true);
+    expect(addJob({ title: 'b', repoPath: REPO, requiresPr: false }, noopBroadcast).job.requiresPr).toBe(false);
+    expect(jobRequiresPr({ title: 'old' })).toBe(true);
+    expect(jobRequiresPr({ requiresPr: false })).toBe(false);
+    expect(jobRequiresPr({ type: 'scheduled', schedule: '@daily', requiresPr: true })).toBe(false);
+  });
+
+  it('skips the PR lookup on a manual move to review', async () => {
+    addJob({ title: 'research', repoPath: REPO, requiresPr: false }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    let looked = false;
+    await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => { looked = true; return { pr: { url: 'u', number: 1 } }; } });
+    expect(looked).toBe(false);
+    expect(job.state).toBe('review');
+    expect(job.prNumber).toBeNull();
+  });
+
+  it('is left alone by the merge sweep, even when its branch merged', async () => {
+    addJob({ title: 'research', repoPath: REPO, requiresPr: false }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast);
+    const finished = await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 1, mergedAt: '2026-08-28T10:00:00Z' } }),
+    });
+    expect(finished).toEqual([]);
+    expect(job.state).toBe('review');
+  });
+
+  it('is validated and toggled through the agent door', () => {
+    expect(postJobForAgent({ title: 'x', repo: REPO, requiresPr: 'no' }, noopBroadcast).error).toMatch(/requires_pr must be true or false/);
+    expect(allJobs()).toHaveLength(0);
+    const { job } = postJobForAgent({ title: 'x', repo: REPO, requiresPr: false }, noopBroadcast);
+    expect(job.requiresPr).toBe(false);
+    expect(editJobForAgent({ id: job.id, requiresPr: 'yes' }, noopBroadcast).error).toMatch(/requires_pr must be true or false/);
+    expect(editJobForAgent({ id: job.id, requiresPr: false }, noopBroadcast).error).toMatch(/Nothing to change/);
+    expect(editJobForAgent({ id: job.id, requiresPr: true }, noopBroadcast).changed).toEqual(['requires_pr']);
+    expect(allJobs()[0].requiresPr).toBe(true);
+  });
+});
+
+describe('releasing an orphaned worktree on done', () => {
+  beforeEach(() => { resetBoard(); orphans.clear(); adoptingOrphans.clear(); });
+
+  async function restartedReviewCard() {
+    addJob({ title: 'kept then restarted', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
+    sessions.clear();
+    job.agentSessionId = null;
+    return job;
+  }
+  const orphanFor = (job, worktreePath) => ({ id: 'orphan-1', name: 'Viper', repoPath: REPO, branchName: job.branchName, worktreePath });
+
+  it('leaves an orphan that is being re-adopted', async () => {
+    const job = await restartedReviewCard();
+    orphans.set('orphan-1', orphanFor(job, GONE_WORKTREE));
+    adoptingOrphans.add('orphan-1');
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(job.state).toBe('done');
+    expect(orphans.has('orphan-1')).toBe(true);
+  });
+
+  it('keeps the orphan when its worktree still holds something', async () => {
+    const job = await restartedReviewCard();
+    // A directory with no .git is a broken worktree: removeWorktree keeps it.
+    const kept = mkdtempSync(join(tmpdir(), 'a007-broken-wt-'));
+    orphans.set('orphan-1', orphanFor(job, kept));
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(orphans.has('orphan-1')).toBe(true);
+    expect(existsSync(kept)).toBe(true);
+    rmSync(kept, { recursive: true, force: true });
+  });
+
+  it('leaves an orphan on another repo with the same branch name alone', async () => {
+    const job = await restartedReviewCard();
+    orphans.set('orphan-1', { ...orphanFor(job, GONE_WORKTREE), repoPath: REPO2 });
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(orphans.has('orphan-1')).toBe(true);
+  });
+
+  it('is what the merge sweep falls back to when no agent is left to retire', async () => {
+    const job = await restartedReviewCard();
+    orphans.set('orphan-1', orphanFor(job, GONE_WORKTREE));
+    const finished = await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 42, mergedAt: '2026-08-28T10:00:00Z' } }),
+      killSession: async () => { throw new Error('nothing to kill'); },
+    });
+    expect(finished).toHaveLength(1);
+    expect(job.state).toBe('done');
+    expect(orphans.has('orphan-1')).toBe(false);
+  });
+});
+
+describe('adversarial review regressions', () => {
+  beforeEach(resetBoard);
+
+  it('clears the last attempt\'s summary when a card goes back to To do', async () => {
+    addJob({ title: 'x', repoPath: REPO, requiresPr: false }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await finishJobForAgent({ session: sessions.get(job.agentSessionId), summary: 'old result' }, noopBroadcast);
+    await moveJob(job.id, 'todo', noopBroadcast, { killSession: async (id) => sessions.delete(id) });
+    expect(job.resultSummary).toBeNull();
+  });
+
+  it('relinks a re-adopted agent over a link to a session that has exited', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    sessions.get(job.agentSessionId).exited = true;   // closed by hand, no restart
+    const adopted = { id: 'session-77', name: 'Viper', repoPath: REPO, branchName: job.branchName, exited: false };
+    sessions.set(adopted.id, adopted);
+    expect(relinkSessionToJob(adopted, noopBroadcast)).toBe(job);
+    expect(job.agentSessionId).toBe('session-77');
+  });
+
+  it('never stores requiresPr false on a scheduled card', () => {
+    addJob({ title: 's', repoPath: REPO, schedule: '@daily', requiresPr: false }, noopBroadcast);
+    expect(allJobs()[0].requiresPr).toBe(true);
+  });
+
+  it('holds the orphan against re-adoption only while its worktree is removed', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    sessions.clear();
+    job.agentSessionId = null;
+    orphans.set('orphan-9', { id: 'orphan-9', name: 'Viper', repoPath: REPO, branchName: job.branchName, worktreePath: GONE_WORKTREE });
+    await moveJob(job.id, 'done', noopBroadcast);
+    expect(orphans.has('orphan-9')).toBe(false);
+    expect(adoptingOrphans.has('orphan-9')).toBe(false);
+  });
+});
+
+describe('red team regressions', () => {
+  beforeEach(resetBoard);
+
+  it('treats the PR poll moving the card during finish_job\'s lookup as a success', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const pr = { url: 'https://github.com/o/r/pull/5', number: 5 };
+    const pollerWins = async () => { job.state = 'review'; return { pr }; };
+    const result = await finishJobForAgent({ session: sessions.get(job.agentSessionId), prUrl: pr.url, summary: 'done' },
+      noopBroadcast, { findPr: pollerWins });
+    expect(result.error).toBeUndefined();
+    expect(job.resultSummary).toBe('done');
+  });
+
+  it('leaves an unlinked session on a Review card\'s branch alone when the PR merges', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: { url: 'u', number: 5 } }) });
+    sessions.clear();
+    job.agentSessionId = null;
+    sessions.set('mine', { id: 'mine', repoPath: REPO, branchName: job.branchName, exited: false });
+    const killed = [];
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => ({ pr: { url: 'u', number: 5, mergedAt: '2026-09-24T00:00:00Z' } }),
+      killSession: async (id) => killed.push(id),
+    });
+    expect(job.state).toBe('done');
+    expect(killed).toEqual([]);
+  });
+});
+
+describe('pass 3 regressions', () => {
+  beforeEach(resetBoard);
+
+  it('never stores requiresPr false through updateJob on a card made scheduled', () => {
+    addJob({ title: 'x', repoPath: REPO, requiresPr: false }, noopBroadcast);
+    const job = allJobs()[0];
+    updateJob(job.id, { jobType: undefined, type: 'scheduled', schedule: '@daily', requiresPr: false }, noopBroadcast);
+    expect(job.requiresPr).toBe(true);
+  });
+});
+
+describe('outside review regressions', () => {
+  beforeEach(resetBoard);
+
+  it('retires an agent re-adopted during the merge lookup, not the stale one', async () => {
+    addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await checkPullRequests(noopBroadcast, { findPr: async () => ({ pr: { url: 'u', number: 5 } }) });
+    const killed = [];
+    await checkMergedPullRequests(noopBroadcast, {
+      findMerged: async () => {
+        sessions.set('readopted', { id: 'readopted', repoPath: REPO, branchName: job.branchName, exited: false });
+        job.agentSessionId = 'readopted';
+        return { pr: { url: 'u', number: 5, mergedAt: '2026-09-24T00:00:00Z' } };
+      },
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+    });
+    expect(killed).toEqual(['readopted']);
   });
 });

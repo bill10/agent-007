@@ -79,6 +79,14 @@ export const POST_JOB_TOOL = {
           'Optional. Which CLI the board spawns for this card: claude (Claude Code) '
           + 'or codex. Defaults to the one you are running as.',
       },
+      requires_pr: {
+        type: 'boolean',
+        description:
+          'Optional, one-time jobs only. Whether the work ends in a pull request. '
+          + 'Defaults to true; pass false for work that is not a code change — '
+          + 'research, an investigation, an ops chore — so the agent reports a '
+          + 'summary instead of opening a PR.',
+      },
     },
     required: ['title'],
     additionalProperties: false,
@@ -137,8 +145,8 @@ export const READ_JOB_TOOL = {
 export const EDIT_JOB_TOOL = {
   name: 'edit_job',
   description:
-    'Change a card that is still in To do: its title, detail, repository or '
-    + 'schedule. Only To do cards can be edited — once the board has dispatched a '
+    'Change a card that is still in To do: its title, detail, repository, '
+    + 'schedule or whether it requires a pull request. Only To do cards can be edited — once the board has dispatched a '
     + 'card its agent has already been handed the text, so a later edit would leave '
     + 'the card describing work nobody was asked to do. Pass only the fields that '
     + 'change; the rest are left alone. Ids come from list_jobs.',
@@ -163,8 +171,44 @@ export const EDIT_JOB_TOOL = {
           'Replaces the cron schedule (five fields, or an @shorthand). Pass an empty '
           + 'string to turn a scheduled card back into one that runs once.',
       },
+      requires_pr: {
+        type: 'boolean',
+        description:
+          'Whether the work ends in a pull request. '
+          + 'Pass false for work that is not a code change — '
+          + 'research, an investigation, an ops chore — so the agent reports a '
+          + 'summary instead of opening a PR.',
+      },
     },
     required: ['id'],
+    additionalProperties: false,
+  },
+};
+
+// How a board-dispatched agent reports that its job is done. The card moves to
+// Review; the agent keeps running there until the card reaches Done.
+export const FINISH_JOB_TOOL = {
+  name: 'finish_job',
+  description:
+    'Report that the job-board job you were dispatched to do is finished, which '
+    + 'moves its card to Review. Only for an agent the board dispatched, and only '
+    + 'once the work is done. If the job requires a pull request, run your ship skill (/ship, or $ship in Codex) first, '
+    + 'wait for it to open the PR, and pass its URL as pr_url. If it does not, pass '
+    + 'a summary of what you did or found — that is what the reviewer reads.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pr_url: {
+        type: 'string',
+        description: 'The pull request URL. Required when the job requires a pull request.',
+      },
+      summary: {
+        type: 'string',
+        description:
+          'What you did or found, written for someone who was not watching. Required '
+          + 'when the job needs no pull request; optional otherwise.',
+      },
+    },
     additionalProperties: false,
   },
 };
@@ -206,7 +250,7 @@ export const SEND_MESSAGE_TOOL = {
   },
 };
 
-export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
+export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -252,6 +296,7 @@ const CALLS = {
       repo: args.repo,
       schedule: args.schedule,
       agent: args.agent,
+      requiresPr: args.requires_pr,
       session: ctx.session || null,
     });
     if (result.error) return toolText(result.error, true);
@@ -262,7 +307,7 @@ const CALLS = {
     // to everyone), and a concrete next-run time is what makes the mistake
     // visible while the user is still in the conversation to correct it.
     const fires = result.job.schedule ? ` on a schedule (${scheduleText(result.job)})` : '';
-    const column = result.job.schedule ? '' : ' (To do)';
+    const column = result.job.schedule ? '' : result.job.requiresPr === false ? ' (To do, no pull request)' : ' (To do)';
     const line = `Posted "${result.job.title}"${where}${fires} to the Agent 007 job board${column}.`;
     // The dispatcher note matters: with the board stopped the card sits there
     // doing nothing, and an agent reporting "queued it" without saying so would
@@ -313,13 +358,14 @@ const CALLS = {
       job.type === 'scheduled'
         ? `schedule: ${scheduleText(job, ' — next ')}`
           + `${job.runCount ? ` — run ${job.runCount} time(s), last ${when(job.lastRunAt)}` : ''}`
-        : 'schedule: runs once',
+        : `schedule: runs once${job.requiresPr ? '' : ', no pull request'}`,
       `posted: ${when(job.postedAt)}`
         + `${job.postedByName ? ` by ${job.postedByName}` : ''}`
         + `${job.postedByAgent ? ` (typed by ${job.postedByAgent})` : ''}`,
       job.agentName ? `agent: ${job.agentName}, started ${when(job.startedAt)}` : null,
       job.branchName ? `branch: ${job.branchName}` : null,
       job.prUrl ? `pull request: ${job.prUrl}${job.prMergedAt ? ` (merged ${when(job.prMergedAt)})` : ''}` : null,
+      job.resultSummary ? `result: ${job.resultSummary}` : null,
       job.attachments.length ? `attachments: ${job.attachments.join(', ')}` : null,
       // Whoever last changed the text, so a card an agent rewrote never reads
       // as if the person who queued it wrote what is there now.
@@ -344,6 +390,7 @@ const CALLS = {
       detail: args.detail,
       repo: args.repo,
       schedule: args.schedule,
+      requiresPr: args.requires_pr,
     });
     if (result.error) return toolText(result.error, true);
     const job = result.job;
@@ -351,6 +398,14 @@ const CALLS = {
     return toolText(
       `Updated ${result.changed.join(', ')} on "${job.title}" (${job.repo}), still in To do.${fires}`,
     );
+  },
+
+  // Async: checking the PR is a network call. handleMcpMessage passes the
+  // promise through, and the route awaits it.
+  [FINISH_JOB_TOOL.name]: async (args, ctx) => {
+    const result = await ctx.finishJob({ prUrl: args.pr_url, summary: args.summary });
+    if (result.error) return toolText(result.error, true);
+    return toolText(`"${result.job.title}" is in Review. You are done — end your turn here.`);
   },
 
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {
@@ -380,12 +435,13 @@ const CALLS = {
  * Handle one JSON-RPC message.
  *
  * @param msg      parsed JSON-RPC request or notification
- * @param ctx      { session, postJob, listJobs, readJob, editJob, listAgents,
+ * @param ctx      { session, postJob, listJobs, readJob, editJob, finishJob, listAgents,
  *                 sendMessage } — the agent
  *                 this token belongs to, and the injected board functions
  *                 (server/jobs.js, the write ones bound to a broadcast), kept
  *                 as parameters so this module never imports the job store.
- * @returns the reply object, or null when the message is a notification.
+ * @returns the reply object, or null when the message is a notification — or
+ *          a promise of the reply, for a tool that has to wait (finish_job).
  */
 export function handleMcpMessage(msg, ctx = {}) {
   const { id, method, params } = msg || {};
@@ -415,7 +471,8 @@ export function handleMcpMessage(msg, ctx = {}) {
     if (typeof name !== 'string' || !Object.hasOwn(CALLS, name)) {
       return fail(id, -32602, `Unknown tool: ${name}`);
     }
-    return ok(id, CALLS[name](params?.arguments || {}, ctx));
+    const result = CALLS[name](params?.arguments || {}, ctx);
+    return result instanceof Promise ? result.then(r => ok(id, r)) : ok(id, result);
   }
 
   // Everything else, including the client's own discovery probes. JSON-RPC says

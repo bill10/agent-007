@@ -10,7 +10,7 @@ import {
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
 import {
-  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, attachmentPath, allJobs,
+  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
 import { agentSummaries, sendMessage } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
@@ -95,23 +95,32 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
   // Mounted outside /api because it is a different audience with a different
   // credential: agents, never browsers. Origin-checked all the same, so a page
   // in the user's browser cannot reach it.
-  app.post('/mcp', checkOrigin, express.json({ limit: '128kb' }), resolveIdentity, requireAgent, (req, res) => {
-    const reply = handleMcpMessage(req.body, {
-      session: req.agentSession,
-      postJob: (fields) => postJobForAgent({ ...fields, user: userById(req.agentSession.ownerId) }, broadcast),
-      listJobs: listJobsForAgent,
-      readJob: readJobForAgent,
-      // The session and its owner, like postJob: an edit is refused on another
-      // person's card and stamped with the agent's name when it lands.
-      editJob: (fields) => editJobForAgent({
-        ...fields,
+  // Async because finish_job waits on a PR lookup. Express 4 does not catch a
+  // rejected handler, so the catch below is what keeps a throw from hanging it.
+  app.post('/mcp', checkOrigin, express.json({ limit: '128kb' }), resolveIdentity, requireAgent, async (req, res) => {
+    let reply;
+    try {
+      reply = await handleMcpMessage(req.body, {
         session: req.agentSession,
-        user: userById(req.agentSession.ownerId),
-      }, broadcast),
-      listAgents: () => agentSummaries(req.agentSession, sessions,
-        (jobId) => allJobs().find(job => job.id === jobId)?.title),
-      sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
-    });
+        postJob: (fields) => postJobForAgent({ ...fields, user: userById(req.agentSession.ownerId) }, broadcast),
+        listJobs: listJobsForAgent,
+        readJob: readJobForAgent,
+        // The session and its owner, like postJob: an edit is refused on another
+        // person's card and stamped with the agent's name when it lands.
+        editJob: (fields) => editJobForAgent({
+          ...fields,
+          session: req.agentSession,
+          user: userById(req.agentSession.ownerId),
+        }, broadcast),
+        listAgents: () => agentSummaries(req.agentSession, sessions,
+          (jobId) => allJobs().find(job => job.id === jobId)?.title),
+        sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
+        finishJob: (fields) => finishJobForAgent({ ...fields, session: req.agentSession }, broadcast),
+      });
+    } catch (err) {
+      console.error('MCP call failed:', err);
+      return res.json({ jsonrpc: '2.0', id: req.body?.id ?? null, error: { code: -32603, message: 'Internal error' } });   // 200, as JSON-RPC errors are: the Codex bridge drops a non-2xx body. Detail stays in the log.
+    }
     // A notification gets no body. 202 is what the MCP HTTP transport expects.
     if (!reply) return res.status(202).end();
     return res.json(reply);
@@ -139,6 +148,7 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
       type: body.type,
       schedule: body.schedule,
       agent: body.agent,
+      requiresPr: body.requiresPr ?? body.requires_pr,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),
     }, broadcast);
