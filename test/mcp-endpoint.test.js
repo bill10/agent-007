@@ -618,7 +618,7 @@ describe('reading and editing the board through the tools', () => {
       prUrl: 'https://github.com/x/y/pull/9',
     });
     const text = await toolText(await callNamed('list_jobs', {}));
-    expect(text).toMatch(/scheduled @daily, next/);
+    expect(text).toMatch(/schedule @daily, next/);
     expect(text).toContain('https://github.com/x/y/pull/9');
   });
 
@@ -634,7 +634,7 @@ describe('reading and editing the board through the tools', () => {
       prCheckError: 'checks failing',
     });
     const text = await toolText(await callNamed('read_job', { id: job.id }));
-    expect(text).toMatch(/schedule: @daily.*run 3 time\(s\)/);
+    expect(text).toMatch(/schedule: @daily.*posted 3 run\(s\)/);
     expect(text).toMatch(/agent: Slate, started/);
     expect(text).toMatch(/pull request: https:\/\/github\.com\/x\/y\/pull\/9 \(merged/);
     expect(text).toMatch(/pull request check: checks failing/);
@@ -643,6 +643,22 @@ describe('reading and editing the board through the tools', () => {
     expect(text).not.toContain('/wt/9');
     expect(text).not.toContain(REPO);
     expect(text).toContain(basename(REPO));
+  });
+});
+
+describe('schedules and their runs through the tools', () => {
+  it('reads a PR-run schedule\'s last hold-off, and names the schedule a run belongs to', async () => {
+    await callTool({ title: 'Bump deps', schedule: '@daily', requires_pr: true });
+    await callTool({ title: 'Bump deps run' });
+    const [schedule, run] = allJobs();
+    Object.assign(schedule, { lastSkipReason: 'waiting on PR #7' });
+    Object.assign(run, { scheduleId: schedule.id, requiresPr: false });
+    const read = await toolText(await callNamed('read_job', { id: schedule.id }));
+    expect(read).toMatch(/each run opens a pull request/);
+    expect(read).toMatch(/last held off: waiting on PR #7/);
+    const runText = await toolText(await callNamed('read_job', { id: run.id }));
+    expect(runText).toContain(`(a run of schedule ${schedule.id})`);
+    expect(await toolText(await callNamed('list_jobs', {}))).toMatch(/a scheduled run/);
   });
 });
 

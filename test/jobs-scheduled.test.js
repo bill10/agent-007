@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   createJob, resolveJobType, jobType, isScheduled, isJobDue, selectDispatchableJobs,
-  buildJobPrompt, buildJobCommand, isScheduledRunOver, scheduledRunReset,
-  JOB_TYPES, DEFAULT_JOB_TYPE, STALLED_AFTER_MS, DEFAULT_PERMISSION_MODE,
+  buildJobPrompt, scheduleHold, supersededRuns, createRunJob, runsToPrune,
+  JOB_TYPES, DEFAULT_JOB_TYPE,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -90,151 +90,93 @@ describe('isJobDue', () => {
   });
 });
 
-describe('selectDispatchableJobs with scheduled jobs', () => {
+describe('selectDispatchableJobs with schedules', () => {
   const now = Date.parse('2026-06-10T12:00:00Z');
-  const soon = new Date(now + 3600_000).toISOString();
 
-  it('leaves a job that is not due yet in To do', () => {
-    const jobs = [{ ...make({ schedule: '0 9 * * *' }), nextRunAt: soon }];
-    expect(selectDispatchableJobs(jobs, { now })).toEqual([]);
+  it('never dispatches a schedule itself, due or not — it is fired instead', () => {
+    const due = { ...make({ schedule: '0 9 * * *' }), nextRunAt: new Date(now - 1000).toISOString() };
+    expect(selectDispatchableJobs([due], { now })).toEqual([]);
   });
 
-  it('dispatches it once it comes due', () => {
-    const jobs = [{ ...make({ schedule: '0 9 * * *' }), nextRunAt: new Date(now - 1000).toISOString() }];
-    expect(selectDispatchableJobs(jobs, { now })).toHaveLength(1);
-  });
-
-  it('does not let a job waiting on its schedule block the queue behind it', () => {
-    // The pending scheduled card is FIRST in posting order. If it consumed a
-    // slot (or stopped the walk) the one-time job behind it would never go out.
-    const pending = { ...make({ schedule: '0 9 * * *' }), id: 'sched', postedAt: '2026-01-01T00:00:00Z', nextRunAt: soon };
-    const queued = { ...make(), id: 'one', postedAt: '2026-01-02T00:00:00Z' };
-    const selected = selectDispatchableJobs([pending, queued], { now, maxPerRepo: 1 });
-    expect(selected.map(j => j.id)).toEqual(['one']);
-  });
-
-  it('does not count a scheduled run in flight against the per-repo cap', () => {
-    // The cap bounds the one-time queue; a run in flight must not eat a slot
-    // a one-time job would otherwise get.
-    const running = { ...make({ schedule: '0 9 * * *' }), id: 'sched', state: 'in-progress', agentSessionId: 's1' };
-    const queued = { ...make(), id: 'one' };
-    expect(selectDispatchableJobs([running, queued], { now, maxPerRepo: 1 }).map(j => j.id)).toEqual(['one']);
-  });
-
-  it('is not held under the cap by busy one-time jobs', () => {
-    // Missed firings are never replayed, so a schedule starved by the cap
-    // would silently lose runs.
+  it('holds a run to the per-repo cap like any other card', () => {
     const busy = { ...make(), id: 'one', state: 'in-progress', agentSessionId: 's1' };
-    const due = { ...make({ schedule: '0 9 * * *' }), id: 'sched', nextRunAt: new Date(now - 1000).toISOString() };
-    expect(selectDispatchableJobs([busy, due], { now, maxPerRepo: 1, liveSessionIds: new Set(['s1']) }).map(j => j.id))
-      .toEqual(['sched']);
+    const run = { ...make(), id: 'run', scheduleId: 'sched' };
+    expect(selectDispatchableJobs([busy, run], { now, maxPerRepo: 1, liveSessionIds: new Set(['s1']) })).toEqual([]);
   });
 });
 
-// --- Prompt ---
+describe('scheduleHold', () => {
+  const schedule = { ...make({ schedule: '@hourly' }), id: 'sched' };
+  const run = (over) => ({ ...make(), scheduleId: 'sched', ...over });
 
-describe('the scheduled prompt', () => {
-  const scheduled = make({ title: 'Summarise yesterday', schedule: '0 9 * * *', detail: 'Read the log.' });
-
-  it('drops the review/ship instruction, which assumes a coding task', () => {
-    const prompt = buildJobPrompt(scheduled);
-    expect(prompt).not.toMatch(/\/review/);
-    expect(prompt).not.toMatch(/\/ship/);
-    // Nothing about pull requests at all: the task plus the one line that
-    // matters. Anything more nudges a non-coding run toward inventing code.
-    expect(prompt).not.toMatch(/pull request/i);
+  it('fires when the schedule has no unfinished run', () => {
+    expect(scheduleHold(schedule, [schedule])).toBeNull();
+    expect(scheduleHold(schedule, [schedule, run({ state: 'done' })])).toBeNull();
   });
 
-  it('keeps the title, the detail and the schedule that produced the run', () => {
-    const prompt = buildJobPrompt(scheduled);
-    expect(prompt.startsWith('Summarise yesterday\n\nRead the log.')).toBe(true);
-    expect(prompt).toContain('(0 9 * * *)');
+  it('holds off while the previous run is still queued or going', () => {
+    expect(scheduleHold(schedule, [run({ state: 'todo' })])).toMatch(/has not started yet/);
+    expect(scheduleHold(schedule, [run({ state: 'todo', lastError: 'repo gone' })])).toMatch(/could not start: repo gone/);
+    expect(scheduleHold(schedule, [run({ state: 'in-progress' })])).toMatch(/still going/);
   });
 
-  it('keeps telling the agent to assume rather than ask — nobody is watching', () => {
-    expect(buildJobPrompt(scheduled)).toMatch(/prefer a reasonable assumption over a\s+question/i);
+  it('holds off while a PR run waits in Review, naming the PR', () => {
+    expect(scheduleHold(schedule, [run({ state: 'review', requiresPr: true, prNumber: 7 })])).toMatch(/PR #7/);
   });
 
-  it('leaves the one-time prompt exactly as it was', () => {
-    const prompt = buildJobPrompt(make({ title: 'Add caching' }));
-    expect(prompt).toMatch(/when the work is finished, run \/ship/i);
-    expect(prompt).not.toMatch(/scheduled run/i);
+  it('holds off on a PR run in Review whose PR number is not known yet', () => {
+    expect(scheduleHold(schedule, [run({ state: 'review', requiresPr: true, prNumber: null })])).toMatch(/previous run's pull request/);
   });
 
-  it('still ships as a single quoted argv', () => {
-    expect(buildJobCommand(scheduled)).toMatch(new RegExp(`^claude --permission-mode ${DEFAULT_PERMISSION_MODE} "`));
+  it('fires past a no-PR run in Review — the next run supersedes it', () => {
+    expect(scheduleHold(schedule, [run({ state: 'review', requiresPr: false })])).toBeNull();
+  });
+
+  it('ignores runs of other schedules', () => {
+    expect(scheduleHold(schedule, [{ ...run({ state: 'in-progress' }), scheduleId: 'other' }])).toBeNull();
   });
 });
 
-// --- Run completion ---
+describe('supersededRuns', () => {
+  const run = (id, postedAt, over = {}) => ({ ...make(), id, postedAt, scheduleId: 'sched', state: 'review', requiresPr: false, ...over });
 
-describe('isScheduledRunOver', () => {
-  const now = Date.now();
-  const job = { ...make({ schedule: '0 9 * * *' }), state: 'in-progress' };
-  const session = (over = {}) => ({ state: 'WORKING', exited: false, lastOutputAt: now, ...over });
-
-  it('is over when the agent exited, or when there is no session left at all', () => {
-    expect(isScheduledRunOver(job, session({ exited: true }), { now })).toBe(true);
-    expect(isScheduledRunOver(job, null, { now })).toBe(true);
+  it('names every no-PR Review run of a schedule but its newest', () => {
+    const jobs = [run('a', '2026-06-10T01:00:00Z'), run('c', '2026-06-10T03:00:00Z'), run('b', '2026-06-10T02:00:00Z')];
+    expect(supersededRuns(jobs).map(({ old, by }) => [old.id, by.id])).toEqual([['a', 'c'], ['b', 'c']]);
   });
 
-  it('is over when the agent has been parked at its prompt past the quiet window', () => {
-    expect(isScheduledRunOver(job, session({ state: 'WAITING', lastOutputAt: now - STALLED_AFTER_MS - 1000 }), { now })).toBe(true);
+  it('lets a newer PR run replace a no-PR run left from before the switch', () => {
+    const jobs = [run('old', '2026-06-10T01:00:00Z'), run('pr', '2026-06-10T02:00:00Z', { requiresPr: true })];
+    expect(supersededRuns(jobs).map(({ old, by }) => [old.id, by.id])).toEqual([['old', 'pr']]);
   });
 
-  it('is not over while the agent is working, or only just went quiet', () => {
-    expect(isScheduledRunOver(job, session(), { now })).toBe(false);
-    expect(isScheduledRunOver(job, session({ state: 'WAITING', lastOutputAt: now - 1000 }), { now })).toBe(false);
-  });
-
-  it('is never over while the agent is asking the user something', () => {
-    // Killing it would throw away the answer it is waiting for; the card shows
-    // "needs you" and holds its slot, exactly as a one-time job does.
-    const asking = session({ state: 'MESSAGE', lastOutputAt: now - STALLED_AFTER_MS - 60_000 });
-    expect(isScheduledRunOver(job, asking, { now })).toBe(false);
-  });
-
-  it('says nothing about one-time jobs or about cards that are not running', () => {
-    expect(isScheduledRunOver({ ...make(), state: 'in-progress' }, null, { now })).toBe(false);
-    expect(isScheduledRunOver({ ...job, state: 'todo' }, null, { now })).toBe(false);
+  it('never supersedes a PR run, a run outside Review, or across schedules', () => {
+    const jobs = [
+      run('pr', '2026-06-10T01:00:00Z', { requiresPr: true }),
+      run('going', '2026-06-10T01:00:00Z', { state: 'in-progress' }),
+      run('mine', '2026-06-10T01:00:00Z'),
+      run('theirs', '2026-06-10T02:00:00Z', { scheduleId: 'other' }),
+    ];
+    expect(supersededRuns(jobs)).toEqual([]);
   });
 });
 
-describe('scheduledRunReset', () => {
-  const now = Date.parse('2026-06-10T12:00:00Z');
-
-  it('re-arms the card in To do with its next run measured from now', () => {
-    const job = {
-      ...make({ schedule: '0 9 * * *' }), state: 'in-progress',
-      agentSessionId: 's1', agentName: 'Viper', branchName: 'bill/x',
-      worktreePath: '/wt/1', startedAt: 'whenever', prCheckError: 'stale',
-      lastError: 'agent lost', lastRunAt: '2026-06-10T09:00:00.000Z',
-    };
-    const reset = scheduledRunReset(job, now);
-    expect(reset.state).toBe('todo');
-    // The run's agent is not closed — the card hands the live link over to
-    // lastRun* so the kept tab stays reachable until the next run retires it.
-    expect(reset.lastRunSessionId).toBe('s1');
-    expect(reset.lastRunAgentName).toBe('Viper');
-    expect(reset.agentSessionId).toBeNull();
-    expect(reset.agentName).toBeNull();
-    expect(reset.branchName).toBeNull();
-    expect(reset.worktreePath).toBeNull();
-    expect(reset.prCheckError).toBeNull();
-    // A completed run supersedes whatever went wrong before it.
-    expect(reset.lastError).toBeNull();
-    // But not lastRunAt: that is set once at dispatch and means when the last
-    // run STARTED, the one reading still meaningful after startedAt is cleared.
-    expect(reset.lastRunAt).toBeUndefined();
-    // From now, not stepped on from the previous due time — so a run that
-    // overran its own interval does not come due again the instant it lands.
-    expect(reset.nextRunAt).toBe(nextCronIso('0 9 * * *', now));
-    expect(Date.parse(reset.nextRunAt)).toBeGreaterThan(now);
+describe('createRunJob', () => {
+  it('posts a one-time card carrying what the schedule says its runs are', () => {
+    const schedule = { ...make({ title: 'Nightly', schedule: '@daily', detail: 'Check.', agent: 'codex', permissionMode: 'plan', requiresPr: true }), id: 'sched', attachments: [{ name: 'a.png', path: '/x/a.png' }] };
+    const { job } = createRunJob(schedule);
+    expect(job.type).toBe('one-time');
+    expect(job.schedule).toBeNull();
+    expect(job.scheduleId).toBe('sched');
+    expect([job.title, job.detail, job.agent, job.permissionMode, job.requiresPr]).toEqual(['Nightly', 'Check.', 'codex', 'plan', true]);
+    expect(job.attachments).toEqual([]);   // copied into the run's own dir by the server
+    expect(createRunJob({ ...schedule, postedByAgent: 'Viper' }).job.postedByAgent).toBe('Viper');
   });
 
-  it('leaves no next run time on a schedule that will never come round again', () => {
-    const job = { ...make({ schedule: '0 0 30 2 *' }), state: 'in-progress' };
-    expect(scheduledRunReset(job, now).nextRunAt).toBeNull();
+  it('gives a run of a default schedule the no-PR prompt', () => {
+    const { job } = createRunJob({ ...make({ schedule: '@daily' }), id: 's' });
+    expect(buildJobPrompt(job)).not.toMatch(/\/ship/);
+    expect(buildJobPrompt(job)).toMatch(/finish_job[\s\S]*summary/);
   });
 });
 
@@ -262,5 +204,19 @@ describe('schedule length', () => {
     // valid-looking prefix of something the user did not write.
     const tooLong = '0 9 * * ' + '1,'.repeat(100) + '5';
     expect(createJob({ title: 'x', repoPath: REPO, schedule: tooLong }).error).toMatch(/too long/i);
+  });
+});
+
+describe('runsToPrune', () => {
+  const done = (id, doneAt, scheduleId = 's') => ({ ...make(), id, scheduleId, state: 'done', doneAt });
+
+  it('keeps each schedule\'s newest finished runs and names the rest, oldest first', () => {
+    const jobs = [done('a', '2026-01-01'), done('c', '2026-01-03'), done('b', '2026-01-02'), done('x', '2026-01-01', 'other')];
+    expect(runsToPrune(jobs, 2).map(j => j.id)).toEqual(['a']);
+  });
+
+  it('leaves unfinished runs and one-time cards alone', () => {
+    const jobs = [done('a', '2026-01-01'), { ...done('live', '2026-01-02'), state: 'review' }, { ...make(), id: 'plain', state: 'done' }];
+    expect(runsToPrune(jobs, 0).map(j => j.id)).toEqual(['a']);
   });
 });

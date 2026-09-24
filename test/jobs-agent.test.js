@@ -9,7 +9,7 @@ import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import { addJob, updateJob, updateSettings, boardSettings, allJobs, postJobForAgent, dispatchOnce, listJobsForAgent, resumeCommandForOrphan, orphanResumePlan } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
-import { createJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, resumeCommand, sessionAgentFromCommand, permissionFlagsFromCommand, normalizePermissionFlags, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS, PERMISSION_FLAGS } from '../lib/jobs.js';
+import { createJob, createRunJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, resumeCommand, sessionAgentFromCommand, permissionFlagsFromCommand, normalizePermissionFlags, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS, PERMISSION_FLAGS } from '../lib/jobs.js';
 import { execSync } from 'child_process';
 import { agentFromTranscripts, codexSessionIdFor, transcriptsFor } from '../server/agent-transcripts.js';
 
@@ -884,12 +884,10 @@ describe('reading the agent off a card', () => {
     expect(err.length).toBeLessThan(120);
   });
 
-  it('gives a scheduled codex card the scheduled suffix, which names no ship skill', () => {
-    // scheduledPromptSuffix ignores the agent: a scheduled run opens no PR, so
-    // neither spelling belongs there.
-    const prompt = buildJobPrompt(createJob({ title: 't', repoPath: REPO, agent: 'codex', type: 'scheduled', schedule: '@daily' }).job);
-    expect(prompt).toContain('scheduled run');
-    expect(prompt).not.toMatch(/[$/]ship/);
+  it('gives a PR-requiring run of a codex schedule the $ship spelling', () => {
+    const schedule = createJob({ title: 't', repoPath: REPO, agent: 'codex', type: 'scheduled', schedule: '@daily', requiresPr: true }).job;
+    const run = createRunJob(schedule).job;
+    expect(buildJobPrompt(run)).toContain('$ship');
   });
 });
 

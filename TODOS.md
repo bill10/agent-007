@@ -34,33 +34,6 @@
   Deferred rather than guessed: all three remedies change the room's look,
   which is a taste decision.
 
-## A scheduled run that never goes quiet starves its schedule silently
-- **What:** A scheduled run only ends on agent exit or WAITING past the quiet
-  window, so an agent wedged producing output (a spinner, a loop) holds the
-  card at "running now" forever: no attention badge (scheduled cards badge only
-  on MESSAGE), no notification, and every future firing is silently lost until
-  a human notices and clicks End run. Add a max-run-duration ceiling (a board
-  setting, since "too long" varies by job) or at least surface "running for
-  N× its interval" on the card and the badge.
-- **Why:** The board's promise is unattended recurrence; a single wedged run
-  breaks that promise invisibly, which is the worst way to break it.
-- **Effort:** S (human: ~2 hours / CC: ~15 min)
-- **Priority:** P2
-- **Depends on:** Scheduled jobs (v0.3.12.0)
-- **Context:** Raised by the adversarial review during /ship (2026-08-30). A
-  ceiling is policy, so it needs a knob, not a hardcoded constant — deferred
-  rather than guessed. Second route into the same failure, found by the
-  security review during /ship (2026-09-03): `isScheduledRunOver` also returns
-  false on `state === 'MESSAGE'`, and MESSAGE is inferred from agent-controlled
-  terminal output, so a repo whose agent's last line matches a dialog pattern
-  pins its card just as effectively. v0.3.30.0 widened that pattern set, so the
-  surface is slightly larger. The ceiling fixes both routes at once; anchoring
-  individual patterns only ever chases one. And it is not adversary-only:
-  `/approve|deny|allow|reject/i` matches those words ANYWHERE in any of the
-  last five lines, so a git log, a LICENSE, a CI transcript or a dependency
-  changelog can flip a quiet agent to MESSAGE by accident — which argues for
-  treating this as ordinary-operation breakage rather than a hardening task.
-
 ## Bound the agents kept in Review
 - **What:** Put a limit on the live agents a repo keeps in Review: an idle
   timeout after `reviewAt` that closes the PTY but keeps the worktree as an
@@ -69,6 +42,8 @@
   a ring buffer and a worktree) until the card is done, and the per-repo cap
   only counts In progress. A card that needs no PR, or whose PR closed without
   merging, only reaches Done by hand, so on a board nobody tidies these add up.
+  Schedules are bounded since v0.4.9.0 (at most one unfinished run each, and
+  newer no-PR runs supersede older ones), so this is about one-time cards.
 - **Effort:** S (human: ~3 hours / CC: ~20 min)
 - **Priority:** P2
 - **Depends on:** Review keeps its agent (v0.4.8.0)
@@ -99,6 +74,8 @@
 ## Retention for finished jobs
 - **What:** Cap what the Finished jobs view renders (most recent N, with a way to
   see the rest) and/or drop `done` jobs older than N days on load.
+- **Note:** A schedule's runs are already capped at 50 finished per schedule
+  (v0.4.9.0); this is about one-time cards.
 - **Why:** Finished jobs are kept forever by design, and every one of them is
   serialized into every `jobs-list` broadcast and rebuilt on each archive render.
   Nothing prunes them and nothing paginates, so both costs grow for the life of
@@ -356,8 +333,8 @@
   succeeded, so `result.error` is null, the card takes `agentSessionId`, a
   branch and a worktree, and moves to In progress. `deriveJobStatus` then shows
   "agent gone" with `lastError` null, and nothing puts a one-time job back in To
-  do, so it never retries. A scheduled card resets and fails the same way on
-  every firing. Treat an exit within a few seconds of dispatch as a dispatch
+  do, so it never retries. A schedule's run gets stuck the same way, and its
+  schedule then holds off behind it. Treat an exit within a few seconds of dispatch as a dispatch
   failure: set `lastError` from the tail of the session's ring buffer and
   requeue the card.
 - **Why:** The card gives no reason and offers no retry, so the only way to find
@@ -431,8 +408,7 @@
   patterns over the visible rows, so a closed dialog is simply not there and
   a partial repaint changes only its rows.
 - **Why:** The bubble is what stops the board from calling a blocked agent
-  "resting", and a false WAITING lets a scheduled run be marked over while
-  its agent still waits on an approval.
+  "resting".
 - **Effort:** M (human: ~1 day / CC: ~30 min, one new server dependency, and
   the headless terminal must follow `pty-resize`)
 - **Priority:** P2
@@ -442,6 +418,39 @@
   dependency; this is the upgrade when a partial repaint is observed.
 
 ## Completed
+
+## A scheduled run that never goes quiet starves its schedule silently
+- **What:** A scheduled run only ends on agent exit or WAITING past the quiet
+  window, so an agent wedged producing output (a spinner, a loop) holds the
+  card at "running now" forever: no attention badge (scheduled cards badge only
+  on MESSAGE), no notification, and every future firing is silently lost until
+  a human notices and clicks End run. Add a max-run-duration ceiling (a board
+  setting, since "too long" varies by job) or at least surface "running for
+  N× its interval" on the card and the badge.
+- **Why:** The board's promise is unattended recurrence; a single wedged run
+  breaks that promise invisibly, which is the worst way to break it.
+- **Effort:** S (human: ~2 hours / CC: ~15 min)
+- **Priority:** P2
+- **Depends on:** Scheduled jobs (v0.3.12.0)
+- **Context:** Raised by the adversarial review during /ship (2026-08-30). A
+  ceiling is policy, so it needs a knob, not a hardcoded constant — deferred
+  rather than guessed. Second route into the same failure, found by the
+  security review during /ship (2026-09-03): `isScheduledRunOver` also returns
+  false on `state === 'MESSAGE'`, and MESSAGE is inferred from agent-controlled
+  terminal output, so a repo whose agent's last line matches a dialog pattern
+  pins its card just as effectively. v0.3.30.0 widened that pattern set, so the
+  surface is slightly larger. The ceiling fixes both routes at once; anchoring
+  individual patterns only ever chases one. And it is not adversary-only:
+  `/approve|deny|allow|reject/i` matches those words ANYWHERE in any of the
+  last five lines, so a git log, a LICENSE, a CI transcript or a dependency
+  changelog can flip a quiet agent to MESSAGE by accident — which argues for
+  treating this as ordinary-operation breakage rather than a hardening task.
+- **Completed:** v0.4.9.0 (2026-09-24). A schedule now posts one-time run
+  cards instead of running itself, so a run ends with `finish_job` rather than
+  by going quiet, and a stuck run is an ordinary In progress card showing
+  "running" or "needs you". The schedule holds off while it is stuck and says
+  why on its card, so no firing is lost silently. There is still no maximum
+  run duration; a run that never finishes has to be moved by hand.
 
 ## Don't auto-switch tabs on teammates' spawns
 - **What:** `handleSessionCreated` calls `switchToSession` unconditionally, so in a multi-user deployment a teammate spawning an agent steals every viewer's active tab. Only auto-switch to sessions this client spawned (or when no session is active).

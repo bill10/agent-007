@@ -571,7 +571,7 @@ describe('cards that need no pull request', () => {
     expect([...scheduled.querySelectorAll('.job-card-type')].map(c => c.textContent)).not.toContain('no PR');
   });
 
-  it('opens a no-PR card on "Not required", sends it back, and hides the choice for a scheduled job', () => {
+  it('opens a no-PR card on "Not required", sends it back, and defaults a schedule to Not required', () => {
     handleJobsList({ jobs: [JOB({ requiresPr: false })], settings: {} });
     document.querySelector('.job-card-btn').click();   // Edit
     const pr = document.getElementById('job-requires-pr');
@@ -583,10 +583,49 @@ describe('cards that need no pull request', () => {
     const type = document.getElementById('job-type');
     type.value = 'scheduled';
     type.dispatchEvent(new Event('change'));
-    expect(document.getElementById('job-pr-field').style.display).toBe('none');
+    expect(pr.value).toBe('no');   // a schedule's runs report a summary unless asked
     type.value = 'one-time';
     type.dispatchEvent(new Event('change'));
-    expect(document.getElementById('job-pr-field').style.display).toBe('');
+    expect(pr.value).toBe('yes');
+    // A pick by hand sticks through a type change.
+    pr.value = 'no';
+    pr.dispatchEvent(new Event('change'));
+    type.value = 'scheduled';
+    type.dispatchEvent(new Event('change'));
+    type.value = 'one-time';
+    type.dispatchEvent(new Event('change'));
+    expect(pr.value).toBe('no');
+  });
+
+  // Same rule as the server: a type change without a pick takes the new
+  // type's default, whether the card is new or being edited.
+  it('flips an existing card\'s PR choice with its type, unless picked by hand', () => {
+    handleJobsList({ jobs: [JOB()], settings: {} });
+    document.querySelector('.job-card-btn').click();   // Edit
+    const type = document.getElementById('job-type');
+    const pr = document.getElementById('job-requires-pr');
+    type.value = 'scheduled';
+    type.dispatchEvent(new Event('change'));
+    expect(pr.value).toBe('no');
+    pr.value = 'yes';
+    pr.dispatchEvent(new Event('change'));
+    type.value = 'one-time';
+    type.dispatchEvent(new Event('change'));
+    type.value = 'scheduled';
+    type.dispatchEvent(new Event('change'));
+    expect(pr.value).toBe('yes');
+  });
+
+  it('opens a schedule that never chose on Not required', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily' })], settings: {} });
+    document.querySelector('.job-card-btn').click();   // Edit
+    expect(document.getElementById('job-requires-pr').value).toBe('no');
+  });
+
+  it('opens a schedule that asked for PR runs on Required', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', requiresPr: true })], settings: {} });
+    document.querySelector('.job-card-btn').click();   // Edit
+    expect(document.getElementById('job-requires-pr').value).toBe('yes');
   });
 });
 
@@ -935,14 +974,53 @@ describe('scheduled cards', () => {
     expect(card.querySelector('.job-card-next').textContent).toMatch(/next .*·.*in 2h/);
   });
 
-  it('says "running now" instead of a next run while a run is in flight', () => {
-    // nextRunAt still points at the run that IS happening, so showing it would
-    // read as a second run already being due.
+  it('points at its latest run and says why it last held off', () => {
     handleJobsList({
-      jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper', nextRunAt: new Date(Date.now() - 1000).toISOString() })],
+      jobs: [
+        SCHEDULED({ lastRunJobId: 'run-1', lastSkipReason: 'waiting on PR #7', lastSkipAt: new Date(Date.now() - 60_000).toISOString() }),
+        JOB({ id: 'run-1', state: 'review', scheduleId: 'job-sched' }),
+      ],
       settings: {},
     });
-    expect(document.querySelector('.job-card-next').textContent).toBe('running now');
+    const card = document.querySelector('[data-job-id="job-sched"]');
+    expect(card.querySelector('.job-card-lastrun').textContent).toMatch(/latest run: Review/);
+    expect(card.textContent).toMatch(/held off .*waiting on PR #7/);
+    const run = document.querySelector('[data-job-id="run-1"]');
+    expect([...run.querySelectorAll('.job-card-type')].map(c => c.textContent)).toContain('run');
+  });
+
+  it('says a run replaced earlier ones', () => {
+    handleJobsList({ jobs: [JOB({ id: 'run-2', state: 'review', scheduleId: 's', supersededRuns: 3 })], settings: {} });
+    expect(document.querySelector('[data-job-id="run-2"]').textContent).toMatch(/filed 3 earlier runs to Finished/);
+  });
+
+  it('says one replaced run in the singular', () => {
+    handleJobsList({ jobs: [JOB({ id: 'run-2', state: 'review', scheduleId: 's', supersededRuns: 1 })], settings: {} });
+    expect(document.querySelector('[data-job-id="run-2"]').textContent).toMatch(/filed 1 earlier run to Finished/);
+  });
+
+  it('marks an archived run that a newer one replaced', () => {
+    handleJobsList({ jobs: [JOB({ id: 'run-1', state: 'done', scheduleId: 's', supersededBy: 'run-2', doneAt: new Date().toISOString() })], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    expect(document.querySelector('#job-finished-cards [data-job-id="run-1"]').textContent).toMatch(/superseded by a newer run/);
+  });
+
+  it('calls a latest run that is done "Finished"', () => {
+    handleJobsList({
+      jobs: [SCHEDULED({ lastRunJobId: 'run-1' }), JOB({ id: 'run-1', state: 'done', scheduleId: 'job-sched', doneAt: new Date().toISOString() })],
+      settings: {},
+    });
+    expect(document.querySelector('[data-job-id="job-sched"] .job-card-lastrun').textContent).toMatch(/latest run: Finished/);
+  });
+
+  it('says nothing about a latest run the board no longer has', () => {
+    handleJobsList({ jobs: [SCHEDULED({ lastRunJobId: 'gone' })], settings: {} });
+    expect(document.querySelector('.job-card-schedule').textContent).not.toMatch(/latest run/);
+  });
+
+  it('does not say it held off while it is paused', () => {
+    handleJobsList({ jobs: [SCHEDULED({ paused: true, lastSkipReason: 'the previous run is still going', lastSkipAt: new Date().toISOString() })], settings: {} });
+    expect(document.querySelector('[data-job-id="job-sched"]').textContent).not.toMatch(/held off/);
   });
 
   it('says so when the schedule will never come round again', () => {
@@ -961,21 +1039,12 @@ describe('scheduled cards', () => {
     expect(document.querySelector('.job-card-type')).toBeNull();
   });
 
-  it('offers Pause between runs and during one, and sends the toggle', () => {
-    // Pause holds the NEXT firing, so it is offered in both states a scheduled
-    // card lives in. During a run it sits beside "End run": one stops this run,
-    // the other stops the ones after it.
+  it('offers Pause and sends the toggle', () => {
     handleJobsList({ jobs: [SCHEDULED()], settings: {} });
     const btn = () => [...document.querySelectorAll('.job-card-btn')].find(b => /Pause|Resume/.test(b.textContent));
     expect(btn().textContent).toBe('Pause');
     btn().click();
     expect(send).toHaveBeenCalledWith({ type: 'job-pause', jobId: 'job-sched', paused: true });
-
-    handleJobsList({
-      jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })],
-      settings: {},
-    });
-    expect(btn().textContent).toBe('Pause');
   });
 
   it('reads as paused on the card and offers Resume instead', () => {
@@ -995,15 +1064,35 @@ describe('scheduled cards', () => {
     expect(labels).not.toContain('Pause');
   });
 
-  it('offers "End run" rather than "→ Review", which a scheduled card never reaches', () => {
+  it('opens the latest run\'s agent from the schedule when it has one', () => {
+    agents.set('s7', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
     handleJobsList({
-      jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })],
+      jobs: [SCHEDULED({ lastRunJobId: 'run-1' }), JOB({ id: 'run-1', state: 'in-progress', scheduleId: 'job-sched', agentSessionId: 's7', agentName: 'Viper' })],
       settings: {},
     });
+    document.querySelector('[data-job-id="job-sched"] .job-card-lastrun').click();
+    expect(switchToSession).toHaveBeenCalledWith('s7');
+  });
+
+  it('marks a schedule whose runs open PRs', () => {
+    handleJobsList({ jobs: [SCHEDULED({ requiresPr: true })], settings: {} });
+    expect([...document.querySelectorAll('.job-card-type')].map(c => c.textContent)).toContain('PR runs');
+  });
+
+  it('shows no move buttons on a schedule in any state', () => {
+    for (const state of ['in-progress', 'review']) {
+      handleJobsList({ jobs: [SCHEDULED({ state })], settings: {} });
+      const labels = [...document.querySelectorAll('.job-card-btn')].map(b => b.textContent);
+      expect(labels.filter(l => /Review|To do|Done|In progress/.test(l))).toEqual([]);
+    }
+  });
+
+  it('offers a schedule no moves — its runs are the cards that move', () => {
+    handleJobsList({ jobs: [SCHEDULED()], settings: {} });
     const labels = [...document.querySelectorAll('.job-card-btn')].map(b => b.textContent);
-    expect(labels).toContain('End run');
     expect(labels).not.toContain('→ Review');
-    expect(labels).not.toContain('← To do');
+    expect(labels).not.toContain('✓ Done');
+    expect(labels).not.toContain('End run');
   });
 });
 
@@ -1081,49 +1170,3 @@ describe('the job form and schedules', () => {
   });
 });
 
-describe('what "quiet" means on a scheduled card', () => {
-  const quietAgent = { state: 'WAITING', lastOutputAt: Date.now() - 4 * 60 * 1000 };
-
-  it('reads as the run finishing, not as a warning that you may be needed', () => {
-    // The board reads that same quiet as "done" and re-arms the card on its
-    // next scan, so "may need you" would be the opposite of true.
-    agents.set('s1', quietAgent);
-    handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
-    expect(document.querySelector('.job-card-status').textContent).toMatch(/run finished/);
-  });
-
-  it('still says "needs you" when the run is actually asking a question', () => {
-    agents.set('s1', { state: 'MESSAGE', lastOutputAt: Date.now() });
-    handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
-    expect(document.querySelector('.job-card-status').textContent).toMatch(/needs you/);
-  });
-
-  it('leaves the warning in place on a one-time card', () => {
-    agents.set('s1', quietAgent);
-    handleJobsList({ jobs: [JOB({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper' })], settings: {} });
-    expect(document.querySelector('.job-card-status').textContent).toMatch(/may need you/);
-  });
-});
-
-describe('the kept last-run agent link', () => {
-  it('renders and jumps to the kept terminal while it is still alive', () => {
-    agents.set('s9', { name: 'Viper', state: 'WAITING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
-    handleJobsList({ jobs: [SCHEDULED({ state: 'todo', lastRunSessionId: 's9', lastRunAgentName: 'Viper' })], settings: {} });
-    const btn = document.querySelector('.job-card-lastrun');
-    expect(btn).not.toBeNull();
-    expect(btn.textContent).toContain('Viper');
-    btn.click();
-    expect(switchToSession).toHaveBeenCalledWith('s9');
-  });
-
-  it('renders nothing once the tab is gone — a restart leaves a stale pointer', () => {
-    handleJobsList({ jobs: [SCHEDULED({ state: 'todo', lastRunSessionId: 's9', lastRunAgentName: 'Viper' })], settings: {} });
-    expect(document.querySelector('.job-card-lastrun')).toBeNull();
-  });
-
-  it('renders no link while the next run is already in progress', () => {
-    agents.set('s9', { name: 'Viper', state: 'WAITING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
-    handleJobsList({ jobs: [SCHEDULED({ state: 'in-progress', agentSessionId: 's10', lastRunSessionId: 's9' })], settings: {} });
-    expect(document.querySelector('.job-card-lastrun')).toBeNull();
-  });
-});

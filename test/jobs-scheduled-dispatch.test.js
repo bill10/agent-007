@@ -4,10 +4,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
 import {
-  addJob, updateJob, moveJob, deleteJob, dispatchOnce, finishScheduledRuns, checkPullRequests, checkMergedPullRequests,
+  addJob, updateJob, moveJob, dispatchOnce, fireSchedules, supersedeRuns, finishJobForAgent, pruneFinishedRuns,
   runScan, allJobs, boardSettings, jobsPayload, postJobForAgent, setJobPaused,
 } from '../server/jobs.js';
-import { STALLED_AFTER_MS, jobType } from '../lib/jobs.js';
+import { jobType } from '../lib/jobs.js';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-sched-'));
 const noopBroadcast = () => {};
@@ -51,83 +51,198 @@ const future = () => new Date(Date.now() + 3600_000).toISOString();
 
 beforeEach(resetBoard);
 
-describe('dispatching a scheduled job', () => {
-  it('waits for the schedule instead of going out the moment it is posted', async () => {
-    // "0 9 * * *" is at most a day away, so a freshly posted card is not due.
+// A schedule that is due right now.
+function dueSchedule(over = {}) {
+  const { job } = addJob({ title: 'Hourly check', repoPath: REPO, schedule: '@hourly', ...over }, noopBroadcast);
+  job.nextRunAt = past();
+  return job;
+}
+const runsOf = (schedule) => allJobs().filter(j => j.scheduleId === schedule.id);
+
+describe('firing a schedule', () => {
+  it('waits for the schedule instead of firing the moment it is posted', () => {
     addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    const calls = [];
-    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
-    expect(calls).toHaveLength(0);
-    expect(allJobs()[0].state).toBe('todo');
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
+    expect(allJobs()).toHaveLength(1);
   });
 
-  it('sends the scheduled prompt, not the review/ship one, once it is due', async () => {
-    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    allJobs()[0].nextRunAt = past();
+  it('posts a run card when due, and the run goes out while the schedule stays put', async () => {
+    const schedule = dueSchedule();
+    const [run] = fireSchedules(noopBroadcast);
+    expect(run.scheduleId).toBe(schedule.id);
+    expect(schedule.runCount).toBe(1);
+    expect(schedule.lastRunJobId).toBe(run.id);
+    expect(Date.parse(schedule.nextRunAt)).toBeGreaterThan(Date.now());
+
     const calls = [];
     const dispatched = await dispatchOnce(fakeCreateSession(calls), noopBroadcast);
+    expect(dispatched.map(d => d.job.id)).toEqual([run.id]);
+    expect(calls[0].command).not.toMatch(/\/ship/);   // a default schedule's runs report a summary
+    expect(schedule.state).toBe('todo');
+    expect(run.state).toBe('in-progress');
+  });
 
-    expect(dispatched).toHaveLength(1);
-    expect(calls[0].command).not.toMatch(/\/ship/);
-    expect(calls[0].command).toMatch(/scheduled run/i);
-    const job = allJobs()[0];
-    expect(job.state).toBe('in-progress');
-    expect(job.agentSessionId).toBe('session-1');
-    expect(job.runCount).toBe(1);
-    expect(job.lastRunAt).toBe(job.startedAt);
+  it('fires and dispatches the run in one scan', async () => {
+    const schedule = dueSchedule();
+    const calls = [];
+    await runScan(fakeCreateSession(calls), noopBroadcast, { killSession: fakeKillSession([]), findPr: async () => ({}), findMerged: async () => ({}) });
+    expect(runsOf(schedule)[0].state).toBe('in-progress');
+  });
+});
+
+describe('a schedule whose run cannot be posted', () => {
+  it('records why on the schedule, moves on, and clears it once a run goes out', () => {
+    const schedule = dueSchedule();
+    schedule.title = '';   // hand-edited config.json: createJob refuses a blank title
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
+    expect(runsOf(schedule)).toHaveLength(0);
+    expect(schedule.lastError).toMatch(/Could not post this run: Title is required/);
+    expect(schedule.runCount).toBe(0);
+    expect(Date.parse(schedule.nextRunAt)).toBeGreaterThan(Date.now());
+
+    schedule.title = 'Hourly check';
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toHaveLength(1);
+    expect(schedule.lastError).toBeNull();
+    expect(schedule.lastErrorAt).toBeNull();
+  });
+});
+
+describe('a schedule holding off', () => {
+  it('skips a firing while the previous run is still going, and says so', async () => {
+    const schedule = dueSchedule();
+    fireSchedules(noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
+    expect(runsOf(schedule)).toHaveLength(1);
+    expect(schedule.lastSkipReason).toMatch(/still going/);
+    // Moved on rather than retried every scan: a skipped firing is not replayed.
+    expect(Date.parse(schedule.nextRunAt)).toBeGreaterThan(Date.now());
+  });
+
+  it('skips while a PR run waits in Review, and fires once it is done', async () => {
+    const schedule = dueSchedule({ requiresPr: true });
+    const [run] = fireSchedules(noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const pr = { url: 'https://github.com/o/r/pull/7', number: 7 };
+    await finishJobForAgent({ session: sessions.get(run.agentSessionId), prUrl: pr.url }, noopBroadcast, { findPr: async () => ({ pr }) });
+    expect(run.state).toBe('review');
+
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
+    expect(schedule.lastSkipReason).toMatch(/PR #7/);
+
+    await moveJob(run.id, 'done', noopBroadcast, { killSession: fakeKillSession([]) });
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toHaveLength(1);
+    expect(schedule.lastSkipReason).toBeNull();
+  });
+});
+
+describe('superseding no-PR runs', () => {
+  // One creator for the whole test, so session ids do not repeat.
+  let create;
+  beforeEach(() => { create = fakeCreateSession([]); });
+
+  // Two runs of one schedule, both finished and waiting in Review.
+  async function twoFinishedRuns() {
+    const schedule = dueSchedule();
+    const runs = [];
+    for (const summary of ['first', 'second']) {
+      schedule.nextRunAt = past();
+      const [run] = fireSchedules(noopBroadcast);
+      run.postedAt = new Date(Date.now() + runs.length).toISOString();   // strictly ordered
+      await dispatchOnce(create, noopBroadcast);
+      await finishJobForAgent({ session: sessions.get(run.agentSessionId), summary }, noopBroadcast);
+      sessions.get(run.agentSessionId).state = 'WAITING';   // done, idle at its prompt
+      runs.push(run);
+    }
+    return { schedule, runs };
+  }
+
+  it('fires past a no-PR run in Review, then files the older one away with its agent', async () => {
+    const { runs: [first, second] } = await twoFinishedRuns();
+    const firstAgent = first.agentSessionId;
+    const killed = [];
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession(killed) });
+    expect(first.state).toBe('done');
+    expect(first.supersededBy).toBe(second.id);
+    expect(first.resultSummary).toBe('first');   // kept in the archive
+    expect(killed).toEqual([firstAgent]);
+    expect(second.state).toBe('review');
+    expect(second.supersededRuns).toBe(1);
+  });
+
+  it('leaves a run whose agent is busy for a later scan', async () => {
+    const { runs: [first] } = await twoFinishedRuns();
+    sessions.get(first.agentSessionId).state = 'MESSAGE';   // someone is talking to it
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession([]) });
+    expect(first.state).toBe('review');
+    sessions.get(first.agentSessionId).state = 'WAITING';
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession([]) });
+    expect(first.state).toBe('done');
+  });
+
+  it('keeps the run that reached Review last, even if it was posted first', async () => {
+    const { runs: [first, second] } = await twoFinishedRuns();
+    first.reviewAt = new Date(Date.now() + 60_000).toISOString();   // sent back and returned
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession([]) });
+    expect(second.state).toBe('done');
+    expect(first.state).toBe('review');
+  });
+
+  it('carries the count forward, so the newest says how many went unread', async () => {
+    const { schedule, runs: [, second] } = await twoFinishedRuns();
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession([]) });
+    schedule.nextRunAt = past();
+    const [third] = fireSchedules(noopBroadcast);
+    third.postedAt = new Date(Date.now() + 10).toISOString();
+    await dispatchOnce(create, noopBroadcast);
+    await finishJobForAgent({ session: sessions.get(third.agentSessionId), summary: 'third' }, noopBroadcast);
+    sessions.get(third.agentSessionId).state = 'WAITING';
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession([]) });
+    expect(second.state).toBe('done');
+    expect(third.supersededRuns).toBe(2);
+  });
+  it('leaves a run where it is when the move to Done is refused, and counts nothing', async () => {
+    const { runs: [first, second] } = await twoFinishedRuns();
+    // A run card hand-edited into a schedule: moveJob refuses every move of one.
+    Object.assign(first, { type: 'scheduled', schedule: '@hourly' });
+    expect(await supersedeRuns(noopBroadcast, { killSession: fakeKillSession([]) })).toEqual([]);
+    expect(first.state).toBe('review');
+    expect(first.supersededBy).toBeUndefined();
+    expect(second.supersededRuns).toBeUndefined();
   });
 });
 
 describe('pausing a schedule', () => {
-  it('holds a due card out of dispatch until it is resumed', async () => {
-    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    const job = allJobs()[0];
-    job.nextRunAt = past();
-    setJobPaused(job.id, true, noopBroadcast);
+  it('holds a due schedule until it is resumed, without replaying the held firing', () => {
+    const schedule = dueSchedule();
+    setJobPaused(schedule.id, true, noopBroadcast);
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
 
-    const calls = [];
-    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
-    expect(allJobs()[0].state).toBe('todo');
+    setJobPaused(schedule.id, false, noopBroadcast);
+    expect(Date.parse(schedule.nextRunAt)).toBeGreaterThan(Date.now());
+    expect(fireSchedules(noopBroadcast)).toEqual([]);
 
-    setJobPaused(job.id, false, noopBroadcast);
-    // Resuming does not replay the firing the pause held: nextRunAt is re-armed
-    // from now, so the card waits for the next occurrence like any other.
-    expect(Date.parse(allJobs()[0].nextRunAt)).toBeGreaterThan(Date.now());
-    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
-
-    allJobs()[0].nextRunAt = past();
-    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toHaveLength(1);
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toHaveLength(1);
   });
 
-  it('pauses a card whose run is already under way, and leaves that run alone', async () => {
-    // The whole reason pause is not routed through updateJob: that refuses any
-    // edit past To do, and "stop running this from tomorrow" is asked for
-    // during a run more often than between them.
-    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    allJobs()[0].nextRunAt = past();
+  it('leaves a run already posted alone', async () => {
+    const schedule = dueSchedule();
+    const [run] = fireSchedules(noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
-    const job = allJobs()[0];
-    expect(job.state).toBe('in-progress');
-
-    expect(setJobPaused(job.id, true, noopBroadcast).error).toBeUndefined();
-    expect(allJobs()[0].paused).toBe(true);
-    expect(allJobs()[0].agentSessionId).toBe('session-1');
-    expect(sessions.has('session-1')).toBe(true);
-
-    // The run ends normally; the card lands back in To do and stays there.
-    sessions.get('session-1').exited = true;
-    await finishScheduledRuns(noopBroadcast, { killSession: fakeKillSession([]) });
-    expect(allJobs()[0].state).toBe('todo');
-    allJobs()[0].nextRunAt = past();
-    const calls = [];
-    expect(await dispatchOnce(fakeCreateSession(calls), noopBroadcast)).toEqual([]);
+    setJobPaused(schedule.id, true, noopBroadcast);
+    expect(run.state).toBe('in-progress');
+    expect(sessions.has(run.agentSessionId)).toBe(true);
   });
 
   it('rejects an unknown card and no-ops a repeat of the state it is in', () => {
     addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
     const job = allJobs()[0];
     expect(setJobPaused('nope', true, noopBroadcast).error).toBeTruthy();
-
     setJobPaused(job.id, true, noopBroadcast);
     const armed = allJobs()[0].nextRunAt;
     setJobPaused(job.id, true, noopBroadcast);
@@ -135,195 +250,7 @@ describe('pausing a schedule', () => {
   });
 });
 
-describe('the PR watcher and scheduled jobs', () => {
-  it('leaves a scheduled run alone even when its branch has an open PR', async () => {
-    // Moving it to Review would take the card out of rotation for good: the
-    // column a scheduled job cycles through is To do, not Review.
-    addJob({ title: 'Nightly sweep', repoPath: REPO, schedule: '0 3 * * *' }, noopBroadcast);
-    Object.assign(allJobs()[0], { state: 'in-progress', branchName: 'bill/sweep', agentSessionId: 's1' });
-    const findPr = async () => ({ pr: { url: 'https://x/pull/7', number: 7 } });
-
-    expect(await checkPullRequests(noopBroadcast, { findPr })).toEqual([]);
-    expect(allJobs()[0].state).toBe('in-progress');
-  });
-
-  it('leaves a scheduled run alone even when its branch has a merged PR', async () => {
-    // Done is terminal. Filing the card away would end the standing job the
-    // first time one of its runs happened to ship something.
-    addJob({ title: 'Nightly sweep', repoPath: REPO, schedule: '0 3 * * *' }, noopBroadcast);
-    Object.assign(allJobs()[0], { state: 'in-progress', branchName: 'bill/sweep', agentSessionId: 's1', startedAt: past() });
-    const findMerged = async () => ({ pr: { url: 'https://x/pull/7', number: 7, mergedAt: new Date().toISOString() } });
-
-    expect(await checkMergedPullRequests(noopBroadcast, { findMerged })).toEqual([]);
-    expect(allJobs()[0].state).toBe('in-progress');
-    expect(allJobs()[0].prMergedAt).toBeNull();
-  });
-});
-
-describe('finishScheduledRuns', () => {
-  function runningJob(sessionOver = {}) {
-    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    const job = allJobs()[0];
-    const session = {
-      id: 's1', name: 'Viper', branchName: 'bill/x', worktreePath: '/wt/1',
-      repoPath: REPO, state: 'WORKING', exited: false, lastOutputAt: Date.now(), ...sessionOver,
-    };
-    sessions.set(session.id, session);
-    Object.assign(job, {
-      state: 'in-progress', agentSessionId: session.id, agentName: session.name,
-      branchName: session.branchName, worktreePath: session.worktreePath,
-      startedAt: past(), runCount: 1, lastRunAt: past(),
-    });
-    return job;
-  }
-
-  it('keeps the agent and re-arms the card once the run goes quiet', async () => {
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    const finished = await finishScheduledRuns(noopBroadcast);
-
-    expect(finished).toHaveLength(1);
-    expect(job.state).toBe('todo');
-    expect(job.agentSessionId).toBeNull();
-    expect(job.branchName).toBeNull();
-    // The agent is NOT closed: its terminal is the run's only output, and the
-    // card keeps a pointer to it until the next run retires it.
-    expect(sessions.has('s1')).toBe(true);
-    expect(job.lastRunSessionId).toBe('s1');
-    expect(job.lastRunAgentName).toBe('Viper');
-    // Re-armed rather than blanked: the schedule and the run record survive.
-    expect(job.schedule).toBe('0 9 * * *');
-    expect(job.runCount).toBe(1);
-    expect(Date.parse(job.nextRunAt)).toBeGreaterThan(Date.now());
-  });
-
-  it('retires the kept agent when the next run dispatches', async () => {
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    await finishScheduledRuns(noopBroadcast);
-    expect(job.lastRunSessionId).toBe('s1');
-
-    job.nextRunAt = past();   // due again, with the old tab still open
-    const calls = [];
-    const killed = [];
-    await dispatchOnce(fakeCreateSession(calls), noopBroadcast, { killSession: fakeKillSession(killed) });
-
-    expect(killed).toEqual(['s1']);
-    expect(job.lastRunSessionId).toBeNull();
-    expect(job.state).toBe('in-progress');
-    expect(job.agentSessionId).toBe('session-1');
-  });
-
-  it('retires an exited previous run too, discarding its scratch files but nothing else', async () => {
-    // The kept agent may have exited on its own by the time the next run is
-    // due. Its worktree is just as stale as a live one's, so it is retired the
-    // same way. Only killSession's caller here says "discard": the worktree is
-    // a finished run's scratch, and the alternative was one orphan per run.
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    await finishScheduledRuns(noopBroadcast);
-    sessions.get('s1').exited = true;
-    job.nextRunAt = past();
-
-    const killed = [];
-    await dispatchOnce(fakeCreateSession([]), noopBroadcast, {
-      killSession: async (id, opts) => { killed.push({ id, opts }); sessions.delete(id); },
-    });
-
-    expect(killed).toEqual([{ id: 's1', opts: { discardChanges: true } }]);
-    expect(job.lastRunSessionId).toBeNull();
-    expect(job.lastRunAgentName).toBeNull();
-    expect(job.agentSessionId).toBe('session-1');
-  });
-
-  it('still dispatches when retiring the previous run throws, and drops the stale pointer', async () => {
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    await finishScheduledRuns(noopBroadcast);
-    job.nextRunAt = past();
-
-    const dispatched = await dispatchOnce(fakeCreateSession([]), noopBroadcast, {
-      killSession: async () => { throw new Error('worktree busy'); },
-    });
-
-    expect(dispatched).toHaveLength(1);
-    expect(job.state).toBe('in-progress');
-    expect(job.agentSessionId).toBe('session-1');
-    expect(job.lastRunSessionId).toBeNull();
-  });
-
-  it('forgets a previous run whose session a restart already dropped', async () => {
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    await finishScheduledRuns(noopBroadcast);
-    sessions.delete('s1');     // gone with the server; only the card remembers it
-    job.nextRunAt = past();
-
-    const killed = [];
-    await dispatchOnce(fakeCreateSession([]), noopBroadcast, { killSession: fakeKillSession(killed) });
-
-    expect(killed).toEqual([]);
-    expect(job.lastRunSessionId).toBeNull();
-    expect(job.lastRunAgentName).toBeNull();
-    expect(job.state).toBe('in-progress');
-  });
-
-  it('retires the kept agent when the card is deleted', async () => {
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    await finishScheduledRuns(noopBroadcast);
-    const killed = [];
-    await deleteJob(job.id, noopBroadcast, { killSession: async (...args) => { killed.push(args); sessions.delete(args[0]); } });
-    // No discard option: deleting a card is not a scheduled retire, so a
-    // dirty worktree still becomes an orphan rather than being thrown away.
-    expect(killed).toEqual([['s1']]);
-    expect(allJobs()).toHaveLength(0);
-  });
-
-  it('retires an exited kept agent when the card is deleted', async () => {
-    // The client never sends kill for a dead tab, so without this the session
-    // entry and its worktree would outlive the card until a restart.
-    const job = runningJob({ state: 'WAITING', lastOutputAt: Date.now() - STALLED_AFTER_MS - 1000 });
-    await finishScheduledRuns(noopBroadcast);
-    sessions.get('s1').exited = true;
-    const killed = [];
-    await deleteJob(job.id, noopBroadcast, { killSession: async (...args) => { killed.push(args); sessions.delete(args[0]); } });
-    expect(killed).toEqual([['s1']]);
-    expect(allJobs()).toHaveLength(0);
-  });
-
-  it('leaves a run that is still working exactly where it is', async () => {
-    const job = runningJob();
-    expect(await finishScheduledRuns(noopBroadcast)).toEqual([]);
-    expect(job.state).toBe('in-progress');
-  });
-
-  it('leaves a run that is asking the user a question alone', async () => {
-    const job = runningJob({ state: 'MESSAGE', lastOutputAt: Date.now() - STALLED_AFTER_MS - 60_000 });
-    await finishScheduledRuns(noopBroadcast);
-    expect(job.state).toBe('in-progress');
-  });
-
-  it('recovers a run whose agent died with the server', async () => {
-    const job = runningJob();
-    sessions.clear();          // what a restart leaves behind
-    await finishScheduledRuns(noopBroadcast);
-    expect(job.state).toBe('todo');
-    expect(Date.parse(job.nextRunAt)).toBeGreaterThan(Date.now());
-  });
-
-  it('re-arms a finished run before the same scan dispatches, in one tick', async () => {
-    // Ordering, not the cap (scheduled cards sit outside it): the run that
-    // ended since the last tick is back in To do before dispatch looks.
-    boardSettings().maxPerRepo = 1;
-    const done = runningJob({ state: 'WAITING', lastOutputAt: 0 });
-    addJob({ title: 'Queued work', repoPath: REPO }, noopBroadcast);
-    const calls = [];
-    const killed = [];
-
-    await runScan(fakeCreateSession(calls), noopBroadcast, { killSession: fakeKillSession(killed) });
-
-    expect(done.state).toBe('todo');
-    expect(calls).toHaveLength(1);
-    expect(allJobs().find(j => j.title === 'Queued work').state).toBe('in-progress');
-  });
-});
-
-describe('editing and moving a scheduled card', () => {
+describe('editing and moving a schedule', () => {
   it('recomputes the next run when the schedule changes', () => {
     addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
     const job = allJobs()[0];
@@ -358,21 +285,6 @@ describe('editing and moving a scheduled card', () => {
     expect(job.nextRunAt).toBeNull();
   });
 
-  it('refuses a type or schedule change while the run is in flight', async () => {
-    // One of the reasons a dispatched card is closed to edits at all: flipping
-    // an in-flight one-time card to scheduled would free its cap slot while its
-    // agent still runs, and hand the run to finishScheduledRuns. The refusal is
-    // now the general To-do gate rather than a type-and-schedule-specific one,
-    // so this asserts the hazard is still covered, not that a special case is.
-    addJob({ title: 'One-timer', repoPath: REPO }, noopBroadcast);
-    const job = allJobs()[0];
-    Object.assign(job, { state: 'in-progress', branchName: 'bill/x', agentSessionId: 's1' });
-    expect(updateJob(job.id, { type: 'scheduled', schedule: '0 9 * * *' }, noopBroadcast).error)
-      .toMatch(/to do/i);
-    expect(jobType(job)).toBe('one-time');
-    expect(job.schedule).toBeFalsy();
-  });
-
   it('lets an ordinary save resend the same type and schedule, without eating a due firing', () => {
     addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
     const job = allJobs()[0];
@@ -383,44 +295,13 @@ describe('editing and moving a scheduled card', () => {
     expect(Date.parse(job.nextRunAt)).toBeLessThan(Date.now());
   });
 
-  it('refuses to park a scheduled card in Review or file it away as Done', async () => {
+  it('refuses to move a schedule anywhere — its runs are the cards that move', async () => {
     addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
     const job = allJobs()[0];
-    Object.assign(job, { state: 'in-progress', branchName: 'bill/x' });
-    expect((await moveJob(job.id, 'review', noopBroadcast, {})).error).toMatch(/scheduled/i);
-    expect((await moveJob(job.id, 'done', noopBroadcast, {})).error).toMatch(/scheduled/i);
-    expect(job.state).toBe('in-progress');
-  });
-
-  it("keeps the last run's agent when the next dispatch fails to spawn", async () => {
-    addJob({ title: 'Daily digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    const job = allJobs()[0];
-    sessions.set('s1', { id: 's1', name: 'Viper', state: 'WAITING', exited: false, lastOutputAt: 0 });
-    Object.assign(job, {
-      state: 'in-progress', agentSessionId: 's1', agentName: 'Viper',
-      branchName: 'bill/x', worktreePath: '/wt/1', startedAt: past(),
-    });
-    await finishScheduledRuns(noopBroadcast);
-    job.nextRunAt = past();
-    const killed = [];
-    const failCreate = async () => ({ error: 'worktree exploded' });
-    await dispatchOnce(failCreate, noopBroadcast, { killSession: fakeKillSession(killed) });
-    // The kept terminal — the last run's only output — survives the failure.
-    expect(killed).toEqual([]);
-    expect(job.lastRunSessionId).toBe('s1');
+    for (const state of ['in-progress', 'review', 'done']) {
+      expect((await moveJob(job.id, state, noopBroadcast, {})).error).toMatch(/schedule stays in To do/);
+    }
     expect(job.state).toBe('todo');
-    expect(job.lastError).toMatch(/worktree exploded/);
-  });
-
-  it('re-arms rather than immediately re-fires when the user ends a run by hand', async () => {
-    addJob({ title: 'Digest', repoPath: REPO, schedule: '0 9 * * *' }, noopBroadcast);
-    const job = allJobs()[0];
-    Object.assign(job, { state: 'in-progress', branchName: 'bill/x', nextRunAt: past() });
-
-    await moveJob(job.id, 'todo', noopBroadcast, {});
-
-    expect(job.state).toBe('todo');
-    expect(Date.parse(job.nextRunAt)).toBeGreaterThan(Date.now());
   });
 });
 
@@ -451,5 +332,69 @@ describe('the wire shape', () => {
     addJob({ title: 'Digest', repoPath: REPO, schedule: '@hourly' }, noopBroadcast);
     const { jobs } = jobsPayload();
     expect(jobs.map(j => j.type)).toEqual(['one-time', 'scheduled']);
+  });
+});
+
+describe('a run sharing its schedule\'s files', () => {
+  it('does not delete the schedule\'s file when one is dropped from the run', async () => {
+    const { job: schedule } = addJob({
+      title: 'With a file', repoPath: REPO, schedule: '@hourly',
+      attachments: [{ name: 'shot.png', data: Buffer.from('png').toString('base64') }],
+    }, noopBroadcast);
+    schedule.nextRunAt = past();
+    const [run] = fireSchedules(noopBroadcast);
+    const shared = schedule.attachments[0].path;
+    updateJob(run.id, { attachments: [] }, noopBroadcast);
+    const { existsSync } = await import('fs');
+    expect(existsSync(shared)).toBe(true);
+    expect(run.attachments).toEqual([]);
+  });
+});
+
+describe('adversarial review regressions', () => {
+  it('abandons a spawn whose card was turned into a schedule meanwhile', async () => {
+    const { job } = addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    const killed = [];
+    const create = async (...args) => {
+      updateJob(job.id, { type: 'scheduled', schedule: '@daily' }, noopBroadcast);
+      return fakeCreateSession([])(...args);
+    };
+    await dispatchOnce(create, noopBroadcast, { killSession: fakeKillSession(killed) });
+    expect(job.state).toBe('todo');
+    expect(killed).toHaveLength(1);
+  });
+
+  it('unlinks a run turned into a schedule, so it cannot hold its parent off', () => {
+    const schedule = dueSchedule();
+    const [run] = fireSchedules(noopBroadcast);
+    updateJob(run.id, { type: 'scheduled', schedule: '@daily' }, noopBroadcast);
+    expect(run.scheduleId).toBeUndefined();
+    schedule.nextRunAt = past();
+    expect(fireSchedules(noopBroadcast)).toHaveLength(1);
+  });
+});
+
+describe('pruning finished runs', () => {
+  it('deletes a schedule\'s finished runs past the cap, with their files, and keeps its count', async () => {
+    const schedule = dueSchedule();
+    for (let i = 0; i < 52; i++) {
+      allJobs().push({ id: `run-${i}`, title: 't', repoPath: REPO, type: 'one-time', scheduleId: schedule.id, state: 'done', doneAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(), attachments: [] });
+    }
+    schedule.runCount = 52;
+    const pruned = await pruneFinishedRuns(noopBroadcast);
+    expect(pruned.map(j => j.id)).toEqual(['run-1', 'run-0']);
+    expect(runsOf(schedule)).toHaveLength(50);
+    expect(schedule.runCount).toBe(52);
+  });
+
+  it('leaves a finished run whose agent is still alive for a later scan', () => {
+    const schedule = dueSchedule();
+    for (let i = 0; i < 51; i++) {
+      allJobs().push({ id: `run-${i}`, title: 't', repoPath: REPO, type: 'one-time', scheduleId: schedule.id, state: 'done', doneAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(), attachments: [] });
+    }
+    sessions.set('alive', { id: 'alive', exited: false });
+    allJobs().find(j => j.id === 'run-0').agentSessionId = 'alive';
+    expect(pruneFinishedRuns(noopBroadcast)).toEqual([]);
+    expect(runsOf(schedule)).toHaveLength(51);
   });
 });

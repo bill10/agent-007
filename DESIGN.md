@@ -498,98 +498,67 @@ Four rules keep the transition honest:
 
 Two kinds of card share those three columns.
 
-A **one-time** job is the original: dispatched once, it crosses the board and
-stops in Review when its agent calls `finish_job` (or the board spots its pull
-request), and leaves the board at Done. A **scheduled** job is a standing
-card fired by a cron schedule; it cycles To do -> In progress -> To do and never
-reaches Review. Cards written before types existed carry no `type` at all, so
-every read goes through `jobType()` — a missing type is one-time, which is what
-those cards have always been.
+A **one-time** job is dispatched once, crosses the board, stops in Review when
+its agent calls `finish_job` (or the board spots its pull request), and leaves
+at Done. A **scheduled** card is a *schedule*, not a job (since v0.4.9.0): it
+stays in To do and is never dispatched itself. Each time it comes due it posts
+a one-time **run** card (`scheduleId` points back at it) carrying its title,
+detail, repo, agent, permission mode and `requiresPr`, and that run goes
+through the one-time lifecycle like any other card. Cards written before types
+existed carry no `type` at all, so every read goes through `jobType()` — a
+missing type is one-time.
 
-- **Same columns, not a fourth one.** A scheduled card between runs is queued
-  work like any other, and pulling it into its own column would take it out of
-  the glance the three columns exist to give. It is marked with a chip and a row
-  showing the cron, the next run, and how many times it has run.
-- **Exempt from the per-repo cap, in both directions.** The cap exists to
-  bound how many agents the board piles onto one repo while draining the
-  one-time queue. A scheduled card neither counts toward it nor waits behind
-  it: it is already bounded — one run at a time, at cron pace — and holding it
-  under the cap would let two long one-time jobs silently starve every
-  schedule on the repo, with the missed firings never replayed. The cap
-  counts one-time In progress cards whose agent is live; agents kept with
-  their cards in Review are deliberately outside it.
-- **The prompt is the task, plus one line.** A scheduled job need not be code
-  at all, so the review/ship instruction is gone — telling an agent that
-  summarises yesterday's commits to run `/ship` would push it into inventing a
-  change so it had something to open a pull request with. Nothing replaces it:
-  an agent already ends its turn with a summary, and the kept terminal (below)
-  is what makes that summary readable. The one line that stays is
-  assumptions-over-questions, because a run that stops to ask holds its card
-  in In progress until a human notices.
-- **A run ends with its agent, not with a pull request.** There is no artefact
-  to watch for, so what is left is the agent: the run is over when it exits, or
-  when it has been parked at its prompt past the quiet window. MESSAGE is
-  excluded — that is the agent asking a question, and killing it would throw
-  away the answer it is waiting for, so such a run holds its slot and shows
-  "needs you" exactly as a one-time job does. `finishScheduledRuns` runs first
-  in each scan, so a run that ended has its card back in To do in time for the
-  same scan to dispatch what was queued behind it. A session gone entirely also
-  counts as over, so a run whose agent was killed or crashed closes out the
-  same way. A restart does not wait for that: `loadConfig` re-arms a scheduled
-  card caught in-progress on the spot — back to To do, next run computed from
-  now, with a `lastError` naming the interrupted run's branch so its work can
-  be recovered from the orphans list. **End run** on the card is the manual
-  version of the same move.
-- **Pause holds the next firing, not the current run** (since v0.3.32.0). A
-  paused card sits in To do reading "paused" instead of a countdown, and
-  `isJobDue` refuses it — one guard, at the gate every dispatch route passes
-  through. It is offered while a run is going as well as between runs, because
-  "stop running this from now on" is asked for mid-run more often than not:
-  **End run** stops the run that is happening, Pause stops the ones after it.
-  So it does not go through `updateJob`, whose gate refuses any edit past To do
-  on the grounds that the agent already holds the card as it stands — pause
-  changes no text the agent was handed. Resuming re-arms `nextRunAt` from that
-  moment rather than honouring a due time that went by during the pause, which
-  would dispatch on the very next scan: firings missed while paused are gone,
-  the same rule a long run follows.
-- **The run's terminal outlives the run.** The agent is not killed when the
-  run ends: its terminal is the run's only output — a scheduled job need not
-  produce code — and killing it would destroy the summary before anyone read
-  it. The card keeps a pointer to the tab ("last run · open terminal"), and
-  the next dispatch retires it, or the user closes it by hand; deleting the
-  card retires it too. Bounded at one kept agent, and so one worktree, per
-  card between runs.
-- **The next run discards the last run's scratch files.** `removeWorktree`
-  keeps a worktree whose tree is dirty or whose commits are unpushed, which is
-  the right call for a one-time job — that is somebody's work. Recurrence
-  turned it into a leak: a scheduled job that reliably leaves a file behind (a
-  report it wrote, or the board's own `.uploads/` attachments folder) orphaned
-  one worktree per run, hourly, and nothing ever collected them. So the
-  retirement at dispatch passes `discardChanges`, which skips only the
-  dirty-tree check: by the time the next run exists, the last run's files are
-  of no use to anyone, and its terminal — the output the board promises to
-  keep — is what was already read. Commits the remote does not have still
-  orphan the worktree; an untracked file is scratch, an unpushed commit is
-  work. Every other path to `killSession` (closing a tab, deleting a card,
-  retiring a one-time job) keeps the conservative default. The same block now
-  retires a previous run whose agent had already exited, which the old
-  `!prev.exited` guard skipped, leaving a dead session and its worktree
-  behind until a restart rediscovered it as an orphan.
-- **The PR watcher and the merge sweep both skip scheduled cards.** A scheduled
-  run that happens to open a pull request must not be moved to Review, and one
-  whose pull request merges must not be filed away as done — either would take
-  the card out of rotation permanently, and done is terminal. The server
-  refuses a manual move to Review or Done for the same reason (delete the card
-  to retire its schedule), and type and schedule are only editable while the
-  card sits in To do — flipping an in-flight card would corrupt the cap
-  accounting and the run finisher's view of it.
-- **The next run is measured from the end of the last one**, never stepped on
-  from the previous due time, so a run that overran its own interval schedules
-  the next one afterwards instead of coming due again the instant it lands.
-  Missed firings never queue up, but the LAST one is owed: a board stopped
-  overnight still holds each card's past due time, so every overdue schedule
-  fires once at the first scan after boot and re-arms into the future from
-  there. One catch-up run, never a backlog.
+Before v0.4.9.0 a scheduled card was dispatched itself and cycled To do -> In
+progress -> To do. That made it a second lifecycle: the board had to guess when
+a run was over (the agent exiting or going quiet), keep the last run's terminal
+open as its only output, exempt the card from the cap, and special-case it in
+every sweep. A run never waited in Review, because the card was also the
+schedule and had to be back in To do for its next firing. Splitting the
+schedule from its runs removes all of that: a run ends when its agent calls
+`finish_job`, its result is read in Review, and a stuck run is an ordinary In
+progress card saying "needs you" instead of a schedule silently losing firings.
+
+- **At most one unfinished run per schedule** (`scheduleHold`). So an hourly
+  job nobody reads cannot fill the board:
+  - a run still in To do or In progress: the firing is skipped. Two runs at
+    once would race each other.
+  - a run in Review that opened a PR: skipped until that PR is merged or the
+    card is done. A second dependency-bump PR on an unmerged one is noise.
+  - a run in Review with no PR: the schedule fires, and the new run
+    **supersedes** the old one once it reaches Review itself.
+
+  A skip moves `nextRunAt` on like a firing does, so it is not replayed, and
+  the schedule card says why it held off.
+- **Superseding keeps the newest result waiting to be read.** Each scan,
+  `supersedeRuns` files every no-PR Review run of a schedule except its newest
+  to Done through `moveJob`, so its agent and worktree are released the same
+  way a person pressing Done releases them. The archived run keeps its summary
+  and `supersededBy`; the newest counts how many it replaced ("replaced 3
+  earlier runs nobody had read"). PR runs are never superseded, because the
+  schedule never fires past one.
+- **The archive keeps a schedule's newest 50 finished runs** (`runsToPrune`,
+  `MAX_FINISHED_RUNS`). Every run is a card in `config.json` and in each board
+  broadcast, and an hourly schedule posts ~8,760 a year, so each scan deletes
+  the oldest finished runs past 50, attachment folders included. The schedule's
+  run count keeps counting. One-time cards are not pruned.
+- **A schedule's runs report a summary by default.** A schedule's
+  `requiresPr` defaults to false (`defaultRequiresPr`): a recurring job was
+  never expected to open a PR, so a recurring code change has to be asked for.
+  Changing a card's type without choosing resets it to the new type's default.
+- **Runs count toward the per-repo cap.** They are ordinary cards. A run
+  waiting behind the cap waits in To do, and its schedule holds off
+  meanwhile, since a run not yet started is still unfinished.
+- **A schedule never moves.** `moveJob` refuses every move of one; Pause and
+  Delete are its controls. Pausing holds the next firing and leaves a run
+  already posted alone; resuming re-arms `nextRunAt` from that moment, so a
+  firing missed while paused is not replayed. Deleting a schedule leaves its
+  runs on the board as ordinary cards.
+- **A run shares its schedule's attachments.** The run's prompt names the
+  schedule's file paths; clearing a finished run's attachments only forgets
+  them, because the run's own attachment directory holds nothing.
+- **Upgrading.** A schedule sitting in To do needs nothing. One saved mid-run
+  by an older server goes back to To do on load, with a note naming the dead
+  run's branch, which is what that server's own restart did.
 - **Cron granularity is bounded by the scan interval.** The dispatcher only acts
   on a scan (five minutes by default, floor 30s), so `* * * * *` means "every
   scan", not every minute. Times are the server's local time — the schedule is
@@ -617,9 +586,6 @@ those cards have always been.
     attention with one that is actually blocking)
   - `quiet -- may need you` -> `--state-idle` (parked at a prompt past the window)
   - `agent gone` -> `--state-disconnected` (session ended)
-  - On a scheduled card, `quiet` and `agent gone` both render as `run finished`
-    in idle gray instead: that quiet IS the run's completion signal, and the
-    alarm colors would tell the user they might be needed when they are not.
 - Clicking anywhere on an in-progress card switches to that agent's terminal;
   the status pill does the same, and stays the keyboard path since the card
   itself is not a tab stop. Card buttons, the PR link, and a click that ends
@@ -661,7 +627,7 @@ that matches nothing is IDLE. The dialog patterns are each CLI's own wording
 until v0.4.2.3 a bare `/approve|deny|allow|reject/` also matched Codex's
 permission picker describing itself ("choose what Codex is allowed to do") and
 any summary line an agent wrote with "allowed" in it, and a false MESSAGE keeps
-a card orange and a scheduled run open for good. Claude Code positions words
+a card orange. Claude Code positions words
 with cursor moves, so its phrases match with the spaces gone
 ("Yes,andalwaysallow"); its 2.1 permission dialogs are captured raw in
 `test/fixtures/claude-permission-dialogs.js`.
@@ -743,10 +709,8 @@ disposed automatically when the agent is retired.
 
 A one-time job's agent is retired when its card reaches Done — its PR merged,
 or the user filed it away — or is moved back to To do. Review keeps it (see
-"How a one-time card moves"). A scheduled run's agent is the exception: it outlives
-its run as the kept terminal and is retired by the next dispatch, by the user
-closing the tab, or with the card's deletion (see "One-time and scheduled
-cards").
+"How a one-time card moves"). A schedule's runs are one-time cards, so the
+same rule covers them; a superseded run is retired as it is filed to Done.
 
 ### Agent-posted jobs
 An agent you are talking to can put a card on the board when you ask it to, so

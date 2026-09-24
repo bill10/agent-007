@@ -39,12 +39,8 @@ describe('the Jobs tab attention badge', () => {
     expect(await badgeFor({ ...running, type: 'one-time' }, null)).toBe('1');
   });
 
-  it('does not count a scheduled run whose agent is gone — that is it finishing', async () => {
-    expect(await badgeFor({ ...running, type: 'scheduled' }, null)).toBeNull();
-    expect(await badgeFor({ ...running, type: 'scheduled' }, { state: 'DISCONNECTED' })).toBeNull();
-  });
-
-  it('still counts a scheduled run that is actually asking a question', async () => {
-    expect(await badgeFor({ ...running, type: 'scheduled' }, { state: 'MESSAGE' })).toBe('1');
+  // A schedule's run is a one-time card, so it is counted like one.
+  it('counts a schedule\'s run whose agent is gone', async () => {
+    expect(await badgeFor({ ...running, scheduleId: 'sched' }, null)).toBe('1');
   });
 });
