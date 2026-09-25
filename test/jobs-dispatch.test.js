@@ -1622,9 +1622,12 @@ describe('releasePushedOrphans at startup', () => {
     orphan('done-card', 'bill10/merged', 'unpushed');
     orphan('dirty', 'bill10/dirty', 'uncommitted');
     orphan('review-card', job.branchName, 'unpushed');
+    // Asked, but removeWorktree still says orphaned: stays, and is not counted.
+    orphans.set('kept', { id: 'kept', name: 'kept', repoPath: REPO, branchName: 'bill10/kept',
+      worktreePath: mkdtempSync(join(tmpdir(), 'a007-kept-')), reason: 'unpushed' });
 
     expect(await releasePushedOrphans(noopBroadcast)).toBe(1);
-    expect([...orphans.keys()].sort()).toEqual(['dirty', 'review-card']);
+    expect([...orphans.keys()].sort()).toEqual(['dirty', 'kept', 'review-card']);
   });
 });
 

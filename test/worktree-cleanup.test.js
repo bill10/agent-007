@@ -159,9 +159,6 @@ describe('branch naming against an open PR', () => {
   });
 });
 
-// A worker that pushed to a URL (`git push -u https://…@github.com/… HEAD:b`)
-// leaves branch.<b>.remote set to that URL and no refs/remotes/origin/<b>, so
-// `@{u}` cannot resolve. Cleanup must then ask the remote directly.
 describe('removeWorktree when the remote-tracking ref is stale', () => {
   // A worker that pushes again (a rebase fix, a force-with-lease) can leave the
   // shared repo's refs/remotes/origin/<branch> on an old SHA, so @{u} resolves
@@ -199,6 +196,9 @@ describe('removeWorktree when the remote-tracking ref is stale', () => {
   });
 });
 
+// A worker that pushed to a URL (`git push -u https://…@github.com/… HEAD:b`)
+// leaves branch.<b>.remote set to that URL and no refs/remotes/origin/<b>, so
+// `@{u}` cannot resolve. Cleanup must then ask the remote directly.
 describe('removeWorktree when the branch was pushed to a URL', () => {
   function pushedToUrl(branch) {
     const { root, repo } = repoWithRemote();
