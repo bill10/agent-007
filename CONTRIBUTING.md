@@ -53,6 +53,11 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 > both ubuntu and Windows, so a change that passes locally on macOS/Linux can
 > still go red on the Windows leg.
 
+Releases are automatic: when a merge to `main` changes `VERSION`,
+`.github/workflows/release.yml` tags that commit `vX` and publishes a GitHub
+Release whose notes are the `## [X]` section of `CHANGELOG.md`, so bump both
+together.
+
 ## Code Style
 
 - **Vanilla JS.** No TypeScript, no framework, no build step. This is intentional.

@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.5.1.3] - 2026-09-25
+
+### Added
+
+- **Every version is a GitHub Release.** Watch the repo's releases to hear
+  about each new version, and link a version's notes straight from GitHub.
+  When a merge to `main` bumps `VERSION`, a workflow tags that commit `vX` and
+  publishes a Release whose notes are this file's section for it. v0.5.1.1 is
+  the first one.
+
 ## [0.5.1.1] - 2026-09-25
 
 ### Changed
