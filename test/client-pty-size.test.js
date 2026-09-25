@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
@@ -50,6 +51,26 @@ describe('terminal size follows the pty', () => {
     setActiveSession(null);
     fitActiveTerminal();
     expect(send).toHaveBeenLastCalledWith({ type: 'pty-resize', sessionId: null });
+  });
+
+  // Output written while hidden leaves xterm's scroll area short; the wheel
+  // then stops rows above the prompt. Showing a terminal refits it.
+  it('resyncs the scroll area when a shown terminal is fitted', () => {
+    const syncScrollArea = vi.fn();
+    addAgent({ term: { cols: 120, rows: 30, resize: vi.fn(), _core: { viewport: { syncScrollArea } } } });
+    fitActiveTerminal();
+    expect(syncScrollArea).toHaveBeenCalledWith(true);
+    addAgent({ termEl: { offsetWidth: 0 }, term: { _core: { viewport: { syncScrollArea } } } });
+    syncScrollArea.mockClear();
+    fitActiveTerminal();
+    expect(syncScrollArea).not.toHaveBeenCalled();
+  });
+
+  // syncScrollArea is private xterm API; the ?. chain would turn a renamed
+  // one into a silent no-op. Re-verify the scroll fix before moving the pin.
+  it('xterm stays pinned to the version the scroll fix was verified on', () => {
+    const html = readFileSync('public/index.html', 'utf8');
+    expect(html).toContain('@xterm/xterm@5.5.0/lib/xterm.js');
   });
 
   it('sends nothing when no size can be proposed', () => {

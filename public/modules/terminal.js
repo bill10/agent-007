@@ -205,7 +205,12 @@ export function handlePtyOutput(msg) {
 // too, which is how the server learns it moved off a terminal it owns.
 function fitAgent(sessionId) {
   const agent = agents.get(sessionId);
-  if (!agent || !agent.fitAddon || agent.termEl.offsetWidth === 0) return;
+  if (!agent || agent.termEl.offsetWidth === 0) return;
+  // Output written while hidden leaves xterm's scroll area short, so the
+  // wheel stops rows above the prompt. Every show passes through here.
+  // ponytail: private xterm 5.5 API; test/client-pty-size pins the version
+  agent.term._core?.viewport?.syncScrollArea?.(true);
+  if (!agent.fitAddon) return;
   const dims = agent.fitAddon.proposeDimensions();
   if (dims && dims.cols > 0 && dims.rows > 0) send({ type: 'pty-resize', sessionId, cols: dims.cols, rows: dims.rows });
 }
