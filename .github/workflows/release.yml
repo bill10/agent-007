@@ -1,0 +1,33 @@
+name: Release
+
+# When a push to main changes VERSION, tag that commit vX and publish a
+# GitHub Release whose notes are CHANGELOG.md's "## [X]" section.
+
+on:
+  push:
+    branches: [main]
+    paths: [VERSION]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Create the tag and Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          if gh release view "v$v" > /dev/null 2>&1 || git ls-remote --exit-code --tags origin "refs/tags/v$v" > /dev/null; then
+            echo "v$v already exists"; exit 0
+          fi
+          awk -v h="## [$v]" 'index($0, h) == 1 { on = 1; next } on && /^## \[/ { exit } on' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then echo "CHANGELOG.md has no section for $v"; exit 1; fi
+          headline="$(git log -1 --format=%s | sed -E 's/^v[0-9.]+ [a-z]+(\([^)]*\))?!?: //; s/ \(#[0-9]+\)$//')"
+          gh release create "v$v" --target "$GITHUB_SHA" --title "v$v — $headline" --notes-file notes.md
