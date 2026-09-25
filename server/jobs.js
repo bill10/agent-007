@@ -17,6 +17,7 @@ import { saveConfig, syncOrphansToConfig } from './config.js';
 import { gitExec, removeWorktree } from './git.js';
 import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
 import { safeFilename } from '../lib/helpers.js';
+import { sendNotice } from './messages.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
@@ -26,6 +27,7 @@ import {
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
+  BILLION_NAME,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -669,7 +671,27 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
       message: `Job "${job.title}" moved to Review — ${pr ? `PR #${pr.number}` : `${session.name} finished`}`,
     });
   }
+  notifyBillion(job);
   return { job: jobSummary(job) };
+}
+
+// A card Billion posted tells Billion the moment it lands in Review, so a
+// finished result is picked up now rather than at its next wake-up. Billion
+// only: any other agent that posted a card may be mid-conversation with a
+// person, and a notice typed into that terminal would be an interruption
+// nobody asked for. The summary is a worker's text, so it goes in quoted and
+// trimmed; read_job has the whole of it.
+const NOTICE_SUMMARY_CHARS = 1500;
+export function notifyBillion(job) {
+  if (job.postedByAgent !== BILLION_NAME) return false;
+  const billion = [...sessions.values()].find(s => s.isBillion && !s.exited);
+  if (!billion) return false;
+  const summary = job.resultSummary || '';
+  const lines = [
+    job.prUrl ? `Pull request: ${job.prUrl}` : null,
+    summary ? `Summary: ${summary.length > NOTICE_SUMMARY_CHARS ? `${summary.slice(0, NOTICE_SUMMARY_CHARS)}… (read_job for the rest)` : summary}` : null,
+  ].filter(Boolean);
+  return sendNotice(billion, `"${job.title}" (card ${job.id}, ${basename(job.repoPath || '')}) is in Review.`, lines);
 }
 
 // A card stops being editable the moment it leaves To do, whoever is asking.
@@ -1544,6 +1566,7 @@ export async function checkPullRequests(broadcast, { findPr = findPrForBranch } 
     if (broadcast) {
       broadcast({ type: 'notification', level: 'info', message: `Job "${job.title}" moved to Review — PR #${pr.number}` });
     }
+    notifyBillion(job);
   }
   if (moved.length > 0 || noted) persist(broadcast);
   return moved;

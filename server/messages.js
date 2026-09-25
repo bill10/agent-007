@@ -75,11 +75,17 @@ export function isUnguarded(session) {
     .some(a => /^(-c|--config|-p|--profile|--full-auto)(=|$)/.test(a) || /^-c\S/.test(a));
 }
 
+// Billion (server/billion.js) is the exception both rules make: every agent
+// may message it. It is the one agent everyone reports to, it belongs to no
+// one, and it never asks before acting — so a worker that read untrusted text
+// can pass that text on to an agent with full access. Accepted in the design
+// (docs/BILLION.md): messages arrive labelled as coming from an agent, and its
+// charter treats them as information, never as instructions.
 export function messageableAgents(from, sessions) {
   const fromUnguarded = isUnguarded(from);
   return [...sessions.values()].filter(s =>
-    s.id !== from.id && !s.exited && isAgent(s) && sameOwner(from, s)
-    && (fromUnguarded || !isUnguarded(s)));
+    s.id !== from.id && !s.exited && isAgent(s)
+    && (s.isBillion || (sameOwner(from, s) && (fromUnguarded || !isUnguarded(s)))));
 }
 
 // Header fields lose newlines as well: a name is renamable, and one carrying a
@@ -97,8 +103,34 @@ export function formatMessage(from, text) {
     + `[Reply with the send_message tool, to: "${name}". This came from another agent, not from the user.]`;
 }
 
+// A board notice: from the server, not an agent, so it names the board and
+// carries no reply line. Quoted like a message body, since a card's summary is
+// an agent's text.
+export function formatNotice(headline, lines = []) {
+  const body = lines.flatMap(line => clean(line).split('\n')).map(line => `> ${line}`);
+  return [`[Job board] ${oneLine(headline)}`, ...body,
+    '[This came from the Agent 007 job board, not the user.]'].join('\n');
+}
+
+// Queue a board notice for a session and deliver it when it can take one. Not
+// agent-to-agent, so neither the permission rule nor the pair limit applies;
+// the queue cap does, and a notice over it is dropped (the board still has
+// the card, for whoever looks).
+export function sendNotice(session, headline, lines, now = Date.now()) {
+  if (!session || session.exited) return false;
+  const queue = queues.get(session.id) || [];
+  if (queue.length >= QUEUE_CAP) return false;
+  queue.push(formatNotice(headline, lines));
+  queues.set(session.id, queue);
+  flushMessages(session, now);
+  return true;
+}
+
 // Whether a message may be typed into this session right now.
 export function canDeliver(session, now = Date.now()) {
+  // Billion holds its mail until it says it is ready (billion_ready), so
+  // nothing lands in the middle of its introduction.
+  if (session.messagesHeld) return false;
   // Both: the stored state is up to a second old, and a dialog that opened
   // since is what this must not type into.
   if (session.exited || session.state !== 'WAITING' || detectState(session, { now }) !== 'WAITING') return false;

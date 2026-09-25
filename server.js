@@ -179,6 +179,9 @@ function startBillion() {
     repoPath: null, worktreePath: null, cwd: dir, isBillion: true, ownerId: null,
   }, broadcast);
   if (result.error) return result;
+  // Mail waits until Billion calls billion_ready: at the end of its
+  // introduction, and at the start of every cycle after a restart.
+  result.session.messagesHeld = true;
   sessions.set(result.session.id, result.session);
   return { session: result.session };
 }

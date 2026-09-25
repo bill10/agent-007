@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { CONFIG_DIR } from './state.js';
 
-export const BILLION_NAME = 'Billion';
+export { BILLION_NAME } from '../lib/jobs.js';
 
 const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.url));
 // Named charter.md in this repo, so an agent working on Agent 007 itself does

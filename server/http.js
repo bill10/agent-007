@@ -12,7 +12,7 @@ import {
 import {
   postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
-import { agentSummaries, sendMessage } from './messages.js';
+import { agentSummaries, sendMessage, flushMessages, pendingMessages } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -116,6 +116,13 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
           (jobId) => allJobs().find(job => job.id === jobId)?.title),
         sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
         finishJob: (fields) => finishJobForAgent({ ...fields, session: req.agentSession }, broadcast),
+        billionReady: () => {
+          const session = req.agentSession;
+          if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };
+          session.messagesHeld = false;
+          flushMessages(session);
+          return { waiting: pendingMessages(session.id) };
+        },
       });
     } catch (err) {
       console.error('MCP call failed:', err);

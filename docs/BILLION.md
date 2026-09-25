@@ -491,8 +491,16 @@ cycle: start agent-cost; drop the browser-extension idea
    repo (copied in as `CLAUDE.md`) so agents working on Agent 007 don't load
    it. Verified live in an isolated server: repo created and committed,
    introduction as designed.
-2. Messaging: workers can reach Billion (exemption), the queue holds until
-   `billion_ready`, `finish_job` notifies the poster.
+2. **Messaging — built.** Every agent can message Billion (exempt from the
+   permission and owner rules as a recipient, `server/messages.js`); its
+   inbox is held until it calls `billion_ready` (a tool listed for Billion
+   only), which the charter calls at the end of the introduction and at the
+   start of every cycle, so a restart needs no stored flag; a card Billion
+   posted sends it a `[Job board]` notice when it reaches Review, through
+   `finish_job` or the PR poll (Billion only: another agent's terminal may be
+   mid-conversation with a person); workers on Billion's cards are told they
+   can ask it. Verified live: a guarded worker messaged Billion, Billion
+   replied, the reply arrived.
 3. Board tools for Billion: `add_repo`, `close_job`.
 4. Approvals via the `PermissionRequest` hook (Claude Code `--settings`,
    Codex two `-c` flags).

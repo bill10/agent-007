@@ -253,7 +253,22 @@ export const SEND_MESSAGE_TOOL = {
   },
 };
 
+// Billion's alone (server/billion.js): listed only for its session.
+export const BILLION_READY_TOOL = {
+  name: 'billion_ready',
+  description:
+    'Open your inbox: until you call this, messages from agents and job board '
+    + 'notices wait instead of being typed into your terminal. Call it when your '
+    + 'introduction is done and at the start of every operating cycle; calling it '
+    + 'again does nothing.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
+
+export function toolsFor(session) {
+  return session?.isBillion ? [...TOOLS, BILLION_READY_TOOL] : TOOLS;
+}
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -415,6 +430,14 @@ const CALLS = {
     return toolText(`"${result.job.title}" is in Review. You are done — end your turn here.`);
   },
 
+  [BILLION_READY_TOOL.name]: (args, ctx) => {
+    const result = ctx.billionReady ? ctx.billionReady() : { error: 'Only Billion has an inbox to open.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.waiting
+      ? `Inbox open. ${result.waiting} message(s) will arrive one at a time as you come to rest at your prompt.`
+      : 'Inbox open. Nothing is waiting.');
+  },
+
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {
     const agents = ctx.listAgents();
     if (!agents.length) return toolText('No other agents are running that you can message.');
@@ -467,7 +490,7 @@ export function handleMcpMessage(msg, ctx = {}) {
   if (isNotification) return null;
 
   if (method === 'ping') return ok(id, {});
-  if (method === 'tools/list') return ok(id, { tools: TOOLS });
+  if (method === 'tools/list') return ok(id, { tools: toolsFor(ctx.session) });
 
   if (method === 'tools/call') {
     // hasOwn, not truthiness: a plain object inherits Object.prototype, so a
@@ -475,7 +498,8 @@ export function handleMcpMessage(msg, ctx = {}) {
     // the chain and run it — a 500 for the first, and a result of
     // "[object Undefined]" for the second, neither of them a tool.
     const name = params?.name;
-    if (typeof name !== 'string' || !Object.hasOwn(CALLS, name)) {
+    if (typeof name !== 'string' || !Object.hasOwn(CALLS, name)
+      || !toolsFor(ctx.session).some(tool => tool.name === name)) {
       return fail(id, -32602, `Unknown tool: ${name}`);
     }
     const result = CALLS[name](params?.arguments || {}, ctx);
