@@ -43,6 +43,16 @@ describe('changelogWith', () => {
   });
 });
 
+// A malformed fragment would only fail the release run after merge; catch it
+// in the PR's own test run instead.
+describe('changelog.d in this repo', () => {
+  it('holds only fragments the release script can read', () => {
+    for (const n of readdirSync('changelog.d').filter((n) => n.endsWith('.md') && n !== 'README.md')) {
+      expect(() => parseFragment(readFileSync(join('changelog.d', n), 'utf8'), n)).not.toThrow();
+    }
+  });
+});
+
 describe('release', () => {
   function repo() {
     const root = mkdtempSync(join(tmpdir(), 'release-'));
