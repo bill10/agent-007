@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.10.2] - 2026-09-25
+
+### Added
+
+- **The demo capture is kept, and there is a procedure for redoing it.** The
+  README's hero GIF now has the same recording beside it as MP4, in
+  `docs/demos/`, for posting where a GIF is the wrong format. CONTRIBUTING
+  explains how the capture is driven headlessly against a running server, how
+  to cut it, and what to check for before committing a frame of your own
+  screen.
+
 ## [0.4.10.1] - 2026-09-24
 
 ### Fixed
