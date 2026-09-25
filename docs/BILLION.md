@@ -236,7 +236,7 @@ short self-introduction, then asks for the information it needs.
    > "grow the company".
    >
    > And when I start a new project, where should its repo go? Your projects
-   > seem to live in `~/Dropbox/Projects/Active/`. Shall I use that?
+   > seem to live in `~/Projects/`. Shall I use that?
 
    After your answers, it closes with where everything lives:
 
@@ -351,9 +351,10 @@ Principles (the charter gives these, not procedures):
 - **Archive, never delete.**
 - Money and safety sections: as in #92.
 
-Practical notes for the charter: `gh auth switch -u bill10` in its own command
-before any `gh` write (default account is read-only; the switch doesn't
-persist); check `baseRefName` and retarget stacked PRs to main before merging.
+Practical note for the charter: check `baseRefName` and retarget stacked PRs
+to main before merging. Machine-specific quirks (which `gh` account can write,
+for example) are not in the template; Billion learns them and keeps them in
+its own `CLAUDE.md`.
 
 Still to add to the template: `<NAME>` = Billion, the introduction section
 (step 3), approvals (`answer_permission`, when to give no decision), "report
@@ -404,7 +405,7 @@ Example of an active one:
 Status: Validating a CLI for agent cost reports; building agent-007's close_job tool.
 
 ## Plan
-agent-cost (new repo, ~/Dropbox/Projects/Active/agent-cost):
+agent-cost (new repo, ~/Projects/agent-cost):
 1. Market research: who tracks agent spend today (card 118, in progress)
 2. Decide build or drop from 118's result
 agent-007:
