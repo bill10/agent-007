@@ -493,6 +493,31 @@ cycle: start agent-cost; drop the browser-extension idea
   note), or Review fills with idle workers.
 - Recurring work → a schedule card Billion posts once.
 
+## Telegram
+
+Billion's questions scroll out of sight in a busy terminal, so its
+`notify_owner` tool puts each one in two places: a **Waiting on you** list
+under Billion's row at the top of the left panel (kept in
+`~/.agent-007/waiting.json` until you dismiss it with ×), and, when a
+Telegram bot is set up, your phone. Whatever you answer the bot is typed into
+Billion's terminal as `[Owner via Telegram] <text>`, the same way board
+notices and agent messages arrive. If Billion is not running the bot says so
+and drops the message.
+
+Setup:
+
+1. In Telegram, message **@BotFather**, send `/newbot`, and put the token it
+   gives you in `~/.agent-007/.env` as `TELEGRAM_BOT_TOKEN=...`. Restart.
+2. Send your new bot any message. The server log (and a notice in the
+   browser) shows `Telegram: a message came from chat <id>` (for each new chat, so
+   check it is yours).
+3. Add `TELEGRAM_CHAT_ID=<id>` to the same file and restart.
+
+The chat id is the only gate: messages from any other chat are ignored
+without a reply, so don't add the bot to a group. The token is never logged or sent to the browser. Billion can notify
+you at most five times a minute. No library: the server long-polls
+`getUpdates` with Node's own `fetch`.
+
 ## Order of building
 
 1. **Billion itself — built.** `server/billion.js` (on/off via `BILLION`,

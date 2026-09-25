@@ -41,6 +41,8 @@ Settings (default in brackets):
   AGENT_MESSAGING         open = any agent may message any other [guarded]
   BILLION                 0 turns off Billion, the always-on agent [on]
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
+  TELEGRAM_BOT_TOKEN      Bot token for Billion's questions on your phone [off]
+  TELEGRAM_CHAT_ID        Your chat with that bot; only it reaches Billion [none]
   TRUST_BOARD_WORKTREES   0 keeps Claude Code's and Codex's folder-trust
                           prompt for job board workers [on]
 
