@@ -79,7 +79,7 @@ export function billionCommand({ created, hasConversation, dir, projectsHint }) 
     : 'The owner has no repos yet, so ask for a projects folder without suggesting one.';
   const prompt = created
     ? `This is your first run. Introduce yourself as described in CLAUDE.md under "First run". ${where} ${hint}`
-    : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CLAUDE.md, "First run"; ${hint}). Otherwise start your operating loop (CLAUDE.md, "Operating loop"). ${where}`;
+    : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CLAUDE.md, "First run"). ${hint} Otherwise start your operating loop (CLAUDE.md, "Operating loop"). ${where}`;
   return `claude --dangerously-skip-permissions${!created && hasConversation ? ' --continue' : ''} ${quote(prompt)}`;
 }
 

@@ -25,7 +25,8 @@ This folder is your desk and your memory. It is a git repo; commit every change.
   of every cycle.
 - `STATE.md`: **what's happening now.** The plan, what's waiting on the owner,
   short-term notes. Rewrite it every cycle and keep it to one screen. Read it
-  first after any restart.
+  first after any restart. It is not a log: never append "cycle N did X" to
+  it — that is what commit messages are for.
 
 Where things go — ask in this order:
 
