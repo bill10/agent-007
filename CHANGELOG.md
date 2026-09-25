@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.9.1.1] - 2026-09-25
+
+### Fixed
+
+- **The branch-sync test no longer flakes on slow runners.** It waited fixed times for scan ticks, but the next tick is only scheduled after the previous scan finishes, so slow git on Windows could outlast the sleep. It now waits for the scans themselves.
+
 ## [0.9.1.0] - 2026-09-25
 
 ### Fixed
