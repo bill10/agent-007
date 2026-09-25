@@ -35,9 +35,13 @@ const DANGEROUS_MODE = 'bypassPermissions';
 
 function markDangerousMode(el) {
   if (!el) return;
-  // The .env entry is dangerous when either CLI's default is.
-  const env = el.id === 'job-permission-mode' && el.value === '' ? Object.values(boardSettings.envModes || {}) : [];
-  el.classList.toggle('job-mode-danger', el.value === DANGEROUS_MODE || env.includes(DANGEROUS_MODE));
+  // An empty value is "whatever the board decides" (the toolbar's .env entry,
+  // a card's Board default): dangerous when that decision is bypass for
+  // either CLI — a picked board mode, or with none picked, a .env default.
+  const board = boardSettings.permissionModeChosen
+    ? [boardSettings.permissionMode]
+    : [boardSettings.permissionMode, ...Object.values(boardSettings.envModes || {})];
+  el.classList.toggle('job-mode-danger', el.value === DANGEROUS_MODE || (el.value === '' && board.includes(DANGEROUS_MODE)));
 }
 
 // Mirrors STALLED_AFTER_MS in lib/jobs.js.

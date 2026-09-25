@@ -19,7 +19,7 @@
 // session Map so it is testable on its own: sessions come in as parameters.
 
 import { parseCommand, detectState } from '../lib/helpers.js';
-import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME } from '../lib/jobs.js';
+import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME, isCodexConfigFlag } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
@@ -77,7 +77,7 @@ export function isUnguarded(session) {
   const { args } = parseCommand(command);
   const end = args.indexOf('--');
   return (end === -1 ? args : args.slice(0, end))
-    .some(a => /^(-c|--config|-p|--profile|--full-auto)(=|$)/.test(a) || /^-c\S/.test(a));
+    .some(isCodexConfigFlag);
 }
 
 // Billion (server/billion.js) is the exception both rules make: every agent

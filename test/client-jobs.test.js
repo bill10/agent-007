@@ -352,6 +352,19 @@ describe('the per-job permission mode', () => {
     expect(perm().value).toBe('');
   });
 
+  it('colours "board default" when what the board decides is bypass', () => {
+    handleJobsList({ jobs: [JOB()], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto', permissionModeChosen: false,
+      envModes: { claude: null, codex: 'bypassPermissions' } } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(perm().value).toBe('');
+    expect(perm().classList).toContain('job-mode-danger');
+    handleJobsList({ jobs: [JOB()], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto', permissionModeChosen: true,
+      envModes: { claude: null, codex: 'bypassPermissions' } } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(perm().classList).not.toContain('job-mode-danger');   // a picked mode overrides the .env one
+    handleJobsList({ jobs: [], settings: { permissionModeChosen: false, envModes: { claude: null, codex: null } } });
+  });
+
   it('shows and sends the mode a card carries', () => {
     handleJobsList({ jobs: [JOB({ permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
     cards()[0].querySelector('.job-card-actions button').click();

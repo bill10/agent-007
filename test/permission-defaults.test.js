@@ -69,7 +69,9 @@ describe('a command someone starts', () => {
   it('leaves a command that already says how it asks exactly as typed', () => {
     // Values the allowlist doesn't know included: they are still the person's choice.
     for (const cmd of ['claude --dangerously-skip-permissions', 'claude --permission-mode plan', 'codex -s read-only', 'codex --yolo',
-      'claude --permission-mode default', 'claude --permission-mode=default', 'codex -a untrusted', 'codex -auntrusted', 'codex --ask-for-approval=on-failure']) {
+      'claude --permission-mode default', 'claude --permission-mode=default', 'codex -a untrusted', 'codex -auntrusted', 'codex --ask-for-approval=on-failure',
+      // Codex's config overrides and profiles can set permissions the allowlist cannot see.
+      'codex -c sandbox_mode=read-only', 'codex -csandbox_mode=read-only', 'codex --config=x', 'codex -p locked', 'codex --profile=locked', 'codex --full-auto']) {
       expect(withDefaultPermission(cmd, env)).toBe(cmd);
     }
   });
@@ -131,10 +133,12 @@ describe('the job board', () => {
 });
 
 describe('re-spawning an agent someone started', () => {
-  it('uses the flags it ran with, or the default when it recorded none', () => {
+  it('uses the flags it ran with, and never the default in place of ones it did not record', () => {
     process.env.CLAUDE_PERMISSION_MODE = 'bypassPermissions';
     const base = { name: 'Old', repoPath: '/nowhere', branchName: 'x', worktreePath: '/nowhere/x', agent: 'claude', origin: 'user' };
-    expect(orphanResumePlan({ ...base, permissionFlags: [] }).flags).toEqual(['--permission-mode', 'bypassPermissions']);
+    // Started as `claude --permission-mode default`: recorded nothing (the
+    // allowlist doesn't read `default`), and must not come back in bypass.
+    expect(orphanResumePlan({ ...base, permissionFlags: [] }).flags).toEqual([]);
     expect(orphanResumePlan({ ...base, permissionFlags: ['--permission-mode', 'plan'] }).flags).toEqual(['--permission-mode', 'plan']);
   });
 });

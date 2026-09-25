@@ -27,7 +27,7 @@ import {
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
-  BILLION_NAME, envPermissionMode, permissionModeFlags,
+  BILLION_NAME, envPermissionMode,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -1284,10 +1284,11 @@ export function orphanResumePlan(orphan, homes) {
     : null;
   // The flags it was spawned with, for a hand-spawned agent with no card.
   // They belong to the CLI on the record: a note-less orphan resolved by a
-  // transcript has none to pass on, and resumes under that CLI's .env default
-  // (or its own default, with none set) — as a fresh spawn of it would.
-  const recorded = recordedPermissionFlags(orphan);
-  const flags = recorded.length || mode ? recorded : permissionModeFlags(agent, envPermissionMode(agent));
+  // transcript has none to pass on, and resumes under that CLI's default.
+  // Never the .env default: an agent spawned since it was set recorded the
+  // flags it got, and one that recorded none may have named a mode the
+  // allowlist doesn't read, which a default must not replace.
+  const flags = recordedPermissionFlags(orphan);
   // A Codex agent is pinned to its own worktree's session by id — the one
   // the transcript probe already found, when that is how its CLI was known.
   const sessionId = agent !== 'codex' ? null
