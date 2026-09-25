@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.5.1.1] - 2026-09-25
+
+### Changed
+
+- **The README says what Agent 007 is for on its first screen.** It opens with
+  "Queue coding jobs, walk away, review the PRs", the demo, a three-command
+  Quick Start and five short highlights: the job board, Billion, bring your own
+  Claude Code or Codex subscription, the pixel office, and agents that message
+  each other. The long feature list lives in `docs/FEATURES.md`.
+- **No C++ compiler needed to install.** `node-pty` ships prebuilt binaries for
+  macOS, Linux and Windows on x64 and arm64, so the compiler setup moved out of
+  the requirements (README and CONTRIBUTING) into a Troubleshooting note for
+  the rare install that has to build it.
+
 ## [0.5.1.0] - 2026-09-25
 
 ### Added
