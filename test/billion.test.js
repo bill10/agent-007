@@ -159,14 +159,19 @@ describe('trustDialogKey', () => {
     'Entertoconfirm·Esctocancel',
   ].join('\n');
 
+  it('ignores text that only mentions the dialog, like a job card quoting it', () => {
+    expect(trustDialogKey('Fix the trust this folder prompt\n❯ Yes, I trust this folder')).toBe(null);
+    expect(trustDialogKey('why does trust this folder say\n❯ No, exit')).toBe(null);
+  });
+
   it('moves off "No, exit", then confirms "Yes"', () => {
-    expect(trustDialogKey(dialog('no'))).toBe('\x1b[B');
+    expect(trustDialogKey(dialog('no'))).toBe('\x0e');
     expect(trustDialogKey(dialog('yes'))).toBe('\r');
   });
 
   it('follows the last cursor drawn when an older drawing is still in the text', () => {
     expect(trustDialogKey(dialog('no') + '\n No, exit❯Yes, I trust this folder')).toBe('\r');
-    expect(trustDialogKey(dialog('yes') + '\n❯No, exit Yes, I trust this folder')).toBe('\x1b[B');
+    expect(trustDialogKey(dialog('yes') + '\n❯No, exit Yes, I trust this folder')).toBe('\x0e');
   });
 
   it('leaves anything else alone', () => {

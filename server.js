@@ -35,6 +35,7 @@ import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
+import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -91,12 +92,17 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     cocktail = wtResult.cocktail;
   }
 
+  // A board worker's worktree is brand new, so Claude Code would stop at its
+  // workspace-trust dialog until someone clicked (server/claude-trust.js).
+  const autoTrust = autoTrusts({ spawnedBy: meta.spawnedBy, worktreePath, command });
+  if (autoTrust) trustClaudeFolder(worktreePath);
+
   const result = createSessionFromConfig({
     sessionId, name: agentName, color, command,
     repoPath: resolvedRepoPath, worktreePath, branchName,
     repoSlug, cocktail, ownerId: ownerId || null,
     spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
-    approvalsToBillion: !!meta.approvalsToBillion,
+    approvalsToBillion: !!meta.approvalsToBillion, autoTrust,
   }, broadcast);
 
   if (result.error) {
