@@ -44,7 +44,8 @@ const wss = new WebSocketServer({ server, verifyClient });
 // broadcast is injected for the same reason server/jobs.js takes it as an
 // argument: http.js must not import ws.js, and a job posted through the MCP
 // tool has to repaint every open board the moment it lands.
-setupRoutes(app, join(__dirname, 'public'), { broadcast });
+// killSession is a hoisted declaration below: close_job retires a card's worker.
+setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession });
 
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.

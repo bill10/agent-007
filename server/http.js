@@ -10,8 +10,9 @@ import {
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
 import {
-  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, attachmentPath, allJobs,
+  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
+import { addRepo } from './git.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 
@@ -87,7 +88,7 @@ export function requireAgent(req, res, next) {
 }
 
 // --- Routes ---
-export function setupRoutes(app, staticDir, { broadcast } = {}) {
+export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
   app.use(express_static(staticDir));
 
   // --- POST /mcp — the board's MCP server ---
@@ -116,6 +117,15 @@ export function setupRoutes(app, staticDir, { broadcast } = {}) {
           (jobId) => allJobs().find(job => job.id === jobId)?.title),
         sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
         finishJob: (fields) => finishJobForAgent({ ...fields, session: req.agentSession }, broadcast),
+        // Billion's own tools: toolsFor() lists them only for its session, and
+        // each checks again here.
+        addRepo: async (path) => {
+          if (!req.agentSession.isBillion) return { error: 'Only Billion can add repositories.' };
+          const raw = String(path || '').trim();
+          const abs = raw.startsWith('~/') ? resolve(homedir(), raw.slice(2)) : raw;
+          return addRepo(abs, broadcast);
+        },
+        closeJob: (fields) => closeJobForAgent({ ...fields, session: req.agentSession }, broadcast, { killSession }),
         billionReady: () => {
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };

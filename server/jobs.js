@@ -694,6 +694,35 @@ export function notifyBillion(job) {
   return sendNotice(billion, `"${job.title}" (card ${job.id}, ${basename(job.repoPath || '')}) is in Review.`, lines);
 }
 
+// Billion's verdict on one of its own cards in Review (docs/BILLION.md, part 3).
+// Accept files it as Done and retires its agent; send it back returns it to To
+// do with the reason added to its detail, so the next worker knows what to fix.
+//
+// Only Billion, only its own cards, only from Review: this is the owner's
+// "Done" button handed to one agent, not to every agent on the board. A card
+// with a pull request is not accepted here — merging it is what files it as
+// Done, and a Done card whose PR never merged would claim work shipped that
+// did not.
+export async function closeJobForAgent({ session, id, accept, note }, broadcast, { killSession } = {}) {
+  if (!session?.isBillion) return { error: 'Only Billion can close cards.' };
+  const job = allJobs().find(j => j.id === id);
+  if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
+  if (job.postedByAgent !== BILLION_NAME) return { error: `"${job.title}" was not posted by you, so it is not yours to close.` };
+  if (job.state !== 'review') return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; only a card in Review can be closed.` };
+  const reason = typeof note === 'string' ? note.trim() : '';
+  if (accept) {
+    if (job.prUrl) return { error: `"${job.title}" has a pull request (${job.prUrl}). Merge it and the board files the card as Done on its own.` };
+    const result = await moveJob(job.id, 'done', broadcast, { killSession });
+    return result.error ? result : { job: jobSummary(job), accepted: true };
+  }
+  if (!reason) return { error: 'Say why it goes back (note): the next worker only knows what the card tells it.' };
+  const result = await moveJob(job.id, 'todo', broadcast, { killSession });
+  if (result.error) return result;
+  job.detail = `${job.detail ? `${job.detail}\n\n` : ''}Sent back by ${BILLION_NAME}: ${reason}`.slice(0, MAX_DETAIL_LEN);
+  persist(broadcast);
+  return { job: jobSummary(job), accepted: false };
+}
+
 // A card stops being editable the moment it leaves To do, whoever is asking.
 //
 // The reasons stack up: its agent was handed the title, detail and attachment

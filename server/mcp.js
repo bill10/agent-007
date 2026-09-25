@@ -264,10 +264,48 @@ export const BILLION_READY_TOOL = {
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 };
 
+export const ADD_REPO_TOOL = {
+  name: 'add_repo',
+  description:
+    'Add a git repository to the Agent 007 board, so job cards can be posted in it '
+    + 'and it shows in the owner\'s left panel. Use it after creating a new '
+    + 'project\'s repo (with its remote and a pushed main). Adding one already '
+    + 'on the board does nothing.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Absolute path to the repository on this machine (~/ is allowed).' },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+};
+
+export const CLOSE_JOB_TOOL = {
+  name: 'close_job',
+  description:
+    'Close one of your own cards that is in Review. accept: true files a card with '
+    + 'no pull request as Done (a card with a PR is filed as Done when you merge '
+    + 'the PR). accept: false sends it back to To do with your note added to its '
+    + 'detail, for a fresh worker to redo; close its pull request first if it '
+    + 'has one. Either way its worker is closed.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The card id, as list_jobs reports it.' },
+      accept: { type: 'boolean', description: 'true: Done. false: back to To do.' },
+      note: { type: 'string', description: 'Required when sending it back: what the next worker must do differently.' },
+    },
+    required: ['id', 'accept'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL];
 
 export function toolsFor(session) {
-  return session?.isBillion ? [...TOOLS, BILLION_READY_TOOL] : TOOLS;
+  return session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
 }
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
@@ -436,6 +474,20 @@ const CALLS = {
     return toolText(result.waiting
       ? `Inbox open. ${result.waiting} message(s) will arrive one at a time as you come to rest at your prompt.`
       : 'Inbox open. Nothing is waiting.');
+  },
+
+  [ADD_REPO_TOOL.name]: async (args, ctx) => {
+    const result = await ctx.addRepo(args.path);
+    if (result.error) return toolText(result.error, true);
+    return toolText(`${result.path} is on the board as "${result.slug}". post_job can use it now.`);
+  },
+
+  [CLOSE_JOB_TOOL.name]: async (args, ctx) => {
+    const result = await ctx.closeJob({ id: args.id, accept: args.accept === true, note: args.note });
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.accepted
+      ? `"${result.job.title}" is Done and its worker is closed.`
+      : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`);
   },
 
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {

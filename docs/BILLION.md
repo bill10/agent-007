@@ -501,7 +501,14 @@ cycle: start agent-cost; drop the browser-extension idea
    mid-conversation with a person); workers on Billion's cards are told they
    can ask it. Verified live: a guarded worker messaged Billion, Billion
    replied, the reply arrived.
-3. Board tools for Billion: `add_repo`, `close_job`.
+3. **Board tools — built.** `add_repo` (wraps `addRepo`, `~/` allowed) and
+   `close_job` (accept a no-PR card → Done; send any card back → To do with
+   the note appended to its detail; a PR card is filed Done by its merge, so
+   accept refuses it). Billion only, its own cards only, Review only; both
+   listed only for Billion and checked again in the route. Verified live end
+   to end: Billion added a repo, posted a no-PR card, the worker finished,
+   the `[Job board]` notice woke Billion, it read the result and accepted
+   the card — Done in 41 s.
 4. Approvals via the `PermissionRequest` hook (Claude Code `--settings`,
    Codex two `-c` flags).
 
