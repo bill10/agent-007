@@ -344,7 +344,12 @@ statement into a plan and the plan into cards.
   `list_jobs`, and messages only the workers of its own cards. Agents you start
   by hand are yours. Throughput is capped by the board's `maxPerRepo`.
 - **Tools and limits:** as in #92, plus Billion's own `billion_ready`,
-  `add_repo`, `close_job` and `answer_permission`.
+  `add_repo`, `close_job` and `answer_permission`, and `read_agent_screen`:
+  the last lines (default 40, at most 200) of a worker's terminal, ANSI
+  stripped, with its status. Narrower than `send_message`: only workers on
+  Billion's own cards, never an agent started by hand, since a screen can show
+  a secret that scrolled by. The text is never logged, and reaches Billion
+  quoted and labelled as untrusted.
 
 Principles (the charter gives these, not procedures):
 
