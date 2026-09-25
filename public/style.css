@@ -751,6 +751,12 @@ body {
 .explorer-billion-name { color: var(--text); font-weight: 600; }
 /* The one way back for a stopped Billion, so it reads as the row's action. */
 .explorer-billion-start { margin-left: auto; color: var(--accent); }
+/* notify_owner's questions, under Billion's row until dismissed */
+.explorer-waiting { list-style: none; margin: 0 0 4px; padding: 0 10px 0 22px; font-size: 11px; }
+.explorer-waiting-head { color: var(--accent); font-weight: 600; padding: 2px 0; }
+.explorer-waiting-item { display: flex; align-items: flex-start; gap: 4px; color: var(--text-muted); padding: 2px 0; }
+.explorer-waiting-item span { flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.explorer-waiting-item button { flex-shrink: 0; }
 
 .explorer-branch-name {
   overflow: hidden;
@@ -1175,7 +1181,7 @@ body {
 .mobile-nav { display: none; }
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
-  .explorer-billion-start { min-width: 44px; min-height: 44px; }
+  .explorer-billion-start, .explorer-waiting-item button { min-width: 44px; min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
   }

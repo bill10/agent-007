@@ -28,6 +28,10 @@ export let serverPlatform = ''; // process.platform of the server, from the welc
 export let billionEnabled = false;
 export function setBillionEnabled(on) { billionEnabled = !!on; }
 
+// Billion's notify_owner messages the owner has not dismissed (server/owner.js).
+export let waitingItems = [];
+export function setWaitingItems(items) { waitingItems = Array.isArray(items) ? items : []; }
+
 // Billion's tab first, then the rest in their own order.
 export function billionFirst(entries) {
   return [...entries].sort(([, a], [, b]) => Number(!!b.isBillion) - Number(!!a.isBillion));
