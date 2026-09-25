@@ -1,10 +1,20 @@
-// Point auth at a throwaway users path so the suite is hermetic: the file does
-// not exist, so auth starts DISABLED regardless of the dev machine's real
-// ~/.agent-007/users.json. Auth-specific tests create/remove users at this path.
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
+// The suite tests the built-in defaults, so the host's own agent-007 settings
+// must not leak in: a shell exporting CLAUDE_PERMISSION_MODE, AGENT_MESSAGING
+// and friends (as a configured .env user's often does) failed tests that assume
+// them unset. Every variable .env.example documents, commented out or not, is
+// cleared; tests that exercise one set it themselves. This runs first so it
+// can never undo the temp dirs set below.
+for (const [, key] of readFileSync(join(import.meta.dirname, '../.env.example'), 'utf8').matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)) {
+  delete process.env[key];
+}
+
+// Point auth at a throwaway users path so the suite is hermetic: the file does
+// not exist, so auth starts DISABLED regardless of the dev machine's real
+// ~/.agent-007/users.json. Auth-specific tests create/remove users at this path.
 process.env.AGENT007_USERS_PATH = join(mkdtempSync(join(tmpdir(), 'a007-test-')), 'users.json');
 
 // Same idea for worktrees: createWorktree mkdirs and git-worktree-adds under
