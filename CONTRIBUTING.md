@@ -4,7 +4,7 @@ Contributions are welcome! This project is intentionally simple: vanilla JS, no 
 
 ## Prerequisites
 
-- **Node.js 20.12+**
+- **Node.js 20.19+ or 22.12+** to run the tests (Vitest 4's `vite` and `rolldown` need it; the app itself runs on 20.12+)
 - **Git**
 
 `node-pty` ships prebuilt binaries for macOS, Linux and Windows (x64 and arm64), so `npm install` normally compiles nothing. If it does try to build `node-pty` and fails, see [Troubleshooting](README.md#troubleshooting) in the README.
