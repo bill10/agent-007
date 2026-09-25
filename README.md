@@ -156,6 +156,8 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 - **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
 - **Windows:** [Visual Studio Build Tools](https://github.com/microsoft/node-pty#windows) with the C++ workload
 
+**An agent will not start: `"claude" is not installed, or not on the PATH Agent 007 was started with.`** The CLI the agent runs (`claude`, `codex` or `gemini`) was not found, and the message says how to install it. If it is installed, Agent 007 was started from somewhere with a shorter `PATH` than your shell (a launcher or a service manager, say); start it from a terminal where `which claude` finds it. Billion runs on Claude Code too, so without it Billion's tab says what to do instead: install Claude Code and press **Start** next to Billion, or restart with `BILLION=0` to turn Billion off.
+
 ## Architecture
 
 ```
@@ -166,7 +168,7 @@ server/
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
   jobs.js          Job board dispatcher (scan, spawn, PR watch, schedule firing, attachment files)
-  command-path.js  Resolves commands to spawnable files on Windows (PATHEXT)
+  command-path.js  Checks a CLI is installed before a spawn; resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
