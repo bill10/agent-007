@@ -394,6 +394,8 @@ async function matchesRemote({ worktreePath, repoPath, branchName }) {
   };
   const remote = await cfg(`branch.${branchName}.remote`) || 'origin';
   const ref = await cfg(`branch.${branchName}.merge`) || `refs/heads/${branchName}`;
+  // Values from config reach argv: never let one parse as an option.
+  if (remote.startsWith('-') || ref.startsWith('-')) return false;
   let matched = false;
   try {
     const local = (await gitExec(['-C', worktreePath, 'rev-parse', 'HEAD'])).trim();
@@ -401,7 +403,7 @@ async function matchesRemote({ worktreePath, repoPath, branchName }) {
     const line = out.split('\n').find(l => l.endsWith(`\t${ref}`));
     matched = !!local && line?.split('\t')[0] === local;
   } catch {}
-  if (/^[a-z]+:\/\/[^/@]+@/i.test(remote)) {
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/@:]+:[^/@]+@/i.test(remote)) {
     try { await gitExec(['-C', repoPath, 'config', `branch.${branchName}.remote`, 'origin']); } catch {}
   }
   return matched;
