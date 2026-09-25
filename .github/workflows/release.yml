@@ -2,6 +2,7 @@ name: Release
 
 # When a push to main changes VERSION, tag the commit that last changed it vX
 # and publish a GitHub Release whose notes are CHANGELOG.md's "## [X]" section.
+# Then publish that version to npm (the npm job below).
 
 on:
   push:
@@ -34,3 +35,43 @@ jobs:
           sha="$(git log -1 --format=%H -- VERSION)"
           headline="$(git log -1 --format=%s "$sha" | sed -E 's/^v[0-9.]+ [a-z]+(\([^)]*\))?!?: //; s/ \(#[0-9]+\)$//')"
           gh release create "v$v" --target "$sha" --title "v$v — $headline" --notes-file notes.md
+
+  # Publish the same version to npm with Trusted Publishing (OIDC): no token
+  # secret, npm trusts this workflow in this repo. A separate job so an npm
+  # failure (trusted publisher not set up yet, registry down) never holds back
+  # the GitHub Release above. Re-runs are safe: a version already on npm is
+  # skipped.
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Trusted publishing needs npm 11.5.1+, which Node 24 ships.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish to npm
+        run: |
+          # npm needs three-part semver and VERSION is four-part. package.json
+          # carries A.B.C (what /ship writes); npm gets A.B.(C*1000+D) so every
+          # MICRO release is published too. See CONTRIBUTING.md "Versions".
+          v="$(tr -d '[:space:]' < VERSION)"
+          IFS=. read -r a b c d <<< "$v"
+          have="$(node -p "require('./package.json').version")"
+          if [ "$have" != "$a.$b.$c" ]; then
+            echo "package.json version is $have, but VERSION is $v (expected $a.$b.$c)"; exit 1
+          fi
+          npmv="$a.$b.$((10#$c * 1000 + 10#$d))"
+          if [ "$(npm view "agent-007@$npmv" version 2>/dev/null)" = "$npmv" ]; then
+            echo "agent-007@$npmv is already on npm"; exit 0
+          fi
+          npm pkg set version="$npmv"
+          npm publish --provenance --access public

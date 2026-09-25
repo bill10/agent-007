@@ -5,6 +5,21 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.0.0] - 2026-09-25
+
+### Added
+
+- **Install with one command: `npx agent-007`.** No clone needed. Agent 007 is
+  ready to publish to npm as `agent-007`, with an `agent-007` command that takes
+  `--port`, `--help` and `--version`, and `agent-007 adduser "Name"` for login
+  users. It reads a `.env` in the directory you run it from, keeps everything
+  it saves in `~/.agent-007`, and installs without compiling anything. The
+  package holds only what runs (about 250 kB).
+- **Each release goes to npm too.** After the GitHub Release, the release
+  workflow publishes the same version to npm from GitHub Actions, with
+  provenance and no stored token. npm versions are three-part, so VERSION
+  `A.B.C.D` is published as `A.B.(C*1000+D)` and every MICRO release reaches
+  npm; this one is `0.6.0`.
 ## [0.5.1.5] - 2026-09-25
 
 ### Fixed
