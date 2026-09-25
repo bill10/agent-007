@@ -260,6 +260,9 @@ export function handleSessionEnded(msg) {
   // would transcribe speech into a dead pty forever.
   if (msg.sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent ended' });
   agent.state = 'DISCONNECTED';
+  // The server's word at exit wins: a re-spawned agent relinked to its card,
+  // or one the board retired, is a board worker even if it opened as a user's.
+  if ('spawnedBy' in msg) { agent.spawnedBy = msg.spawnedBy; agent.jobId = msg.jobId || null; }
 
   // A board agent retired after opening its PR takes its tab with it. Under
   // unattended dispatch these arrive steadily, and a row of dead tabs is pure

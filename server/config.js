@@ -121,6 +121,10 @@ export function saveActiveSession(session, broadcast) {
     agent: sessionAgent(session),
     permissionFlags: sessionPermissionFlags(session),
     origin: sessionOrigin(session),
+    // The card it works on, so a re-spawn after a restart is that card's
+    // worker again rather than a stranger on its branch.
+    jobId: session.jobId || null,
+    approvalsToBillion: !!session.approvalsToBillion,
     savedAt: new Date().toISOString(),
   });
   saveConfig(broadcast);
@@ -171,6 +175,8 @@ export function recoverCrashedSessions(broadcast) {
       agent: isValidJobAgent(s.agent) ? s.agent : null,
       permissionFlags: recordedPermissionFlags(s),
       origin: s.origin === 'board' ? 'board' : 'user',
+      jobId: typeof s.jobId === 'string' ? s.jobId : null,
+      approvalsToBillion: s.approvalsToBillion === true,
       reason: 'server-restart',
       createdAt: new Date().toISOString(),
     };

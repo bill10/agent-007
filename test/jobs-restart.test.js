@@ -104,7 +104,7 @@ describe('restart recovery for a running agent', () => {
       // And the permission flags each was started with, for a re-spawn that
       // has no job card to ask.
       expect(config.activeSessions.map(s => s.permissionFlags)).toEqual([['--dangerously-bypass-approvals-and-sandbox'], ['--permission-mode', 'auto']]);
-      saveActiveSession({ name: 'Dispatched', command: 'codex "job"', spawnedBy: 'board', repoPath: '/r', repoSlug: 'r', worktreePath: wt3, branchName: 'b/dispatched', color: '#000', cocktail: 'dispatched' });
+      saveActiveSession({ name: 'Dispatched', command: 'codex "job"', spawnedBy: 'board', jobId: 'job-7', approvalsToBillion: true, repoPath: '/r', repoSlug: 'r', worktreePath: wt3, branchName: 'b/dispatched', color: '#000', cocktail: 'dispatched' });
       expect(config.activeSessions.map(s => s.origin)).toEqual(['user', 'user', 'board']);
 
       // What the next start does with that record.
@@ -116,6 +116,11 @@ describe('restart recovery for a running agent', () => {
       expect(byName.Viper.agent).toBe('claude');
       expect(byName.Viper.permissionFlags).toEqual(['--permission-mode', 'auto']);
       expect(byName.Dispatched.origin).toBe('board');
+      // The card it worked on and where its approvals go survive the restart.
+      expect(byName.Dispatched.jobId).toBe('job-7');
+      expect(byName.Dispatched.approvalsToBillion).toBe(true);
+      expect(byName.Onyx.jobId).toBeNull();
+      expect(byName.Onyx.approvalsToBillion).toBe(false);
       expect(byName.Onyx.origin).toBe('user');
       expect(config.orphans.find(o => o.name === 'Onyx').permissionFlags).toEqual(['--dangerously-bypass-approvals-and-sandbox']);
       expect(config.orphans.find(o => o.name === 'Onyx').agent).toBe('codex');   // persisted, for the restart after this one

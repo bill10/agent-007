@@ -1242,7 +1242,9 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
 // belongs to, or null. relinkSessionToJob below ties the session to it, and
 // resumeCommandForOrphan reads the card's agent through the same lookup before
 // the spawn, so the two cannot disagree about which card the orphan came from.
-export function findJobForBranch({ repoPath, branchName }) {
+// A record that saved its card's id (jobId) picks that card when two share the
+// branch; the branch alone still decides for older records.
+export function findJobForBranch({ repoPath, branchName, jobId }) {
   if (!branchName) return null;
   // in-progress OR review: a job can reach review while its link is null (the
   // PR was found after a restart, so there was no session to retire), and the
@@ -1258,7 +1260,8 @@ export function findJobForBranch({ repoPath, branchName }) {
   );
   // Prefer work still in flight: if an old review job and a new in-progress job
   // share a branch, the agent belongs to the one that is not finished.
-  return matches.find(j => j.state === 'in-progress') || matches[0] || null;
+  return (jobId && matches.find(j => j.id === jobId))
+    || matches.find(j => j.state === 'in-progress') || matches[0] || null;
 }
 
 // What re-adopting an orphan should run. The orphan record says which CLI the
@@ -1326,7 +1329,10 @@ export function relinkSessionToJob(session, broadcast) {
   job.lastErrorAt = null;
   job.prCheckError = null;
   job.prCheckErrorAt = null;
-  session.jobId = job.id;   // so the PR path can retire it like any board agent
+  // A board worker again, so the PR path retires it and its tab and desk go
+  // like any board agent's (the client keys that on spawnedBy + jobId).
+  session.spawnedBy = 'board';
+  session.jobId = job.id;
   persist(broadcast);
   return job;
 }
@@ -1632,6 +1638,10 @@ async function retireAgentForJob(job, askedBranch, askedSessionId, killSession, 
   if (!session || session.exited) return false;
   try {
     if (!job.agentName) job.agentName = session.name;
+    // The board retired it, so it leaves as a board worker does: session-ended
+    // carries these, and the client closes the tab and walks it out on them.
+    session.spawnedBy = 'board';
+    session.jobId = job.id;
     await killSession(session.id);
     job.agentSessionId = null;   // only after the kill actually succeeded
     return true;

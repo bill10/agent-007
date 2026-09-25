@@ -11,16 +11,19 @@ import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, load
 import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
-import { isTyping } from './messages.js';
+import { isTyping, sendText } from './messages.js';
+import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
 import { waitingPayload, dismissWaiting } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
-import { isValidJobAgent } from '../lib/jobs.js';
+import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { billionRuns } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
-  orphanResumePlan,
+  orphanResumePlan, findJobForBranch,
 } from './jobs.js';
+
+export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Continue your card where you left off.';
 
 // --- Client tracking ---
 const clients = new Set();
@@ -400,8 +403,13 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           // by a card, a transcript or the default is a guess, and writing it
           // down would make a wrong one permanent.
           const { command, mode, flags } = orphanResumePlan(orphan);
-          // Matched on the branch, as relinkSessionToJob does below.
-          const card = allJobs().find(j => j.branchName && j.branchName === orphan.branchName && j.repoPath === orphan.repoPath);
+          // The card it worked on: its saved jobId, or (an older record) the
+          // one on its branch in its repo — the same lookup relinkSessionToJob
+          // makes below. With one, it comes back as that card's board worker.
+          const card = findJobForBranch(orphan);
+          const spawnedBy = card ? 'board' : 'user';
+          const autoTrust = autoTrusts({ spawnedBy, worktreePath: orphan.worktreePath, command });
+          if (autoTrust && sessionAgentFromCommand(command) === 'claude') trustClaudeFolder(orphan.worktreePath);
           const result = createSessionFromConfig({
             sessionId: nextSessionId(),
             name: orphan.name,
@@ -420,7 +428,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
             // recorded flags, it keeps them.
             permissionFlags: mode ? [] : flags,
             origin: orphan.origin === 'board' ? 'board' : 'user',
-            approvalsToBillion: card?.postedByBillion === true,
+            spawnedBy, jobId: card?.id || null, autoTrust,
+            approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);
@@ -439,6 +448,9 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
               type: 'notification', level: 'info',
               message: `${session.name} reconnected to job "${relinked.title}"`,
             });
+            // `claude --continue` resumes at the prompt and waits there. Typed
+            // once it rests at the prompt; a card in Review has nothing to do.
+            if (relinked.state === 'in-progress') sendText(session, RESPAWN_NUDGE);
           }
           adoptingOrphans.delete(msg.orphanId);
           orphans.delete(msg.orphanId);

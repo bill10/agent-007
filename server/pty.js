@@ -158,7 +158,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     dropMessages(sessionId);
     if (session.isBillion) dropApprovals();
     updateState(session, broadcast);
-    broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
+    // What it is as it ends, which a relink or a board retirement may have
+    // changed since session-created: the client's finished-worker path reads it.
+    broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}`,
+      spawnedBy: session.spawnedBy, jobId: session.jobId });
   });
 
   session.stateCheckInterval = setInterval(() => {
