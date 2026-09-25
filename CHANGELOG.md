@@ -5,6 +5,19 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.5.1.4] - 2026-09-25
+
+### Fixed
+
+- **A fresh install no longer opens with a wall of security warnings.**
+  `npm install` used to report 9 vulnerabilities (1 critical, 4 high). The
+  server's own dependencies now audit clean: Express 4.22.3 brings `qs`
+  6.16.0, plus patched `body-parser` and `path-to-regexp`. The test tooling
+  moved to Vitest 3.2.7, vite 7.3.6 and esbuild 0.28. One moderate advisory
+  remains (GHSA-82fw-gwwq-j7x9, test tooling only). It covers Vitest's
+  browser-mode mock server, which this project never starts, and no Vitest 3
+  release fixes it. `npm audit --omit=dev` reports 0.
+
 ## [0.5.1.3] - 2026-09-25
 
 ### Added
