@@ -32,6 +32,7 @@ import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
+import { withDefaultPermission, envPermissionMode, PERMISSION_MODES } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
 
@@ -55,6 +56,10 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
   // worktree directory's codename: two holders of one name means the first
   // kill frees it while the other still names a directory on disk.
   if (name && codenamePool.has(name)) return { error: `An agent named ${name} already exists` };
+  // An agent someone starts gets the .env default mode for its CLI, unless its
+  // command already says how it asks. The board settles its own workers' mode
+  // (boardModeFor in server/jobs.js), so their commands are left as built.
+  if (meta.spawnedBy !== 'board') command = withDefaultPermission(command);
   const sessionId = nextSessionId();
   const agentName = name || codenamePool.pick();
   if (name) codenamePool.addUsed(name);
@@ -227,6 +232,12 @@ async function startup() {
     killSession,
   });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
+  // A misspelt mode would otherwise be ignored without a word.
+  for (const [agent, key] of [['claude', 'CLAUDE_PERMISSION_MODE'], ['codex', 'CODEX_PERMISSION_MODE']]) {
+    const raw = (process.env[key] || '').trim();
+    if (raw && !envPermissionMode(agent)) console.warn(`  ${key}=${raw} is not a permission mode (${PERMISSION_MODES.join(', ')}); ignored`);
+    else if (raw) console.log(`  ${agent} agents start in ${raw} unless told otherwise`);
+  }
   if (billionRuns()) {
     const { error } = startBillion();
     console.log(error ? `  Billion: not started (${error})` : `  Billion: running in ${billionDir()}`);
