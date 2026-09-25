@@ -8,7 +8,7 @@ vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
 
 import { send } from '../public/modules/ws.js';
 import { switchToSession } from '../public/modules/terminal.js';
-import { agents, repos, orphans, setActiveSession, setBillionEnabled, billionFirst } from '../public/modules/state.js';
+import { agents, repos, orphans, setActiveSession, setBillionEnabled, billionFirst, setWaitingItems } from '../public/modules/state.js';
 import { renderExplorer } from '../public/modules/explorer.js';
 
 const row = () => document.querySelector('.explorer-billion');
@@ -20,6 +20,7 @@ beforeEach(() => {
   orphans.clear();
   setActiveSession(null);
   setBillionEnabled(true);
+  setWaitingItems([]);
   vi.clearAllMocks();
 });
 
@@ -80,6 +81,23 @@ describe('Billion in the explorer', () => {
     setBillionEnabled(false);
     renderExplorer();
     expect(row()).toBeNull();
+  });
+});
+
+describe('Waiting on you', () => {
+  it('lists notify_owner messages under Billion, as text, each dismissable', () => {
+    setWaitingItems([{ id: 'w1', text: '<b>Buy the domain?</b>' }, { id: 'w2', text: 'Pick a name' }]);
+    renderExplorer();
+    const items = row().querySelectorAll('.explorer-waiting-item');
+    expect([...items].map(li => li.querySelector('span').textContent)).toEqual(['<b>Buy the domain?</b>', 'Pick a name']);
+    expect(row().querySelector('b')).toBeNull();
+    items[0].querySelector('button').click();
+    expect(send).toHaveBeenCalledWith({ type: 'waiting-dismiss', id: 'w1' });
+  });
+
+  it('shows no list when nothing is waiting', () => {
+    renderExplorer();
+    expect(row().querySelector('.explorer-waiting')).toBeNull();
   });
 });
 

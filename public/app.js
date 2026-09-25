@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
@@ -533,6 +533,7 @@ function onMessage(msg) {
     case 'file-diff': handleFileDiff(msg); break;
     case 'full-tree': handleFullTree(msg); break;
     case 'orphans-list': handleOrphansList(msg); break;
+    case 'waiting-list': setWaitingItems(msg.items); renderExplorer(); break;
     // The office canvas pins one paper per job, so a jobs-list broadcast has
     // to repaint it too — the animation loop skips frames with no live agent.
     case 'jobs-list': handleJobsList(msg); noteJobsUpdate(); renderOffice(); break;

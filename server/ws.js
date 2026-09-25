@@ -12,6 +12,7 @@ import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js'
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping } from './messages.js';
+import { waitingPayload, dismissWaiting } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent } from '../lib/jobs.js';
 import { billionRuns } from './billion.js';
@@ -195,6 +196,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
+    ws.send(JSON.stringify(waitingPayload()));
 
     broadcastPresence();
 
@@ -266,6 +268,10 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: result.error }));
           // Already running (a second click): everyone has its tab already.
           else if (!result.existing) announceSession(result.session, ws);
+          break;
+        }
+        case 'waiting-dismiss': {
+          if (typeof msg.id === 'string') dismissWaiting(msg.id, broadcast);
           break;
         }
         case 'kill': {

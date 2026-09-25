@@ -321,8 +321,27 @@ export const ANSWER_PERMISSION_TOOL = {
   },
 };
 
+export const NOTIFY_OWNER_TOOL = {
+  name: 'notify_owner',
+  description:
+    'Put a question or a decision in front of the owner when they may be away '
+    + 'from the terminal: it is pinned in the "Waiting on you" list at the top of '
+    + 'the owner\'s browser, and sent to their phone over Telegram when that is set '
+    + 'up. One short message: the question, why, and what you recommend. Their '
+    + 'reply, if they answer from Telegram, arrives in this terminal as '
+    + '"[Owner via Telegram] <text>". At most a few per minute.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'The message, written to be read on a phone.' },
+    },
+    required: ['text'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, NOTIFY_OWNER_TOOL];
 
 export function toolsFor(session) {
   return session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
@@ -520,6 +539,12 @@ const CALLS = {
     return toolText(result.choice === 'owner'
       ? `Left to the owner: ${result.worker}'s dialog is showing for them now.`
       : `${result.worker} has your answer: ${result.choice}.`);
+  },
+
+  [NOTIFY_OWNER_TOOL.name]: async (args, ctx) => {
+    const result = ctx.notifyOwner ? await ctx.notifyOwner(args.text) : { error: 'Only Billion can notify the owner.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText('Sent to the owner on Telegram and pinned under "Waiting on you". Keep working on everything else; their reply, if any, arrives here as [Owner via Telegram].');
   },
 
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {

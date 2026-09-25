@@ -5,6 +5,26 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.6.0] - 2026-09-25
+
+### Added
+
+- **Billion's questions reach your phone, and you can answer from there.** In
+  a busy company Billion's terminal fills with card notices and merges, and a
+  question to you scrolled away. Billion now has a `notify_owner` tool: the
+  question, why, and its recommendation, in one short message. It is pinned in
+  a **Waiting on you** list under Billion's row in the left panel (dismiss each
+  with ×; kept in `~/.agent-007/waiting.json` across restarts), and with
+  `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` set it is sent to you by a
+  Telegram bot. Whatever you answer the bot is typed into Billion's terminal as
+  `[Owner via Telegram] <text>`; if Billion is not running, the bot says so.
+  Only your chat is accepted: messages from any other chat are ignored without
+  a reply. With only the token set, the server log shows the id of each chat
+  that messages the bot, so setup is three steps (docs/BILLION.md,
+  "Telegram"). The token is never logged or sent to the browser. At most five
+  notifications a minute. No new dependency: Node's own `fetch`. Billion's
+  charter now tells it to use the tool when it asks you something.
+
 ## [0.6.5.0] - 2026-09-25
 
 ### Added
