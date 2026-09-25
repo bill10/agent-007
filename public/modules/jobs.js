@@ -193,7 +193,7 @@ function renderFinishedList(finished) {
   if (sorted.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'job-column-empty';
-    empty.textContent = 'No finished jobs yet — a card lands here once its pull request merges.';
+    empty.textContent = 'No finished jobs yet — a card lands here once its pull request merges or is closed, or you mark it done.';
     cards.appendChild(empty);
     return;
   }
@@ -212,7 +212,7 @@ function renderFinishedToggle(count) {
     : `View finished jobs${count ? ` (${count})` : ''}`;
   btn.title = showingFinished
     ? 'Back to the To do / In progress / Review columns'
-    : 'Jobs whose pull request has merged, or that were filed away as done. They leave the board but are kept here.';
+    : 'Jobs whose pull request merged or was closed, or that were marked done. They leave the board but are kept here.';
   btn.setAttribute('aria-pressed', String(showingFinished));
   btn.classList.toggle('showing', showingFinished);
 }
@@ -455,7 +455,9 @@ function renderCard(job) {
     fin.className = 'job-card-finished';
     fin.textContent = job.prMergedAt
       ? `merged ${relativeTime(job.prMergedAt)}`
-      : `finished ${relativeTime(job.doneAt)}`;
+      : job.prClosedAt
+        ? `PR closed without merging ${relativeTime(job.prClosedAt)}`
+        : `finished ${relativeTime(job.doneAt)}`;
     card.appendChild(fin);
   }
 

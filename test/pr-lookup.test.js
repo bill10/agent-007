@@ -3,7 +3,7 @@ import { mkdtempSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { findPrForBranch, findMergedPrForBranch } from '../server/jobs.js';
+import { findPrForBranch, findMergedPrForBranch, findClosedPrForBranch } from '../server/jobs.js';
 
 // findPrForBranch needs a real git repo to get past its guards; everything
 // about the ACCOUNT WALK is injected, so these never touch GitHub.
@@ -202,5 +202,23 @@ describe('findMergedPrForBranch', () => {
     expect(await findMergedPrForBranch('/no/such/path', 'feat/x', gh)).toEqual({ pr: null });
     expect(await findMergedPrForBranch(REPO, '', gh)).toEqual({ pr: null });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('findClosedPrForBranch', () => {
+  it('reports an error when every account fails', async () => {
+    const failed = await findClosedPrForBranch(REPO, 'feat/x', ghFake({ visible: null }));
+    expect(failed.pr).toBeNull();
+    expect(failed.error).toMatch(/tried 3 accounts/);
+  });
+
+  it('hands the card\'s PR number to the query', async () => {
+    const asked = [];
+    const result = await findClosedPrForBranch(REPO, 'feat/x', {
+      listAccounts: async () => ['a'], tokenFor: async () => 't', prNumber: 7,
+      prList: async (_r, _b, _t, number) => { asked.push(number); return { pr: { url: 'u', number } }; },
+    });
+    expect(result.pr).toEqual({ url: 'u', number: 7 });
+    expect(asked).toEqual([7]);
   });
 });

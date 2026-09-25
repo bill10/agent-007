@@ -20,7 +20,7 @@ import { safeFilename } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
-  parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs,
+  parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr,
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
@@ -500,6 +500,7 @@ export function readJobForAgent(jobId) {
       branchName: job.branchName || null,
       startedAt: job.startedAt || null,
       prMergedAt: job.prMergedAt || null,
+      prClosedAt: job.prClosedAt || null,
       resultSummary: job.resultSummary || null,
       editedAt: job.editedAt || null,
       lastRunAt: job.lastRunAt || null,
@@ -613,10 +614,23 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
   // it is done, so this is a success, and a summary it brings still lands.
   if (job.state === 'review') {
     const note = String(summary || '').trim().slice(0, MAX_DETAIL_LEN);
-    if (note) {
-      job.resultSummary = note;
-      persist(broadcast);
+    let changed = false;
+    if (note) { job.resultSummary = note; changed = true; }
+    // A PR link that is not the card's: the agent reworked and opened a new
+    // PR on the same branch. It is the card's PR of record if it is that
+    // branch's open PR, checked the same way as a first finish.
+    const norm = u => String(u).trim().replace(/\/+$/, '').toLowerCase();
+    if (jobRequiresPr(job) && prUrl && prUrl.trim() && (!job.prUrl || norm(prUrl) !== norm(job.prUrl))) {
+      const askedBranch = job.branchName;
+      const found = await findPr(job.repoPath, askedBranch);
+      if (found.pr && norm(found.pr.url) === norm(prUrl) && job.state === 'review' && job.branchName === askedBranch) {
+        job.prUrl = found.pr.url;
+        job.prNumber = found.pr.number;
+        job.prClosedSeenAt = null;
+        changed = true;
+      }
     }
+    if (changed) persist(broadcast);
     return { job: jobSummary(job) };
   }
   if (job.state !== 'in-progress') {
@@ -952,7 +966,10 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // that has not been tried yet, and not into the archive, where it would still
   // be telling the user to move the card by hand. The Review case is handled
   // below, where a successful lookup clears it too.
-  if (state !== 'review') clearPrCheckError(job);
+  if (state !== 'review') {
+    clearPrCheckError(job);
+    job.prClosedSeenAt = null;   // a closed reading is about this stay in Review only
+  }
   // A manual move means "the PR was opened outside the board". Look it up, or
   // the card sits in Review with no link to the thing it produced — nothing
   // else backfills it, since the watcher only examines in-progress jobs.
@@ -1368,6 +1385,15 @@ async function mergedPrListOnce(repoPath, branchName, token, match) {
   }
 }
 
+async function closedPrListOnce(repoPath, branchName, token, number) {
+  try {
+    const stdout = await runGh(closedPrViewArgs(number), { cwd: repoPath, token });
+    return { pr: parseClosedPr(stdout, number) };
+  } catch (err) {
+    return { error: ghErrorDetail(err) || 'gh pr view failed' };
+  }
+}
+
 // Is this even a path we can ask gh about? Cheap local checks first, so a
 // removed repo or an undispatched job never shells out at all.
 async function isQueryableRepo(repoPath, branchName) {
@@ -1493,6 +1519,17 @@ export async function findMergedPrForBranch(repoPath, branchName, {
     { listAccounts, tokenFor, label: `${GH_PR_LIST} --state merged` });
 }
 
+// The card's PR of record, if it was closed without merging.
+export async function findClosedPrForBranch(repoPath, branchName, {
+  listAccounts = ghAccountsCached,
+  tokenFor = ghTokenCached,
+  prList = closedPrListOnce,
+  prNumber = null,
+} = {}) {
+  return branchPrLookup(repoPath, branchName, token => prList(repoPath, branchName, token, prNumber),
+    { listAccounts, tokenFor, label: 'gh pr view' });
+}
+
 // Close the agent that delivered a job, resolving it by branch when the stored
 // link is gone. killSession -> removeWorktree deletes the worktree and the local
 // branch (fully pushed by then); the PR is untouched. The card keeps the whole
@@ -1588,6 +1625,7 @@ export async function checkPullRequests(broadcast, { findPr = findPrForBranch } 
     job.state = 'review';
     job.prUrl = pr.url;
     job.prNumber = pr.number;
+    job.prClosedSeenAt = null;
     job.reviewAt = new Date().toISOString();
     // The restart note says the board is still watching for this PR. It just
     // found it, so the note is now false on its own card.
@@ -1620,15 +1658,21 @@ export async function checkPullRequests(broadcast, { findPr = findPrForBranch } 
 //
 // Deliberately narrower than checkPullRequests in three ways:
 //
-//  - Only MERGED counts, and only THIS card's merge (see parseMergedPr). A PR
-//    closed without merging left the work undelivered and someone still has to
-//    decide what to do about it, so its card stays.
+//  - Only THIS card's PR counts (see parseMergedPr). Merged files the card as
+//    merged. Closed without merging files it too, marked prClosedAt: closing a
+//    PR is already someone deciding, and a card left in Review would hold a
+//    live agent and worktree for work nobody is going to land (and, on a
+//    schedule's run, hold the schedule off). Unpushed work stays an orphan.
 //  - Only cards that require a PR. One that does not has no PR of its own to
 //    watch, and a branch name matching some merge proves nothing about it.
 //
 // Reaching Done retires the agent and releases its worktree from either
 // column, the same as a manual move to Done: merged means finished.
-export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch } = {}) {
+// How long a closed reading must hold before the card is filed (see the
+// closed path in checkMergedPullRequests).
+export const CLOSED_CONFIRM_MS = 60_000;
+
+export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch, findClosed = findClosedPrForBranch, findPr = findPrForBranch } = {}) {
   // prMergedAt is only ever written alongside state 'done', and done is
   // terminal, so the state filter already excludes every stamped job. Kept as a
   // cheap assertion of that invariant rather than a live condition.
@@ -1675,9 +1719,75 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
       continue;
     }
 
-    if (askedState === 'review' && clearPrCheckError(job)) noted = true;
+    // A Review card with a PR still has the closed-PR lookups ahead; its note
+    // is cleared only once those succeed too, or a lasting failure there would
+    // clear and rewrite it on every scan.
+    const closedLookupAhead = !pr && askedState === 'review' && job.prNumber != null;
+    if (askedState === 'review' && !closedLookupAhead && clearPrCheckError(job)) noted = true;
 
-    if (!pr) continue;
+    if (!pr) {
+      if (askedState === 'review' && job.prNumber != null) {
+        const prNumber = job.prNumber;
+        const still = () => allJobs().includes(job) && job.state === 'review'
+          && job.prNumber === prNumber && job.branchName === askedBranch;
+        const { pr: closedPr, error: closedError } = await findClosed(job.repoPath, askedBranch, { prNumber });
+        if (!still()) continue;
+        if (closedError) {
+          if (notePrCheckError(job, `Cannot check whether this pull request was closed — ${closedError}. This job stays in Review until you move it by hand.`)) noted = true;
+          continue;
+        }
+        if (!closedPr) {
+          if (clearPrCheckError(job)) noted = true;
+          if (job.prClosedSeenAt) { job.prClosedSeenAt = null; noted = true; }
+          continue;
+        }
+        // Closed and replaced: an agent asked to rework often closes its PR
+        // and opens another on the same branch. That new PR is the card's now.
+        // Any open PR means "not closed": the same number reopened in between.
+        // A failed lookup decides nothing — the replacement may be there.
+        const { pr: openPr, error: openError } = await findPr(job.repoPath, askedBranch);
+        if (!still()) continue;
+        if (openError) {
+          if (notePrCheckError(job, `Cannot check for a replacement pull request — ${openError}. This job stays in Review until you move it by hand.`)) noted = true;
+          continue;
+        }
+        if (clearPrCheckError(job)) noted = true;
+        if (openPr) {
+          if (openPr.number !== prNumber) {
+            job.prNumber = openPr.number;
+            job.prUrl = openPr.url;
+          }
+          if (job.prClosedSeenAt || openPr.number !== prNumber) { job.prClosedSeenAt = null; noted = true; }
+          continue;
+        }
+        // Two readings at least CLOSED_CONFIRM_MS apart before acting: closing
+        // and reopening a PR (to re-run CI, to retarget it) must not file the
+        // card away, and "Run now" right after a tick must not count as two.
+        if (!job.prClosedSeenAt) { job.prClosedSeenAt = new Date().toISOString(); noted = true; continue; }
+        if (Date.now() - Date.parse(job.prClosedSeenAt) < CLOSED_CONFIRM_MS) continue;
+        // Someone may be talking to its agent about the rework; wait until it
+        // is quiet, as superseding does.
+        const live = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
+        if (live && !live.exited && live.state !== 'WAITING') continue;
+        job.state = 'done';
+        job.prClosedAt = new Date().toISOString();
+        job.doneAt = job.prClosedAt;
+        finished.push(job);
+        // Not discarded: a closed PR's work may still be wanted, so anything
+        // unpushed or dirty stays behind as an orphan.
+        const closedAgent = await retireAgentForJob(job, askedBranch, job.agentSessionId, killSession, { byBranch: false });
+        if (!closedAgent) await releaseOrphanedWorktree(job, broadcast);
+        if (!attachmentsInUse(job)) clearAttachments(job);
+        if (broadcast) {
+          broadcast({
+            type: 'notification', level: 'info',
+            message: `Job "${job.title}" is done — PR #${prNumber} was closed without merging. It moved to Finished jobs.`
+              + (job.scheduleId ? ' Its schedule can run again.' : ''),
+          });
+        }
+      }
+      continue;
+    }
     job.state = 'done';
     job.prMergedAt = pr.mergedAt || new Date().toISOString();
     job.doneAt = new Date().toISOString();
@@ -1854,13 +1964,13 @@ let scanInFlight = false;
 // findPr/findMerged are forwarded rather than left to their defaults so the
 // order of the scan — PRs found, then merges swept, then dispatch — is
 // reachable from a test without talking to GitHub.
-export async function runScan(createSession, broadcast, { onSessionCreated, killSession, findPr, findMerged } = {}) {
+export async function runScan(createSession, broadcast, { onSessionCreated, killSession, findPr, findMerged, findClosed } = {}) {
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
     await checkPullRequests(broadcast, { findPr });
     await supersedeRuns(broadcast, { killSession });
-    await checkMergedPullRequests(broadcast, { killSession, findMerged });
+    await checkMergedPullRequests(broadcast, { killSession, findMerged, findClosed, findPr });
     pruneFinishedRuns(broadcast);
     fireSchedules(broadcast);
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });

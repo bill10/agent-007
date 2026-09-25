@@ -1170,3 +1170,13 @@ describe('the job form and schedules', () => {
   });
 });
 
+
+describe('an archived run whose PR was closed', () => {
+  it('says the PR was closed without merging, not that it merged', () => {
+    handleJobsList({ jobs: [JOB({ id: 'r', state: 'done', scheduleId: 's', prClosedAt: new Date().toISOString(), doneAt: new Date().toISOString() })], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    const text = document.querySelector('[data-job-id="r"] .job-card-finished').textContent;
+    expect(text).toMatch(/PR closed without merging/);
+    expect(text).not.toMatch(/^merged/);
+  });
+});

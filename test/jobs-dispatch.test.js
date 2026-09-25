@@ -1809,6 +1809,22 @@ describe('releasing an orphaned worktree on done', () => {
     expect(job.state).toBe('done');
     expect(orphans.has('orphan-1')).toBe(false);
   });
+
+  it('is what the closed-PR sweep falls back to when no agent is left to retire', async () => {
+    const job = await restartedReviewCard();
+    job.prNumber = 42;
+    job.worktreePath = GONE_WORKTREE;   // the card recorded the worktree the orphan holds
+    orphans.set('orphan-1', orphanFor(job, GONE_WORKTREE));
+    job.prClosedSeenAt = new Date(Date.now() - 120_000).toISOString();   // first reading, a while ago
+    const finished = await checkMergedPullRequests(noopBroadcast, { findPr: async () => ({ pr: null }),
+      findMerged: async () => ({ pr: null }),
+      findClosed: async () => ({ pr: { url: 'u', number: 42 } }),
+      killSession: async () => { throw new Error('nothing to kill'); },
+    });
+    expect(finished).toHaveLength(1);
+    expect(job.prClosedAt).toBeTruthy();
+    expect(orphans.has('orphan-1')).toBe(false);
+  });
 });
 
 describe('adversarial review regressions', () => {
