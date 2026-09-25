@@ -82,3 +82,22 @@ export function billionCommand({ created, hasConversation, dir, projectsHint }) 
     : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CLAUDE.md, "First run"; ${hint}). Otherwise start your operating loop (CLAUDE.md, "Operating loop"). ${where}`;
   return `claude --dangerously-skip-permissions${!created && hasConversation ? ' --continue' : ''} ${quote(prompt)}`;
 }
+
+// Claude Code asks whether to trust a folder the first time it runs there, and
+// highlights "No, exit". Billion's folder is Agent 007's own, holding only
+// what the server put there, so the server answers for it. It acts on what the
+// screen shows rather than a fixed key sequence, so a version that highlights
+// "Yes" first still gets the right answer: arrow off "No", Enter on "Yes",
+// nothing on anything else. The text is everything drawn since the dialog
+// settled, which can hold an older drawing too, so the LAST cursor is the one
+// on screen now. Claude Code draws with cursor moves, so the stripped text may
+// have lost its spaces.
+export function trustDialogKey(screenText) {
+  if (!/trust\s*this\s*folder/i.test(screenText)) return null;
+  const at = screenText.lastIndexOf('❯');
+  if (at === -1) return null;
+  const selected = screenText.slice(at + 1);
+  if (/^\s*Yes,\s*I\s*trust\s*this\s*folder/i.test(selected)) return '\r';
+  if (/^\s*No,\s*exit/.test(selected)) return '\x1b[B';
+  return null;
+}

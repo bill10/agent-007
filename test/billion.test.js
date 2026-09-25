@@ -4,7 +4,7 @@ import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
-  billionEnabled, billionDir, ensureBillionRepo, suggestProjectsDir, billionCommand,
+  billionEnabled, billionDir, ensureBillionRepo, suggestProjectsDir, billionCommand, trustDialogKey,
 } from '../server/billion.js';
 import { CONFIG_DIR } from '../server/state.js';
 import { parseCommand } from '../lib/helpers.js';
@@ -109,5 +109,31 @@ describe('billionCommand', () => {
   it('keeps a folder with quotes and spaces intact through parseCommand', () => {
     const odd = '/Users/a "b"\\c/billion';
     expect(promptOf(billionCommand({ created: true, hasConversation: false, dir: odd, projectsHint: null }))).toContain(odd);
+  });
+});
+
+describe('trustDialogKey', () => {
+  // As Claude Code 2.1 draws it, stripped: cursor moves stand in for spaces.
+  const dialog = (selected) => [
+    'Quicksafetycheck:Isthisaprojectyoucreatedoroneyoutrust?',
+    selected === 'no' ? '❯No,exit' : ' No, exit',
+    selected === 'yes' ? '❯ Yes, I trust this folder' : 'Yes,Itrustthisfolder',
+    'Entertoconfirm·Esctocancel',
+  ].join('\n');
+
+  it('moves off "No, exit", then confirms "Yes"', () => {
+    expect(trustDialogKey(dialog('no'))).toBe('\x1b[B');
+    expect(trustDialogKey(dialog('yes'))).toBe('\r');
+  });
+
+  it('follows the last cursor drawn when an older drawing is still in the text', () => {
+    expect(trustDialogKey(dialog('no') + '\n No, exit❯Yes, I trust this folder')).toBe('\r');
+    expect(trustDialogKey(dialog('yes') + '\n❯No, exit Yes, I trust this folder')).toBe('\x1b[B');
+  });
+
+  it('leaves anything else alone', () => {
+    expect(trustDialogKey('❯ No, exit')).toBeNull();          // some other "No, exit" menu
+    expect(trustDialogKey('> Try "fix the tests"')).toBeNull();
+    expect(trustDialogKey('')).toBeNull();
   });
 });

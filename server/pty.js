@@ -13,6 +13,7 @@ import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from '
 import { broadcastJobs } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
+import { trustDialogKey } from './billion.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 
@@ -110,6 +111,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     const cut = raw.lastIndexOf('\n');
     session.pendingRaw = (cut === -1 ? raw : raw.slice(cut + 1)).slice(-2000);
     const lines = stripAnsiComplete(raw.slice(0, cut + 1)).split('\n').filter(l => l.trim().length > 0);
+    if (session.isBillion && (session.trustKeys || 0) < TRUST_KEY_CAP) {
+      session.trustScreen = ((session.trustScreen || '') + outside).slice(-8000);
+      answerTrustDialog(session);
+    }
     const partial = stripAnsiComplete(session.pendingRaw).trim();
     // Freshness is judged on THIS read, never on the carry. `partial` is
     // re-derived from accumulated bytes, so counting it here would re-count
@@ -157,6 +162,27 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
   });
 
   session.stateCheckInterval = setInterval(() => updateState(session, broadcast), 1000);
+}
+
+// Billion only (server/billion.js trustDialogKey). A dialog arrives in several
+// reads, and a late one can still show the old cursor, so reads are collected
+// until the screen has been quiet for a moment and the key is chosen from the
+// settled drawing. Collected from the key onwards only, so an answered drawing
+// is never answered twice. Capped, so a dialog that never changes can't be
+// typed at forever.
+const TRUST_SETTLE_MS = 400;
+const TRUST_KEY_CAP = 4;
+function answerTrustDialog(session) {
+  if (!session.isBillion || (session.trustKeys || 0) >= TRUST_KEY_CAP) return;
+  clearTimeout(session.trustTimer);
+  session.trustTimer = setTimeout(() => {
+    const key = session.exited ? null : trustDialogKey(stripAnsiComplete(session.trustScreen || ''));
+    if (!key) return;
+    // Enter answers it for good: stop watching.
+    session.trustKeys = key === '\r' ? TRUST_KEY_CAP : (session.trustKeys || 0) + 1;
+    session.trustScreen = '';
+    try { session.pty.write(key); } catch {}
+  }, TRUST_SETTLE_MS);
 }
 
 /**

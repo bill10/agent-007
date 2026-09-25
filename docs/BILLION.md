@@ -503,9 +503,14 @@ its "Limits today" section; update it as each part ships.
 Found while verifying part 1:
 
 - **Claude Code's folder trust dialog** appears on Billion's first start and
-  defaults to "No, exit": pressing Enter without reading closes Billion
-  (Start brings it back). No flag skips it; pre-trusting would mean writing
-  to `~/.claude.json`, which live Claude sessions write concurrently.
+  defaults to "No, exit". No flag skips it, and pre-trusting would mean
+  writing `~/.claude.json`, which live Claude sessions write concurrently.
+  Decided: the server answers it, for Billion only (its folder holds only
+  what the server put there). It reads the settled screen and presses one
+  key for the last cursor drawn — Down off "No", Enter on "Yes", nothing
+  otherwise — because the dialog arrives in several reads and a late one can
+  still show the old cursor (answering per read pressed Down twice and
+  wrapped back to "No"). Verified live on a fresh folder.
 - A server started from inside a Claude Code session passes
   `CLAUDE_CODE_CHILD_SESSION` to its agents, which turns their transcript
   saving off — and `--continue` needs a transcript. Only affects a server
