@@ -523,6 +523,47 @@ without a reply, so don't add the bot to a group. The token is never logged or s
 you at most five times a minute. No library: the server long-polls
 `getUpdates` with Node's own `fetch`.
 
+### Voice
+
+A poor man's audio chat, free and on your own machine: nothing is sent
+anywhere but Telegram, and there is no paid transcription.
+
+- **Billion speaks** on macOS with ffmpeg installed (`brew install ffmpeg`):
+  `say` reads the message, ffmpeg encodes it as OGG/Opus, and the bot sends it
+  as a voice message with the same text as its caption, so links stay
+  tappable. Links are read out as "link". Without `say` or ffmpeg (Linux,
+  Windows) it sends text, and the server log says once why.
+- **You speak**: send the bot a voice note (or an audio file) and it is
+  transcribed on this machine by [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
+  then typed into Billion's terminal as `[Owner via Telegram, voice] <transcript>`.
+  A caption you type on the note follows as `(caption: ...)`. Whisper's
+  markers like `[BLANK_AUDIO]` are dropped, and a note with no words left
+  gets a reply asking you to send it again. Set up:
+
+  ```bash
+  brew install whisper-cpp ffmpeg
+  mkdir -p ~/.agent-007/whisper
+  curl -L -o ~/.agent-007/whisper/ggml-base.en.bin \
+    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+  ```
+
+  and in `~/.agent-007/.env`, `WHISPER_MODEL=/Users/you/.agent-007/whisper/ggml-base.en.bin`
+  (a full path). `ggml-base.en` (about 150 MB) is quick and fine for English;
+  `ggml-small.bin` (about 500 MB) is more accurate and multilingual. The
+  server looks for `whisper-cli`, `whisper-cpp` or `main` on `PATH`;
+  `WHISPER_CPP_BIN` points at one elsewhere. Until it is set up, a voice note
+  gets a one-line reply saying so, and nothing reaches Billion. Notes over 5
+  minutes or 20 MB are refused, and `say`, ffmpeg or whisper.cpp running
+  longer than 5 minutes is stopped (text instead, or a reply to send text).
+- **When Billion uses voice**: `TELEGRAM_VOICE=mirror` (the default) answers in
+  the mode of your last message, voice for a voice note and text for text, and
+  Billion's own new questions follow it too; text until you have sent
+  anything. The mode is kept in `~/.agent-007/telegram-voice.json` across
+  restarts. `always` speaks every message, `never` none. Whatever the setting,
+  a message over about a minute of speech (900 characters) or one that is
+  mostly links, code or paths goes as text, and voice never goes without its
+  text caption.
+
 ## Order of building
 
 1. **Billion itself — built.** `server/billion.js` (on/off via `BILLION`,
@@ -541,7 +582,10 @@ you at most five times a minute. No library: the server long-polls
    start of every cycle, so a restart needs no stored flag; a card Billion
    posted sends it a `[Job board]` notice when it reaches Review, through
    `finish_job` or the PR poll (Billion only: another agent's terminal may be
-   mid-conversation with a person); workers on Billion's cards are told they
+   mid-conversation with a person), and another once CI on the card's PR
+   finishes on its head commit (`CI finished on … : all passed` or `failed:
+   <checks>`, once per head commit and again after a re-run, from a 60s poll of Review cards that also files a
+   merged or closed PR at once, `checkReviewCi` in `server/jobs.js`); workers on Billion's cards are told they
    can ask it. Verified live: a guarded worker messaged Billion, Billion
    replied, the reply arrived.
 3. **Board tools — built.** `add_repo` (wraps `addRepo`, `~/` allowed) and

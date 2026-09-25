@@ -29,7 +29,7 @@ import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphane
 import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
-import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
+import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
@@ -238,6 +238,9 @@ async function startup() {
   mkdirSync(WORKTREE_DIR, { recursive: true });
   await pruneWorktrees();
   await scanForOrphanedWorktrees(broadcast);
+  // Not awaited: each check can ask the remote, and boot must not wait on the network.
+  releasePushedOrphans(broadcast).then(n => { if (n) console.log(`  Released ${n} orphaned worktree(s) now on the remote`); })
+    .catch(err => console.error('Orphan re-check failed:', err.message));
   // The loop always runs; each tick is a no-op while settings.running is false.
   // Keeping one timer alive (instead of creating/destroying it on toggle) means
   // the Start button only has to flip a boolean, and a config restored with

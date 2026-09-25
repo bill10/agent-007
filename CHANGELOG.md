@@ -5,22 +5,80 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
-## [0.6.7.0] - 2026-09-25
+## [0.8.0.0] - 2026-09-25
 
 ### Added
 
-- **Billion can see a stalled worker's screen.** A new Billion-only board tool,
-  `read_agent_screen`, returns the last lines of a worker's terminal (40 by
-  default, at most 200, capped at 20,000 characters) as plain text with ANSI
-  escapes stripped, plus its status: working, waiting, needs you or exited.
-  Billion can now see the dialog, error loop or question a worker is stuck on
-  instead of messaging it blind or digging through transcript files. Reading
-  is narrower than `send_message`: only workers on cards Billion posted,
-  including one that has exited; agents you start by hand stay off-limits,
-  since a screen can show a secret that scrolled by. The text is never logged
-  on the server, and reaches Billion quoted line by line under a header that
-  calls it untrusted data from the worker, never instructions. Billion's
-  charter lists the tool and says the same.
+- **Billion hears when CI finishes on its cards, and merged cards leave the
+  board within a minute.** Every Review card with a pull request is now checked
+  every 60 seconds with `gh pr view`, through the same GitHub accounts the
+  board already uses to find PRs. No webhooks, so it works on a laptop behind
+  NAT. When every check on the PR's latest commit has finished, a card Billion
+  posted sends it `[Job board] CI finished on "<title>" (card <id>, PR #n):
+  all passed`, or `failed: <check names>`. It comes once per commit, and again
+  after a new push or a re-run of a failed job. Billion's charter now says to
+  merge on that notice after its diff review, instead of running
+  `gh pr checks --watch`, and to re-run a job that failed for a reason
+  unrelated to the change (a known flaky test) before sending the card back. A PR found merged or
+  closed is filed on that same check, instead of waiting up to 5 minutes for
+  the next board scan. Its worker and worktree are released under the same
+  rules as before. A PR that can't be read is checked less and less often, down
+  to once every 15 minutes. The checks run only while the board is started.
+
+### Fixed
+
+- **Stopping the board during a scan no longer leaves a second scan loop
+  running.** A scan that was still in progress when the dispatcher stopped
+  scheduled its next run anyway.
+
+## [0.7.1.0] - 2026-09-25
+
+### Fixed
+
+- **A finished card's worktree is no longer kept as an "unpushed" orphan when its branch is on the remote.** A worker that pushed again from its worktree (a rebase fix, a force-with-lease) could leave the shared repo's `refs/remotes/origin/<branch>` on an old SHA, so cleanup saw HEAD differ from `@{u}` and kept the worktree. Cleanup now asks the remote (`git ls-remote`) whenever HEAD is not `@{u}`, not only when `@{u}` is missing. Only an exact SHA match counts; offline, an error or a different SHA still keeps the worktree.
+- **Orphans already kept as "unpushed" are re-checked at startup.** Each one whose card is not in progress or in Review goes through the same cleanup rules, so one that is clean and matches the remote is released without a click. Dirty worktrees and branches the remote does not hold stay.
+
+## [0.7.0.0] - 2026-09-25
+
+### Added
+
+- **Talk to Billion over Telegram, and hear it answer, free and on your own
+  machine.** Send the bot a voice note and it is transcribed locally by
+  whisper.cpp and typed into Billion's terminal as
+  `[Owner via Telegram, voice] <transcript>` (a caption you add is kept).
+  Billion's messages to you can come back as voice notes, spoken by macOS
+  `say` and encoded with ffmpeg, always with the same text as the caption so
+  links stay tappable. Nothing leaves the machine but the Telegram calls
+  themselves, and there is no paid transcription. `TELEGRAM_VOICE=mirror` (the
+  default) answers in the mode of your last message and remembers it across
+  restarts; `always` and `never` fix it. A message over about a minute of
+  speech (900 characters), or one that is mostly links, code or paths, always
+  goes as text. Without `say` or ffmpeg (Linux, Windows) Billion sends text and
+  the log says why once. Until whisper.cpp and a model (`WHISPER_MODEL`) are
+  set up, a voice note gets a one-line reply on how to turn it on, and nothing
+  reaches Billion. Notes over 5 minutes or 20 MB are refused. Setup is in
+  docs/BILLION.md, "Voice". Billion's charter now says a voice transcript is
+  the owner's words with possible transcription errors, and to ask back when
+  something is ambiguous and risky.
+
+## [0.6.7.0] - 2026-09-25
+
+### Changed
+
+- **Parallel PRs no longer conflict on VERSION and CHANGELOG.md.** A PR now
+  adds its release notes as its own file, `changelog.d/<branch-name>.md`, with
+  a `bump:` level (`major`, `minor`, `patch` or `micro`) in its front matter,
+  and never edits `VERSION`, `package.json`'s version or `CHANGELOG.md`. When
+  it merges, the release workflow runs `scripts/release.js`, which picks the
+  next version from the fragments, writes `VERSION`, `package.json`,
+  `package-lock.json` and the `CHANGELOG.md` section, deletes the fragments and
+  commits that to `main`; the tag, GitHub Release and npm publish follow as
+  before, with the same npm version mapping. Two or three workers running at
+  once used to cost a rebase-and-renumber round trip each. `AGENTS.md` (read
+  by Codex, and by Claude Code through `CLAUDE.md`) tells agents to skip
+  /ship's version bump and write the fragment instead; CONTRIBUTING.md
+  "Releases" has the details. A PR that still bumps `VERSION` by hand is
+  released as before.
 
 ## [0.6.6.0] - 2026-09-25
 
