@@ -107,6 +107,9 @@ its prompt.
   its classifier reviews every action. Config-file defaults are invisible to
   this check. Without this a read-only job reading an untrusted issue could get a
   bypass agent to run what the issue said. (Added in the pre-landing review.)
+  `AGENT_MESSAGING=open` in `.env` lifts this rule (not the owner rule) for
+  all of one person's agents, and a sender the rule refuses is told why.
+  (Added in v0.5.1.0.)
 
 ### Loops
 
