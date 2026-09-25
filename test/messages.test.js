@@ -173,6 +173,11 @@ describe('who can be reached', () => {
     expect(messageableAgents(yolo, sessions).map(s => s.name)).toEqual(['Cobra', 'Mamba']);
   });
 
+  it('reads a Codex profile with its name attached as possibly never asking', () => {
+    expect(isUnguarded(agent('Viper', { command: 'codex -pyolo', agent: 'codex' }))).toBe(true);
+    expect(isUnguarded(agent('Viper', { command: 'codex -csandbox_mode=danger-full-access', agent: 'codex' }))).toBe(true);
+  });
+
   it('lets the owner open messaging between all their agents with AGENT_MESSAGING=open', () => {
     const careful = agent('Cobra', { command: 'claude --permission-mode auto' });
     const yolo = agent('Viper', { command: 'claude --dangerously-skip-permissions' });

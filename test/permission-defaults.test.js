@@ -71,7 +71,7 @@ describe('a command someone starts', () => {
     for (const cmd of ['claude --dangerously-skip-permissions', 'claude --permission-mode plan', 'codex -s read-only', 'codex --yolo',
       'claude --permission-mode default', 'claude --permission-mode=default', 'codex -a untrusted', 'codex -auntrusted', 'codex --ask-for-approval=on-failure',
       // Codex's config overrides and profiles can set permissions the allowlist cannot see.
-      'codex -c sandbox_mode=read-only', 'codex -csandbox_mode=read-only', 'codex --config=x', 'codex -p locked', 'codex --profile=locked', 'codex --full-auto']) {
+      'codex -c sandbox_mode=read-only', 'codex -csandbox_mode=read-only', 'codex --config=x', 'codex -p locked', 'codex -plocked', 'codex --profile=locked', 'codex --full-auto']) {
       expect(withDefaultPermission(cmd, env)).toBe(cmd);
     }
   });
