@@ -56,7 +56,15 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 Releases are automatic: when a merge to `main` changes `VERSION`,
 `.github/workflows/release.yml` tags that commit `vX` and publishes a GitHub
 Release whose notes are the `## [X]` section of `CHANGELOG.md`, so bump both
-together. The same workflow then publishes the version to npm.
+together. The same workflow then publishes the version to npm as
+`@bill10/agent-007` (npm rejected the unscoped `agent-007` as too close to
+`agent007`). It publishes with OIDC trusted publishing, so there is no npm token: the owner
+sets it up once on npmjs.com, on the `@bill10/agent-007` package page under
+Settings → Trusted Publisher, with GitHub Actions, repository
+`bill10/agent-007` and workflow `release.yml`. npm only shows that page once
+the package exists, so the very first version is published by hand
+(`npm publish --access public` from a clean checkout of the release commit,
+after `npm pkg set version=` the npm version below).
 
 ### Versions
 
@@ -110,7 +118,7 @@ server/
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, and the Codex session id to resume, read off its transcripts (re-spawn)
   auth.js          Login tokens, ownership, agent session tokens
-bin/agent-007.js   The agent-007 command (npx agent-007): flags, .env, start
+bin/agent-007.js   The agent-007 command (npx @bill10/agent-007): flags, .env, start
 bin/adduser.js     Create a login user (npm run adduser)
 lib/               Pure functions, tested (helpers.js, jobs.js job logic, cron.js parser)
 public/            Frontend (vanilla JS, no build)
