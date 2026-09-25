@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
-  billionEnabled, billionDir, ensureBillionRepo, suggestProjectsDir, billionCommand, trustDialogKey,
+  billionEnabled, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, trustDialogKey,
 } from '../server/billion.js';
 import { CONFIG_DIR } from '../server/state.js';
 import { parseCommand } from '../lib/helpers.js';
@@ -32,11 +32,13 @@ describe('ensureBillionRepo', () => {
   it('creates a committed repo from the templates on the first run', () => {
     const dir = fresh();
     expect(ensureBillionRepo(dir)).toEqual({ created: true });
-    for (const f of ['CLAUDE.md', 'STATE.md', 'COMPANY.md']) expect(existsSync(join(dir, f))).toBe(true);
-    // The charter is copied in under the name Claude Code loads; the template
-    // name must not come along.
-    expect(existsSync(join(dir, 'charter.md'))).toBe(false);
-    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toMatch(/You are \*\*Billion\*\*/);
+    // Exactly these names: listed rather than probed, since macOS matches
+    // charter.md to CHARTER.md. The template names must not come along.
+    expect(readdirSync(dir).filter(f => f !== '.git').sort()).toEqual(['CHARTER.md', 'CLAUDE.md', 'COMPANY.md', 'STATE.md']);
+    expect(readFileSync(join(dir, 'CHARTER.md'), 'utf8')).toMatch(/You are \*\*Billion\*\*/);
+    // CLAUDE.md is the owner's, and pulls the charter in.
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toMatch(/^@CHARTER\.md$/m);
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toMatch(/## Owner's rules/);
     expect(readFileSync(join(dir, 'STATE.md'), 'utf8')).toMatch(/^Status: not started$/m);
     expect(log(dir)).toEqual(['Billion: first run']);
     expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()).toBe('');
@@ -58,6 +60,31 @@ describe('ensureBillionRepo', () => {
     expect(ensureBillionRepo(dir)).toEqual({ created: true });
     expect(readFileSync(join(dir, 'COMPANY.md'), 'utf8')).toBe('# Mine\n');
     expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(true);
+  });
+});
+
+describe('refreshCharter', () => {
+  it('brings an older charter up to date in a commit of its own, leaving the owner\'s files alone', () => {
+    const dir = fresh();
+    ensureBillionRepo(dir);
+    writeFileSync(join(dir, 'CHARTER.md'), 'an older charter\n');
+    writeFileSync(join(dir, 'CLAUDE.md'), '@CHARTER.md\n\n## Owner\'s rules\n- New repos go in ~/Code\n');
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qam', 'older'], { cwd: dir });
+    writeFileSync(join(dir, 'STATE.md'), 'Status: mid-cycle, not committed\n');
+
+    expect(refreshCharter(dir)).toBe(true);
+    expect(readFileSync(join(dir, 'CHARTER.md'), 'utf8')).toMatch(/You are \*\*Billion\*\*/);
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toMatch(/~\/Code/);
+    expect(log(dir)[0]).toBe('Agent 007: update the charter');
+    // Billion's own uncommitted work is not swept into that commit.
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()).toBe(' M STATE.md\n');
+  });
+
+  it('does nothing when the charter is current', () => {
+    const dir = fresh();
+    ensureBillionRepo(dir);
+    expect(refreshCharter(dir)).toBe(false);
+    expect(log(dir)).toEqual(['Billion: first run']);
   });
 });
 

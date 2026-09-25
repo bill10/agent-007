@@ -32,7 +32,7 @@ import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
-import { BILLION_NAME, billionEnabled, billionDir, ensureBillionRepo, suggestProjectsDir, billionCommand } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
 import { transcriptsFor } from './server/agent-transcripts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,6 +166,7 @@ function startBillion() {
   let created;
   try {
     ({ created } = ensureBillionRepo(dir));
+    if (!created && refreshCharter(dir)) console.log('  Billion: charter updated to this version');
   } catch (err) {
     console.error(`Billion: could not set up ${dir}:`, err.message);
     return { error: `Could not set up Billion's folder ${dir}: ${err.message}` };

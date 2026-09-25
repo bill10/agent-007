@@ -282,10 +282,13 @@ into `~/.agent-007/billion/` on first run.
 
 ### The three files at a glance
 
-- **`CLAUDE.md` — how Billion works.** Role, cycle, principles, escalation
-  list, tools and limits, operating rules (e.g. where new repos go). Changes
-  only when you ask. Loaded automatically by Claude Code at session start and
-  kept through compaction.
+- **`CHARTER.md` — how Billion works, as Agent 007 ships it.** Role, cycle,
+  principles, escalation list, tools and limits. Rewritten by the server on
+  every start; Billion never edits it.
+- **`CLAUDE.md` — the owner's rules.** Imports `@CHARTER.md`, then the
+  owner's settings and rules (e.g. where new repos go), which take
+  precedence. Changes only when you ask. Loaded automatically by Claude Code
+  at session start (with the charter) and kept through compaction.
 - **`COMPANY.md` — what's true about the company.** *Mission* (your words; only
   you change it) + *What we know* (Billion: projects, customers, numbers,
   lessons). Changes when something is learned. **Not imported** (it grows,
@@ -305,7 +308,7 @@ goes into `CLAUDE.md` itself, the one file guaranteed to be in context.
 
 Boundary test for Billion:
 
-- A rule for how I work? → `CLAUDE.md`
+- A rule the owner gave me? → `CLAUDE.md` (Agent 007's rules are in `CHARTER.md`, read-only)
 - A fact that will still matter in a month? → `COMPANY.md`
 - About what's happening now? → `STATE.md`
 - A card's status or full result? → the board
@@ -532,15 +535,17 @@ cycle: start agent-cost; drop the browser-extension idea
 
 Each part is useful without the next.
 
-**Decide before the first release: charter upgrades.** Templates are copied
-into Billion's folder only on its first run, so once a real Billion exists, a
-later charter change (new tools, approvals) never reaches it — and a charter
-that doesn't call `billion_ready` leaves its inbox closed. Proposed: split it
-into `CHARTER.md` (the app's, rewritten by the server on every start and
-committed in Billion's repo when it changes) and `CLAUDE.md` (the owner's
-rules, importing `@CHARTER.md` and taking precedence). Not needed while
-building: every test starts from a fresh folder. Until 2–4 land, the charter says so in
-its "Limits today" section; update it as each part ships.
+**Charter upgrades — built.** Billion's instructions have two owners, so
+they are two files. `CHARTER.md` is Agent 007's (from
+`templates/billion/charter.md`): the server rewrites it on every start and
+commits it on its own ("Agent 007: update the charter") when it changed, so a
+new release reaches a Billion that already exists; the pathspec commit leaves
+Billion's uncommitted work alone. `CLAUDE.md` is the owner's (from
+`templates/billion/owner.md`, first run only): it imports `@CHARTER.md` and
+holds *Owner's rules* — projects folder, escalation changes, any rule the
+owner gives — which take precedence. Verified live: the import loads, the
+introduction writes the owner's rules into `CLAUDE.md` only, and a simulated
+older charter was replaced on restart with the owner's rules intact.
 
 Found while verifying part 1:
 
