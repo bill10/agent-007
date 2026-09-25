@@ -20,6 +20,20 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   provenance and no stored token. npm versions are three-part, so VERSION
   `A.B.C.D` is published as `A.B.(C*1000+D)` and every MICRO release reaches
   npm; this one is `0.6.0`.
+## [0.5.1.5] - 2026-09-25
+
+### Fixed
+
+- **`npm test` passes when your shell exports agent-007's own settings.** With
+  `CLAUDE_PERMISSION_MODE`, `CODEX_PERMISSION_MODE` or `AGENT_MESSAGING` set,
+  as a configured `.env` often leaves them, six messaging and permission tests
+  read those values instead of the defaults they check, and failed. The shared
+  test setup now clears every variable `.env.example` documents before each
+  test file, so a variable added there later is covered too. Runtime behaviour
+  is unchanged.
+- **The test suite no longer writes MCP configs into your real
+  `~/.agent-007/mcp`.** They now go to a temp dir, like the suite's other
+  Agent 007 paths, so a test run can't sweep away a running server's configs.
 
 ## [0.5.1.4] - 2026-09-25
 
