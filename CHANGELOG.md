@@ -5,6 +5,24 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.4.1] - 2026-09-25
+
+### Changed
+
+- **The README says what Agent 007 is for, in the order you'd grow into it.**
+  The tagline is now "From web terminals for your coding agents to a
+  self-running agent company", followed by four steps: one agent in a web
+  terminal with its worktree handled for you, many terminals across projects in
+  one window, a job board Claude Code and Codex workers pick up on their own
+  (cron jobs included), and Billion, who takes a goal and runs the board. The
+  old Highlights list is folded into those steps. The README also says plainly
+  that it runs on your machine (agents work while it is on and awake), that
+  Billion's plan and memory live in git so it resumes after a restart, and that
+  every worker is a real terminal you can open, from a phone too.
+- **npm description** matches the GitHub one, and the keywords add
+  `autonomous-agents`. `docs/FEATURES.md` and `docs/BILLION.md` open with a line
+  placing them in the same progression.
+
 ## [0.6.4.0] - 2026-09-25
 
 ### Added

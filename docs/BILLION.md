@@ -6,6 +6,10 @@ Builds on PR #92 (orchestrator charter template and guide).
 
 ## Idea
 
+The last step of the progression: once the job board runs work without you
+watching, Billion stops you having to post the jobs too. Give it a goal and it
+runs the board.
+
 Borrowed from Munder Difflin's orchestrator ("Michael"): one contact point. You
 talk to Billion; Billion posts job cards, directs workers, and approves or denies
 their permission prompts. It escalates only what needs you.
