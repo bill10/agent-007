@@ -50,7 +50,8 @@ describe('the trust dialog, answered from the pty stream', () => {
     const session = {
       id: 'bt', pty: { onData: (cb) => { onData = cb; }, onExit: () => {}, write: vi.fn() },
       ringBuffer: { push: () => {} }, state: 'WORKING', lastOutputAt: 0, lastResizeAt: 0,
-      lastStrippedLine: '', recentStrippedLines: [], pendingRaw: '', isTUI: true, exited: false, ...fields,
+      lastStrippedLine: '', recentStrippedLines: [], pendingRaw: '', isTUI: true, exited: false,
+      createdAt: Date.now(), ...fields,
     };
     setupPtyHandlers(session, 'bt', () => {});
     clearInterval(session.stateCheckInterval);

@@ -10,7 +10,6 @@
 
 import { execFile } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
 import { config, sessions, orphans, adoptingOrphans, codenamePool, CONFIG_DIR } from './state.js';
 import { saveConfig, syncOrphansToConfig } from './config.js';
@@ -743,7 +742,10 @@ export async function closeJobForAgent({ session, id, accept, note }, broadcast,
   // The PR is kept for the reply, since the move clears it from the card.
   const oldPrUrl = job.prUrl || null;
   const oldDetail = job.detail;
-  job.detail = `${job.detail ? `${job.detail}\n\n` : ''}Sent back by ${BILLION_NAME}: ${reason}`.slice(0, MAX_DETAIL_LEN);
+  // The note always fits: it is the old detail that gives way.
+  const sentBack = `Sent back by ${BILLION_NAME}: ${reason}`.slice(0, MAX_DETAIL_LEN);
+  const room = MAX_DETAIL_LEN - sentBack.length - 2;
+  job.detail = job.detail && room > 0 ? `${job.detail.slice(0, room)}\n\n${sentBack}` : sentBack;
   const result = await moveJob(job.id, 'todo', broadcast, { killSession });
   if (result.error) {
     job.detail = oldDetail;

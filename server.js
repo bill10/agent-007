@@ -33,7 +33,7 @@ import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
-import { transcriptsFor } from './server/agent-transcripts.js';
+import { hasClaudeTranscript } from './server/agent-transcripts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -146,7 +146,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
     syncOrphansToConfig(broadcast);
     broadcastOrphansList();
     broadcast({ type: 'notification', level: 'info', message: `${session.name} orphaned — worktree kept (${reason} changes)` });
-  } else if (!session.isBillion) {   // Billion's name stays reserved for its next start
+  } else {
     codenamePool.recycle(session.name);
     if (session.worktreePath) codenamePool.recycle(basename(session.worktreePath)); // differs after a rename
   }
@@ -159,7 +159,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
 function startBillion() {
   for (const [id, s] of sessions) {
     if (!s.isBillion) continue;
-    if (!s.exited) return { session: s };
+    if (!s.exited) return { session: s, existing: true };
     sessions.delete(id);   // a stopped one's tab goes; the new one replaces it
   }
   const dir = billionDir();
@@ -181,7 +181,7 @@ function startBillion() {
   }
   const command = billionCommand({
     created,
-    hasConversation: !created && transcriptsFor(dir).agent === 'claude',
+    hasConversation: !created && hasClaudeTranscript(dir),
     dir,
     projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
   });

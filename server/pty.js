@@ -8,7 +8,7 @@ import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealO
 export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
-import { mintAgentToken } from './auth.js';
+import { mintAgentToken, authEnabled } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
@@ -175,6 +175,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
 const TRUST_SETTLE_MS = 400;
 const TRUST_KEY_CAP = 4;
 const TRUST_WINDOW_MS = 60_000;
+const TRUST_SCREEN_CHARS = 8000;
 function answerTrustDialog(session, data, now) {
   if (!session.isBillion || (session.trustKeys || 0) >= TRUST_KEY_CAP) return;
   if (now - session.createdAt > TRUST_WINDOW_MS) {
@@ -183,7 +184,7 @@ function answerTrustDialog(session, data, now) {
     clearTimeout(session.trustTimer);
     return;
   }
-  session.trustScreen = ((session.trustScreen || '') + data).slice(-8000);
+  session.trustScreen = ((session.trustScreen || '') + data).slice(-TRUST_SCREEN_CHARS);
   clearTimeout(session.trustTimer);
   session.trustTimer = setTimeout(() => {
     const key = session.exited ? null : trustDialogKey(stripAnsiComplete(session.trustScreen || ''));
@@ -322,6 +323,12 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
 }
 
 export function updateState(session, broadcast) {
+  // User accounts are read live, so they can appear while Billion runs. It
+  // belongs to no one, so every signed-in user could then drive an agent that
+  // never asks before acting: it stops, and Start stays refused (billionRuns).
+  if (session.isBillion && !session.exited && authEnabled()) {
+    try { session.pty.kill(); } catch {}
+  }
   const prevState = session.state;
   const newState = detectState(session);
   if (newState !== prevState) {

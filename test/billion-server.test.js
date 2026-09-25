@@ -45,7 +45,7 @@ beforeAll(async () => {
   server.listen(0, '127.0.0.1');
   await new Promise(r => server.once('listening', r));
   wsUrl = `ws://127.0.0.1:${server.address().port}`;
-  codenamePool.addUsed(BILLION_NAME);   // what startup() does
+  codenamePool.reserve(BILLION_NAME);   // what startup() does
 });
 
 afterAll(async () => {

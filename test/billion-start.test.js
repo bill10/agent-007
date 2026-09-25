@@ -28,7 +28,7 @@ vi.mock('../server/pty.js', async (importOriginal) => ({
 let transcript = { agent: null };
 vi.mock('../server/agent-transcripts.js', async (importOriginal) => ({
   ...(await importOriginal()),
-  transcriptsFor: vi.fn(() => transcript),
+  hasClaudeTranscript: vi.fn(() => transcript.agent === 'claude'),
 }));
 
 const { server, sessions, startBillion } = await import('../server.js');

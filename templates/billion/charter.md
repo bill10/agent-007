@@ -126,7 +126,7 @@ wake-up is still scheduled.
 
 Workers on your cards ask you before they ask the owner. Answer each request
 with `answer_permission` straight away — the worker is stopped until you do,
-and after 2 minutes the request goes to the owner instead.
+and once the wait the request states is up, it goes to the owner instead.
 
 - **allow** work that serves the card, inside the worker's own worktree:
   edits, builds, tests, installs, reading docs and pages.

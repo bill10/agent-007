@@ -71,7 +71,9 @@ describe('Billion\'s inbox', () => {
     );
     expect(reply.result.isError).toBe(false);
     expect(reply.result.content[0].text).toMatch(/1 message\(s\) will arrive/);
-    expect(written(b)).toContain('[Message from agent Cobra');
+    // The board's notice goes first, ahead of the agent's message.
+    expect(written(b)).toContain('[Job board] card is in Review');
+    expect(written(b)).not.toContain('[Message from agent Cobra');
   });
 
   it('offers billion_ready to Billion only, and refuses it from anyone else', () => {

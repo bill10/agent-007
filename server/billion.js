@@ -1,11 +1,11 @@
 // Billion — the one agent you talk to (docs/BILLION.md).
 //
 // A repo-less agent whose working directory is its own git repo, holding its
-// charter and memory. The server starts it on every boot, resuming the last
-// conversation when there is one. Everything here is pure or touches only
+// charter and memory. The server starts it on boot (unless it is off, see
+// billionRuns), resuming the last conversation when there is one. Everything here is pure or touches only
 // Billion's own folder; spawning it is server.js's job, like every session.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, copyFileSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -66,6 +66,14 @@ export function ensureBillionRepo(dir) {
       throw new Error(`${dir} is a git repository that isn't Billion's folder (it has no ${CHARTER.to}); point BILLION_DIR somewhere else`);
     }
     return { created: false };
+  }
+  // Nor a folder with anything in it (BILLION_DIR at a home or projects
+  // folder): setting up there would put all of it in Billion's repo, and run
+  // Billion in it. Only the template files may be there already.
+  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY)]);
+  const theirs = existsSync(dir) ? readdirSync(dir).filter(name => !ours.has(name)) : [];
+  if (theirs.length) {
+    throw new Error(`${dir} already holds other files (${theirs.slice(0, 3).join(', ')}${theirs.length > 3 ? ', …' : ''}), so it can't be Billion's folder; point BILLION_DIR at a new or empty folder`);
   }
   mkdirSync(dir, { recursive: true });
   for (const [from, to] of [[CHARTER.from, CHARTER.to], ...Object.entries(FIRST_RUN_ONLY)]) {

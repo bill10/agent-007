@@ -173,6 +173,12 @@ export function transcriptsFor(worktreePath, { claude = claudeHome(), codex = co
   return { agent: 'codex', codexSessionId: x.id };
 }
 
+// Whether Claude Code left a conversation in exactly this folder — all
+// Billion needs to know, without walking every Codex rollout on disk.
+export function hasClaudeTranscript(dir, { claude = claudeHome() } = {}) {
+  return !!dir && maxOf(pathForms(dir).map(p => newestClaudeTranscript(p, claude))) !== null;
+}
+
 export function agentFromTranscripts(worktreePath, homes) {
   return transcriptsFor(worktreePath, homes).agent;
 }

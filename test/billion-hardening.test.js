@@ -4,8 +4,8 @@
 // name, and Billion stays off where it would belong to everyone or to a repo
 // that is not its own.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -16,6 +16,7 @@ const { sendText, dropMessages } = await import('../server/messages.js');
 const { addJob, boardSettings, postJobForAgent, editJobForAgent } = await import('../server/jobs.js');
 const { ensureBillionRepo, billionRuns } = await import('../server/billion.js');
 const { createCodenamePool } = await import('../lib/helpers.js');
+const { updateState } = await import('../server/pty.js');
 const { BILLION_NAME } = await import('../lib/jobs.js');
 
 function fake(name, fields = {}) {
@@ -83,6 +84,7 @@ describe('an allow on input Billion only partly saw', () => {
 
 describe('Billion\'s cards', () => {
   const REPO = mkdtempSync(join(tmpdir(), 'a007-bh-repo-'));
+  afterAll(() => rmSync(REPO, { recursive: true, force: true }));
   beforeEach(() => {
     config.repos = [{ path: REPO }];
     config.jobs = [];
@@ -126,7 +128,32 @@ describe('where Billion does not run', () => {
 
   it('refuses a folder that is someone else\'s git repo', () => {
     const dir = mkdtempSync(join(tmpdir(), 'a007-bh-project-'));
-    execFileSync('git', ['init', '-q'], { cwd: dir });
-    expect(() => ensureBillionRepo(dir)).toThrow(/isn't Billion's folder/);
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: dir });
+      expect(() => ensureBillionRepo(dir)).toThrow(/isn't Billion's folder/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a folder that already holds other files, and sets nothing up in it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'a007-bh-home-'));
+    try {
+      writeFileSync(join(dir, 'notes.txt'), 'mine');
+      expect(() => ensureBillionRepo(dir)).toThrow(/already holds other files \(notes\.txt\)/);
+      expect(existsSync(join(dir, '.git'))).toBe(false);
+      expect(existsSync(join(dir, 'CHARTER.md'))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('stops a running Billion the moment user accounts appear', () => {
+    const b = { ...fake('Live', { isBillion: true }), pty: { write: vi.fn(), kill: vi.fn() } };
+    updateState(b);
+    expect(b.pty.kill).not.toHaveBeenCalled();
+    writeFileSync(usersPath, JSON.stringify([{ id: 'u1', displayName: 'A', tokenHash: 'x', color: '#fff' }]));
+    updateState(b);
+    expect(b.pty.kill).toHaveBeenCalled();
   });
 });

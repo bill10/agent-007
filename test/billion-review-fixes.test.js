@@ -2,15 +2,15 @@
 // after spawn, approvals that cannot outlive their chance of an answer, and
 // close_job telling the next worker why, before anyone can pick the card up.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync } from 'fs';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
 const { config, sessions } = await import('../server/state.js');
 const { setupPtyHandlers } = await import('../server/pty.js');
 const { requestApproval, clearApprovals, dropApprovals, APPROVAL_WAIT_MS } = await import('../server/approvals.js');
-const { dropMessages, pendingMessages } = await import('../server/messages.js');
+const { dropMessages, pendingMessages, sendMessage, flushMessages } = await import('../server/messages.js');
 const { addJob, boardSettings, closeJobForAgent } = await import('../server/jobs.js');
 const { handleMcpMessage } = await import('../server/mcp.js');
 const { HOOK_WAIT_MS, HOOK_TIMEOUT_S } = await import('../server/agent-mcp.js');
@@ -69,13 +69,49 @@ describe('approvals', () => {
     expect(pendingMessages(billion.id)).toBe(0);
   });
 
-  it('hands every waiting request to the owner at once when Billion stops', async () => {
+  it('hands every waiting request to the owner at once when Billion\'s process exits', async () => {
+    vi.useFakeTimers();
     billion.state = 'WORKING';
-    const a = requestApproval(worker, request);
-    const b = requestApproval(worker, request);
-    dropApprovals();
-    expect(await a).toEqual({});
-    expect(await b).toEqual({});
+    let onExit;
+    const exiting = (fields) => ({
+      id: 'rf-x', ringBuffer: { push: () => {} }, recentStrippedLines: [], pendingRaw: '', isTUI: true, exited: false,
+      pty: { onData: () => {}, onExit: (cb) => { onExit = cb; }, write: vi.fn() }, ...fields,
+    });
+    const settled = [];
+    requestApproval(worker, request).then(r => settled.push(r));
+    // Another session exiting leaves it waiting.
+    const other = exiting({});
+    setupPtyHandlers(other, 'rf-x', () => {});
+    clearInterval(other.stateCheckInterval);
+    onExit({ exitCode: 0 });
+    await Promise.resolve();
+    expect(settled).toEqual([]);
+    // Billion's own exit hands it on, long before the wait is up.
+    const b = exiting({ isBillion: true });
+    setupPtyHandlers(b, 'rf-x', () => {});
+    clearInterval(b.stateCheckInterval);
+    onExit({ exitCode: 0 });
+    await Promise.resolve();
+    expect(settled).toEqual([{}]);
+  });
+
+  it('puts approvals ahead of agent messages, with a cap of their own', () => {
+    billion.state = 'WORKING';
+    const chatty = fake('Chatty');
+    sessions.set(chatty.id, chatty);
+    for (let i = 0; i < 20; i++) sendMessage({ from: fake(`W${i}`), to: BILLION_NAME, text: 'hi', sessions });
+    expect(pendingMessages(billion.id)).toBe(20);
+    requestApproval(worker, request);                       // still gets in, and first
+    expect(pendingMessages(billion.id)).toBe(21);
+    billion.state = 'WAITING';
+    flushMessages(billion, Date.now());
+    expect(billion.pty.write.mock.calls[0][0]).toContain('[Approval ');
+  });
+
+  it('delivers "Billion" to the real one, not a session that happens to share the name', () => {
+    const impostor = fake('Billion', { id: 'rf-imp' });
+    sessions.set(impostor.id, impostor);
+    expect(sendMessage({ from: worker, to: BILLION_NAME, text: 'question', sessions }).to).toBe(billion);
   });
 
   it('keeps the hook\'s limits above the wait, so the server always gives up first', () => {
@@ -86,11 +122,20 @@ describe('approvals', () => {
 
 describe('close_job sending a card back', () => {
   const REPO = mkdtempSync(join(tmpdir(), 'a007-rf-repo-'));
+  afterAll(() => rmSync(REPO, { recursive: true, force: true }));
   beforeEach(() => {
     config.repos = [{ path: REPO }];
     config.jobs = [];
     config.jobBoard = null;
     boardSettings();
+  });
+
+  it('keeps the whole reason even on a card whose detail is already full', async () => {
+    const { job } = addJob({ title: 'Big', detail: 'x'.repeat(20000), repoPath: REPO, postedByAgent: BILLION_NAME, postedByBillion: true }, () => {});
+    Object.assign(job, { state: 'review', agentSessionId: worker.id, branchName: 'big' });
+    await closeJobForAgent({ session: billion, id: job.id, accept: false, note: 'Split it up.' }, () => {}, { killSession: async () => {} });
+    expect(job.detail.length).toBeLessThanOrEqual(20000);
+    expect(job.detail.endsWith('Sent back by Billion: Split it up.')).toBe(true);
   });
 
   it('writes the reason on the card before it is back in To do, and names the PR to close', async () => {

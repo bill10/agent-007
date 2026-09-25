@@ -374,8 +374,9 @@ Projects directory for new repos: asked in the introduction (step 3).
 
 Decided. Billion's working memory between cycles: read first after a restart,
 rewritten whole every cycle, readable by you. The board already records every
-card Billion posted (`postedByAgent`, `server/jobs.js:392`; the name "Billion"
-is reserved) with its status, PR and summary, so none of that is copied here —
+card Billion posted (`postedByBillion`, set from the posting session in
+`server/jobs.js` `postJobForAgent`; `postedByAgent` is only the display name)
+with its status, PR and summary, so none of that is copied here —
 it would go stale. `STATE.md` holds only what the board can't know.
 
 ```markdown

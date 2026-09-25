@@ -19,7 +19,7 @@
 // session Map so it is testable on its own: sessions come in as parameters.
 
 import { parseCommand, detectState } from '../lib/helpers.js';
-import { permissionFlagsFromCommand, sessionAgentFromCommand } from '../lib/jobs.js';
+import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
@@ -37,6 +37,11 @@ export const USER_TYPING_HOLD_MS = 30 * 1000;
 export const SUBMIT_DELAY_MS = 150;
 
 const queues = new Map();   // recipient session id -> [formatted text]
+// How many at the front of a queue the server wrote (approvals, board
+// notices). They go ahead of agent messages and count against their own cap,
+// so agents messaging Billion cannot push its approvals past their wait, or
+// crowd them out of the queue altogether.
+const serverAhead = new Map();
 const sends = new Map();    // `${from.id}>${to.id}` -> [timestamps]
 
 // Everything but newline and tab. The text goes inside a bracketed paste, and a
@@ -127,9 +132,11 @@ export function formatNotice(headline, lines = []) {
 export function sendText(session, text, now = Date.now()) {
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
-  if (queue.length >= QUEUE_CAP) return false;
-  queue.push(clean(text));
+  const ahead = serverAhead.get(session.id) || 0;
+  if (ahead >= QUEUE_CAP) return false;
+  queue.splice(ahead, 0, clean(text));
   queues.set(session.id, queue);
+  serverAhead.set(session.id, ahead + 1);
   flushMessages(session, now);
   return true;
 }
@@ -141,6 +148,8 @@ export function unqueueText(sessionId, text) {
   const at = queue ? queue.indexOf(clean(text)) : -1;
   if (at === -1) return false;
   queue.splice(at, 1);
+  const ahead = serverAhead.get(sessionId) || 0;
+  if (at < ahead) serverAhead.set(sessionId, ahead - 1);
   if (!queue.length) queues.delete(sessionId);
   return true;
 }
@@ -203,7 +212,9 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
     return { error: `The message is ${body.length} characters; the limit is ${MAX_MESSAGE_CHARS}.` };
   }
   const reachable = messageableAgents(from, sessions);
-  const target = reachable.find(s => s.name === to);
+  // Billion by what it is, not by what it is called: an old session that
+  // happens to carry the name must not receive what was meant for it.
+  const target = to === BILLION_NAME ? reachable.find(s => s.isBillion) : reachable.find(s => s.name === to);
   if (!target) {
     const names = reachable.map(s => s.name).join(', ');
     return { error: `No agent named "${to}" you can message. ${names ? `Agents you can reach: ${names}.` : 'There are no other agents running.'}` };
@@ -216,7 +227,7 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
     return { error: `You have sent ${target.name} ${PAIR_LIMIT} messages in the last ${PAIR_WINDOW_MS / 60000} minutes, which is the limit. Tell the user what you need from ${target.name} instead.` };
   }
   const queue = queues.get(target.id) || [];
-  if (queue.length >= QUEUE_CAP) {
+  if (queue.length - (serverAhead.get(target.id) || 0) >= QUEUE_CAP) {
     return { error: `${target.name} already has ${QUEUE_CAP} messages waiting for it. Try again once it has caught up.` };
   }
 
@@ -234,6 +245,8 @@ export function flushMessages(session, now = Date.now()) {
   const queue = queues.get(session.id);
   if (!queue?.length || !canDeliver(session, now)) return false;
   deliver(session, queue.shift(), now);
+  const ahead = serverAhead.get(session.id) || 0;
+  if (ahead) serverAhead.set(session.id, ahead - 1);
   if (!queue.length) queues.delete(session.id);
   return true;
 }
@@ -257,6 +270,7 @@ export function agentSummaries(from, sessions, jobTitle = () => null) {
 // anything addressed to one.
 export function dropMessages(sessionId) {
   queues.delete(sessionId);
+  serverAhead.delete(sessionId);
   for (const key of sends.keys()) {
     if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) sends.delete(key);
   }
