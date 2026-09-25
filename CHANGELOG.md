@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.9.2.1] - 2026-09-25
+
+### Changed
+
+- **Billion's Telegram voice notes use a better macOS voice.** It now speaks with the best English voice installed (Premium, then Enhanced, en_US before en_GB) instead of `say`'s old default, and `SAY_VOICE` picks one by name. Download the free Premium voices in System Settings → Accessibility → Spoken Content → Manage Voices; see docs/BILLION.md, "Voice".
+
 ## [0.9.2.0] - 2026-09-25
 
 ### Changed
