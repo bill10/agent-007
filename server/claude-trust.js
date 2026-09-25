@@ -18,12 +18,24 @@ import { join } from 'path';
 import { sessionAgentFromCommand } from '../lib/jobs.js';
 import { envSwitchOn } from '../lib/helpers.js';
 
-// Board-dispatched Claude Code workers only, and on unless
+// Board-dispatched Claude Code and Codex workers only, and on unless
 // TRUST_BOARD_WORKTREES says otherwise (0/false/off/no). Hand-started agents
 // keep the dialog.
 export function autoTrusts({ spawnedBy, worktreePath, command }, env = process.env) {
-  return spawnedBy === 'board' && !!worktreePath && sessionAgentFromCommand(command) === 'claude'
+  return spawnedBy === 'board' && !!worktreePath && ['claude', 'codex'].includes(sessionAgentFromCommand(command))
     && envSwitchOn(env.TRUST_BOARD_WORKTREES);
+}
+
+// Codex asks "Do you trust the contents of this directory?" in a new worktree
+// too, and records the answer as [projects."<path>"] trust_level in
+// ~/.codex/config.toml. A -c override does the same for this one run and
+// writes nothing: an inline table merges with the user's own [projects]
+// (verified against codex-cli 0.154), and unlike a dotted key it survives the
+// dot in ~/.agent-007. A JSON string is a valid TOML basic string.
+export function codexTrustArgs(folder) {
+  let path = folder;
+  try { path = realpathSync(folder); } catch {}
+  return ['-c', `projects={${JSON.stringify(path)}={trust_level="trusted"}}`];
 }
 
 const isRecord = (v) => !!v && typeof v === 'object' && !Array.isArray(v);

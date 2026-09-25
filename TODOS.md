@@ -98,21 +98,6 @@
 - **Depends on:** Nothing
 - **Context:** Surfaced while making the test suite pass on Windows (2026-08-30): the mode assertions are skipped there rather than weakened on POSIX.
 
-## Pre-trust Codex board worktrees
-
-- **What:** Board-dispatched Claude Code workers skip the workspace-trust
-  dialog (server/claude-trust.js). Codex workers still stop at Codex's
-  "Trust and continue" dialog in every new worktree.
-- **Why:** Same as for Claude Code: unattended dispatch needs one click per
-  Codex card today.
-- **Effort:** S. Codex records trust per path in `~/.codex/config.toml`
-  (`[projects."<path>"] trust_level = "trusted"`), or it may take a
-  `-c projects...` override on the command line, which would avoid writing
-  the file, but the worktree path is not known when `buildJobCommand` runs.
-- **Priority:** P3
-- **Context:** Left out of the Claude Code change (2026-09-25) because it means
-  editing TOML the user owns, or reworking where the command is built.
-
 ## Hand the board tool to Gemini agents
 
 - **What:** Gemini still receives no board MCP configuration. Investigate a

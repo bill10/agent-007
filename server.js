@@ -32,7 +32,7 @@ import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
-import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE } from './lib/jobs.js';
+import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noClaudeCommand } from './server/billion.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
@@ -100,8 +100,9 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
 
   // A board worker's worktree is brand new, so Claude Code would stop at its
   // workspace-trust dialog until someone clicked (server/claude-trust.js).
+  // Codex's is skipped by a flag instead (server/pty.js).
   const autoTrust = autoTrusts({ spawnedBy: meta.spawnedBy, worktreePath, command });
-  if (autoTrust) trustClaudeFolder(worktreePath);
+  if (autoTrust && sessionAgentFromCommand(command) === 'claude') trustClaudeFolder(worktreePath);
 
   const result = createSessionFromConfig({
     sessionId, name: agentName, color, command,

@@ -41,8 +41,8 @@ Settings (default in brackets):
   AGENT_MESSAGING         open = any agent may message any other [guarded]
   BILLION                 0 turns off Billion, the always-on agent [on]
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
-  TRUST_BOARD_WORKTREES   0 keeps Claude Code's folder-trust prompt for job
-                          board workers [on]
+  TRUST_BOARD_WORKTREES   0 keeps Claude Code's and Codex's folder-trust
+                          prompt for job board workers [on]
 
 Set them in the environment, in ~/.agent-007/.env (\`agent-007 init\` writes it,
 every setting explained and commented out), or in a .env in the current
