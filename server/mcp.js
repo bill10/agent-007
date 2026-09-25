@@ -20,6 +20,7 @@
 // lib/jobs.js is the pure half of the board — no store, no Express — so the
 // column names come from there rather than being spelled out a second time.
 import { JOB_STATES, STATE_LABELS, JOB_AGENTS } from '../lib/jobs.js';
+import { APPROVAL_WAIT_MS } from './agent-mcp.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -253,7 +254,79 @@ export const SEND_MESSAGE_TOOL = {
   },
 };
 
+// Billion's alone (server/billion.js): listed only for its session.
+export const BILLION_READY_TOOL = {
+  name: 'billion_ready',
+  description:
+    'Open your inbox: until you call this, messages from agents and job board '
+    + 'notices wait instead of being typed into your terminal. Call it when your '
+    + 'introduction is done and at the start of every operating cycle; calling it '
+    + 'again does nothing.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
+export const ADD_REPO_TOOL = {
+  name: 'add_repo',
+  description:
+    'Add a git repository to the Agent 007 board, so job cards can be posted in it '
+    + 'and it shows in the owner\'s left panel. Use it after creating a new '
+    + 'project\'s repo (with its remote and a pushed main). Adding one already '
+    + 'on the board does nothing.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Absolute path to the repository on this machine (~/ is allowed).' },
+    },
+    required: ['path'],
+    additionalProperties: false,
+  },
+};
+
+export const CLOSE_JOB_TOOL = {
+  name: 'close_job',
+  description:
+    'Close one of your own cards that is in Review. accept: true files a card with '
+    + 'no pull request as Done (a card with a PR is filed away when you merge the '
+    + 'PR, or close it to drop the work). accept: false sends it back to To do '
+    + 'with your note added to its detail, for a fresh worker to redo; if it had a '
+    + 'pull request, close that one afterwards. Either way its worker is closed.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The card id, as list_jobs reports it.' },
+      accept: { type: 'boolean', description: 'true: Done. false: back to To do.' },
+      note: { type: 'string', description: 'Required when sending it back: what the next worker must do differently.' },
+    },
+    required: ['id', 'accept'],
+    additionalProperties: false,
+  },
+};
+
+export const ANSWER_PERMISSION_TOOL = {
+  name: 'answer_permission',
+  description:
+    'Answer a worker\'s permission request, which arrives in your terminal as '
+    + '"[Approval <id>] …". allow lets the worker go ahead; deny refuses, and your '
+    + 'reason is what the worker reads; owner leaves it to the owner, who then sees '
+    + `the worker's dialog. Unanswered requests go to the owner after ${APPROVAL_WAIT_MS / 60000} minutes.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The id from the [Approval <id>] line.' },
+      decision: { type: 'string', enum: ['allow', 'deny', 'owner'] },
+      reason: { type: 'string', description: 'For deny: what the worker should do instead.' },
+    },
+    required: ['id', 'decision'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL];
+
+export function toolsFor(session) {
+  return session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
+}
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -288,6 +361,8 @@ function summaryLine(job) {
   // The live state of the agent working it, when there is one, is the part a
   // person actually asks about ("is it stuck?").
   if (job.agentName) bits.push(`${job.agentName}${job.status ? ` ${job.status}` : ''}`);
+  // So an agent can tell its own cards apart without a read_job per card.
+  if (job.postedByAgent) bits.push(`posted by ${job.postedByAgent}`);
   if (job.prUrl) bits.push(job.prUrl);
   return `  ${job.id}  ${job.title}\n    ${bits.filter(Boolean).join(' · ')}`;
 }
@@ -415,6 +490,38 @@ const CALLS = {
     return toolText(`"${result.job.title}" is in Review. You are done — end your turn here.`);
   },
 
+  [BILLION_READY_TOOL.name]: (args, ctx) => {
+    const result = ctx.billionReady ? ctx.billionReady() : { error: 'Only Billion has an inbox to open.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.waiting
+      ? `Inbox open. ${result.waiting} message(s) will arrive one at a time as you come to rest at your prompt.`
+      : 'Inbox open. Nothing is waiting.');
+  },
+
+  [ADD_REPO_TOOL.name]: async (args, ctx) => {
+    const result = await ctx.addRepo(args.path);
+    if (result.error) return toolText(result.error, true);
+    return toolText(`${result.path} is on the board as "${result.slug}". post_job can use it now.`);
+  },
+
+  [CLOSE_JOB_TOOL.name]: async (args, ctx) => {
+    const result = await ctx.closeJob({ id: args.id, accept: args.accept === true, note: args.note });
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.accepted
+      ? `"${result.job.title}" is Done and its worker is closed.`
+      : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`
+        + (result.oldPrUrl ? ` Its old pull request is still open: close ${result.oldPrUrl}.` : ''));
+  },
+
+  [ANSWER_PERMISSION_TOOL.name]: (args, ctx) => {
+    const result = ctx.answerPermission({ id: args.id, decision: args.decision, reason: args.reason });
+    if (result.error) return toolText(result.error, true);
+    if (result.cut) return toolText(`That request was cut short, so your allow went to the owner instead: ${result.worker}'s dialog is showing for them now.`);
+    return toolText(result.choice === 'owner'
+      ? `Left to the owner: ${result.worker}'s dialog is showing for them now.`
+      : `${result.worker} has your answer: ${result.choice}.`);
+  },
+
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {
     const agents = ctx.listAgents();
     if (!agents.length) return toolText('No other agents are running that you can message.');
@@ -467,7 +574,7 @@ export function handleMcpMessage(msg, ctx = {}) {
   if (isNotification) return null;
 
   if (method === 'ping') return ok(id, {});
-  if (method === 'tools/list') return ok(id, { tools: TOOLS });
+  if (method === 'tools/list') return ok(id, { tools: toolsFor(ctx.session) });
 
   if (method === 'tools/call') {
     // hasOwn, not truthiness: a plain object inherits Object.prototype, so a
@@ -475,7 +582,8 @@ export function handleMcpMessage(msg, ctx = {}) {
     // the chain and run it — a 500 for the first, and a result of
     // "[object Undefined]" for the second, neither of them a tool.
     const name = params?.name;
-    if (typeof name !== 'string' || !Object.hasOwn(CALLS, name)) {
+    if (typeof name !== 'string' || !Object.hasOwn(CALLS, name)
+      || !toolsFor(ctx.session).some(tool => tool.name === name)) {
       return fail(id, -32602, `Unknown tool: ${name}`);
     }
     const result = CALLS[name](params?.arguments || {}, ctx);

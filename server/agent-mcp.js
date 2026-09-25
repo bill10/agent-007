@@ -29,6 +29,14 @@ export const MCP_CONFIG_DIR = process.env.AGENT007_MCP_DIR
 // agent this app spawns).
 export const MCP_SERVER_NAME = 'agent-007-board';
 
+// How long a worker's permission request waits for Billion (server/approvals.js),
+// and the two limits that must outlast it so the server, answering "no
+// decision", always gives up first: a CLI that times its hook out counts that
+// as a deny. The hook script's own wait, then the CLI's timeout for the hook.
+export const APPROVAL_WAIT_MS = 120_000;
+export const HOOK_WAIT_MS = APPROVAL_WAIT_MS + 20_000;
+export const HOOK_TIMEOUT_S = (APPROVAL_WAIT_MS + 30_000) / 1000;
+
 // Agents run on this machine, so the board is reachable over loopback — which
 // also keeps the token off the network when HOST is a tailnet address. A
 // non-wildcard bind is the one case where loopback may not be listening, so use
@@ -76,6 +84,33 @@ export function writeMcpConfig(sessionId, agentToken) {
     console.error(`Could not write the MCP config for session ${sessionId}:`, err.message);
     return null;
   }
+}
+
+// The --settings that routes a Claude Code worker's permission dialogs to
+// Billion (server/approvals.js): a PermissionRequest hook running
+// server/permission-hook.js with this session's MCP config. Claude Code only;
+// Codex takes its hook differently and is not wired yet (docs/BILLION.md).
+const PERMISSION_HOOK = fileURLToPath(new URL('./permission-hook.js', import.meta.url));
+const shellQuote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
+// Forward slashes on Windows, which node takes as well: a backslash means
+// something different to each shell a hook might run under (doubled by the
+// quoting above, cmd.exe would read two), so the paths carry none.
+export const hookPath = (p, platform = process.platform) => (platform === 'win32' ? String(p).replace(/\\/g, '/') : String(p));
+export function withApprovalHook(file, args, configPath) {
+  if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
+  const settings = {
+    // The two board tools the job prompt tells the worker to use: finishing
+    // its card, and asking Billion. Asking permission for those would only
+    // send Billion a request to approve its own instructions.
+    permissions: { allow: ['finish_job', 'send_message'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`) },
+    hooks: {
+      PermissionRequest: [{
+        matcher: '*',
+        hooks: [{ type: 'command', command: [process.execPath, PERMISSION_HOOK, configPath].map(p => shellQuote(hookPath(p))).join(' '), timeout: HOOK_TIMEOUT_S }],
+      }],
+    },
+  };
+  return ['--settings', JSON.stringify(settings), ...args];
 }
 
 export function removeMcpConfig(sessionId) {

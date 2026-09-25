@@ -8,11 +8,13 @@ import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealO
 export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
-import { mintAgentToken } from './auth.js';
-import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
+import { mintAgentToken, authEnabled } from './auth.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
+import { trustDialogKey } from './billion.js';
+import { dropApprovals } from './approvals.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 
@@ -110,6 +112,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     const cut = raw.lastIndexOf('\n');
     session.pendingRaw = (cut === -1 ? raw : raw.slice(cut + 1)).slice(-2000);
     const lines = stripAnsiComplete(raw.slice(0, cut + 1)).split('\n').filter(l => l.trim().length > 0);
+    answerTrustDialog(session, outside, now);
     const partial = stripAnsiComplete(session.pendingRaw).trim();
     // Freshness is judged on THIS read, never on the carry. `partial` is
     // re-derived from accumulated bytes, so counting it here would re-count
@@ -152,20 +155,58 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // about not leaving credentials lying in the filesystem, not about access.
     removeMcpConfig(sessionId);
     dropMessages(sessionId);
+    if (session.isBillion) dropApprovals();
     updateState(session, broadcast);
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
   });
 
-  session.stateCheckInterval = setInterval(() => updateState(session, broadcast), 1000);
+  session.stateCheckInterval = setInterval(() => {
+    stopBillionUnderAccounts(session);
+    updateState(session, broadcast);
+  }, 1000);
+}
+
+// Billion only (server/billion.js trustDialogKey). A dialog arrives in several
+// reads, and a late one can still show the old cursor, so reads are collected
+// until the screen has been quiet for a moment and the key is chosen from the
+// settled drawing. Collected from the key onwards only, so an answered drawing
+// is never answered twice. Capped, so a dialog that never changes can't be
+// typed at forever. And only just after spawn: the dialog comes before Claude
+// Code's first prompt, and on every start after the first there is none, so a
+// watcher left armed would read Billion's whole session — and could type into
+// it whenever its own output happened to look like that dialog.
+const TRUST_SETTLE_MS = 400;
+const TRUST_KEY_CAP = 4;
+const TRUST_WINDOW_MS = 60_000;
+const TRUST_SCREEN_CHARS = 8000;
+function answerTrustDialog(session, data, now) {
+  if (!session.isBillion || (session.trustKeys || 0) >= TRUST_KEY_CAP) return;
+  if (now - session.createdAt > TRUST_WINDOW_MS) {
+    session.trustKeys = TRUST_KEY_CAP;
+    session.trustScreen = '';
+    clearTimeout(session.trustTimer);
+    return;
+  }
+  session.trustScreen = ((session.trustScreen || '') + data).slice(-TRUST_SCREEN_CHARS);
+  clearTimeout(session.trustTimer);
+  session.trustTimer = setTimeout(() => {
+    const key = session.exited ? null : trustDialogKey(stripAnsiComplete(session.trustScreen || ''));
+    if (!key) return;
+    // Enter answers it for good: stop watching.
+    session.trustKeys = key === '\r' ? TRUST_KEY_CAP : (session.trustKeys || 0) + 1;
+    session.trustScreen = '';
+    try { session.pty.write(key); } catch {}
+  }, TRUST_SETTLE_MS);
 }
 
 /**
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion }, broadcast) {
   const { file, args } = parseCommand(command);
-  const cwd = worktreePath || homedir();
+  // ownCwd: a repo-less agent that still has a folder of its own (Billion).
+  const cwd = worktreePath || ownCwd || homedir();
 
   // Both of these are checked up front because Windows reports them from the
   // console host *after* spawn() returns — see server/command-path.js. An
@@ -187,7 +228,12 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // would put a live board credential on disk for terminals that have no way to
   // use it — a plain `bash` tab does not need one.
   const mcpConfigPath = takesMcpConfig(file) ? writeMcpConfig(sessionId, agentToken) : null;
-  const spawnArgs = withMcpConfig(file, args, mcpConfigPath);
+  const mcpArgs = withMcpConfig(file, args, mcpConfigPath);
+  // A worker on one of Billion's cards asks Billion before it asks a person
+  // (server/approvals.js) — where the CLI can be hooked, which today is
+  // Claude Code only. Recorded as whether the hook actually went in.
+  const spawnArgs = approvalsToBillion ? withApprovalHook(file, mcpArgs, mcpConfigPath) : mcpArgs;
+  const hooked = spawnArgs !== mcpArgs;
 
   installAsyncSpawnGuard();
   let ptyProcess;
@@ -255,6 +301,8 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     // dispatcher would otherwise yank the user's cursor away every few minutes.
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,       // job this session was dispatched for, if any
+    isBillion: !!isBillion,     // the one agent you talk to (server/billion.js)
+    approvalsToBillion: hooked, // its permission dialogs go to Billion first
     exited: false,
     stateCheckInterval: null,
     repoPath,
@@ -275,6 +323,16 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   lastSpawnAttempt = { session, command, broadcast };
   setupPtyHandlers(session, sessionId, broadcast);
   return { session };
+}
+
+// User accounts are read live, so they can appear while Billion runs. It
+// belongs to no one, so every signed-in user could then drive an agent that
+// never asks before acting: it stops, and Start stays refused (billionRuns).
+// On the one-second tick, not on every chunk of output: it stats a file.
+export function stopBillionUnderAccounts(session) {
+  if (session.isBillion && !session.exited && authEnabled()) {
+    try { session.pty.kill(); } catch {}
+  }
 }
 
 export function updateState(session, broadcast) {

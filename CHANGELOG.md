@@ -5,6 +5,53 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.5.0.0] - 2026-09-24
+
+### Added
+
+- **Billion, the one agent you talk to.** The server now starts an always-on
+  Claude Code agent called Billion. You give it a mission, narrow ("ship the
+  Windows build") or broad ("grow the company"), and it runs the work: it
+  plans, posts job cards, reviews what comes back, merges pull requests, and
+  comes to you only for money, access, anything irreversible, making a
+  private repo public, payments or security, and real forks in direction.
+  It runs without permission prompts, so those rules are its brakes.
+  - On its first start it introduces itself, shows you what it will always
+    ask you about, and asks for your mission and where new project repos
+    should go. After that it works in a self-paced loop and picks up where it
+    left off when the server restarts.
+  - Its memory is a git repo of its own in `~/.agent-007/billion`: your rules
+    in `CLAUDE.md`, the mission and what it learns in `COMPANY.md`, its
+    current plan in `STATE.md`. Every change is a commit. Its instructions
+    (`CHARTER.md`) are Agent 007's and update with each release, without
+    touching your rules.
+  - It sits pinned at the top of the left panel and alone at the top of the
+    office, and its terminal opens by default. Nothing restarts it on its own:
+    a stopped Billion shows a Start button.
+  - On by default. `BILLION=0` turns it off and `BILLION_DIR` moves its
+    folder (it must be new or empty). It stays off while user accounts are
+    enabled, since it would belong to everyone.
+- **Every agent can message Billion,** and a card Billion posted tells it the
+  moment it reaches Review, with the pull request or summary, instead of
+  waiting for its next check. Workers on its cards are told they can ask it
+  instead of waiting for you.
+- **Billion answers its workers' permission requests.** A Claude Code worker
+  on one of Billion's cards asks Billion before it asks you. Billion allows,
+  denies with a reason the worker reads, or leaves it to you, and anything it
+  does not answer within two minutes comes to you as the usual dialog. A
+  request it could not see in full, a question or plan approval, or text that
+  tries to steer its answer always reaches you instead. Codex workers still
+  ask you.
+- **Billion's board tools:** it can add a new project's repo to the board, and
+  accept a finished card that has no pull request or send it back with a note
+  for the next worker.
+
+### Changed
+
+- `list_jobs` shows which agent posted each card.
+- The server answers Claude Code's first-run folder trust dialog for Billion's
+  own folder.
+
 ## [0.4.10.1] - 2026-09-24
 
 ### Fixed

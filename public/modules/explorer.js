@@ -1,5 +1,5 @@
 // File explorer panel — repo sections, branch trees, inline diffs
-import { agents, repos, orphans, activeSessionId, setView } from './state.js';
+import { agents, repos, orphans, activeSessionId, setView, billionEnabled } from './state.js';
 import { send } from './ws.js';
 import { switchToSession } from './terminal.js';
 
@@ -142,7 +142,10 @@ export function renderExplorer() {
   const scrollTop = content.scrollTop;
   content.innerHTML = '';
 
-  if (repos.size === 0 && agents.size === 0 && orphans.size === 0) {
+  renderBillionRow(content);
+
+  const otherAgents = [...agents.values()].filter(a => !a.isBillion).length;
+  if (repos.size === 0 && otherAgents === 0 && orphans.size === 0) {
     const empty = document.createElement('div');
     empty.className = 'explorer-empty';
     empty.textContent = 'No repos yet';
@@ -257,7 +260,7 @@ export function renderExplorer() {
   }
 
   // Agents without repos (legacy mode)
-  const noRepoAgents = [...agents.entries()].filter(([, a]) => !a.repoPath);
+  const noRepoAgents = [...agents.entries()].filter(([, a]) => !a.repoPath && !a.isBillion);
   if (noRepoAgents.length > 0) {
     const section = document.createElement('div');
     section.className = 'explorer-repo';
@@ -283,6 +286,47 @@ export function renderExplorer() {
   }
 
   content.scrollTop = scrollTop;
+}
+
+// Billion, pinned above the repos (docs/BILLION.md). The row stays while it is
+// stopped, with a Start button: nothing restarts it on its own.
+function renderBillionRow(content) {
+  const [sessionId, agent] = [...agents.entries()].find(([, a]) => a.isBillion) || [];
+  if (!billionEnabled && !agent) return;
+  const running = !!agent && agent.state !== 'DISCONNECTED';
+  const section = document.createElement('div');
+  section.className = 'explorer-repo explorer-billion';
+  const entry = document.createElement('div');
+  entry.className = `explorer-branch${sessionId && sessionId === activeSessionId ? ' active' : ''}`;
+  // The whole row starts a stopped Billion, not just its button.
+  entry.onclick = running ? () => switchToSession(sessionId) : () => send({ type: 'billion-start' });
+  const dot = document.createElement('span');
+  dot.className = 'explorer-dot';
+  // Red only for a Billion that ran and stopped; grey for one not started yet.
+  dot.style.background = stateColor(running ? agent.state : agent ? 'DISCONNECTED' : 'IDLE');
+  entry.appendChild(dot);
+  const name = document.createElement('span');
+  name.className = 'explorer-billion-name';
+  name.textContent = 'Billion';
+  entry.appendChild(name);
+  if (!running) {
+    const stopped = document.createElement('span');
+    stopped.className = 'explorer-branch-label';
+    stopped.textContent = 'stopped';
+    entry.appendChild(stopped);
+    const start = document.createElement('button');
+    start.className = 'explorer-icon-btn explorer-billion-start';
+    start.textContent = '\u25b6';
+    start.title = 'Start Billion';
+    start.setAttribute('aria-label', 'Start Billion');
+    start.onclick = (e) => {
+      e.stopPropagation();
+      send({ type: 'billion-start' });
+    };
+    entry.appendChild(start);
+  }
+  section.appendChild(entry);
+  content.appendChild(section);
 }
 
 function saveCollapsedRepos() {

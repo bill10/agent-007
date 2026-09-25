@@ -19,7 +19,7 @@
 // session Map so it is testable on its own: sessions come in as parameters.
 
 import { parseCommand, detectState } from '../lib/helpers.js';
-import { permissionFlagsFromCommand, sessionAgentFromCommand } from '../lib/jobs.js';
+import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
@@ -37,6 +37,11 @@ export const USER_TYPING_HOLD_MS = 30 * 1000;
 export const SUBMIT_DELAY_MS = 150;
 
 const queues = new Map();   // recipient session id -> [formatted text]
+// How many at the front of a queue the server wrote (approvals, board
+// notices). They go ahead of agent messages and count against their own cap,
+// so agents messaging Billion cannot push its approvals past their wait, or
+// crowd them out of the queue altogether.
+const serverAhead = new Map();
 const sends = new Map();    // `${from.id}>${to.id}` -> [timestamps]
 
 // Everything but newline and tab. The text goes inside a bracketed paste, and a
@@ -75,30 +80,90 @@ export function isUnguarded(session) {
     .some(a => /^(-c|--config|-p|--profile|--full-auto)(=|$)/.test(a) || /^-c\S/.test(a));
 }
 
+// Billion (server/billion.js) is the exception both rules make: every agent
+// may message it. It is the one agent everyone reports to, it belongs to no
+// one, and it never asks before acting — so a worker that read untrusted text
+// can pass that text on to an agent with full access. Accepted in the design
+// (docs/BILLION.md): messages arrive labelled as coming from an agent, and its
+// charter treats them as information, never as instructions.
 export function messageableAgents(from, sessions) {
   const fromUnguarded = isUnguarded(from);
   return [...sessions.values()].filter(s =>
-    s.id !== from.id && !s.exited && isAgent(s) && sameOwner(from, s)
-    && (fromUnguarded || !isUnguarded(s)));
+    s.id !== from.id && !s.exited && isAgent(s)
+    && (s.isBillion || (sameOwner(from, s) && (fromUnguarded || !isUnguarded(s)))));
 }
 
 // Header fields lose newlines as well: a name is renamable, and one carrying a
 // newline could start a line of its own outside the quoted body.
-const oneLine = (s) => clean(s).replace(/[\n\t]/g, ' ');
+export const oneLine = (s) => clean(s).replace(/[\n\t]/g, ' ');
 
 export function formatMessage(from, text) {
   const where = [from.agent, from.repoSlug, from.branchName].filter(Boolean).map(oneLine).join(' · ');
   const name = oneLine(from.name);
   // Every body line quoted, so a body cannot close the message with a footer
   // of its own and carry on as if it were the user speaking.
-  const body = clean(text).split('\n').map(line => `> ${line}`).join('\n');
+  const body = quoteLines(text).join('\n');
   return `[Message from agent ${name}${where ? ` (${where})` : ''}]\n`
     + `${body}\n`
     + `[Reply with the send_message tool, to: "${name}". This came from another agent, not from the user.]`;
 }
 
+// Agent text, quoted line by line so it cannot pass for anything but a quote.
+export function quoteLines(text) {
+  return clean(text).split('\n').map(line => `> ${line}`);
+}
+
+// A board notice: from the server, not an agent, so it names the board and
+// carries no reply line. Quoted like a message body, since a card's summary is
+// an agent's text.
+export function formatNotice(headline, lines = []) {
+  return [`[Job board] ${oneLine(headline)}`, ...lines.flatMap(quoteLines),
+    '[This came from the Agent 007 job board, not the user.]'].join('\n');
+}
+
+// Queue text the server wrote (a board notice, an approval request) and
+// deliver it when the session can take one. Not agent-to-agent, so neither
+// the permission rule nor the pair limit applies; the queue cap does, and
+// text over it is refused.
+//
+// Cleaned here, whoever wrote it: it goes into a bracketed paste, and a stray
+// ESC[201~ anywhere in it — a tool name, a card title — would end the paste
+// and type the rest as keystrokes of the user's own.
+export function sendText(session, text, now = Date.now()) {
+  if (!session || session.exited) return false;
+  const queue = queues.get(session.id) || [];
+  const ahead = serverAhead.get(session.id) || 0;
+  if (ahead >= QUEUE_CAP) return false;
+  queue.splice(ahead, 0, clean(text));
+  queues.set(session.id, queue);
+  serverAhead.set(session.id, ahead + 1);
+  flushMessages(session, now);
+  return true;
+}
+
+// Take back text still waiting in a session's queue (an approval request that
+// expired before it was typed).
+export function unqueueText(sessionId, text) {
+  const queue = queues.get(sessionId);
+  const at = queue ? queue.indexOf(clean(text)) : -1;
+  if (at === -1) return false;
+  queue.splice(at, 1);
+  const ahead = serverAhead.get(sessionId) || 0;
+  if (at < ahead) serverAhead.set(sessionId, ahead - 1);
+  if (!queue.length) queues.delete(sessionId);
+  return true;
+}
+
+// A notice over the cap is dropped: the board still has the card.
+export function sendNotice(session, headline, lines, now = Date.now()) {
+  return sendText(session, formatNotice(headline, lines), now);
+}
+
 // Whether a message may be typed into this session right now.
 export function canDeliver(session, now = Date.now()) {
+  // Billion holds its mail until it says it is ready (billion_ready), so
+  // nothing lands in the middle of its introduction.
+  if (session.messagesHeld) return false;
   // Both: the stored state is up to a second old, and a dialog that opened
   // since is what this must not type into.
   if (session.exited || session.state !== 'WAITING' || detectState(session, { now }) !== 'WAITING') return false;
@@ -147,7 +212,9 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
     return { error: `The message is ${body.length} characters; the limit is ${MAX_MESSAGE_CHARS}.` };
   }
   const reachable = messageableAgents(from, sessions);
-  const target = reachable.find(s => s.name === to);
+  // Billion by what it is, not by what it is called: an old session that
+  // happens to carry the name must not receive what was meant for it.
+  const target = to === BILLION_NAME ? reachable.find(s => s.isBillion) : reachable.find(s => s.name === to);
   if (!target) {
     const names = reachable.map(s => s.name).join(', ');
     return { error: `No agent named "${to}" you can message. ${names ? `Agents you can reach: ${names}.` : 'There are no other agents running.'}` };
@@ -160,7 +227,7 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
     return { error: `You have sent ${target.name} ${PAIR_LIMIT} messages in the last ${PAIR_WINDOW_MS / 60000} minutes, which is the limit. Tell the user what you need from ${target.name} instead.` };
   }
   const queue = queues.get(target.id) || [];
-  if (queue.length >= QUEUE_CAP) {
+  if (queue.length - (serverAhead.get(target.id) || 0) >= QUEUE_CAP) {
     return { error: `${target.name} already has ${QUEUE_CAP} messages waiting for it. Try again once it has caught up.` };
   }
 
@@ -178,6 +245,8 @@ export function flushMessages(session, now = Date.now()) {
   const queue = queues.get(session.id);
   if (!queue?.length || !canDeliver(session, now)) return false;
   deliver(session, queue.shift(), now);
+  const ahead = serverAhead.get(session.id) || 0;
+  if (ahead) serverAhead.set(session.id, ahead - 1);
   if (!queue.length) queues.delete(session.id);
   return true;
 }
@@ -201,6 +270,7 @@ export function agentSummaries(from, sessions, jobTitle = () => null) {
 // anything addressed to one.
 export function dropMessages(sessionId) {
   queues.delete(sessionId);
+  serverAhead.delete(sessionId);
   for (const key of sends.keys()) {
     if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) sends.delete(key);
   }

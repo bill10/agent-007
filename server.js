@@ -30,8 +30,10 @@ import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
-import { orphans } from './server/state.js';
+import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
+import { hasClaudeTranscript } from './server/agent-transcripts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -42,7 +44,8 @@ const wss = new WebSocketServer({ server, verifyClient });
 // broadcast is injected for the same reason server/jobs.js takes it as an
 // argument: http.js must not import ws.js, and a job posted through the MCP
 // tool has to repaint every open board the moment it lands.
-setupRoutes(app, join(__dirname, 'public'), { broadcast });
+// killSession is a hoisted declaration below: close_job retires a card's worker.
+setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession });
 
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.
@@ -88,6 +91,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     repoPath: resolvedRepoPath, worktreePath, branchName,
     repoSlug, cocktail, ownerId: ownerId || null,
     spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
+    approvalsToBillion: !!meta.approvalsToBillion,
   }, broadcast);
 
   if (result.error) {
@@ -149,8 +153,52 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
   sessions.delete(sessionId);
 }
 
+// Billion (server/billion.js): started at boot, and again only when someone
+// asks — an agent that crashes in a loop is worse than one that stays stopped.
+// Returns the running one if there is one.
+function startBillion() {
+  for (const [id, s] of sessions) {
+    if (!s.isBillion) continue;
+    if (!s.exited) return { session: s, existing: true };
+    sessions.delete(id);   // a stopped one's tab goes; the new one replaces it
+  }
+  const dir = billionDir();
+  let created;
+  try {
+    ({ created } = ensureBillionRepo(dir));
+  } catch (err) {
+    console.error(`Billion: could not set up ${dir}:`, err.message);
+    return { error: `Could not set up Billion's folder ${dir}: ${err.message}` };
+  }
+  // Best effort: a charter that could not be committed is still the new one on
+  // disk, and a Billion on last version's charter beats no Billion.
+  if (!created) {
+    try {
+      if (refreshCharter(dir)) console.log('  Billion: charter updated to this version');
+    } catch (err) {
+      console.error(`Billion: could not commit the updated charter in ${dir}:`, err.message);
+    }
+  }
+  const command = billionCommand({
+    created,
+    hasConversation: !created && hasClaudeTranscript(dir),
+    dir,
+    projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
+  });
+  const result = createSessionFromConfig({
+    sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,
+    repoPath: null, worktreePath: null, cwd: dir, isBillion: true, ownerId: null,
+  }, broadcast);
+  if (result.error) return result;
+  // Mail waits until Billion calls billion_ready: at the end of its
+  // introduction, and at the start of every cycle after a restart.
+  result.session.messagesHeld = true;
+  sessions.set(result.session.id, result.session);
+  return { session: result.session };
+}
+
 // --- WebSocket ---
-setupWebSocket(wss, { createSession, killSession });
+setupWebSocket(wss, { createSession, killSession, startBillion });
 
 // --- Startup ---
 async function startup() {
@@ -163,6 +211,9 @@ async function startup() {
   // real server running on 7007 while the suite ran.
   sweepMcpConfigs();
   loadConfig();
+  // Reserved whether or not it runs: no other agent may take the name that
+  // send_message delivers to Billion by.
+  codenamePool.reserve(BILLION_NAME);
   recoverCrashedSessions(broadcast);
   mkdirSync(WORKTREE_DIR, { recursive: true });
   await pruneWorktrees();
@@ -176,6 +227,12 @@ async function startup() {
     killSession,
   });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
+  if (billionRuns()) {
+    const { error } = startBillion();
+    console.log(error ? `  Billion: not started (${error})` : `  Billion: running in ${billionDir()}`);
+  } else if (billionEnabled()) {
+    console.log('  Billion: off while user accounts are enabled');
+  }
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
     const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
@@ -215,7 +272,7 @@ function gracefulShutdown() {
 }
 
 // --- Exports for testing ---
-export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession };
+export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession, startBillion };
 
 // Auto-start when run directly
 if (isDirectRun(import.meta.url, process.argv[1])) {

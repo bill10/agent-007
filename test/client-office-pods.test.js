@@ -47,6 +47,21 @@ describe('pod layout', () => {
     expect(positions.get('c').x - positions.get('a').x).toBe((WS_W + WS_GAP_X) * Z);
   });
 
+  it('seats Billion alone at the top center, above every pod, whenever it arrived', () => {
+    const infos = [
+      ...agentsOn(['a', '/r/one'], ['c', null]),
+      { id: 'billion', repoPath: null, slug: null, isBillion: true },
+      ...agentsOn(['b', '/r/one']),
+    ];
+    const { pods, positions } = computePodLayout(infos, W, H);
+    // Its own unlabeled pod, first, and not merged with the no-repo pod.
+    expect(pods.map(p => p.repoPath)).toEqual([null, '/r/one', null]);
+    expect(pods.map(p => p.label)).toEqual([null, 'one', null]);
+    const billion = positions.get('billion');
+    expect(billion.x).toBe(Math.floor((W - WS_W * Z) / 2));
+    for (const id of ['a', 'b', 'c']) expect(positions.get(id).y).toBeGreaterThan(billion.y);
+  });
+
   it('anchors a sparse office near the top of the floor, but still centers a full one', () => {
     const one = computePodLayout(agentsOn(['a', '/r/one']), W, H);
     expect(one.positions.get('a').y).toBe(FLOOR_TOP + TOP_MARGIN);

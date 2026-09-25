@@ -20,6 +20,7 @@ This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel
 
 ## Features
 
+- **Billion, the one agent you talk to** -- An always-on Claude Code agent the server starts for you. Give it a mission and it runs the work: it plans, posts job cards, reviews what comes back, merges pull requests, and answers its workers' permission requests, coming to you only for money, access, anything irreversible, and real forks in direction. Its memory is a git repo of its own, and it picks up where it left off after a restart. Design in [docs/BILLION.md](docs/BILLION.md).
 - **Pixel office** -- Every agent gets a desk. The sprite faces the screen while working, turns to face you when it needs you, and wanders off to sit down when idle, so you can see the state of every agent at a glance. Desks group into per-repo pods; agents walk in on spawn and out on exit.
 - **Git worktree isolation** -- Each agent gets its own worktree and branch automatically, so several agents can work on one repo without merge conflicts. Branches are named after cocktails (`bill/vesper`, `bill/martini`, ...).
 - **Multi-repo support** -- Add any number of repos and manage every agent from one window.
@@ -98,6 +99,8 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `PORT` | `7007` | Listen port |
 | `HOST` | `127.0.0.1` | Bind interface. Use `0.0.0.0` only behind Tailscale/a trusted network |
 | `ALLOWED_ORIGINS` | *(none)* | Comma-separated extra origins for the cross-origin check (`localhost` is always allowed) |
+| `BILLION` | *(on)* | `0` (or `false`/`off`/`no`) turns Billion off. It is also off whenever user accounts exist, since it would belong to everyone |
+| `BILLION_DIR` | `~/.agent-007/billion` | Billion's own folder and git repo. Point it at a new or empty folder |
 
 > **Running remotely?** The server spawns real shells, so never expose it to the
 > open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
@@ -161,8 +164,11 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message)
-  messages.js      Agent-to-agent messages (who can reach whom, rate limit, queued until the recipient rests at its prompt)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission)
+  messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
+  billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
+  approvals.js     Hands a worker's permission request to Billion and waits for its answer
+  permission-hook.js  Claude Code PermissionRequest hook a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)
@@ -188,6 +194,8 @@ lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
   cron.js          Five-field cron parser (schedules for scheduled jobs)
+templates/
+  billion/         Billion's starting files (charter, owner rules, STATE.md, COMPANY.md)
 ```
 
 ## Acknowledgements

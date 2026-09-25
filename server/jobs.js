@@ -10,13 +10,14 @@
 
 import { execFile } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { basename, dirname, join, resolve, sep } from 'path';
 import { config, sessions, orphans, adoptingOrphans, codenamePool, CONFIG_DIR } from './state.js';
 import { saveConfig, syncOrphansToConfig } from './config.js';
 import { gitExec, removeWorktree } from './git.js';
 import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
-import { safeFilename } from '../lib/helpers.js';
+import { safeFilename, expandHome } from '../lib/helpers.js';
+import { sendNotice } from './messages.js';
+import { liveBillion } from './billion.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr,
@@ -26,6 +27,7 @@ import {
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
+  BILLION_NAME,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -288,8 +290,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -314,7 +316,7 @@ export function resolveRepoRef(ref) {
   if (repos.length === 0) return { error: 'No repositories are configured in Agent 007 — add one in the explorer first' };
   const raw = String(ref || '').trim();
   if (!raw) return { error: `Which repository? Pass repo with one of: ${known.map(p => basename(p)).join(', ')}` };
-  const expanded = raw.startsWith('~/') ? resolve(homedir(), raw.slice(2)) : raw;
+  const expanded = expandHome(raw);
   const abs = resolve(expanded);
   const byPath = known.find(p => p === raw || p === abs);
   if (byPath) return { path: byPath };
@@ -394,6 +396,7 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, re
     postedBy: user ? user.id : null,
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
+    postedByBillion: !!session?.isBillion,
   }, broadcast);
   if (result.error) return { error: result.error };
 
@@ -540,6 +543,12 @@ export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr,
         + 'Ask them, or post a new card.',
     };
   }
+  // Billion's cards carry its trust — its worker asks Billion, not a person,
+  // for permission — and belong to no user, so the check above never fires on
+  // them. Only Billion rewrites them; a person still can, from the board.
+  if (job.postedByBillion && !session?.isBillion) {
+    return { error: `"${job.title}" is ${BILLION_NAME}'s card, so only ${BILLION_NAME} can edit it. Ask it with send_message, or post a new card.` };
+  }
 
   const fields = {};
   const changed = [];
@@ -683,7 +692,68 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
       message: `Job "${job.title}" moved to Review — ${pr ? `PR #${pr.number}` : `${session.name} finished`}`,
     });
   }
+  notifyBillion(job);
   return { job: jobSummary(job) };
+}
+
+// A card Billion posted tells Billion the moment it lands in Review, so a
+// finished result is picked up now rather than at its next wake-up. Billion
+// only: any other agent that posted a card may be mid-conversation with a
+// person, and a notice typed into that terminal would be an interruption
+// nobody asked for. The summary is a worker's text, so it goes in quoted and
+// trimmed; read_job has the whole of it.
+const NOTICE_SUMMARY_CHARS = 1500;
+export function notifyBillion(job) {
+  if (!job.postedByBillion) return false;
+  const billion = liveBillion();
+  if (!billion) return false;
+  const summary = job.resultSummary || '';
+  const lines = [
+    job.prUrl ? `Pull request: ${job.prUrl}` : null,
+    summary ? `Summary: ${summary.length > NOTICE_SUMMARY_CHARS ? `${summary.slice(0, NOTICE_SUMMARY_CHARS)}… (read_job for the rest)` : summary}` : null,
+  ].filter(Boolean);
+  return sendNotice(billion, `"${job.title}" (card ${job.id}, ${basename(job.repoPath || '')}) is in Review.`, lines);
+}
+
+// Billion's verdict on one of its own cards in Review (docs/BILLION.md, part 3).
+// Accept files it as Done and retires its agent; send it back returns it to To
+// do with the reason added to its detail, so the next worker knows what to fix.
+//
+// Only Billion, only its own cards, only from Review: this is the owner's
+// "Done" button handed to one agent, not to every agent on the board. A card
+// with a pull request is not accepted here — merging it is what files it as
+// Done, and a Done card whose PR never merged would claim work shipped that
+// did not.
+const SENT_BACK_CHARS = 2000;
+export async function closeJobForAgent({ session, id, accept, note }, broadcast, { killSession } = {}) {
+  if (!session?.isBillion) return { error: 'Only Billion can close cards.' };
+  const job = allJobs().find(j => j.id === id);
+  if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
+  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to close.` };
+  if (job.state !== 'review') return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; only a card in Review can be closed.` };
+  const reason = typeof note === 'string' ? note.trim() : '';
+  if (accept) {
+    if (job.prUrl) return { error: `"${job.title}" has a pull request (${job.prUrl}). Merge it, or close it to drop the work: either way the board files the card away on its own.` };
+    const result = await moveJob(job.id, 'done', broadcast, { killSession });
+    return result.error ? result : { job: jobSummary(job), accepted: true };
+  }
+  if (!reason) return { error: 'Say why it goes back (note): the next worker only knows what the card tells it.' };
+  // The note goes on before the move: once the card is back in To do the
+  // dispatcher may hand it out, and the worker must get the reason with it.
+  // The PR is kept for the reply, since the move clears it from the card.
+  const oldPrUrl = job.prUrl || null;
+  const oldDetail = job.detail;
+  // The note always fits: it is the old detail that gives way.
+  // Capped well short of the card's limit, so the task itself always survives.
+  const sentBack = `Sent back by ${BILLION_NAME}: ${reason}`.slice(0, SENT_BACK_CHARS);
+  const room = MAX_DETAIL_LEN - sentBack.length - 2;
+  job.detail = job.detail && room > 0 ? `${job.detail.slice(0, room)}\n\n${sentBack}` : sentBack;
+  const result = await moveJob(job.id, 'todo', broadcast, { killSession });
+  if (result.error) {
+    job.detail = oldDetail;
+    return result;
+  }
+  return { job: jobSummary(job), accepted: false, oldPrUrl };
 }
 
 // A card stops being editable the moment it leaves To do, whoever is asking.
@@ -1063,6 +1133,8 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // of whatever they are typing every few minutes would be unusable.
     const result = await createSession(command, null, job.repoPath, branch, job.postedBy || null, {
       spawnedBy: 'board', jobId: job.id, branchSuffixOnCollision: true,
+      // Billion's cards ask Billion before they ask a person (part 4).
+      approvalsToBillion: job.postedByBillion === true,
     });
     if (result.error) {
       // Surface the failure on the card and leave it in To do; the next tick
@@ -1582,6 +1654,7 @@ export async function checkPullRequests(broadcast, { findPr = findPrForBranch } 
     if (broadcast) {
       broadcast({ type: 'notification', level: 'info', message: `Job "${job.title}" moved to Review — PR #${pr.number}` });
     }
+    notifyBillion(job);
   }
   if (moved.length > 0 || noted) persist(broadcast);
   return moved;

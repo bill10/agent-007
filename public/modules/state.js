@@ -23,6 +23,16 @@ export let selfUserId = null;
 export let authEnabled = false;
 export let serverPlatform = ''; // process.platform of the server, from the welcome message
 
+// Whether this server runs Billion (server/billion.js). The explorer keeps its
+// row pinned even while it is stopped, so there is always a way to start it.
+export let billionEnabled = false;
+export function setBillionEnabled(on) { billionEnabled = !!on; }
+
+// Billion's tab first, then the rest in their own order.
+export function billionFirst(entries) {
+  return [...entries].sort(([, a], [, b]) => Number(!!b.isBillion) - Number(!!a.isBillion));
+}
+
 export function setSelf(userId, enabled, platform) {
   selfUserId = userId;
   authEnabled = !!enabled;

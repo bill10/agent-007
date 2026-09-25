@@ -14,6 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping } from './messages.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent } from '../lib/jobs.js';
+import { billionRuns } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
@@ -60,6 +61,7 @@ export function sessionPayload(session) {
     ownerColor: owner ? owner.color : null,
     spawnedBy: session.spawnedBy || 'user',
     jobId: session.jobId || null,
+    isBillion: !!session.isBillion,
     // So a client builds its xterm at the pty's size before the scrollback
     // replay lands, instead of reflowing it into xterm's default 80x24.
     cols: session.pty.cols,
@@ -147,7 +149,7 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
-export function setupWebSocket(wss, { createSession, killSession }) {
+export function setupWebSocket(wss, { createSession, killSession, startBillion }) {
   wss.on('connection', (ws, req) => {
     // Auth gate (phase 1): when users are configured, require a valid token
     // (?token= on the WS URL, since browsers can't set handshake headers).
@@ -163,7 +165,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
 
     // Tell the client who it is and whether auth is on.
     // platform lets the client offer the right shell preset (bash vs PowerShell).
-    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user), platform: process.platform }));
+    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user), platform: process.platform, billionEnabled: billionRuns() }));
 
     // Send repos list
     ws.send(JSON.stringify({
@@ -171,8 +173,10 @@ export function setupWebSocket(wss, { createSession, killSession }) {
       repos: config.repos.map(r => ({ path: r.path, slug: basename(r.path), exists: existsSync(r.path) })),
     }));
 
-    // Send existing sessions
-    for (const [, session] of sessions) {
+    // Send existing sessions, Billion first: a window that has not picked a
+    // tab opens the first one it is sent, and Billion is the default.
+    const replay = [...sessions.values()].sort((a, b) => Number(!!b.isBillion) - Number(!!a.isBillion));
+    for (const session of replay) {
       ws.send(JSON.stringify(sessionPayload(session)));
       const chunks = session.ringBuffer.getAll();
       for (let i = 0; i < chunks.length; i += 100) {
@@ -226,7 +230,9 @@ export function setupWebSocket(wss, { createSession, killSession }) {
         case 'pty-input': {
           const session = sessions.get(msg.sessionId);
           // Non-owners are read-only: silently drop input (no per-keystroke error).
-          if (session && !session.exited && owns(ws, session.ownerId)) {
+          // Billion belongs to no one, so with user accounts nobody may type
+          // into it — not even in the second before the check stops it.
+          if (session && !session.exited && owns(ws, session.ownerId) && !(session.isBillion && authEnabled())) {
             // Holds agent messages back while a person is mid-line (messages.js).
             if (isTyping(msg.data)) session.lastUserInputAt = Date.now();
             session.pty.write(msg.data);
@@ -249,6 +255,19 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           if (session) fitPtyToWatchers(session);
           break;
         }
+        case 'billion-start': {
+          // Say why, rather than a Start button that silently does nothing
+          // (it can outlive the switch-off: user accounts are read live).
+          if (!billionRuns()) {
+            ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: 'Billion is off: turned off with BILLION=0, or user accounts are enabled' }));
+            break;
+          }
+          const result = startBillion();
+          if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: result.error }));
+          // Already running (a second click): everyone has its tab already.
+          else if (!result.existing) announceSession(result.session, ws);
+          break;
+        }
         case 'kill': {
           const session = sessions.get(msg.sessionId);
           if (session && !owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
@@ -268,6 +287,11 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           const session = sessions.get(msg.sessionId);
           if (!session) break;
           if (!owns(ws, session.ownerId)) { denyControl(ws, session.name, session.ownerId); break; }
+          // send_message finds Billion by name, so the name is fixed.
+          if (session.isBillion) {
+            ws.send(JSON.stringify({ type: 'notification', level: 'error', message: `${session.name}'s name can't be changed` }));
+            break;
+          }
           const name = typeof msg.name === 'string' ? msg.name.trim().slice(0, 40) : '';
           if (!/[a-zA-Z0-9]/.test(name) || name === session.name) break;
           // The pool holds every live label, every orphan's label, and every
@@ -370,6 +394,8 @@ export function setupWebSocket(wss, { createSession, killSession }) {
           // by a card, a transcript or the default is a guess, and writing it
           // down would make a wrong one permanent.
           const { command, mode, flags } = orphanResumePlan(orphan);
+          // Matched on the branch, as relinkSessionToJob does below.
+          const card = allJobs().find(j => j.branchName && j.branchName === orphan.branchName && j.repoPath === orphan.repoPath);
           const result = createSessionFromConfig({
             sessionId: nextSessionId(),
             name: orphan.name,
@@ -388,6 +414,7 @@ export function setupWebSocket(wss, { createSession, killSession }) {
             // recorded flags, it keeps them.
             permissionFlags: mode ? [] : flags,
             origin: orphan.origin === 'board' ? 'board' : 'user',
+            approvalsToBillion: card?.postedByBillion === true,
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);

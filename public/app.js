@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
@@ -475,6 +475,7 @@ function onMessage(msg) {
   switch (msg.type) {
     case 'welcome':
       setSelf(msg.user ? msg.user.id : null, msg.authEnabled, msg.platform);
+      setBillionEnabled(msg.billionEnabled);
       refreshSpawnPresets();
       break;
     case 'presence': renderPresence(msg.users, selfUserId); break;
