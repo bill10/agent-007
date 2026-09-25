@@ -577,7 +577,10 @@ anywhere but Telegram, and there is no paid transcription.
    start of every cycle, so a restart needs no stored flag; a card Billion
    posted sends it a `[Job board]` notice when it reaches Review, through
    `finish_job` or the PR poll (Billion only: another agent's terminal may be
-   mid-conversation with a person); workers on Billion's cards are told they
+   mid-conversation with a person), and another once CI on the card's PR
+   finishes on its head commit (`CI finished on … : all passed` or `failed:
+   <checks>`, once per head commit and again after a re-run, from a 60s poll of Review cards that also files a
+   merged or closed PR at once, `checkReviewCi` in `server/jobs.js`); workers on Billion's cards are told they
    can ask it. Verified live: a guarded worker messaged Billion, Billion
    replied, the reply arrived.
 3. **Board tools — built.** `add_repo` (wraps `addRepo`, `~/` allowed) and
