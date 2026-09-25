@@ -5,6 +5,20 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.5.0] - 2026-09-25
+
+### Added
+
+- **Queued Codex jobs start without a click too.** Codex asks "Do you trust
+  the contents of this directory?" in every brand-new worktree, so a Codex card
+  on the board used to wait there for someone. A board-dispatched Codex worker
+  is now started with `-c projects={"<worktree>"={trust_level="trusted"}}`,
+  which trusts that one worktree for that run. Nothing is written to
+  `~/.codex/config.toml`, and your own trusted projects stay trusted. A trusted
+  worktree lets the repo's Codex project config, hooks and exec policies load,
+  the same trade-off as for Claude Code. `TRUST_BOARD_WORKTREES=0` now keeps
+  the dialog for both CLIs, and hand-started Codex agents keep it as before.
+
 ## [0.6.4.1] - 2026-09-25
 
 ### Changed
