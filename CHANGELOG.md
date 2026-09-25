@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.5.1.2] - 2026-09-25
+
+### Fixed
+
+- **A fresh `npm install` reports 0 vulnerabilities.** It used to print
+  "9 vulnerabilities (2 low, 2 moderate, 4 high, 1 critical)". Express moves to
+  4.22.3, which brings patched `qs`, `body-parser` and `path-to-regexp`. The
+  test runner moves to Vitest 4.1.11, and with it patched `vite`, `esbuild`,
+  `postcss` and `nanoid`. Vitest 5 also fixes it but needs Node 22.12, and
+  Agent 007 still supports Node 20.12.
+
 ## [0.5.1.1] - 2026-09-25
 
 ### Changed
