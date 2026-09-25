@@ -52,7 +52,7 @@ describe('asking Billion', () => {
   it('types the request into Billion, and returns its allow', async () => {
     const answer = requestApproval(worker, request, { jobTitle: 'Fix login' });
     expect(typed(billion)).toContain('Falcon (card "Fix login", app · fix-login) asks to use Write:');
-    expect(typed(billion)).toContain('>   "file_path": "/elsewhere/x.txt",');
+    await vi.waitFor(() => expect(typed(billion)).toContain('>   "file_path": "/elsewhere/x.txt",'));   // typed in small pastes
     expect(answerApproval(idOf(billion), 'allow')).toEqual({ worker: 'Falcon', choice: 'allow', cut: false });
     expect(await answer).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
   });

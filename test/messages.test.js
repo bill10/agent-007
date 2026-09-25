@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   sendMessage, flushMessages, dropMessages, formatMessage, canDeliver, isTyping, isUnguarded,
-  messageableAgents, pendingMessages, PAIR_LIMIT, PAIR_WINDOW_MS, QUEUE_CAP, USER_TYPING_HOLD_MS, SUBMIT_DELAY_MS,
+  messageableAgents, pendingMessages, PAIR_LIMIT, PAIR_WINDOW_MS, QUEUE_CAP, USER_TYPING_HOLD_MS, PASTE_CHUNK_CHARS, pasteChunks,
 } from '../server/messages.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { updateState, setupPtyHandlers } from '../server/pty.js';
@@ -22,7 +22,8 @@ function agent(name, fields = {}) {
 }
 
 const mapOf = (...list) => new Map(list.map(s => [s.id, s]));
-const written = (s) => s.pty.write.mock.calls.map(c => c[0]).join('');
+// Everything typed so far, once the rest of the message's pastes are out.
+const written = (s) => { vi.runAllTimers(); return s.pty.write.mock.calls.map(c => c[0]).join(''); };
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -31,15 +32,36 @@ afterEach(() => {
 });
 
 describe('delivery', () => {
-  it('types a message into an idle agent as one bracketed paste, then Enter', () => {
+  it('types a message into an idle agent as a bracketed paste per line, then Enter', () => {
     const from = agent('Cobra', { command: 'codex', agent: 'codex', repoSlug: 'agent-007', branchName: 'fix-cron' });
     const to = agent('Viper');
     expect(sendMessage({ from, to: 'Viper', text: 'line one\nline two', sessions: mapOf(from, to), now: NOW }))
       .toMatchObject({ delivered: true });
-    expect(written(to)).toBe(`\x1b[200~${formatMessage(from, 'line one\nline two')}\x1b[201~`);
+    const text = formatMessage(from, 'line one\nline two');
+    expect(to.pty.write).toHaveBeenCalledTimes(1);   // the first line at once, the rest on timers
+    expect(written(to)).toBe(`${text.split('\n').map((line, i, all) => `\x1b[200~${line}${i < all.length - 1 ? '\n' : ''}\x1b[201~`).join('')}\r`);
     expect(written(to)).toContain('[Message from agent Cobra (codex · agent-007 · fix-cron)]');
-    vi.advanceTimersByTime(SUBMIT_DELAY_MS);
-    expect(to.pty.write).toHaveBeenLastCalledWith('\r');
+  });
+
+  it('holds the next message until the last one is typed out', () => {
+    const from = agent('Cobra');
+    const to = agent('Viper');
+    sendMessage({ from, to: 'Viper', text: 'a\nb\nc', sessions: mapOf(from, to), now: NOW });
+    sendMessage({ from, to: 'Viper', text: 'second', sessions: mapOf(from, to), now: NOW });
+    to.stateChangedAt = NOW + 1;                        // even if the state moved meanwhile
+    expect(flushMessages(to, NOW + 1)).toBe(false);
+    vi.runAllTimers();
+    expect(flushMessages(to, NOW + 1)).toBe(true);
+  });
+
+  it('keeps each paste short enough that Claude Code takes it as typing, not pasted content', () => {
+    const long = `${'x'.repeat(450)}\n\n- one\n- two 🐍${'y'.repeat(PASTE_CHUNK_CHARS - 7)}🐍`;
+    const chunks = pasteChunks(long);
+    expect(chunks.join('')).toBe(long);                      // nothing lost or reordered
+    expect(chunks.every(c => Array.from(c).length <= PASTE_CHUNK_CHARS)).toBe(true);
+    expect(chunks.every(c => c.split('\n').length <= 2 && (!c.includes('\n') || c.endsWith('\n')))).toBe(true);
+    expect(chunks.some(c => /[\ud800-\udbff]$/.test(c))).toBe(false);   // no emoji cut in half
+    expect(chunks.slice(0, 3).map(c => c.length)).toEqual([PASTE_CHUNK_CHARS, PASTE_CHUNK_CHARS, 51]);
   });
 
   it.each(['WORKING', 'MESSAGE', 'DISCONNECTED'])('queues rather than typing into an agent that is %s', (state) => {
@@ -81,7 +103,7 @@ describe('delivery', () => {
       const to = agent('Viper');
       sendMessage({ from, to: 'Viper', text: 'hi', sessions: mapOf(from, to), now: NOW });
       Object.assign(to, change);
-      vi.advanceTimersByTime(SUBMIT_DELAY_MS);
+      vi.runAllTimers();
       expect(to.pty.write).not.toHaveBeenCalledWith('\r');
     }
   });
@@ -92,7 +114,7 @@ describe('delivery', () => {
     const sessions = mapOf(from, to);
     sendMessage({ from, to: 'Viper', text: 'first', sessions, now: NOW });
     to.lastStrippedLine = 'Do you want to proceed?';
-    vi.advanceTimersByTime(SUBMIT_DELAY_MS);            // Enter skipped
+    vi.runAllTimers();            // Enter skipped
     sendMessage({ from, to: 'Viper', text: 'second', sessions, now: NOW });
     to.lastStrippedLine = '';
     to.stateChangedAt = to.messageUnsubmittedAt + 1;   // it has worked and come back since
@@ -119,7 +141,7 @@ describe('delivery', () => {
     const from = agent('Cobra');
     const to = agent('Viper', { pty: { write: vi.fn(() => { throw new Error('EIO'); }) } });
     expect(() => sendMessage({ from, to: 'Viper', text: 'hi', sessions: mapOf(from, to), now: NOW })).not.toThrow();
-    expect(() => vi.advanceTimersByTime(SUBMIT_DELAY_MS)).not.toThrow();
+    expect(() => vi.runAllTimers()).not.toThrow();
   });
 
   it('cleans the header too, and 8-bit CSI as well as ESC', () => {
@@ -300,7 +322,7 @@ describe('edges of sending', () => {
     const to = agent('Viper');
     sendMessage({ from, to: 'Viper', text: 'hi', sessions: mapOf(from, to), now: NOW });
     to.exited = true;
-    vi.advanceTimersByTime(SUBMIT_DELAY_MS);
+    vi.runAllTimers();
     expect(to.pty.write).toHaveBeenCalledTimes(1);
   });
 
@@ -388,6 +410,7 @@ describe('the pty state check (server/pty.js)', () => {
     const sessions = mapOf(from, to);
     sendMessage({ from, to: 'Viper', text: 'first', sessions, now: NOW });
     sendMessage({ from, to: 'Viper', text: 'second', sessions, now: NOW });
+    vi.runAllTimers();                     // the first finishes typing
     vi.setSystemTime(NOW + 1000);
     updateState(to);                       // still WAITING: no stamp, no delivery
     expect(written(to)).not.toContain('second');

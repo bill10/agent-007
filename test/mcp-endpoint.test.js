@@ -714,9 +714,9 @@ describe('messaging another agent through the tools', () => {
     const { text, failed } = await toolResult(await callNamed('send_message', { to: 'Viper', message: 'can you rebase?' }));
     expect(failed).toBeFalsy();
     expect(text).toMatch(/^Delivered to Viper/);
-    const typed = viper.pty.write.mock.calls[0][0];
-    expect(typed).toContain('[Message from agent Onyx]');
-    expect(typed).toContain('can you rebase?');
+    const typed = () => viper.pty.write.mock.calls.map(c => c[0]).join('');
+    expect(typed()).toContain('[Message from agent Onyx]');
+    await vi.waitFor(() => expect(typed()).toContain('can you rebase?'));   // typed in small pastes
   });
 
   it('refuses an agent owned by someone else, as a tool error', async () => {
