@@ -136,3 +136,84 @@ describe('re-spawning an agent someone started', () => {
     expect(orphanResumePlan({ ...base, permissionFlags: ['--permission-mode', 'plan'] }).flags).toEqual(['--permission-mode', 'plan']);
   });
 });
+
+describe('edges of the default', () => {
+  it('reads a flag-shaped prompt after `--` as the prompt, and still adds the default', () => {
+    const cmd = withDefaultPermission('claude -- --dangerously-skip-permissions', env);
+    expect(cmd).toBe('claude --permission-mode bypassPermissions -- --dangerously-skip-permissions');
+    expect(permissionFlagsFromCommand(cmd)).toEqual(['--permission-mode', 'bypassPermissions']);
+  });
+
+  it('rebuilds a quoted codex path, and leaves one alone when the mode has no flags', () => {
+    const cmd = withDefaultPermission('"/my tools/codex" "fix it"', env);
+    expect(parseCommand(cmd)).toEqual({ file: '/my tools/codex', args: ['--dangerously-bypass-approvals-and-sandbox', 'fix it'] });
+    expect(withDefaultPermission('"/my tools/codex" "fix it"', { CODEX_PERMISSION_MODE: 'acceptEdits' })).toBe('"/my tools/codex" "fix it"');
+  });
+
+  it('has no flags for a CLI it does not know, or a mode that is not one', () => {
+    expect(permissionModeFlags('gemini', 'plan')).toEqual([]);
+    expect(permissionModeFlags('claude', 'yolo')).toEqual([]);
+  });
+
+  it('spawns a person\'s agent unchanged when the .env value is not a mode', async () => {
+    process.env.CLAUDE_PERMISSION_MODE = 'yolo';
+    await createSession('claude', null, null, null, null, {});
+    expect(spawned[0].command).toBe('claude');
+  });
+});
+
+describe('re-spawning a board agent', () => {
+  const REPO = mkdtempSync(join(tmpdir(), 'a007-permdef-o-'));
+  beforeEach(() => {
+    config.repos = [{ path: REPO }];
+    config.jobs = [];
+    config.jobBoard = null;
+    boardSettings();
+  });
+  const base = { name: 'Old', repoPath: REPO, branchName: 'b1', worktreePath: '/nowhere/b1', agent: 'codex' };
+
+  it('with its card gone, resumes in the CLI\'s .env mode, not with the default as extra flags', () => {
+    process.env.CODEX_PERMISSION_MODE = 'plan';
+    const plan = orphanResumePlan({ ...base, origin: 'board', permissionFlags: [] });
+    expect(plan.mode).toBe('plan');
+    expect(plan.flags).toEqual([]);
+  });
+
+  it('with its card, resumes in the card\'s CLI .env mode until the board picks one', () => {
+    process.env.CODEX_PERMISSION_MODE = 'bypassPermissions';
+    const { job } = addJob({ title: 'Card', repoPath: REPO, agent: 'codex' }, () => {});
+    Object.assign(job, { state: 'in-progress', branchName: 'b1' });
+    expect(orphanResumePlan({ ...base, origin: 'board' }).mode).toBe('bypassPermissions');
+    updateSettings({ permissionMode: 'manual' }, () => {});
+    expect(orphanResumePlan({ ...base, origin: 'board' }).mode).toBe('manual');
+  });
+
+  it('a hand-spawned one with no flags and no .env default resumes with none', () => {
+    delete process.env.CLAUDE_PERMISSION_MODE;
+    expect(orphanResumePlan({ ...base, agent: 'claude', origin: 'user', branchName: 'nomatch' }).flags).toEqual([]);
+  });
+});
+
+describe('the .env default changing while a card spawns', () => {
+  const REPO = mkdtempSync(join(tmpdir(), 'a007-permdef-race-'));
+  beforeEach(() => {
+    config.repos = [{ path: REPO }];
+    config.jobs = [];
+    config.jobBoard = null;
+    boardSettings();
+  });
+
+  it('abandons the spawn, as a board retune would', async () => {
+    process.env.CLAUDE_PERMISSION_MODE = 'plan';
+    addJob({ title: 'Racing', repoPath: REPO, agent: 'claude' }, () => {});
+    const killed = [];
+    await dispatchOnce(async (command, name, repoPath, branch, ownerId, meta) => {
+      process.env.CLAUDE_PERMISSION_MODE = 'bypassPermissions';
+      const session = { id: 's-race', name: 'W', command, repoPath, branchName: branch, state: 'WORKING', exited: false, jobId: meta.jobId };
+      sessions.set(session.id, session);
+      return { session };
+    }, () => {}, { killSession: async (id) => { killed.push(id); } });
+    expect(killed).toEqual(['s-race']);
+    expect(config.jobs[0].state).toBe('todo');
+  });
+});

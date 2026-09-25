@@ -184,6 +184,26 @@ describe('who can be reached', () => {
     expect(sendMessage({ from: careful, to: 'Mamba', text: 'hi', sessions, now: NOW }).error).toMatch(/^No agent named "Mamba" is running/);
   });
 
+  it('delivers uphill once AGENT_MESSAGING=open is in the environment, however it is cased', () => {
+    const saved = process.env.AGENT_MESSAGING;
+    process.env.AGENT_MESSAGING = ' Open ';
+    try {
+      const careful = agent('Cobra', { command: 'claude --permission-mode auto' });
+      const yolo = agent('Viper', { command: 'claude --dangerously-skip-permissions' });
+      expect(sendMessage({ from: careful, to: 'Viper', text: 'hi', sessions: mapOf(careful, yolo), now: NOW }))
+        .toMatchObject({ delivered: true });
+    } finally {
+      if (saved === undefined) delete process.env.AGENT_MESSAGING; else process.env.AGENT_MESSAGING = saved;
+    }
+  });
+
+  it('gives no reason for an agent that has exited, only that it is not running', () => {
+    const careful = agent('Cobra', { command: 'claude --permission-mode auto' });
+    const gone = agent('Viper', { command: 'claude --dangerously-skip-permissions', exited: true });
+    expect(sendMessage({ from: careful, to: 'Viper', text: 'hi', sessions: mapOf(careful, gone), now: NOW }).error)
+      .toMatch(/^No agent named "Viper" is running/);
+  });
+
   it.each([
     ['claude --dangerously-skip-permissions', true],
     ['claude --permission-mode bypassPermissions', true],
