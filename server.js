@@ -159,6 +159,8 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
       agent: sessionAgent(session),
       permissionFlags: sessionPermissionFlags(session),
       origin: sessionOrigin(session),
+      jobId: session.jobId || null,
+      approvalsToBillion: !!session.approvalsToBillion,
       reason, createdAt: new Date().toISOString(),
     };
     orphans.set(orphanId, orphan);

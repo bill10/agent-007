@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { app, server, startup, sessions } from '../server.js';
+import { app, server, startup, sessions, killSession } from '../server.js';
+import { pendingMessages } from '../server/messages.js';
+import { countInFlightByRepo, selectDispatchableJobs } from '../lib/jobs.js';
 import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
-import { addJob, deleteJob, allJobs, updateSettings } from '../server/jobs.js';
+import { addJob, deleteJob, moveJob, allJobs, updateSettings } from '../server/jobs.js';
 import { config, orphans, codenamePool } from '../server/state.js';
 import WebSocket from 'ws';
 import { tmpdir } from 'os';
@@ -1084,6 +1086,91 @@ describe('ownership is inert when auth is disabled', () => {
       if (name) codenamePool.recycle(name);
       rmSync(worktreePath, { recursive: true, force: true });
       rmSync(codexHome, { recursive: true, force: true });
+      w.close();
+    }
+  }, 20000);
+
+  // A board worker parked by a restart (or a close) keeps its card. Re-spawned,
+  // it is that card's worker again: a board tab, counted toward the cap, told
+  // once to carry on while its card is In progress, and retired like any other.
+  it.skipIf(process.platform === 'win32')('a re-spawned board worker keeps its card, counts toward the cap, is nudged once, and leaves as a board worker', async () => {
+    const { bin, restore } = fakeCodexOnPath();
+    const worktreePath = fakeOrphanWorktree();
+    const repoPath = tmpdir();
+    const branchName = 'b/respawn-board-test';
+    const savedRepos = config.repos;
+    config.repos = [...config.repos, { path: repoPath }];
+    const command = `${join(bin, 'codex')} --model o3`;
+    const w = await open();
+    let name, back, jobId, queuedId;
+    const park = async (sessionId) => {
+      const parked = next(w, (m) => m.type === 'orphans-list' && m.orphans.some(o => o.name === name));
+      w.send(JSON.stringify({ type: 'kill', sessionId }));
+      return (await parked).orphans.find(o => o.name === name);
+    };
+    const respawn = async (orphan, from) => {
+      const readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== from);
+      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
+      return readopted;
+    };
+    try {
+      const { job } = addJob({ title: 'respawn board card', repoPath, agent: 'codex' }, () => {});
+      jobId = job.id;
+      const created = next(w, (m) => m.type === 'session-created' && m.command === command);
+      w.send(JSON.stringify({ type: 'spawn', command }));
+      const { sessionId, name: spawned } = await created;
+      name = spawned;
+      // As the dispatcher would have made it.
+      Object.assign(sessions.get(sessionId), { repoPath, worktreePath, branchName, spawnedBy: 'board', jobId, origin: 'board' });
+      Object.assign(job, { state: 'review', branchName, agentSessionId: sessionId });
+
+      let orphan = await park(sessionId);
+      expect(orphan.jobId).toBe(jobId);
+      expect(orphan.origin).toBe('board');
+
+      // Card in Review: a board worker again, but nothing to nudge.
+      back = await respawn(orphan, sessionId);
+      expect(back.spawnedBy).toBe('board');
+      expect(back.jobId).toBe(jobId);
+      expect(pendingMessages(back.sessionId)).toBe(0);
+
+      // Card in progress, and an older record with no jobId: found by branch.
+      job.state = 'in-progress';
+      orphan = await park(back.sessionId);
+      orphans.get(orphan.id).jobId = null;
+      const before = back.sessionId;
+      back = await respawn(orphan, before);
+      const session = sessions.get(back.sessionId);
+      expect(session.spawnedBy).toBe('board');
+      expect(session.jobId).toBe(jobId);
+      expect(job.agentSessionId).toBe(back.sessionId);
+      expect(config.activeSessions.find(s => s.worktreePath === worktreePath).jobId).toBe(jobId);
+      // One line queued, typed once it rests at its prompt.
+      expect(pendingMessages(back.sessionId)).toBe(1);
+      // It holds its repo's slot: a queued card there waits.
+      const live = new Set([...sessions].filter(([, s]) => !s.exited).map(([id]) => id));
+      expect(countInFlightByRepo(allJobs(), live).get(repoPath)).toBe(1);
+      const { job: queued } = addJob({ title: 'respawn queued card', repoPath, agent: 'codex' }, () => {});
+      queuedId = queued.id;
+      expect(selectDispatchableJobs(allJobs(), { maxPerRepo: 1, liveSessionIds: live }).map(j => j.id)).not.toContain(queuedId);
+
+      // Filed as done: it ends as a board worker, so its tab and desk go.
+      const ended = next(w, (m) => m.type === 'session-ended' && m.sessionId === back.sessionId);
+      await moveJob(jobId, 'done', () => {}, { killSession });
+      expect(await ended).toMatchObject({ spawnedBy: 'board', jobId });
+      back = null;
+    } finally {
+      restore();
+      config.repos = savedRepos;
+      config.activeSessions = config.activeSessions.filter(s => s.worktreePath !== worktreePath);
+      for (const o of [...orphans.values()]) if (o.worktreePath === worktreePath) orphans.delete(o.id);
+      if (back && sessions.has(back.sessionId)) {
+        Object.assign(sessions.get(back.sessionId), { repoPath: null, worktreePath: null, jobId: null });
+        w.send(JSON.stringify({ type: 'kill', sessionId: back.sessionId }));
+      }
+      for (const id of [jobId, queuedId]) if (id && allJobs().some(j => j.id === id)) await deleteJob(id, () => {});
+      if (name) codenamePool.recycle(name);
+      rmSync(worktreePath, { recursive: true, force: true });
       w.close();
     }
   }, 20000);
