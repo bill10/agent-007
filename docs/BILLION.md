@@ -533,6 +533,16 @@ anywhere but Telegram, and there is no paid transcription.
   as a voice message with the same text as its caption, so links stay
   tappable. Links are read out as "link". Without `say` or ffmpeg (Linux,
   Windows) it sends text, and the server log says once why.
+- **Which voice**: `SAY_VOICE` names one from `say -v '?'` (e.g.
+  `SAY_VOICE=Ava (Premium)`; a bare `Samantha` matches
+  `Samantha (English (US))`). Unset, the server picks the best English voice
+  installed: a Premium one, then Enhanced, en_US before en_GB, else `say`'s
+  old default. The Premium and Enhanced voices sound far more natural and are
+  free: System Settings → Accessibility → Spoken Content → System voice →
+  Manage Voices, open English, and download one (Premium voices are a few
+  hundred MB). Restart the server to pick it up; the log says which voice it
+  chose when Telegram starts. A `SAY_VOICE` that is not installed is logged
+  once and the automatic pick is used.
 - **You speak**: send the bot a voice note (or an audio file) and it is
   transcribed on this machine by [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
   then typed into Billion's terminal as `[Owner via Telegram, voice] <transcript>`.
