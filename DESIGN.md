@@ -847,9 +847,11 @@ and `finish_job` for a dispatched agent to report its own card done — over str
 
   What follows is larger than the board, and the honest answer belongs here
   rather than in a tooltip. `bypassPermissions` means the agent runs Bash
-  unprompted, as the user, from the moment the operator grants that worktree's
-  trust dialog (which is every job, so read this as one click away rather than
-  as automatic), and `MCP_CONFIG_DIR` (`~/.agent-007/mcp/<port>/`) is
+  unprompted, as the user, from the moment that worktree is trusted. For a
+  Claude Code worker the server does that itself before the spawn (v0.6.2.0,
+  `server/claude-trust.js`), so read this as automatic; only
+  `TRUST_BOARD_WORKTREES=0`, or a Codex worker's own trust prompt, puts one
+  click back in front of it. And `MCP_CONFIG_DIR` (`~/.agent-007/mcp/<port>/`) is
   a SIBLING of `WORKTREE_DIR` (`~/.agent-007/worktrees/`), where every board
   agent's cwd lives. One `cat ../../mcp/<port>/*.json` yields every live
   session's bearer token; `resolveAgentToken` maps a token to its session and

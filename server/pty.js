@@ -166,21 +166,23 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
   }, 1000);
 }
 
-// Billion only (server/billion.js trustDialogKey). A dialog arrives in several
+// Billion, and board-dispatched Claude Code workers unless
+// TRUST_BOARD_WORKTREES=0 (server/claude-trust.js pre-seeds their trust; this
+// catches the dialog when that write lost a race). A dialog arrives in several
 // reads, and a late one can still show the old cursor, so reads are collected
 // until the screen has been quiet for a moment and the key is chosen from the
 // settled drawing. Collected from the key onwards only, so an answered drawing
 // is never answered twice. Capped, so a dialog that never changes can't be
 // typed at forever. And only just after spawn: the dialog comes before Claude
 // Code's first prompt, and on every start after the first there is none, so a
-// watcher left armed would read Billion's whole session — and could type into
+// watcher left armed would read the agent's whole session — and could type into
 // it whenever its own output happened to look like that dialog.
 const TRUST_SETTLE_MS = 400;
 const TRUST_KEY_CAP = 4;
 const TRUST_WINDOW_MS = 60_000;
 const TRUST_SCREEN_CHARS = 8000;
 function answerTrustDialog(session, data, now) {
-  if (!session.isBillion || (session.trustKeys || 0) >= TRUST_KEY_CAP) return;
+  if (!session.answersTrust || (session.trustKeys || 0) >= TRUST_KEY_CAP) return;
   if (now - session.createdAt > TRUST_WINDOW_MS) {
     session.trustKeys = TRUST_KEY_CAP;
     session.trustScreen = '';
@@ -203,7 +205,7 @@ function answerTrustDialog(session, data, now) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust }, broadcast) {
   const { file, args } = parseCommand(command);
   // ownCwd: a repo-less agent that still has a folder of its own (Billion).
   const cwd = worktreePath || ownCwd || homedir();
@@ -302,6 +304,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,       // job this session was dispatched for, if any
     isBillion: !!isBillion,     // the one agent you talk to (server/billion.js)
+    answersTrust: !!(isBillion || autoTrust),   // see answerTrustDialog
     approvalsToBillion: hooked, // its permission dialogs go to Billion first
     exited: false,
     stateCheckInterval: null,

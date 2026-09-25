@@ -1,6 +1,6 @@
 {
   "name": "agent-007",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Self-hosted office where a manager agent posts jobs to Claude Code and Codex workers in parallel git worktrees, then reviews and merges their PRs. Cron jobs, agent-to-agent messaging, pixel-art status view.",
   "license": "MIT",
   "repository": {
