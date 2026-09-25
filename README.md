@@ -3,47 +3,33 @@
 [![Tests (Ubuntu)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml)
 [![Tests (Windows)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml)
 
-A pixel office for managing AI terminal agents. Spawn Claude Code (or any CLI) instances into isolated git worktrees and watch them work side-by-side in a retro pixel art office.
+**Queue coding jobs, walk away, review the PRs.**
+
+Agents run in parallel, each in its own git worktree; one boss agent runs the board for you; and a pixel office shows who's working and who's waiting on you.
 
 ![An agent walks to its desk and starts work, a job card is posted and dispatched to a second desk, and an agent turns orange when it stops to ask a question](docs/demo.gif)
 
 *Recorded from the running app. If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
 
-## Why?
-
-This project is inspired by [pixel-agents](https://github.com/pablodelucca/pixel-agents) (big shoutout to them), which is mainly a VS Code extension. However, I needed more than a VS Code extension, so I just vibe-coded one for my own use. If any of the following sounds like you, please feel free to give it a try or, even better, contribute and make it more useful.
-
-- I normally have multiple Claude Code instances running simultaneously, and I rarely open VS Code to write code myself.
-- I have multiple projects/repos being developed simultaneously, and a typical IDE's one-window-per-project view is not helpful.
-- I need automatic worktree isolation when multiple agents are working on one repo for different features.
-- I want something slightly more playful, since I'm talking to multiple terminals all day long.
-
-## Features
-
-- **Billion, the one agent you talk to** -- An always-on Claude Code agent the server starts for you. Give it a mission and it runs the work: it plans, posts job cards, reviews what comes back, merges pull requests, and answers its workers' permission requests, coming to you only for money, access, anything irreversible, and real forks in direction. Its memory is a git repo of its own, and it picks up where it left off after a restart. Design in [docs/BILLION.md](docs/BILLION.md).
-- **Pixel office** -- Every agent gets a desk. The sprite faces the screen while working, turns to face you when it needs you, and wanders off to sit down when idle, so you can see the state of every agent at a glance. Desks group into per-repo pods; agents walk in on spawn and out on exit.
-- **Git worktree isolation** -- Each agent gets its own worktree and branch automatically, so several agents can work on one repo without merge conflicts. Branches are named after cocktails (`bill/vesper`, `bill/martini`, ...).
-- **Multi-repo support** -- Add any number of repos and manage every agent from one window.
-- **Live file explorer** -- Real-time file tree with git status, inline diffs, and a changes-only filter.
-- **Terminal multiplexer** -- Full xterm.js terminals with clickable URLs, clipboard image paste, draggable tabs, and renaming.
-- **Job board** -- Queue work instead of babysitting it. Each queued job spawns a fresh agent on its own worktree and branch, moves To do -> In progress -> Review as the agent works and reports back (with a pull request, or a summary for work that needs none), and files itself away when the PR merges or is closed, or you mark it done. A card can also be a cron schedule that posts a run card each time it comes due; a newer run replaces an unread older one, so an hourly job never floods the board. Per-board and per-card permission modes; Claude Code or Codex per card.
-- **Agents post jobs too** -- Tell an agent "add that to the job board" and it files the card itself over MCP.
-- **Agents message each other** -- Claude Code and Codex agents alike: "ask Viper what it changed" sends the question to that agent's terminal over MCP, and the reply comes back the same way.
-- **Works on a phone** -- Below 700px the three panels become one screen at a time.
-- **Dark/light themes** (see [DESIGN.md](DESIGN.md)), **live sync** across every connected browser, and **voice input** (`Cmd+D`) for dictating prompts.
-
-The long version of each of these, with the details and caveats, is in [docs/FEATURES.md](docs/FEATURES.md).
-
 ## Quick Start
 
 ```bash
-git clone https://github.com/bill10/agent-007.git
-cd agent-007
+git clone https://github.com/bill10/agent-007.git && cd agent-007
 npm install
 npm start
 ```
 
-Open [http://localhost:7007](http://localhost:7007) in your browser. Click **+ Agent**, pick a repo, and hit Start -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. **+ Job** posts work to the job board instead.
+Open [http://localhost:7007](http://localhost:7007). Click **+ Job** to queue work on the board, or **+ Agent** to start one by hand -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. Needs Node.js 20.12+ and Git ([full requirements](#requirements)).
+
+## Highlights
+
+- **A job board, not a babysitting job** -- Each card gets a fresh agent on its own worktree and branch. It moves To do -> In progress -> Review on its own and lands as a pull request (or a summary, for work that isn't code). Cards can also run on a cron schedule.
+- **Billion, the one agent you talk to** -- Give it a mission and it plans, posts cards, reviews what comes back, merges PRs and answers its workers' permission requests. It comes to you only for money, access, anything irreversible and real forks in direction.
+- **Your agents, your subscriptions** -- Claude Code, Codex, any terminal agent is supported -- use your existing subscriptions, no extra charge.
+- **See everything at a glance** -- Every agent gets a desk in the pixel office: facing the screen while it works, turning to face you when it needs you. One window for every repo, with live terminals, a file explorer and inline diffs.
+- **Agents that talk to each other** -- Tell one to "add that to the job board" or "ask Viper what it changed", and it does it over MCP.
+
+Everything else -- scheduled jobs, phone layout, voice input, themes, and the details and caveats of each feature -- is in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Keyboard Shortcuts
 
@@ -145,13 +131,16 @@ distinct color and shows up in the presence indicator.
 - Git
 - A modern browser (three panels at 900px+, explorer hidden below that, one panel at a time on a phone)
 - A CLI to run as the agent (defaults to `claude`, but works with any command)
+
+Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, and browsing paths all handle Windows natively, and CI runs the test suite on both Ubuntu and Windows. One Windows caveat: the per-agent MCP config file protects its token with POSIX file permissions, which Windows doesn't have, so on a shared Windows machine other local users can read it.
+
+## Troubleshooting
+
+**`npm install` fails building `node-pty`.** `node-pty` ships prebuilt binaries for macOS, Linux and Windows on x64 and arm64, so normally nothing compiles. Only if the install tries to build it from source and fails, install a C++ toolchain and run `npm install` again:
+
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
 - **Linux:** `build-essential` and `python3` (`sudo apt install build-essential python3`)
 - **Windows:** [Visual Studio Build Tools](https://github.com/microsoft/node-pty#windows) with the C++ workload
-
-> **Note:** `node-pty` (used for terminal sessions) is a native addon that requires a C++ compiler. The requirements above ensure it compiles during `npm install`.
-
-Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, and browsing paths all handle Windows natively, and CI runs the test suite on both Ubuntu and Windows. One Windows caveat: the per-agent MCP config file protects its token with POSIX file permissions, which Windows doesn't have, so on a shared Windows machine other local users can read it.
 
 ## Architecture
 
@@ -203,6 +192,7 @@ templates/
 
 ## Acknowledgements
 
+- Inspired by [pixel-agents](https://github.com/pablodelucca/pixel-agents), the VS Code extension that put AI agents in a pixel office first.
 - Character sprites and the ambient decor sprites (`furniture/cactus.png`, `plant_2.png`, `sofa_side.png`, `sofa_front.png`, `coffee_table.png`, `coffee.png`, `table_front.png`, `chair_side.png`, `chair_back.png` -- the two chairs recolored, and `chair_front.png` drawn for this project in the same style) from [pixel-agents](https://github.com/pablodelucca/pixel-agents) (MIT, © Pablo De Lucca — license vendored at `public/assets/characters/LICENSE`), character bases by JIK-A-4's ["Metro City" free top-down character pack](https://jik-a-4.itch.io/metrocity-free-topdown-character-pack) (CC0)
 - Desk and `bookshelf.png` sprites from the Free Furniture Office Equipment Set by Antea (CC-BY 4.0)
 
@@ -213,3 +203,5 @@ Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup inst
 ## License
 
 [MIT](LICENSE)
+
+If this is useful, a ⭐ helps others find it.

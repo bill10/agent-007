@@ -6,10 +6,8 @@ Contributions are welcome! This project is intentionally simple: vanilla JS, no 
 
 - **Node.js 20.12+**
 - **Git**
-- **C++ build tools** (required by `node-pty`):
-  - macOS: `xcode-select --install`
-  - Linux: `sudo apt install build-essential python3`
-  - Windows: [Visual Studio Build Tools](https://github.com/microsoft/node-pty#windows) with the C++ workload
+
+`node-pty` ships prebuilt binaries for macOS, Linux and Windows (x64 and arm64), so `npm install` normally compiles nothing. If it does try to build `node-pty` and fails, see [Troubleshooting](README.md#troubleshooting) in the README.
 
 ## Setup
 
