@@ -128,7 +128,7 @@ describe('a card Billion posted', () => {
   it('tells Billion the moment it reaches Review, with the summary', async () => {
     const { b, job } = await finishedCard(BILLION_NAME);
     expect(written(b)).toContain(`[Job board] "Research pricing" (card ${job.id}, `);
-    expect(written(b)).toContain('> Summary: Nobody charges per seat.');
+    await vi.waitFor(() => expect(written(b)).toContain('> Summary: Nobody charges per seat.'));   // typed in small pastes
   });
 
   it('tells Billion nothing about a card someone else posted', async () => {

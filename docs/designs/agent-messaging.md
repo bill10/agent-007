@@ -68,9 +68,13 @@ A message is typed into the recipient's terminal as a user turn:
 Each body line is quoted with `> `, so a body cannot close the message with a
 footer of its own and carry on as if the user were speaking.
 
-It is written as a bracketed paste (`\x1b[200~ … \x1b[201~`) followed by `\r`,
+It is written as bracketed pastes (`\x1b[200~ … \x1b[201~`) followed by `\r`,
 so a newline inside the message cannot submit early and the whole block goes in
-as one turn.
+as one turn. Each paste is one line or less, at most 200 characters, 10 ms
+apart: Claude Code 2.1.x folds a longer paste (seen at 500 characters or 31
+lines) into a "[Pasted text]" placeholder that reaches the model as
+`pasted_content`, which it treats as maybe not from the user and asks about
+instead of acting on.
 
 **When it is written.** Only when the recipient is `WAITING` and no person has
 typed into that terminal in the last 30 s. Otherwise it waits in a per-session
