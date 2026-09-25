@@ -15,7 +15,7 @@ import {
 import { addRepo } from './git.js';
 import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval } from './approvals.js';
-import { agentSummaries, sendMessage, flushMessages, pendingMessages } from './messages.js';
+import { agentSummaries, sendMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner } from './owner.js';
 
@@ -133,6 +133,11 @@ export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
         notifyOwner: (text) => (req.agentSession.isBillion
           ? notifyOwner(text, { broadcast })
           : { error: 'Only Billion can notify the owner.' }),
+        // Never logged: a screen can hold a secret that scrolled by.
+        readAgentScreen: ({ name, lines }) => readAgentScreen({
+          from: req.agentSession, name, lines, sessions,
+          isBillionCard: (jobId) => allJobs().some(job => job.id === jobId && job.postedByBillion),
+        }),
         billionReady: () => {
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };
