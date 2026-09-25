@@ -15,6 +15,9 @@ import { randomUUID } from 'crypto';
 import { CONFIG_DIR } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
+import {
+  chooseMode, speechUnavailable, synthesize, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
+} from './voice.js';
 
 export const MAX_NOTIFY_CHARS = 3000;          // Telegram's own limit is 4096
 export const NOTIFY_LIMIT = 5;                  // a burst of five, then...
@@ -23,6 +26,7 @@ export const POLL_TIMEOUT_S = 30;
 const MAX_BACKOFF_MS = 60 * 1000;
 const WAITING_CAP = 50;
 export const OWNER_PREFIX = '[Owner via Telegram]';
+export const OWNER_VOICE_PREFIX = '[Owner via Telegram, voice]';
 
 export function telegramSettings(env = process.env) {
   const token = (env.TELEGRAM_BOT_TOKEN || '').trim();
@@ -39,15 +43,15 @@ export function redact(text, env = process.env) {
 }
 
 // One Bot API call. Returns the result, or throws an Error whose message is
-// already redacted.
+// already redacted. params is JSON, or FormData for an upload.
 async function call(method, params, { env = process.env, signal } = {}) {
   const { token } = telegramSettings(env);
+  const form = params instanceof FormData;
   let body;
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      ...(form ? { body: params } : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) }),
       signal,
     });
     body = await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }));
@@ -66,6 +70,89 @@ export async function sendTelegram(text, { env = process.env } = {}) {
     return { ok: true };
   } catch (err) {
     return { error: err.message };
+  }
+}
+
+// --- Voice (server/voice.js does the audio) ---
+
+// The mode of the owner's last message, kept next to waiting.json so mirror
+// survives a restart.
+const voiceStatePath = () => join(CONFIG_DIR, 'telegram-voice.json');
+
+export function lastOwnerMode() {
+  try { return JSON.parse(readFileSync(voiceStatePath(), 'utf8')).lastMode; } catch { return undefined; }
+}
+
+function saveOwnerMode(mode) {
+  if (lastOwnerMode() === mode) return;
+  try { writeFileSync(voiceStatePath(), JSON.stringify({ lastMode: mode })); } catch (err) {
+    console.error('Telegram: could not save the last message mode:', err.message);
+  }
+}
+
+// text spoken, with text as the caption so links stay tappable. Returns
+// { ok } or { error }; the caller sends text instead on an error.
+export async function sendVoice(text, { env = process.env } = {}) {
+  const { chatId } = telegramSettings(env);
+  try {
+    const ogg = await synthesize(text);
+    const form = new FormData();
+    form.append('chat_id', chatId);
+    form.append('caption', text);   // under Telegram's 1024: voice is for texts of 900 or fewer
+    form.append('voice', new Blob([ogg], { type: 'audio/ogg' }), 'billion.ogg');
+    await call('sendVoice', form, { env });
+    return { ok: true };
+  } catch (err) {
+    return { error: redact(err.message, env) };
+  }
+}
+
+let voiceOffLogged = false;
+
+// A message to the owner, as voice or text by TELEGRAM_VOICE (docs/BILLION.md, "Voice").
+export async function sendToOwner(text, { env = process.env, platform = process.platform } = {}) {
+  if (chooseMode(text, { env, lastMode: lastOwnerMode() }).mode === 'voice') {
+    const off = speechUnavailable(env, platform);
+    const result = off ? { error: off } : await sendVoice(text, { env });
+    if (!result.error) return result;
+    if (!voiceOffLogged) {
+      voiceOffLogged = true;
+      console.log(`  Telegram: sending text, not voice: ${result.error}`);
+    }
+  }
+  return sendTelegram(text, { env });
+}
+
+// A voice note's bytes, or throws a redacted Error.
+async function downloadFile(fileId, env) {
+  const file = await call('getFile', { file_id: fileId }, { env });
+  if (file?.file_size > MAX_NOTE_BYTES) throw new Error('too big');
+  const { token } = telegramSettings(env);
+  try {
+    const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length > MAX_NOTE_BYTES) throw new Error('too big');
+    return bytes;
+  } catch (err) {
+    throw new Error(redact(err.cause?.message || err.message, env));
+  }
+}
+
+// The owner's voice note → its transcript, or a reply for the owner.
+async function transcribeNote(note, env) {
+  const setup = whisperSetup(env);
+  if (setup.missing) return { reply: setup.missing, result: 'no-whisper' };
+  const limit = `Voice notes can be up to ${MAX_NOTE_SECONDS / 60} minutes and ${MAX_NOTE_BYTES / 1024 / 1024} MB; send a shorter one or text.`;
+  if (note.duration > MAX_NOTE_SECONDS || note.file_size > MAX_NOTE_BYTES) return { reply: limit, result: 'too-big' };
+  try {
+    const transcript = await transcribe(await downloadFile(note.file_id, env), setup);
+    if (!transcript) return { reply: 'I could not make out any words in that voice note; send it again or as text.', result: 'empty' };
+    return { transcript };
+  } catch (err) {
+    if (err.message === 'too big') return { reply: limit, result: 'too-big' };
+    console.error('Telegram: could not transcribe a voice note:', redact(err.message, env));
+    return { reply: 'I could not transcribe that voice note; send it as text instead.', result: 'failed' };
   }
 }
 
@@ -123,7 +210,7 @@ export async function notifyOwner(text, { broadcast, env = process.env, now = Da
   if (!token || !chatId) {
     return { pinned: true, error: 'Pinned under "Waiting on you" in the owner\'s browser, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.' };
   }
-  const result = await sendTelegram(`Billion: ${body}`, { env });
+  const result = await sendToOwner(`Billion: ${body}`, { env });
   if (result.error) return { pinned: true, error: `Pinned under "Waiting on you" in the owner's browser, but the Telegram send failed: ${result.error}` };
   return { ok: true };
 }
@@ -150,13 +237,25 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     return 'discovery';
   }
   if (String(chat) !== chatId) return 'ignored';
-  if (typeof msg.text !== 'string' || !msg.text.trim()) return 'ignored';
+  const note = (msg.voice || msg.audio)?.file_id ? (msg.voice || msg.audio) : null;
+  const typed = typeof msg.text === 'string' && msg.text.trim() ? msg.text : null;
+  if (!note && !typed) return 'ignored';
+  saveOwnerMode(note ? 'voice' : 'text');
   const billion = liveBillion();
   if (!billion) {
     await sendTelegram('Billion is not running', { env });
     return 'not-running';
   }
-  if (!sendText(billion, `${OWNER_PREFIX} ${msg.text}`)) {
+  let line = `${OWNER_PREFIX} ${typed}`;
+  if (note) {
+    const heard = await transcribeNote(note, env);
+    if (heard.reply) {
+      await sendTelegram(heard.reply, { env });
+      return heard.result;
+    }
+    line = `${OWNER_VOICE_PREFIX} ${heard.transcript}`;
+  }
+  if (!sendText(billion, line)) {
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
     return 'full';
   }
