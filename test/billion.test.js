@@ -8,6 +8,7 @@ import {
 } from '../server/billion.js';
 import { CONFIG_DIR } from '../server/state.js';
 import { parseCommand } from '../lib/helpers.js';
+import { hasClaudeTranscript } from '../server/agent-transcripts.js';
 
 const fresh = () => join(mkdtempSync(join(tmpdir(), 'a007-billion-')), 'billion');
 const log = (dir) => execFileSync('git', ['log', '--format=%s'], { cwd: dir }).toString().trim().split('\n');
@@ -51,6 +52,13 @@ describe('ensureBillionRepo', () => {
     expect(ensureBillionRepo(dir)).toEqual({ created: false });
     expect(readFileSync(join(dir, 'STATE.md'), 'utf8')).toBe('Status: running\n');
     expect(log(dir)).toEqual(['Billion: first run']);
+  });
+
+  it('sets up a folder holding only what an OS leaves behind', () => {
+    const dir = fresh();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, '.DS_Store'), '');
+    expect(ensureBillionRepo(dir)).toEqual({ created: true });
   });
 
   it('keeps files already in a folder that is not a repo yet', () => {
@@ -163,5 +171,19 @@ describe('trustDialogKey', () => {
     expect(trustDialogKey('❯ No, exit')).toBeNull();          // some other "No, exit" menu
     expect(trustDialogKey('> Try "fix the tests"')).toBeNull();
     expect(trustDialogKey('')).toBeNull();
+  });
+});
+
+describe('hasClaudeTranscript', () => {
+  it('finds a conversation Claude Code left in exactly that folder', () => {
+    const home = mkdtempSync(join(tmpdir(), 'a007-claude-home-'));
+    const dir = '/tmp/some folder/billion';
+    expect(hasClaudeTranscript(dir, { claude: home })).toBe(false);
+    const project = join(home, 'projects', dir.replace(/[^A-Za-z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, 'x.jsonl'), '{}\n');
+    expect(hasClaudeTranscript(dir, { claude: home })).toBe(true);
+    expect(hasClaudeTranscript('/tmp/elsewhere', { claude: home })).toBe(false);
+    expect(hasClaudeTranscript('', { claude: home })).toBe(false);
   });
 });

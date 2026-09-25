@@ -254,7 +254,12 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           break;
         }
         case 'billion-start': {
-          if (!billionRuns()) break;
+          // Say why, rather than a Start button that silently does nothing
+          // (it can outlive the switch-off: user accounts are read live).
+          if (!billionRuns()) {
+            ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: 'Billion is off: turned off with BILLION=0, or user accounts are enabled' }));
+            break;
+          }
           const result = startBillion();
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: result.error }));
           // Already running (a second click): everyone has its tab already.

@@ -70,7 +70,8 @@ export function ensureBillionRepo(dir) {
   // Nor a folder with anything in it (BILLION_DIR at a home or projects
   // folder): setting up there would put all of it in Billion's repo, and run
   // Billion in it. Only the template files may be there already.
-  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY)]);
+  // The files an OS leaves in any folder it has shown don't count either.
+  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), '.DS_Store', 'Thumbs.db', 'desktop.ini']);
   const theirs = existsSync(dir) ? readdirSync(dir).filter(name => !ours.has(name)) : [];
   if (theirs.length) {
     throw new Error(`${dir} already holds other files (${theirs.slice(0, 3).join(', ')}${theirs.length > 3 ? ', …' : ''}), so it can't be Billion's folder; point BILLION_DIR at a new or empty folder`);

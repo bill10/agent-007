@@ -97,8 +97,6 @@ describe('approvals', () => {
 
   it('puts approvals ahead of agent messages, with a cap of their own', () => {
     billion.state = 'WORKING';
-    const chatty = fake('Chatty');
-    sessions.set(chatty.id, chatty);
     for (let i = 0; i < 20; i++) sendMessage({ from: fake(`W${i}`), to: BILLION_NAME, text: 'hi', sessions });
     expect(pendingMessages(billion.id)).toBe(20);
     requestApproval(worker, request);                       // still gets in, and first
@@ -109,8 +107,10 @@ describe('approvals', () => {
   });
 
   it('delivers "Billion" to the real one, not a session that happens to share the name', () => {
+    // Ahead of the real one in the map, so a lookup by name would find it first.
     const impostor = fake('Billion', { id: 'rf-imp' });
-    sessions.set(impostor.id, impostor);
+    sessions.clear();
+    for (const s of [impostor, billion, worker]) sessions.set(s.id, s);
     expect(sendMessage({ from: worker, to: BILLION_NAME, text: 'question', sessions }).to).toBe(billion);
   });
 

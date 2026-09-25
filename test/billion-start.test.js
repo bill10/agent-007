@@ -67,7 +67,7 @@ describe('startBillion', () => {
 
   it('returns the running one instead of starting a second', () => {
     const first = startBillion().session;
-    expect(startBillion().session).toBe(first);
+    expect(startBillion()).toMatchObject({ session: first, existing: true });
     expect(spawned).toHaveLength(1);
   });
 
@@ -146,7 +146,17 @@ describe('the Start button (billion-start)', () => {
     ws.close();
   });
 
-  it('does nothing when Billion is turned off', async () => {
+  it('announces Billion once, however often Start is pressed', async () => {
+    const { ws, seen } = await open();
+    ws.send(JSON.stringify({ type: 'billion-start' }));
+    await vi.waitFor(() => expect(seen.find(m => m.type === 'session-created')).toBeTruthy());
+    ws.send(JSON.stringify({ type: 'billion-start' }));
+    await settle();
+    expect(seen.filter(m => m.type === 'session-created' && m.isBillion)).toHaveLength(1);
+    ws.close();
+  });
+
+  it('says why when Billion is turned off, and starts nothing', async () => {
     process.env.BILLION = '0';
     const { ws, seen } = await open();
     await vi.waitFor(() => expect(seen.find(m => m.type === 'welcome')).toBeTruthy());
@@ -154,7 +164,8 @@ describe('the Start button (billion-start)', () => {
     ws.send(JSON.stringify({ type: 'billion-start' }));
     await settle();
     expect(spawned).toHaveLength(0);
-    expect(seen.some(m => m.type === 'session-created' || m.type === 'spawn-error')).toBe(false);
+    expect(seen.some(m => m.type === 'session-created')).toBe(false);
+    expect(seen.find(m => m.type === 'spawn-error').error).toMatch(/Billion is off/);
     ws.close();
   });
 });
