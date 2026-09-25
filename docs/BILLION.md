@@ -531,7 +531,9 @@ anywhere but Telegram, and there is no paid transcription.
 - **You speak**: send the bot a voice note (or an audio file) and it is
   transcribed on this machine by [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
   then typed into Billion's terminal as `[Owner via Telegram, voice] <transcript>`.
-  Set up:
+  A caption you type on the note follows as `(caption: ...)`. Whisper's
+  markers like `[BLANK_AUDIO]` are dropped, and a note with no words left
+  gets a reply asking you to send it again. Set up:
 
   ```bash
   brew install whisper-cpp ffmpeg
@@ -546,7 +548,8 @@ anywhere but Telegram, and there is no paid transcription.
   server looks for `whisper-cli`, `whisper-cpp` or `main` on `PATH`;
   `WHISPER_CPP_BIN` points at one elsewhere. Until it is set up, a voice note
   gets a one-line reply saying so, and nothing reaches Billion. Notes over 5
-  minutes or 20 MB are refused.
+  minutes or 20 MB are refused, and `say`, ffmpeg or whisper.cpp running
+  longer than 5 minutes is stopped (text instead, or a reply to send text).
 - **When Billion uses voice**: `TELEGRAM_VOICE=mirror` (the default) answers in
   the mode of your last message, voice for a voice note and text for text, and
   Billion's own new questions follow it too; text until you have sent
