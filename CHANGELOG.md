@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.4.10.1] - 2026-09-24
+
+### Fixed
+
+- **Scrolling back down reaches the prompt again.** If an agent printed
+  while its terminal was out of view (another tab, the job board, another
+  phone view), switching back left the scroll range short: after scrolling
+  up, the wheel stopped about a screenful above the bottom and the input
+  line stayed out of reach. Showing a terminal now brings its scroll range
+  up to date.
+
 ## [0.4.10.0] - 2026-09-24
 
 ### Changed
