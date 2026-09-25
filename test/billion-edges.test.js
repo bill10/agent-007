@@ -163,10 +163,12 @@ describe('notices to Billion', () => {
   });
   const card = (fields) => ({ id: 'j1', title: 'Fix login', repoPath: REPO, postedByAgent: BILLION_NAME, postedByBillion: true, ...fields });
 
-  it('names the pull request and trims a long summary', () => {
+  it('names the pull request and trims a long summary', async () => {
     expect(notifyBillion(card({ prUrl: 'https://github.com/o/r/pull/9', resultSummary: 's'.repeat(2000) }))).toBe(true);
-    expect(typed(billion)).toContain('> Pull request: https://github.com/o/r/pull/9');
-    expect(typed(billion)).toContain('… (read_job for the rest)');
+    // Typed in small pastes, so read with their brackets taken out.
+    const text = () => typed(billion).replace(/\x1b\[20[01]~/g, '');
+    await vi.waitFor(() => expect(text()).toContain('… (read_job for the rest)'));
+    expect(text()).toContain('> Pull request: https://github.com/o/r/pull/9');
   });
 
   it('is dropped when no Billion is running', () => {

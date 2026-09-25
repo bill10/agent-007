@@ -35,6 +35,14 @@ export const USER_TYPING_HOLD_MS = 30 * 1000;
 // Enter is a newline; with this gap codex-cli 0.155.1 takes paste and Enter as
 // one turn (checked in review).
 export const SUBMIT_DELAY_MS = 150;
+// Claude Code (2.1.x) folds a long paste into a "[Pasted text #1]" placeholder
+// and hands the model that part wrapped as pasted_content, which it treats as
+// maybe not from the user: a long message got a question back, not action.
+// Seen at 500 chars or 31 lines in one paste; 300 chars, or a line or two,
+// comes through as plain typing. So a message goes in as many small pastes,
+// a line or less each, still bracketed so a newline stays a newline.
+export const PASTE_CHUNK_CHARS = 200;
+export const PASTE_GAP_MS = 10;
 
 const queues = new Map();   // recipient session id -> [formatted text]
 // How many at the front of a queue the server wrote (approvals, board
@@ -44,7 +52,7 @@ const queues = new Map();   // recipient session id -> [formatted text]
 const serverAhead = new Map();
 const sends = new Map();    // `${from.id}>${to.id}` -> [timestamps]
 
-// Everything but newline and tab. The text goes inside a bracketed paste, and a
+// Everything but newline and tab. The text goes inside bracketed pastes, and a
 // message carrying ESC[201~ would end the paste early and type the rest as raw
 // keystrokes — arrow keys, Enter, whatever it liked.
 const clean = (s) => String(s ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
@@ -147,7 +155,7 @@ export function formatNotice(headline, lines = []) {
 // the permission rule nor the pair limit applies; the queue cap does, and
 // text over it is refused.
 //
-// Cleaned here, whoever wrote it: it goes into a bracketed paste, and a stray
+// Cleaned here, whoever wrote it: it goes into bracketed pastes, and a stray
 // ESC[201~ anywhere in it — a tool name, a card title — would end the paste
 // and type the rest as keystrokes of the user's own.
 export function sendText(session, text, now = Date.now()) {
@@ -185,6 +193,8 @@ export function canDeliver(session, now = Date.now()) {
   // Billion holds its mail until it says it is ready (billion_ready), so
   // nothing lands in the middle of its introduction.
   if (session.messagesHeld) return false;
+  // Still typing the last one: a second would interleave with its pastes.
+  if (session.messageTyping) return false;
   // Both: the stored state is up to a second old, and a dialog that opened
   // since is what this must not type into.
   if (session.exited || session.state !== 'WAITING' || detectState(session, { now }) !== 'WAITING') return false;
@@ -202,23 +212,42 @@ function write(session, data) {
   try { session.pty.write(data); return true; } catch { return false; }
 }
 
+// Lines, newline kept, cut to PASTE_CHUNK_CHARS by code point so an emoji's
+// surrogate pair is never split across two pastes.
+export function pasteChunks(text) {
+  return text.split(/(?<=\n)/).flatMap(line => {
+    const chars = Array.from(line);
+    const out = [];
+    for (let i = 0; i < chars.length; i += PASTE_CHUNK_CHARS) out.push(chars.slice(i, i + PASTE_CHUNK_CHARS).join(''));
+    return out;
+  });
+}
+
 function deliver(session, text, now) {
   session.messageDeliveredAt = now;
-  write(session, `\x1b[200~${text}\x1b[201~`);
+  session.messageTyping = true;
+  const chunks = pasteChunks(text);
+  const type = () => {
+    if (session.exited) return;
+    write(session, `\x1b[200~${chunks.shift()}\x1b[201~`);
+    setTimeout(chunks.length ? type : submit, chunks.length ? PASTE_GAP_MS : SUBMIT_DELAY_MS);
+  };
   // Checked again at the Enter: in those 150 ms a dialog may have opened, which
   // the Enter would answer, or a person may have started typing, whose text
   // would go with it. Left unsent, the message sits in the composer instead.
   // The screen is read afresh rather than through session.state, which lags a
   // second behind and reads WORKING for three after any output — the paste's
   // own echo included.
-  setTimeout(() => {
+  const submit = () => {
+    session.messageTyping = false;
     if (session.exited) return;
     if (detectState(session, { stateTimeoutMs: 0 }) === 'MESSAGE' || (session.lastUserInputAt || 0) > now) {
       session.messageUnsubmittedAt = Date.now();
       return;
     }
     write(session, '\r');
-  }, SUBMIT_DELAY_MS);
+  };
+  type();
 }
 
 /**
