@@ -13,6 +13,7 @@ import { CONFIG_DIR, sessions } from './state.js';
 import { authEnabled } from './auth.js';
 
 import { quote } from '../lib/jobs.js';
+import { envSwitchOn } from '../lib/helpers.js';
 export { BILLION_NAME } from '../lib/jobs.js';
 
 const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.url));
@@ -43,7 +44,7 @@ export function liveBillion() {
 
 // On unless turned off: BILLION=0 (or false/off/no) in the environment or .env.
 export function billionEnabled(env = process.env) {
-  return !/^(0|false|off|no)$/i.test(String(env.BILLION ?? '').trim());
+  return envSwitchOn(env.BILLION);
 }
 
 // Whether this server runs Billion. Not with user accounts: Billion belongs
@@ -151,19 +152,25 @@ export function billionCommand({ created, hasConversation, dir, projectsHint }) 
 
 // Claude Code asks whether to trust a folder the first time it runs there, and
 // highlights "No, exit". Billion's folder is Agent 007's own, holding only
-// what the server put there, so the server answers for it. It acts on what the
+// what the server put there, so the server answers for it. Board workers get
+// the same answer for a different reason: queueing a job on a repo already
+// trusts it (server/claude-trust.js has the trade-off and the opt-out). It acts on what the
 // screen shows rather than a fixed key sequence, so a version that highlights
-// "Yes" first still gets the right answer: arrow off "No", Enter on "Yes",
+// "Yes" first still gets the right answer: Ctrl-N off "No", Enter on "Yes",
 // nothing on anything else. The text is everything drawn since the dialog
 // settled, which can hold an older drawing too, so the LAST cursor is the one
 // on screen now. Claude Code draws with cursor moves, so the stripped text may
 // have lost its spaces.
 export function trustDialogKey(screenText) {
-  if (!/trust\s*this\s*folder/i.test(screenText)) return null;
+  // Both options, not just the phrase: a board worker's screen also shows its
+  // job text, which anyone who can post a card chooses.
+  if (!/Yes,\s*I\s*trust\s*this\s*folder/i.test(screenText) || !/No,\s*exit/.test(screenText)) return null;
   const at = screenText.lastIndexOf('❯');
   if (at === -1) return null;
   const selected = screenText.slice(at + 1);
   if (/^\s*Yes,\s*I\s*trust\s*this\s*folder/i.test(selected)) return '\r';
-  if (/^\s*No,\s*exit/.test(selected)) return '\x1b[B';
+  // Ctrl-N, not the down arrow: an arrow starts with ESC, and a lone ESC here
+  // is "Esc to cancel", which exits claude. Verified on 2.1.282.
+  if (/^\s*No,\s*exit/.test(selected)) return '\x0e';
   return null;
 }

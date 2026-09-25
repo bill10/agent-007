@@ -58,16 +58,16 @@ describe('the trust dialog, answered from the pty stream', () => {
     return { session, write: (d) => onData(d) };
   }
 
-  it('waits for the drawing to settle, arrows off "No", then confirms "Yes" and stops watching', () => {
+  it('waits for the drawing to settle, moves off "No" with Ctrl-N, then confirms "Yes" and stops watching', () => {
     vi.useFakeTimers();
-    const { session, write } = open({ isBillion: true });
+    const { session, write } = open({ isBillion: true, answersTrust: true });
     write(NO);
     expect(session.pty.write).not.toHaveBeenCalled();   // not before it settles
     vi.advanceTimersByTime(400);
-    expect(session.pty.write.mock.calls.map(c => c[0])).toEqual(['\x1b[B']);
+    expect(session.pty.write.mock.calls.map(c => c[0])).toEqual(['\x0e']);
     write(YES);
     vi.advanceTimersByTime(400);
-    expect(session.pty.write.mock.calls.map(c => c[0])).toEqual(['\x1b[B', '\r']);
+    expect(session.pty.write.mock.calls.map(c => c[0])).toEqual(['\x0e', '\r']);
     write(NO);                                           // answered for good
     vi.advanceTimersByTime(400);
     expect(session.pty.write).toHaveBeenCalledTimes(2);
@@ -75,7 +75,7 @@ describe('the trust dialog, answered from the pty stream', () => {
 
   it('gives up after a few keys on a dialog that never changes', () => {
     vi.useFakeTimers();
-    const { session, write } = open({ isBillion: true });
+    const { session, write } = open({ isBillion: true, answersTrust: true });
     for (let i = 0; i < 10; i++) { write(NO); vi.advanceTimersByTime(400); }
     expect(session.pty.write).toHaveBeenCalledTimes(4);
   });
@@ -86,11 +86,33 @@ describe('the trust dialog, answered from the pty stream', () => {
     other.write(NO);
     vi.advanceTimersByTime(400);
     expect(other.session.pty.write).not.toHaveBeenCalled();
-    const gone = open({ isBillion: true });
+    const gone = open({ isBillion: true, answersTrust: true });
     gone.write(NO);
     gone.session.exited = true;
     vi.advanceTimersByTime(400);
     expect(gone.session.pty.write).not.toHaveBeenCalled();
+  });
+
+  it('answers for a board worker marked answersTrust, and not for one without it', () => {
+    vi.useFakeTimers();
+    const trusted = open({ spawnedBy: 'board', answersTrust: true });
+    const plain = open({ spawnedBy: 'board' });
+    trusted.write(NO); plain.write(NO);
+    vi.advanceTimersByTime(400);
+    expect(trusted.session.pty.write.mock.calls.map(c => c[0])).toEqual(['\x0e']);
+    expect(plain.session.pty.write).not.toHaveBeenCalled();
+  });
+
+  it('marks answersTrust on the spawned session for Billion or autoTrust only', () => {
+    const cmd = process.platform === 'win32' ? 'cmd /c exit' : 'true';
+    const spawn = (extra) => createSessionFromConfig({ sessionId: `bt-${Math.random()}`, name: 'T', color: '#000', command: cmd, ...extra }, () => {});
+    const made = [spawn({ autoTrust: true }), spawn({ isBillion: true }), spawn({ spawnedBy: 'board' })];
+    try {
+      expect(made.map(r => r.session.answersTrust)).toEqual([true, true, false]);
+      expect(made.map(r => r.session.isBillion)).toEqual([false, true, false]);   // autoTrust is not Billion
+    } finally {
+      for (const r of made) { try { r.session.pty.kill(); } catch {} clearInterval(r.session.stateCheckInterval); }
+    }
   });
 });
 

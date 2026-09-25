@@ -564,6 +564,12 @@ Found while verifying part 1:
   otherwise — because the dialog arrives in several reads and a late one can
   still show the old cursor (answering per read pressed Down twice and
   wrapped back to "No"). Verified live on a fresh folder.
+  Since v0.6.2.0 the key off "No" is Ctrl-N, not Down: an arrow starts with
+  ESC, and a lone ESC on that dialog is "Esc to cancel", which exits Claude
+  Code. Board-dispatched Claude Code workers now get the same answer too, and
+  their worktree is pre-trusted in `~/.claude.json` before the spawn, with the
+  screen answer kept as the fallback for a lost write
+  (`server/claude-trust.js`; `TRUST_BOARD_WORKTREES=0` keeps the dialog).
 - A server started from inside a Claude Code session passes
   `CLAUDE_CODE_CHILD_SESSION` to its agents, which turns their transcript
   saving off — and `--continue` needs a transcript. Only affects a server

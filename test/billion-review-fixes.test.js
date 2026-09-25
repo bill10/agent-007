@@ -43,7 +43,7 @@ describe('the trust watcher', () => {
     vi.useFakeTimers();
     let onData;
     const session = {
-      id: 'rf-t', createdAt: Date.now() - 61_000, isBillion: true,
+      id: 'rf-t', createdAt: Date.now() - 61_000, isBillion: true, answersTrust: true,
       pty: { onData: (cb) => { onData = cb; }, onExit: () => {}, write: vi.fn() },
       ringBuffer: { push: () => {} }, state: 'WORKING', lastOutputAt: 0, lastResizeAt: 0,
       lastStrippedLine: '', recentStrippedLines: [], pendingRaw: '', isTUI: true, exited: false,
