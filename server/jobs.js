@@ -1097,6 +1097,8 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // of whatever they are typing every few minutes would be unusable.
     const result = await createSession(command, null, job.repoPath, branch, job.postedBy || null, {
       spawnedBy: 'board', jobId: job.id, branchSuffixOnCollision: true,
+      // Billion's cards ask Billion before they ask a person (part 4).
+      approvalsToBillion: job.postedByAgent === BILLION_NAME,
     });
     if (result.error) {
       // Surface the failure on the card and leave it in To do; the next tick

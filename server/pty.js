@@ -9,7 +9,7 @@ export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken } from './auth.js';
-import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig } from './agent-mcp.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook } from './agent-mcp.js';
 import { broadcastJobs } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
@@ -189,7 +189,7 @@ function answerTrustDialog(session) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion }, broadcast) {
   const { file, args } = parseCommand(command);
   // ownCwd: a repo-less agent that still has a folder of its own (Billion).
   const cwd = worktreePath || ownCwd || homedir();
@@ -214,7 +214,12 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // would put a live board credential on disk for terminals that have no way to
   // use it — a plain `bash` tab does not need one.
   const mcpConfigPath = takesMcpConfig(file) ? writeMcpConfig(sessionId, agentToken) : null;
-  const spawnArgs = withMcpConfig(file, args, mcpConfigPath);
+  const mcpArgs = withMcpConfig(file, args, mcpConfigPath);
+  // A worker on one of Billion's cards asks Billion before it asks a person
+  // (server/approvals.js) — where the CLI can be hooked, which today is
+  // Claude Code only. Recorded as whether the hook actually went in.
+  const spawnArgs = approvalsToBillion ? withApprovalHook(file, mcpArgs, mcpConfigPath) : mcpArgs;
+  const hooked = spawnArgs !== mcpArgs;
 
   installAsyncSpawnGuard();
   let ptyProcess;
@@ -283,6 +288,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,       // job this session was dispatched for, if any
     isBillion: !!isBillion,     // the one agent you talk to (server/billion.js)
+    approvalsToBillion: hooked, // its permission dialogs go to Billion first
     exited: false,
     stateCheckInterval: null,
     repoPath,

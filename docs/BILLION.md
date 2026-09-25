@@ -509,8 +509,26 @@ cycle: start agent-cost; drop the browser-extension idea
    to end: Billion added a repo, posted a no-PR card, the worker finished,
    the `[Job board]` notice woke Billion, it read the result and accepted
    the card — Done in 41 s.
-4. Approvals via the `PermissionRequest` hook (Claude Code `--settings`,
-   Codex two `-c` flags).
+4. **Approvals — built for Claude Code.** Workers on Billion's cards get a
+   `--settings` with a `PermissionRequest` hook (`server/permission-hook.js`)
+   that posts the request to `POST /hook/permission` with the worker's own
+   agent token, read from its 0600 MCP config (not an env var: every child
+   process would inherit it). `server/approvals.js` types `[Approval <id>]`
+   into Billion and waits up to 2 minutes for `answer_permission`
+   (allow / deny with a reason / owner); anything else — no Billion, one not
+   ready, silence, an error — is no decision, and the dialog goes to a
+   person. The same settings pre-allow `finish_job` and `send_message`, the
+   two board tools the job prompt tells workers to use. Your own agents and
+   cards are not hooked. Verified live: a worker in manual mode asked to
+   Write outside its worktree, Billion allowed it, the file was written, the
+   card closed.
+   - Approvals fire only when a worker would show a dialog: in `auto` mode
+     the classifier decides most things itself, and a user allow list (yours
+     allows all `Bash`) skips the dialog entirely.
+   - **Codex: not wired.** The recipe is known (two `-c` flags: the hook and
+     its trusted hash, read from `codex app-server` `hooks/list` at startup),
+     but Codex isn't installed here to build and test it against. Codex
+     workers keep asking the owner.
 
 Each part is useful without the next.
 

@@ -106,24 +106,32 @@ export function formatMessage(from, text) {
 // A board notice: from the server, not an agent, so it names the board and
 // carries no reply line. Quoted like a message body, since a card's summary is
 // an agent's text.
+export function quoteLines(text) {
+  return clean(text).split('\n').map(line => `> ${line}`);
+}
+
 export function formatNotice(headline, lines = []) {
-  const body = lines.flatMap(line => clean(line).split('\n')).map(line => `> ${line}`);
-  return [`[Job board] ${oneLine(headline)}`, ...body,
+  return [`[Job board] ${oneLine(headline)}`, ...lines.flatMap(quoteLines),
     '[This came from the Agent 007 job board, not the user.]'].join('\n');
 }
 
-// Queue a board notice for a session and deliver it when it can take one. Not
-// agent-to-agent, so neither the permission rule nor the pair limit applies;
-// the queue cap does, and a notice over it is dropped (the board still has
-// the card, for whoever looks).
-export function sendNotice(session, headline, lines, now = Date.now()) {
+// Queue text the server wrote (a board notice, an approval request) and
+// deliver it when the session can take one. Not agent-to-agent, so neither
+// the permission rule nor the pair limit applies; the queue cap does, and
+// text over it is refused.
+export function sendText(session, text, now = Date.now()) {
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
   if (queue.length >= QUEUE_CAP) return false;
-  queue.push(formatNotice(headline, lines));
+  queue.push(text);
   queues.set(session.id, queue);
   flushMessages(session, now);
   return true;
+}
+
+// A notice over the cap is dropped: the board still has the card.
+export function sendNotice(session, headline, lines, now = Date.now()) {
+  return sendText(session, formatNotice(headline, lines), now);
 }
 
 // Whether a message may be typed into this session right now.

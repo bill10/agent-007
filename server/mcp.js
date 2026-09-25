@@ -301,8 +301,27 @@ export const CLOSE_JOB_TOOL = {
   },
 };
 
+export const ANSWER_PERMISSION_TOOL = {
+  name: 'answer_permission',
+  description:
+    'Answer a worker\'s permission request, which arrives in your terminal as '
+    + '"[Approval <id>] …". allow lets the worker go ahead; deny refuses, and your '
+    + 'reason is what the worker reads; owner leaves it to the owner, who then sees '
+    + 'the worker\'s dialog. Unanswered requests go to the owner after 2 minutes.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The id from the [Approval <id>] line.' },
+      decision: { type: 'string', enum: ['allow', 'deny', 'owner'] },
+      reason: { type: 'string', description: 'For deny: what the worker should do instead.' },
+    },
+    required: ['id', 'decision'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL];
 
 export function toolsFor(session) {
   return session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
@@ -488,6 +507,14 @@ const CALLS = {
     return toolText(result.accepted
       ? `"${result.job.title}" is Done and its worker is closed.`
       : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`);
+  },
+
+  [ANSWER_PERMISSION_TOOL.name]: (args, ctx) => {
+    const result = ctx.answerPermission({ id: args.id, decision: args.decision, reason: args.reason });
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.choice === 'owner'
+      ? `Left to the owner: ${result.worker}'s dialog is showing for them now.`
+      : `${result.worker} has your answer: ${result.choice}.`);
   },
 
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {

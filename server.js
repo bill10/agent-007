@@ -91,6 +91,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     repoPath: resolvedRepoPath, worktreePath, branchName,
     repoSlug, cocktail, ownerId: ownerId || null,
     spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
+    approvalsToBillion: !!meta.approvalsToBillion,
   }, broadcast);
 
   if (result.error) {

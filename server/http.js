@@ -13,6 +13,7 @@ import {
   postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
 import { addRepo } from './git.js';
+import { requestApproval, answerApproval } from './approvals.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 
@@ -126,6 +127,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
           return addRepo(abs, broadcast);
         },
         closeJob: (fields) => closeJobForAgent({ ...fields, session: req.agentSession }, broadcast, { killSession }),
+        answerPermission: ({ id, decision, reason }) => (req.agentSession.isBillion
+          ? answerApproval(id, decision, reason)
+          : { error: 'Only Billion answers permission requests.' }),
         billionReady: () => {
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };
@@ -141,6 +145,21 @@ export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
     // A notification gets no body. 202 is what the MCP HTTP transport expects.
     if (!reply) return res.status(202).end();
     return res.json(reply);
+  });
+
+  // A worker's PermissionRequest hook (server/permission-hook.js), with that
+  // worker's own agent token. Answers with the hook's output: Billion's
+  // decision, or {} for none — which is also what anything unexpected gets,
+  // so the dialog falls back to a person.
+  app.post('/hook/permission', checkOrigin, express.json({ limit: '256kb' }), resolveIdentity, requireAgent, async (req, res) => {
+    try {
+      const worker = req.agentSession;
+      const jobTitle = worker.jobId ? allJobs().find(job => job.id === worker.jobId)?.title : null;
+      res.json(await requestApproval(worker, req.body, { jobTitle }));
+    } catch (err) {
+      console.error('Permission hook failed:', err);
+      res.json({});
+    }
   });
 
   // Gate the whole /api surface once, so new routes are origin- and auth-checked

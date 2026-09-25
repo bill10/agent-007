@@ -78,6 +78,31 @@ export function writeMcpConfig(sessionId, agentToken) {
   }
 }
 
+// The --settings that routes a Claude Code worker's permission dialogs to
+// Billion (server/approvals.js): a PermissionRequest hook running
+// server/permission-hook.js with this session's MCP config. Claude Code only;
+// Codex takes its hook differently and is not wired yet (docs/BILLION.md).
+// The hook's timeout outlasts the server's wait, so it is the server that
+// gives up first, with "no decision", never the CLI with a deny.
+const PERMISSION_HOOK = fileURLToPath(new URL('./permission-hook.js', import.meta.url));
+const shellQuote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
+export function withApprovalHook(file, args, configPath) {
+  if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
+  const settings = {
+    // The two board tools the job prompt tells the worker to use: finishing
+    // its card, and asking Billion. Asking permission for those would only
+    // send Billion a request to approve its own instructions.
+    permissions: { allow: ['finish_job', 'send_message'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`) },
+    hooks: {
+      PermissionRequest: [{
+        matcher: '*',
+        hooks: [{ type: 'command', command: `${shellQuote(process.execPath)} ${shellQuote(PERMISSION_HOOK)} ${shellQuote(configPath)}`, timeout: 150 }],
+      }],
+    },
+  };
+  return ['--settings', JSON.stringify(settings), ...args];
+}
+
 export function removeMcpConfig(sessionId) {
   try {
     rmSync(mcpConfigPath(sessionId), { force: true });
