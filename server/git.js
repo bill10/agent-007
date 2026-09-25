@@ -342,13 +342,14 @@ export async function removeWorktree(session, { discardChanges = false } = {}) {
         const local = (await gitExec(['-C', session.worktreePath, 'rev-parse', 'HEAD'])).trim();
         const upstream = (await gitExec(['-C', session.worktreePath, 'rev-parse', '@{u}'])).trim();
         fullyPushed = !!local && local === upstream;
-      } catch {
-        // No upstream, or one git cannot resolve locally — typically a branch
-        // pushed to a raw URL (`git push -u https://…`), which records the URL
-        // as branch.<name>.remote and creates no remote-tracking ref. Ask the
-        // remote itself; anything short of a matching SHA stays not-pushed.
-        fullyPushed = await matchesRemote(session);
-      }
+      } catch {}
+      // No upstream git can resolve locally (a branch pushed to a raw URL,
+      // `git push -u https://…`, records the URL as branch.<name>.remote and
+      // creates no remote-tracking ref), or one that is stale: a push from
+      // inside the worktree after a rebase or a force-with-lease can leave the
+      // shared repo's refs/remotes/origin/<branch> on an old SHA. Ask the
+      // remote itself; anything short of a matching SHA stays not-pushed.
+      if (!fullyPushed) fullyPushed = await matchesRemote(session);
     }
     if (!reason && !fullyPushed) {
       const baseBranch = await resolveBaseBranch(session.repoPath);

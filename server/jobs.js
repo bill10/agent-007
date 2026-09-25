@@ -1086,6 +1086,20 @@ async function releaseOrphanedWorktree({ branchName, repoPath, worktreePath }, b
   return true;
 }
 
+// An "unpushed" orphan left by an older build (or a stale remote-tracking ref)
+// may be fully on the remote by now. Re-check each one at startup through the
+// same release path, so removeWorktree's rules decide: dirty stays, and only
+// an exact SHA match on the remote counts as pushed. A card still in progress
+// or in Review may want its agent re-adopted, so its orphan is left alone.
+export async function releasePushedOrphans(broadcast) {
+  let released = 0;
+  for (const entry of [...orphans.values()]) {
+    if (entry.reason !== 'unpushed' || findJobForBranch(entry)) continue;
+    if (await releaseOrphanedWorktree(entry, broadcast)) released++;
+  }
+  return released;
+}
+
 export function updateSettings(fields, broadcast) {
   const settings = boardSettings();
   if (typeof fields.running === 'boolean') settings.running = fields.running;

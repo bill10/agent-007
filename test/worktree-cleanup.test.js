@@ -162,6 +162,43 @@ describe('branch naming against an open PR', () => {
 // A worker that pushed to a URL (`git push -u https://…@github.com/… HEAD:b`)
 // leaves branch.<b>.remote set to that URL and no refs/remotes/origin/<b>, so
 // `@{u}` cannot resolve. Cleanup must then ask the remote directly.
+describe('removeWorktree when the remote-tracking ref is stale', () => {
+  // A worker that pushes again (a rebase fix, a force-with-lease) can leave the
+  // shared repo's refs/remotes/origin/<branch> on an old SHA, so @{u} resolves
+  // but is not HEAD. The remote itself is the authority.
+  function staleTracking(branch) {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, branch, { commit: true, push: true });
+    const old = execFileSync('git', ['-C', wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    writeFileSync(join(wt, 'fix.txt'), 'review fix');
+    execFileSync('git', ['-C', wt, 'add', '-A']);
+    execFileSync('git', ['-C', wt, 'commit', '-q', '-m', 'review fix']);
+    execFileSync('git', ['-C', wt, 'push', '-q', 'origin', 'HEAD']);
+    execFileSync('git', ['-C', repo, 'update-ref', `refs/remotes/origin/${branch}`, old]);
+    return { repo, wt, old };
+  }
+
+  it('releases it when HEAD matches the branch on the remote', async () => {
+    const { repo, wt, old } = staleTracking('bill10/stale-ref');
+    expect(execFileSync('git', ['-C', wt, 'rev-parse', '@{u}'], { encoding: 'utf8' }).trim()).toBe(old);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/stale-ref' });
+
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it('keeps it when the remote holds a different SHA', async () => {
+    const { repo, wt } = staleTracking('bill10/stale-diverged');
+    execFileSync('git', ['-C', wt, 'commit', '-q', '--amend', '-m', 'amended, never pushed']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/stale-diverged' });
+
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+});
+
 describe('removeWorktree when the branch was pushed to a URL', () => {
   function pushedToUrl(branch) {
     const { root, repo } = repoWithRemote();

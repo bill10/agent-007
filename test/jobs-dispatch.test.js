@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions, orphans, adoptingOrphans } from '../server/state.js';
-import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent } from '../server/jobs.js';
+import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent, releasePushedOrphans } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 import { buildJobCommand as buildCommand, buildJobPrompt, jobRequiresPr, DEFAULT_PERMISSION_MODE } from '../lib/jobs.js';
 
@@ -1603,6 +1603,28 @@ describe('done after a restart', () => {
     await moveJob(job.id, 'todo', noopBroadcast);
     expect(orphans.has('orphan-1')).toBe(false);
     expect(job.branchName).toBeNull();
+  });
+});
+
+describe('releasePushedOrphans at startup', () => {
+  beforeEach(resetBoard);
+
+  // removeWorktree's own tests cover the git rules; this covers which orphans
+  // get asked at all. A worktree already gone from disk releases on any ask.
+  it('re-checks only unpushed orphans with no live card', async () => {
+    addJob({ title: 'in review', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
+    sessions.clear();
+    const orphan = (id, branchName, reason) => orphans.set(id, { id, name: id, repoPath: REPO, branchName,
+      worktreePath: join(GONE_WORKTREE, id), reason });
+    orphan('done-card', 'bill10/merged', 'unpushed');
+    orphan('dirty', 'bill10/dirty', 'uncommitted');
+    orphan('review-card', job.branchName, 'unpushed');
+
+    expect(await releasePushedOrphans(noopBroadcast)).toBe(1);
+    expect([...orphans.keys()].sort()).toEqual(['dirty', 'review-card']);
   });
 });
 
