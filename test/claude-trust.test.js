@@ -26,7 +26,7 @@ describe('trustClaudeFolder', () => {
     const after = JSON.parse(readFileSync(file, 'utf8'));
     expect(after).toEqual({ ...before, projects: { ...before.projects, [wt]: { hasTrustDialogAccepted: true } } });
     expect(Object.keys(after)).toEqual(Object.keys(before));
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);   // Windows has no POSIX modes
     expect(readdirSync(home).filter(f => f.includes('.tmp'))).toEqual([]);
   });
 
@@ -82,7 +82,7 @@ describe('trustClaudeFolder', () => {
     const stale = `${file}.agent007-${process.pid}.tmp`;
     writeFileSync(stale, 'junk', { mode: 0o644 });
     expect(trustClaudeFolder(wt, { home, env: {} })).toBe(true);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);   // Windows has no POSIX modes
     expect(readdirSync(home).filter(f => f.includes('.tmp'))).toEqual([]);
   });
 
