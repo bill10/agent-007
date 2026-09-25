@@ -32,7 +32,7 @@ import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
-import { withDefaultPermission, envPermissionMode, PERMISSION_MODES } from './lib/jobs.js';
+import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
 
@@ -233,7 +233,7 @@ async function startup() {
   });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
   // A misspelt mode would otherwise be ignored without a word.
-  for (const [agent, key] of [['claude', 'CLAUDE_PERMISSION_MODE'], ['codex', 'CODEX_PERMISSION_MODE']]) {
+  for (const [agent, key] of Object.entries(ENV_PERMISSION_MODE)) {
     const raw = (process.env[key] || '').trim();
     if (raw && !envPermissionMode(agent)) console.warn(`  ${key}=${raw} is not a permission mode (${PERMISSION_MODES.join(', ')}); ignored`);
     else if (raw) console.log(`  ${agent} agents start in ${raw} unless told otherwise`);

@@ -3,7 +3,7 @@
 // it, what it may never override, and that the flags land in the command so
 // every reader of a session's mode sees them.
 
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -67,7 +67,9 @@ describe('a command someone starts', () => {
   });
 
   it('leaves a command that already says how it asks exactly as typed', () => {
-    for (const cmd of ['claude --dangerously-skip-permissions', 'claude --permission-mode plan', 'codex -s read-only', 'codex --yolo']) {
+    // Values the allowlist doesn't know included: they are still the person's choice.
+    for (const cmd of ['claude --dangerously-skip-permissions', 'claude --permission-mode plan', 'codex -s read-only', 'codex --yolo',
+      'claude --permission-mode default', 'claude --permission-mode=default', 'codex -a untrusted', 'codex -auntrusted', 'codex --ask-for-approval=on-failure']) {
       expect(withDefaultPermission(cmd, env)).toBe(cmd);
     }
   });

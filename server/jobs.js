@@ -124,7 +124,10 @@ export function jobsPayload() {
       agentAlive: !!(session && !session.exited),
     };
   });
-  return { type: 'jobs-list', jobs, settings: boardSettings() };
+  // The .env defaults ride along, so the toolbar can show the mode workers
+  // really start in while no mode has been picked there.
+  const envModes = { claude: envPermissionMode('claude'), codex: envPermissionMode('codex') };
+  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes } };
 }
 
 export function broadcastJobs(broadcast) {
