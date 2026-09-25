@@ -27,6 +27,11 @@ process.env.AGENT007_WORKTREE_DIR = mkdtempSync(join(tmpdir(), 'a007-worktrees-'
 // would otherwise wipe the developer's real repo list and orphan records.
 process.env.AGENT007_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'a007-config-'));
 
+// And the per-session MCP configs: they default to ~/.agent-007/mcp/<PORT>, and
+// sweepMcpConfigs() rmSyncs that whole directory, so a test booting on the live
+// server's port would delete its agents' configs.
+process.env.AGENT007_MCP_DIR = mkdtempSync(join(tmpdir(), 'a007-mcp-'));
+
 // Node 25+ ships its own Web Storage globals (localStorage, sessionStorage,
 // Storage); without --localstorage-file, localStorage is undefined. Vitest's
 // happy-dom environment only copies window keys that are NOT already on the
