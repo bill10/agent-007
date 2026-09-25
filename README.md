@@ -54,7 +54,7 @@ Uncomment what you want, then restart. The ones people change:
 | `HOST=0.0.0.0` + `ALLOWED_ORIGINS=<tailnet name>` | Reach it from your phone or another machine (behind Tailscale only, see [docs/REMOTE.md](docs/REMOTE.md)) |
 | `CLAUDE_PERMISSION_MODE` | Mode Claude Code agents start in, e.g. `bypassPermissions` |
 | `CODEX_PERMISSION_MODE` | The same for Codex |
-| `TRUST_BOARD_WORKTREES=0` | Keeps Claude Code's folder-trust prompt for job board workers |
+| `TRUST_BOARD_WORKTREES=0` | Keeps Claude Code's and Codex's folder-trust prompt for job board workers |
 | `PORT` | Port to listen on (default `7007`) |
 
 Highest wins: command-line flags (`--port`), then environment variables, then
@@ -121,7 +121,7 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `AGENT_MESSAGING` | *(guarded)* | `open` lets any of your agents message any other. By default an agent that asks before acting cannot message one that never asks |
 | `BILLION` | *(on)* | `0` (or `false`/`off`/`no`) turns Billion off. It is also off whenever user accounts exist, since it would belong to everyone |
 | `BILLION_DIR` | `~/.agent-007/billion` | Billion's own folder and git repo. Point it at a new or empty folder |
-| `TRUST_BOARD_WORKTREES` | *(on)* | Board-dispatched Claude Code workers skip the workspace-trust dialog, so queued jobs start unattended. That also lets the repo's own `.claude/settings.json` hooks and permission allow rules apply without asking. `0` (or `false`/`off`/`no`) keeps the dialog. Hand-started agents always keep it |
+| `TRUST_BOARD_WORKTREES` | *(on)* | Board-dispatched Claude Code and Codex workers skip the workspace-trust dialog, so queued jobs start unattended. That also lets the repo's own `.claude/settings.json` (or Codex project config, hooks and exec policies) apply without asking. `0` (or `false`/`off`/`no`) keeps the dialog. Hand-started agents always keep it |
 
 > **Running remotely?** The server spawns real shells, so never expose it to the
 > open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended

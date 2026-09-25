@@ -1,10 +1,11 @@
 // Pre-seeding Claude Code's workspace trust for board workers (server/claude-trust.js).
 // Every test runs against a temp HOME: the real ~/.claude.json is never touched.
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, realpathSync, symlinkSync, lstatSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, realpathSync, symlinkSync, lstatSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { autoTrusts, trustClaudeFolder } from '../server/claude-trust.js';
+import { autoTrusts, trustClaudeFolder, codexTrustArgs } from '../server/claude-trust.js';
+import { createSessionFromConfig } from '../server/pty.js';
 
 let home, file, wt;
 beforeEach(() => {
@@ -101,9 +102,66 @@ describe('autoTrusts', () => {
     for (const v of ['0', 'false', 'OFF', 'no', ' 0 ']) expect(autoTrusts(board, { TRUST_BOARD_WORKTREES: v })).toBe(false);
     expect(autoTrusts(board, { TRUST_BOARD_WORKTREES: '1' })).toBe(true);
   });
+  it('covers board-dispatched Codex workers too, under the same opt-out', () => {
+    const codex = { ...board, command: "codex 'do it'" };
+    expect(autoTrusts(codex, {})).toBe(true);
+    expect(autoTrusts(codex, { TRUST_BOARD_WORKTREES: '0' })).toBe(false);
+    expect(autoTrusts({ ...codex, spawnedBy: 'user' }, {})).toBe(false);
+  });
   it('leaves hand-started agents, other CLIs and repo-less sessions alone', () => {
     expect(autoTrusts({ ...board, spawnedBy: 'user' }, {})).toBe(false);
-    expect(autoTrusts({ ...board, command: 'codex exec hi' }, {})).toBe(false);
+    expect(autoTrusts({ ...board, command: 'gemini hi' }, {})).toBe(false);
     expect(autoTrusts({ ...board, worktreePath: null }, {})).toBe(false);
+  });
+});
+
+describe('codexTrustArgs', () => {
+  it('trusts only the worktree, by its real path, as a TOML inline table', () => {
+    const dotted = join(home, '.agent-007', 'wt.1');
+    mkdirSync(dotted, { recursive: true });
+    expect(codexTrustArgs(dotted)).toEqual(['-c', `projects={${JSON.stringify(dotted)}={trust_level="trusted"}}`]);
+    if (process.platform !== 'win32') {   // symlinks need privileges there
+      symlinkSync(dotted, join(home, 'link'));
+      expect(codexTrustArgs(join(home, 'link'))[1]).toContain(JSON.stringify(dotted));
+    }
+  });
+  it('writes nothing to CODEX_HOME', () => {
+    codexTrustArgs(wt);
+    expect(readdirSync(home)).toEqual(['worktrees']);
+  });
+});
+
+// A stand-in `codex` that records the arguments it was started with.
+describe.skipIf(process.platform === 'win32')('a Codex spawn', () => {
+  const spawnCodex = (extra) => {
+    const bin = join(home, 'bin');
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, 'codex'), `#!/bin/sh\nprintf '%s\\n' "$@" > "${home}/args"\n`, { mode: 0o755 });
+    const PATH = process.env.PATH;
+    process.env.PATH = `${bin}:${PATH}`;
+    try {
+      return createSessionFromConfig({ sessionId: `ct-${Math.random()}`, name: 'T', color: '#000', command: "codex 'do it'", worktreePath: wt, spawnedBy: 'board', ...extra }, () => {});
+    } finally { process.env.PATH = PATH; }
+  };
+  const argsSeen = async () => {
+    for (let i = 0; i < 100 && !existsSync(join(home, 'args')); i++) await new Promise(r => setTimeout(r, 20));
+    return readFileSync(join(home, 'args'), 'utf8');
+  };
+  const done = (r) => { try { r.session.pty.kill(); } catch {} clearInterval(r.session.stateCheckInterval); };
+
+  it('gets the trust flag and no PTY answering when auto-trusted', async () => {
+    const r = spawnCodex({ autoTrust: true });
+    try {
+      expect(await argsSeen()).toContain(`projects={${JSON.stringify(wt)}={trust_level="trusted"}}`);
+      expect(r.session.answersTrust).toBe(false);
+    } finally { done(r); }
+  });
+  it('gets no trust flag otherwise', async () => {
+    const r = spawnCodex({ spawnedBy: 'user' });
+    try {
+      const seen = await argsSeen();
+      expect(seen).toContain('do it');
+      expect(seen).not.toContain('trust_level');
+    } finally { done(r); }
   });
 });
