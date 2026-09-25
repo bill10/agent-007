@@ -313,6 +313,7 @@ export function addJob({ title, detail, repoPath, type, schedule, permissionMode
   if (written) result.job.attachments = written.attachments;
   allJobs().push(result.job);
   persist(broadcast);
+  requestDispatch();
   return { job: result.job };
 }
 
@@ -699,6 +700,7 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
   job.lastErrorAt = null;
   clearPrCheckError(job);
   persist(broadcast);
+  requestDispatch();
   if (broadcast) {
     broadcast({
       type: 'notification', level: 'info',
@@ -876,6 +878,7 @@ export function setJobPaused(jobId, paused, broadcast) {
   job.paused = next;
   if (!next && job.schedule) job.nextRunAt = nextCronIso(job.schedule);
   persist(broadcast);
+  if (!next) requestDispatch();
   return { job };
 }
 
@@ -889,6 +892,7 @@ export async function deleteJob(jobId, broadcast, { killSession } = {}) {
   if (idx === -1) return { error: 'Job not found' };
   const [removed] = jobs.splice(idx, 1);
   persist(broadcast);
+  requestDispatch();
   // After persist, so a file the OS will not let go of (open in a browser tab
   // on Windows) cannot leave a card that is gone from memory but back on the
   // next restart. The id is checked the same way a path is: it too is
@@ -1031,6 +1035,8 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   // Persist and repaint before the kill so the card moves immediately; the kill
   // then emits its own session-ended and orphan notifications.
   persist(broadcast);
+  // Back in To do, or a slot freed by leaving In progress.
+  if (state === 'todo' || fromState === 'in-progress') requestDispatch();
   if (retiringSessionId && killSession) {
     const session = sessions.get(retiringSessionId);
     if (session && !session.exited) {
@@ -1103,6 +1109,8 @@ export async function releasePushedOrphans(broadcast) {
 
 export function updateSettings(fields, broadcast) {
   const settings = boardSettings();
+  // Starting the board, or raising its cap, makes room right away.
+  const before = { running: settings.running, maxPerRepo: settings.maxPerRepo };
   if (typeof fields.running === 'boolean') settings.running = fields.running;
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
@@ -1114,6 +1122,7 @@ export function updateSettings(fields, broadcast) {
     settings.permissionModeChosen = true;
   }
   persist(broadcast);
+  if (settings.running && (!before.running || settings.maxPerRepo > before.maxPerRepo)) requestDispatch();
   return { settings };
 }
 
@@ -2130,6 +2139,29 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
   }
 }
 
+// --- Dispatch on events ---
+
+// A card posted or requeued, or a slot freed, asks for a dispatch pass here
+// instead of waiting out the scan interval (5 minutes by default). Events
+// within DISPATCH_DEBOUNCE_MS coalesce into one pass. The pass is dispatchOnce
+// alone, behind the scan's flag: the PR and merge sweeps ask GitHub about
+// every card and have nothing to do with a card just posted, so they stay on
+// the interval. A pass that finds a scan running asks again, since the scan
+// may have picked its candidates before the event.
+export const DISPATCH_DEBOUNCE_MS = 2000;
+let dispatchPass = null;
+let kickTimer = null;
+
+export function requestDispatch() {
+  if (!dispatchPass || kickTimer) return;
+  kickTimer = setTimeout(async () => {
+    kickTimer = null;
+    try { await dispatchPass(); } catch (err) {
+      console.error('Job dispatch pass failed:', err.message);
+    }
+  }, DISPATCH_DEBOUNCE_MS);
+}
+
 // --- Loop ---
 
 let dispatchTimer = null;
@@ -2165,12 +2197,25 @@ export function startDispatcher(createSession, broadcast, { onSessionCreated, ki
     if (generation === loopGeneration) ciTimer = setTimeout(ciTick, CI_POLL_MS);
   };
   ciTimer = setTimeout(ciTick, CI_POLL_MS);
+  dispatchPass = async () => {
+    if (!boardSettings().running) return;
+    if (scanInFlight) { requestDispatch(); return; }
+    scanInFlight = true;
+    try {
+      await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
+    } finally {
+      scanInFlight = false;
+    }
+  };
 }
 
 export function stopDispatcher() {
   loopGeneration++;
   clearTimeout(dispatchTimer);
   clearTimeout(ciTimer);
+  clearTimeout(kickTimer);
   dispatchTimer = null;
   ciTimer = null;
+  kickTimer = null;
+  dispatchPass = null;
 }

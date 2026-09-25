@@ -10,7 +10,7 @@ import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } 
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken, authEnabled } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook } from './agent-mcp.js';
-import { broadcastJobs } from './jobs.js';
+import { broadcastJobs, requestDispatch } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 import { trustDialogKey } from './billion.js';
@@ -158,6 +158,8 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     dropMessages(sessionId);
     if (session.isBillion) dropApprovals();
     updateState(session, broadcast);
+    // A board worker gone frees its repo's slot.
+    if (session.jobId) requestDispatch();
     // What it is as it ends, which a relink or a board retirement may have
     // changed since session-created: the client's finished-worker path reads it.
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}`,
