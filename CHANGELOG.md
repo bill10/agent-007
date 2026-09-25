@@ -5,6 +5,30 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.1.0] - 2026-09-25
+
+### Fixed
+
+- **A finished card's worktree is cleaned up even when its branch was pushed
+  to a URL.** A worker that pushed with `git push -u https://…@github.com/…`
+  left the branch tracking that URL instead of `origin`, so git had no
+  remote-tracking ref to compare against and the cleanup called a fully pushed
+  branch "unpushed" and kept its worktree as an orphan. When the upstream can't
+  be resolved locally, the cleanup now asks the remote for the branch's SHA
+  (5 second timeout) and releases the worktree only on an exact match. Offline,
+  an error, or a different SHA still keeps it, so no branch whose commits are
+  missing from the remote is deleted.
+- **A token left in a branch's remote URL is removed.** If that URL holds
+  a user and token before the host, the cleanup points the branch back at
+  `origin`, so the token no longer sits in `.git/config`. The URL is never
+  logged.
+
+### Changed
+
+- **Dispatched workers are told to push with `git push -u origin HEAD`** and
+  never to put credentials in a remote URL. To push as a different GitHub
+  account, `gh auth switch` is enough.
+
 ## [0.6.0.0] - 2026-09-25
 
 ### Added
