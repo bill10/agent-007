@@ -38,6 +38,7 @@ import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
+import { startTelegram, stopTelegram } from './server/owner.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -258,6 +259,8 @@ async function startup() {
   } else if (billionEnabled()) {
     console.log('  Billion: off while user accounts are enabled');
   }
+  // After Billion, so a reply waiting in Telegram finds it running.
+  startTelegram({ broadcast });
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
     const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
@@ -275,6 +278,7 @@ async function startup() {
 function gracefulShutdown() {
   console.log('\nShutting down...');
   stopDispatcher();
+  stopTelegram();
   const killPromises = [];
   for (const [, session] of sessions) {
     clearInterval(session.stateCheckInterval);

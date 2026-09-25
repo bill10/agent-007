@@ -17,6 +17,7 @@ import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval } from './approvals.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
+import { notifyOwner } from './owner.js';
 
 // --- Origin Check Middleware (B2) ---
 // Rejects cross-origin requests from disallowed origins. localhost is always
@@ -129,6 +130,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
         answerPermission: ({ id, decision, reason }) => (req.agentSession.isBillion
           ? answerApproval(id, decision, reason)
           : { error: 'Only Billion answers permission requests.' }),
+        notifyOwner: (text) => (req.agentSession.isBillion
+          ? notifyOwner(text, { broadcast })
+          : { error: 'Only Billion can notify the owner.' }),
         billionReady: () => {
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };
