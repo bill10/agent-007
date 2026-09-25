@@ -158,3 +158,51 @@ describe('branch naming against an open PR', () => {
     expect(result.branchName).toBe('bill10/brand-new-job');
   });
 });
+
+// A worker that pushed to a URL (`git push -u https://…@github.com/… HEAD:b`)
+// leaves branch.<b>.remote set to that URL and no refs/remotes/origin/<b>, so
+// `@{u}` cannot resolve. Cleanup must then ask the remote directly.
+describe('removeWorktree when the branch was pushed to a URL', () => {
+  function pushedToUrl(branch) {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, branch, { commit: true });
+    const url = `file://${join(root, 'remote.git')}`;
+    execFileSync('git', ['-C', wt, 'push', '-q', '-u', url, `HEAD:${branch}`], { stdio: 'ignore' });
+    return { root, repo, wt };
+  }
+
+  it('releases it when HEAD matches the branch on the remote', async () => {
+    const { repo, wt } = pushedToUrl('bill10/url-pushed');
+    expect(() => execFileSync('git', ['-C', wt, 'rev-parse', '@{u}'], { stdio: 'ignore' })).toThrow();
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/url-pushed' });
+
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it('keeps it when HEAD has commits the remote does not', async () => {
+    const { repo, wt } = pushedToUrl('bill10/url-ahead');
+    writeFileSync(join(wt, 'more.txt'), 'not pushed');
+    execFileSync('git', ['-C', wt, 'add', '-A']);
+    execFileSync('git', ['-C', wt, 'commit', '-q', '-m', 'local only']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/url-ahead' });
+
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps it when the remote is unreachable, and moves a credentialed URL back to origin', async () => {
+    const { repo, wt } = pushedToUrl('bill10/url-offline');
+    // Port 1 refuses at once: an offline remote, and a fake token in the URL.
+    execFileSync('git', ['-C', repo, 'config', 'branch.bill10/url-offline.remote', 'https://x-access-token:fake@127.0.0.1:1/r.git']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/url-offline' });
+
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+    const remote = execFileSync('git', ['-C', repo, 'config', 'branch.bill10/url-offline.remote'], { encoding: 'utf8' }).trim();
+    expect(remote).toBe('origin');
+  });
+});

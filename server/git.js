@@ -343,9 +343,11 @@ export async function removeWorktree(session, { discardChanges = false } = {}) {
         const upstream = (await gitExec(['-C', session.worktreePath, 'rev-parse', '@{u}'])).trim();
         fullyPushed = !!local && local === upstream;
       } catch {
-        // No upstream configured, or the remote ref is unknown locally: treat
-        // as not pushed and fall through to the conservative base-branch check.
-        fullyPushed = false;
+        // No upstream, or one git cannot resolve locally — typically a branch
+        // pushed to a raw URL (`git push -u https://…`), which records the URL
+        // as branch.<name>.remote and creates no remote-tracking ref. Ask the
+        // remote itself; anything short of a matching SHA stays not-pushed.
+        fullyPushed = await matchesRemote(session);
       }
     }
     if (!reason && !fullyPushed) {
@@ -378,6 +380,31 @@ export async function removeWorktree(session, { discardChanges = false } = {}) {
     console.error('Worktree cleanup error:', err.message);
     return { orphaned: true, reason: 'cleanup-failed' };
   }
+}
+
+// HEAD equals the branch's ref on its configured remote (origin if none).
+// Only a definite match counts: offline, a timeout, an auth failure or a
+// different SHA all return false, which keeps the branch. A remote URL with
+// credentials in it is repointed at origin on the way, so the token stops
+// sitting in .git/config; the URL itself is never logged.
+async function matchesRemote({ worktreePath, repoPath, branchName }) {
+  if (!branchName) return false;
+  const cfg = async key => {
+    try { return (await gitExec(['-C', repoPath, 'config', '--get', key])).trim(); } catch { return ''; }
+  };
+  const remote = await cfg(`branch.${branchName}.remote`) || 'origin';
+  const ref = await cfg(`branch.${branchName}.merge`) || `refs/heads/${branchName}`;
+  let matched = false;
+  try {
+    const local = (await gitExec(['-C', worktreePath, 'rev-parse', 'HEAD'])).trim();
+    const out = await gitExec(['-C', repoPath, 'ls-remote', remote, ref]);
+    const line = out.split('\n').find(l => l.endsWith(`\t${ref}`));
+    matched = !!local && line?.split('\t')[0] === local;
+  } catch {}
+  if (/^[a-z]+:\/\/[^/@]+@/i.test(remote)) {
+    try { await gitExec(['-C', repoPath, 'config', `branch.${branchName}.remote`, 'origin']); } catch {}
+  }
+  return matched;
 }
 
 // Delete an agent's branch, cleaning up first so it actually succeeds. If the
