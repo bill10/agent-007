@@ -19,7 +19,7 @@
 // session Map so it is testable on its own: sessions come in as parameters.
 
 import { parseCommand, detectState } from '../lib/helpers.js';
-import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME } from '../lib/jobs.js';
+import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME, isCodexConfigFlag } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
@@ -77,7 +77,7 @@ export function isUnguarded(session) {
   const { args } = parseCommand(command);
   const end = args.indexOf('--');
   return (end === -1 ? args : args.slice(0, end))
-    .some(a => /^(-c|--config|-p|--profile|--full-auto)(=|$)/.test(a) || /^-c\S/.test(a));
+    .some(isCodexConfigFlag);
 }
 
 // Billion (server/billion.js) is the exception both rules make: every agent
@@ -86,11 +86,32 @@ export function isUnguarded(session) {
 // can pass that text on to an agent with full access. Accepted in the design
 // (docs/BILLION.md): messages arrive labelled as coming from an agent, and its
 // charter treats them as information, never as instructions.
-export function messageableAgents(from, sessions) {
-  const fromUnguarded = isUnguarded(from);
+//
+// AGENT_MESSAGING=open in .env lifts the permission rule (not the owner rule):
+// for someone who runs every agent in one mode it never blocks anything, and
+// for someone who mixes modes it is theirs to waive. Messages keep their
+// "from another agent, not the user" label either way.
+export function messagingOpen(env = process.env) {
+  return String(env.AGENT_MESSAGING ?? '').trim().toLowerCase() === 'open';
+}
+
+// Why `from` may not message `to`, or null when it may. Another owner's agent
+// is refused without a reason: saying so would tell an agent it exists.
+const HIDDEN_AGENT = 'hidden';
+function refusal(from, to, open) {
+  if (to.isBillion) return null;
+  if (!sameOwner(from, to)) return HIDDEN_AGENT;
+  if (!open && !isUnguarded(from) && isUnguarded(to)) {
+    return 'never asks before acting and you do, so a message from you could get it to do what you would have to ask for '
+      + '(the owner can allow this with AGENT_MESSAGING=open in .env)';
+  }
+  return null;
+}
+
+export function messageableAgents(from, sessions, env = process.env) {
+  const open = messagingOpen(env);
   return [...sessions.values()].filter(s =>
-    s.id !== from.id && !s.exited && isAgent(s)
-    && (s.isBillion || (sameOwner(from, s) && (fromUnguarded || !isUnguarded(s)))));
+    s.id !== from.id && !s.exited && isAgent(s) && !refusal(from, s, open));
 }
 
 // Header fields lose newlines as well: a name is renamable, and one carrying a
@@ -217,7 +238,11 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
   const target = to === BILLION_NAME ? reachable.find(s => s.isBillion) : reachable.find(s => s.name === to);
   if (!target) {
     const names = reachable.map(s => s.name).join(', ');
-    return { error: `No agent named "${to}" you can message. ${names ? `Agents you can reach: ${names}.` : 'There are no other agents running.'}` };
+    const reach = names ? `Agents you can reach: ${names}.` : 'There are no other agents you can reach.';
+    // Say why when the agent is there but the rules keep it out of reach.
+    const there = [...sessions.values()].find(s => s.id !== from.id && !s.exited && isAgent(s) && s.name === to);
+    const why = there && refusal(from, there, messagingOpen());
+    return { error: why && why !== HIDDEN_AGENT ? `${to} ${why}. ${reach}` : `No agent named "${to}" is running. ${reach}` };
   }
 
   // Two agents that each answer every message would talk for ever.

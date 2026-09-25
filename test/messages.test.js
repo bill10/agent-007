@@ -165,10 +165,48 @@ describe('who can be reached', () => {
     const alsoYolo = agent('Mamba', { command: 'codex --dangerously-bypass-approvals-and-sandbox' });
     const sessions = mapOf(careful, yolo, alsoYolo);
     expect(messageableAgents(careful, sessions)).toEqual([]);
-    expect(sendMessage({ from: careful, to: 'Viper', text: 'rm -rf /', sessions, now: NOW }).error).toMatch(/No agent named "Viper"/);
+    // Told why, and how the owner can allow it.
+    expect(sendMessage({ from: careful, to: 'Viper', text: 'rm -rf /', sessions, now: NOW }).error)
+      .toMatch(/^Viper never asks before acting and you do.*AGENT_MESSAGING=open/);
     expect(yolo.pty.write).not.toHaveBeenCalled();
     // Downhill and sideways are fine: the recipient's own permissions still apply.
     expect(messageableAgents(yolo, sessions).map(s => s.name)).toEqual(['Cobra', 'Mamba']);
+  });
+
+  it('reads a Codex profile with its name attached as possibly never asking', () => {
+    expect(isUnguarded(agent('Viper', { command: 'codex -pyolo', agent: 'codex' }))).toBe(true);
+    expect(isUnguarded(agent('Viper', { command: 'codex -csandbox_mode=danger-full-access', agent: 'codex' }))).toBe(true);
+  });
+
+  it('lets the owner open messaging between all their agents with AGENT_MESSAGING=open', () => {
+    const careful = agent('Cobra', { command: 'claude --permission-mode auto' });
+    const yolo = agent('Viper', { command: 'claude --dangerously-skip-permissions' });
+    const theirs = agent('Mamba', { command: 'claude', ownerId: 'u2' });
+    const sessions = mapOf(careful, yolo, theirs);
+    expect(messageableAgents(careful, sessions, { AGENT_MESSAGING: 'open' }).map(s => s.name)).toEqual(['Viper']);
+    expect(messageableAgents(careful, sessions, { AGENT_MESSAGING: 'no' })).toEqual([]);
+    // Another owner's agent stays out of reach, and unmentioned.
+    expect(sendMessage({ from: careful, to: 'Mamba', text: 'hi', sessions, now: NOW }).error).toMatch(/^No agent named "Mamba" is running/);
+  });
+
+  it('delivers uphill once AGENT_MESSAGING=open is in the environment, however it is cased', () => {
+    const saved = process.env.AGENT_MESSAGING;
+    process.env.AGENT_MESSAGING = ' Open ';
+    try {
+      const careful = agent('Cobra', { command: 'claude --permission-mode auto' });
+      const yolo = agent('Viper', { command: 'claude --dangerously-skip-permissions' });
+      expect(sendMessage({ from: careful, to: 'Viper', text: 'hi', sessions: mapOf(careful, yolo), now: NOW }))
+        .toMatchObject({ delivered: true });
+    } finally {
+      if (saved === undefined) delete process.env.AGENT_MESSAGING; else process.env.AGENT_MESSAGING = saved;
+    }
+  });
+
+  it('gives no reason for an agent that has exited, only that it is not running', () => {
+    const careful = agent('Cobra', { command: 'claude --permission-mode auto' });
+    const gone = agent('Viper', { command: 'claude --dangerously-skip-permissions', exited: true });
+    expect(sendMessage({ from: careful, to: 'Viper', text: 'hi', sessions: mapOf(careful, gone), now: NOW }).error)
+      .toMatch(/^No agent named "Viper" is running/);
   });
 
   it.each([
@@ -278,7 +316,7 @@ describe('edges of sending', () => {
   it('says there is nobody to reach when no other agent runs', () => {
     const from = agent('Cobra');
     expect(sendMessage({ from, to: 'Viper', text: 'hi', sessions: mapOf(from), now: NOW }).error)
-      .toMatch(/no other agents running/);
+      .toMatch(/There are no other agents you can reach/);
   });
 
   it('refuses a non-string message rather than typing "[object Object]"', () => {

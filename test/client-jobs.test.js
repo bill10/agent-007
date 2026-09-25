@@ -352,6 +352,19 @@ describe('the per-job permission mode', () => {
     expect(perm().value).toBe('');
   });
 
+  it('colours "board default" when what the board decides is bypass', () => {
+    handleJobsList({ jobs: [JOB()], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto', permissionModeChosen: false,
+      envModes: { claude: null, codex: 'bypassPermissions' } } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(perm().value).toBe('');
+    expect(perm().classList).toContain('job-mode-danger');
+    handleJobsList({ jobs: [JOB()], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto', permissionModeChosen: true,
+      envModes: { claude: null, codex: 'bypassPermissions' } } });
+    cards()[0].querySelector('.job-card-actions button').click();
+    expect(perm().classList).not.toContain('job-mode-danger');   // a picked mode overrides the .env one
+    handleJobsList({ jobs: [], settings: { permissionModeChosen: false, envModes: { claude: null, codex: null } } });
+  });
+
   it('shows and sends the mode a card carries', () => {
     handleJobsList({ jobs: [JOB({ permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
     cards()[0].querySelector('.job-card-actions button').click();
@@ -381,6 +394,26 @@ describe('the per-job permission mode', () => {
     expect(cards()[0].querySelector('.job-card-type').classList).toContain('job-mode-danger');
     handleJobsList({ jobs: [JOB({ permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
     expect(cards()[0].querySelector('.job-card-type').classList).not.toContain('job-mode-danger');
+  });
+
+  it('shows the .env defaults while no mode is picked, and lets any pick override them', () => {
+    handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto', permissionModeChosen: false,
+      envModes: { claude: 'bypassPermissions', codex: null } } });
+    const perm = document.getElementById('job-permission-mode');
+    expect(perm.value).toBe('');
+    expect(perm.selectedOptions[0].textContent).toBe('.env: claude bypassPermissions, codex auto');
+    expect(perm.classList).toContain('job-mode-danger');   // workers really run in bypass
+    // Picking the built-in mode is a change too, so it is sent and recorded.
+    perm.value = 'auto';
+    perm.dispatchEvent(new Event('change'));
+    expect(send).toHaveBeenCalledWith({ type: 'job-settings', permissionMode: 'auto' });
+    // Once a mode is picked, the .env entry goes.
+    handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, permissionMode: 'auto', permissionModeChosen: true,
+      envModes: { claude: 'bypassPermissions', codex: null } } });
+    expect(perm.value).toBe('auto');
+    expect(perm.querySelector('option[value=""]')).toBeNull();
+    expect(perm.classList).not.toContain('job-mode-danger');
+    handleJobsList({ jobs: [], settings: { permissionModeChosen: false, envModes: { claude: null, codex: null } } });
   });
 
   it('marks the toolbar select when the board itself is on bypassPermissions', () => {

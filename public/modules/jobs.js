@@ -34,7 +34,14 @@ export const COLUMNS = [
 const DANGEROUS_MODE = 'bypassPermissions';
 
 function markDangerousMode(el) {
-  if (el) el.classList.toggle('job-mode-danger', el.value === DANGEROUS_MODE);
+  if (!el) return;
+  // An empty value is "whatever the board decides" (the toolbar's .env entry,
+  // a card's Board default): dangerous when that decision is bypass for
+  // either CLI — a picked board mode, or with none picked, a .env default.
+  const board = boardSettings.permissionModeChosen
+    ? [boardSettings.permissionMode]
+    : [boardSettings.permissionMode, ...Object.values(boardSettings.envModes || {})];
+  el.classList.toggle('job-mode-danger', el.value === DANGEROUS_MODE || (el.value === '' && board.includes(DANGEROUS_MODE)));
 }
 
 // Mirrors STALLED_AFTER_MS in lib/jobs.js.
@@ -595,8 +602,23 @@ function renderToolbar() {
     : 'dispatcher stopped';
   status.classList.toggle('running', running);
   if (document.activeElement !== cap) cap.value = boardSettings.maxPerRepo;
-  // The mode a card falls back to when it does not name one of its own.
-  if (perm && document.activeElement !== perm) perm.value = boardSettings.permissionMode || 'auto';
+  // The mode a card falls back to when it does not name one of its own. With
+  // none picked here and a .env default in play, that default is what workers
+  // start in, so the dropdown says so (an entry of its own, so that picking
+  // any mode, the built-in one included, still counts as picking it).
+  if (perm && document.activeElement !== perm) {
+    const env = boardSettings.envModes || {};
+    const fromEnv = !boardSettings.permissionModeChosen && (env.claude || env.codex);
+    let entry = perm.querySelector('option[value=""]');
+    if (fromEnv) {
+      if (!entry) { entry = document.createElement('option'); entry.value = ''; perm.prepend(entry); }
+      const base = boardSettings.permissionMode || 'auto';
+      entry.textContent = `.env: claude ${env.claude || base}, codex ${env.codex || base}`;
+    } else if (entry) {
+      entry.remove();
+    }
+    perm.value = fromEnv ? '' : (boardSettings.permissionMode || 'auto');
+  }
   markDangerousMode(perm);
 }
 

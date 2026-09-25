@@ -27,7 +27,7 @@ import {
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
-  BILLION_NAME,
+  BILLION_NAME, envPermissionMode,
 } from '../lib/jobs.js';
 import { nextCronIso } from '../lib/cron.js';
 
@@ -51,6 +51,16 @@ function defaultSettings() {
     // default from ever reaching this board.
     permissionModeMigrated: false,
   };
+}
+
+// The board's mode for a card on this CLI, before the card's own mode: one
+// picked in the board's dropdown wins; with none picked, the CLI's .env
+// default (CLAUDE_PERMISSION_MODE / CODEX_PERMISSION_MODE); then the board's
+// built-in default.
+export function boardModeFor(agent) {
+  const settings = boardSettings();
+  if (settings.permissionModeChosen) return settings.permissionMode;
+  return envPermissionMode(agent) || settings.permissionMode;
 }
 
 export function boardSettings() {
@@ -114,7 +124,10 @@ export function jobsPayload() {
       agentAlive: !!(session && !session.exited),
     };
   });
-  return { type: 'jobs-list', jobs, settings: boardSettings() };
+  // The .env defaults ride along, so the toolbar can show the mode workers
+  // really start in while no mode has been picked there.
+  const envModes = { claude: envPermissionMode('claude'), codex: envPermissionMode('codex') };
+  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes } };
 }
 
 export function broadcastJobs(broadcast) {
@@ -1120,7 +1133,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
-    const command = buildJobCommand(job, { permissionMode: settings.permissionMode });
+    const command = buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) });
     // Kept so the recheck below can tell whether the card still dispatches
     // into the same repo as the session it is about to be handed.
     const spawnedRepo = job.repoPath;
@@ -1170,7 +1183,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // prompt no longer depends on the type), so the type is checked outright:
     // a schedule claimed as In progress could never move again.
     const stillQueued = allJobs().includes(job) && job.state === 'todo' && !isScheduled(job)
-      && buildJobCommand(job, { permissionMode: boardSettings().permissionMode }) === command
+      && buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) }) === command
       && job.repoPath === spawnedRepo;
     if (!stillQueued) {
       if (killSession) {
@@ -1266,12 +1279,15 @@ export function orphanResumePlan(orphan, homes) {
   // board: it resumes under the board's current mode, not the CLI's default —
   // and not the mode it was dispatched with, which the board may have
   // tightened since.
-  const mode = card ? dispatchPermissionMode(card, boardSettings().permissionMode)
-    : orphan.origin === 'board' ? dispatchPermissionMode(null, boardSettings().permissionMode)
+  const mode = card ? dispatchPermissionMode(card, boardModeFor(jobAgent(card)))
+    : orphan.origin === 'board' ? dispatchPermissionMode(null, boardModeFor(agent))
     : null;
   // The flags it was spawned with, for a hand-spawned agent with no card.
   // They belong to the CLI on the record: a note-less orphan resolved by a
   // transcript has none to pass on, and resumes under that CLI's default.
+  // Never the .env default: an agent spawned since it was set recorded the
+  // flags it got, and one that recorded none may have named a mode the
+  // allowlist doesn't read, which a default must not replace.
   const flags = recordedPermissionFlags(orphan);
   // A Codex agent is pinned to its own worktree's session by id — the one
   // the transcript probe already found, when that is how its CLI was known.

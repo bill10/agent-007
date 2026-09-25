@@ -5,6 +5,36 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.5.1.0] - 2026-09-25
+
+### Added
+
+- **A default permission mode for every agent, from `.env`.**
+  `CLAUDE_PERMISSION_MODE` and `CODEX_PERMISSION_MODE` (one of `auto`,
+  `acceptEdits`, `bypassPermissions`, `manual`, `dontAsk`, `plan`) set the mode
+  every Claude Code or Codex agent the app starts runs in: agents you start
+  from **+ Agent** or type a command for, and job board workers. Anything more
+  specific still wins: permission flags in the command (any value, including
+  ones like `--permission-mode default`, and Codex config overrides and
+  profiles), a card's own mode, or a mode picked in the board's permissions
+  dropdown. Until you pick one there, the dropdown shows the `.env` defaults,
+  in red when either is bypass. Billion keeps its own mode. A misspelt mode is
+  reported when the server starts.
+- **`AGENT_MESSAGING=open`** lets any of your agents message any other. By
+  default an agent that asks before acting still cannot message one that never
+  asks, so it cannot borrow that agent's permissions; with every agent in the
+  same kind of mode the rule never blocks anything anyway.
+
+### Changed
+
+- When the messaging rule refuses a message, the sender is told why and how
+  the owner can allow it, instead of being told no such agent exists.
+
+### Fixed
+
+- A Codex agent started with its profile name attached to `-p` (`-pyolo`) is
+  now recognised as possibly never asking, like `-p yolo`.
+
 ## [0.5.0.0] - 2026-09-24
 
 ### Added
