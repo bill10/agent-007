@@ -20,7 +20,7 @@ import { sendNotice } from './messages.js';
 import { liveBillion } from './billion.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
-  parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr,
+  parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr, prCiViewArgs, parsePrCi,
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
@@ -1001,6 +1001,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (state !== 'review') {
     clearPrCheckError(job);
     job.prClosedSeenAt = null;   // a closed reading is about this stay in Review only
+    job.ciNotifiedSha = null;    // and so is the CI notice
   }
   // A manual move means "the PR was opened outside the board". Look it up, or
   // the card sits in Review with no link to the thing it produced — nothing
@@ -1565,6 +1566,25 @@ export async function findClosedPrForBranch(repoPath, branchName, {
     { listAccounts, tokenFor, label: 'gh pr view' });
 }
 
+async function prCiOnce(repoPath, number, token) {
+  try {
+    const stdout = await runGh(prCiViewArgs(number), { cwd: repoPath, token });
+    return { pr: parsePrCi(stdout) };
+  } catch (err) {
+    return { error: ghErrorDetail(err) || 'gh pr view failed' };
+  }
+}
+
+// The card's PR of record with its state and head-commit checks (parsePrCi).
+export async function findPrCi(repoPath, branchName, prNumber, {
+  listAccounts = ghAccountsCached,
+  tokenFor = ghTokenCached,
+  view = prCiOnce,
+} = {}) {
+  return branchPrLookup(repoPath, branchName, token => view(repoPath, prNumber, token),
+    { listAccounts, tokenFor, label: 'gh pr view' });
+}
+
 // Close the agent that delivered a job, resolving it by branch when the stored
 // link is gone. killSession -> removeWorktree deletes the worktree and the local
 // branch (fully pushed by then); the PR is untouched. The card keeps the whole
@@ -1707,7 +1727,9 @@ export async function checkPullRequests(broadcast, { findPr = findPrForBranch } 
 // closed path in checkMergedPullRequests).
 export const CLOSED_CONFIRM_MS = 60_000;
 
-export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch, findClosed = findClosedPrForBranch, findPr = findPrForBranch } = {}) {
+// `only` narrows the sweep to those cards: the CI watch files the ones it saw
+// merged or closed without a gh round trip for every other card on the board.
+export async function checkMergedPullRequests(broadcast, { killSession, findMerged = findMergedPrForBranch, findClosed = findClosedPrForBranch, findPr = findPrForBranch, only = null } = {}) {
   // prMergedAt is only ever written alongside state 'done', and done is
   // terminal, so the state filter already excludes every stamped job. Kept as a
   // cheap assertion of that invariant rather than a live condition.
@@ -1717,7 +1739,8 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   // its straggler files freed.
   const recleared = clearFinishedAttachments();
   const candidates = allJobs().filter(j =>
-    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && jobRequiresPr(j));
+    (j.state === 'review' || j.state === 'in-progress') && j.branchName && !j.prMergedAt && jobRequiresPr(j)
+    && (!only || only.includes(j)));
   if (candidates.length === 0) {
     if (recleared) persist(broadcast);
     return [];
@@ -1853,6 +1876,72 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
   }
   if (finished.length > 0 || noted || recleared) persist(broadcast);
   return finished;
+}
+
+// --- CI watch ---
+
+// Review cards with a PR are polled on their own, shorter timer (CI_POLL_MS)
+// rather than the dispatch interval, for two things the scan is too slow for:
+//
+//  - Billion hears when CI on its card's PR has finished, once per head commit
+//    (job.ciNotifiedSha), so it merges on that instead of polling gh itself.
+//    A new push is a new SHA, which re-arms it.
+//  - A PR seen merged or closed is filed now, through the same merge sweep the
+//    scan runs (agent retired, worktree released, closed-PR confirm window).
+//
+// Polling, not webhooks: the server usually sits on a laptop behind NAT.
+export const CI_POLL_MS = 60_000;
+const CI_BACKOFF_MAX_MS = 15 * 60_000;
+const ciBackoff = new Map();   // job id -> { failures, nextAt }; memory only
+
+export function notifyBillionCi(job, ci) {
+  if (!job.postedByBillion) return false;
+  const billion = liveBillion();
+  if (!billion) return false;
+  const verdict = ci.failed.length ? `failed: ${ci.failed.join(', ')}` : 'all passed';
+  return sendNotice(billion, `CI finished on "${job.title}" (card ${job.id}, PR #${job.prNumber}): ${verdict}`,
+    job.prUrl ? [`Pull request: ${job.prUrl}`] : []);
+}
+
+export async function checkReviewCi(broadcast, { killSession, viewCi = findPrCi, sweep = checkMergedPullRequests, now = Date.now() } = {}) {
+  const cards = allJobs().filter(j => j.state === 'review' && j.prNumber != null && j.branchName && jobRequiresPr(j));
+  for (const id of ciBackoff.keys()) if (!cards.some(j => j.id === id)) ciBackoff.delete(id);
+  const notified = [];
+  const ended = [];
+  let changed = false;
+  for (const job of cards) {
+    const backoff = ciBackoff.get(job.id);
+    if (backoff && now < backoff.nextAt) continue;
+    const askedPr = job.prNumber;
+    const { pr, error } = await viewCi(job.repoPath, job.branchName, askedPr);
+    if (!allJobs().includes(job) || job.state !== 'review' || job.prNumber !== askedPr) continue;
+    if (error || !pr) {
+      // The merge sweep on the scan reports the failure on the card; this only
+      // backs off, so an unreachable repo is not asked every minute.
+      const failures = (backoff?.failures || 0) + 1;
+      ciBackoff.set(job.id, { failures, nextAt: now + Math.min(CI_POLL_MS * 2 ** failures, CI_BACKOFF_MAX_MS) });
+      continue;
+    }
+    ciBackoff.delete(job.id);
+    if (pr.state === 'MERGED' || pr.state === 'CLOSED') { ended.push(job); continue; }
+    if (!pr.ci || !pr.headSha || job.ciNotifiedSha === pr.headSha) continue;
+    // Stamped only once the notice is queued, so a Billion that was down
+    // still hears about it when it is back.
+    if (notifyBillionCi(job, pr.ci)) {
+      job.ciNotifiedSha = pr.headSha;
+      notified.push(job);
+      changed = true;
+    }
+  }
+  if (changed) persist(broadcast);
+  // Behind the scan's own flag: two sweeps at once would both retire the same
+  // agent. A scan already running files these cards itself.
+  let filed = [];
+  if (ended.length && !scanInFlight) {
+    scanInFlight = true;
+    try { filed = await sweep(broadcast, { killSession, only: ended }); } finally { scanInFlight = false; }
+  }
+  return { notified, filed };
 }
 
 // --- Schedules ---
@@ -2018,11 +2107,16 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
 // --- Loop ---
 
 let dispatchTimer = null;
+let ciTimer = null;
+// Bumped by every stop, so a tick still awaiting when the loop was stopped
+// does not reschedule itself into a second, unstoppable loop.
+let loopGeneration = 0;
 
 // Self-rescheduling rather than setInterval so a slow git/gh pass can never
 // overlap the next tick (same reasoning as startTreeScanLoop in git.js).
 export function startDispatcher(createSession, broadcast, { onSessionCreated, killSession } = {}) {
   stopDispatcher();
+  const generation = loopGeneration;
   const tick = async () => {
     try {
       if (boardSettings().running) {
@@ -2031,14 +2125,26 @@ export function startDispatcher(createSession, broadcast, { onSessionCreated, ki
     } catch (err) {
       console.error('Job dispatcher tick failed:', err.message);
     }
-    dispatchTimer = setTimeout(tick, boardSettings().intervalMs);
+    if (generation === loopGeneration) dispatchTimer = setTimeout(tick, boardSettings().intervalMs);
   };
   // First tick soon after start so pressing Start feels responsive, rather than
   // appearing to do nothing until the first full interval elapses.
   dispatchTimer = setTimeout(tick, 2000);
+  const ciTick = async () => {
+    try {
+      if (boardSettings().running) await checkReviewCi(broadcast, { killSession });
+    } catch (err) {
+      console.error('CI watch tick failed:', err.message);
+    }
+    if (generation === loopGeneration) ciTimer = setTimeout(ciTick, CI_POLL_MS);
+  };
+  ciTimer = setTimeout(ciTick, CI_POLL_MS);
 }
 
 export function stopDispatcher() {
+  loopGeneration++;
   clearTimeout(dispatchTimer);
+  clearTimeout(ciTimer);
   dispatchTimer = null;
+  ciTimer = null;
 }
