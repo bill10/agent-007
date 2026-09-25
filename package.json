@@ -1,6 +1,6 @@
 {
   "name": "@bill10/agent-007",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "From web terminals for your coding agents to a self-running agent company: Claude Code and Codex in parallel git worktrees, a job board they pick work from, and one agent that runs the board from a goal.",
   "license": "MIT",
   "repository": {

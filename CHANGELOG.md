@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.9.2.0] - 2026-09-25
+
+### Changed
+
+- **A new card starts right away when its repo has room.** Posting a card, moving one back to To do, or a worker freeing its slot (card to Review or Done, or its agent gone) now triggers a dispatch pass within about two seconds, instead of waiting for the next 5-minute scan. Bursts coalesce into one pass, a stopped board still does nothing, and the periodic scan stays as the fallback.
+
 ## [0.9.1.1] - 2026-09-25
 
 ### Fixed
