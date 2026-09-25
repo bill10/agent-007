@@ -98,31 +98,20 @@
 - **Depends on:** Nothing
 - **Context:** Surfaced while making the test suite pass on Windows (2026-08-30): the mode assertions are skipped there rather than weakened on POSIX.
 
-## Pre-seed workspace trust for board-dispatched agents
+## Pre-trust Codex board worktrees
 
-- **What:** Before the job board spawns an agent, write `hasTrustDialogAccepted`
-  for the new worktree path into `~/.claude.json` so the agent starts working
-  immediately instead of stopping at Claude Code's workspace-trust prompt.
-- **Why:** Every board agent gets a brand-new worktree, and Claude Code shows
-  the trust dialog the first time it runs in any directory, so every dispatched
-  job currently needs one human click before it starts. That is the single
-  thing standing between the board and genuinely unattended dispatch. Verified
-  against claude 2.1.250: `--permission-mode acceptEdits`, `bypassPermissions`
-  and `--dangerously-skip-permissions` all still show it; per `claude --help`
-  it is skipped only in non-interactive `-p` mode, which defeats the point of
-  having a terminal you can take over.
-- **Effort:** S (human: ~2 hours / CC: ~10 min), most of it verification.
-- **Priority:** P2
-- **Depends on:** Job board (v0.3.0.0)
-- **Context:** Deliberately not built with the board (2026-08-27). It writes a
-  file outside the app that Claude Code rewrites constantly, so the read-modify-write
-  races; and pre-granting trust on the user's behalf is their call, not the
-  app's. If built, it should be an opt-in board setting, default off. Note that
-  pre-seeding was never verified to work — a test using a throwaway `HOME` was
-  invalid (the control case also passed, so claude was not really starting), and
-  whether trust is inherited from a parent directory is also unverified. Settle
-  both before building. Until then the board surfaces the dialog as "needs you"
-  so it takes one click, not a mystery.
+- **What:** Board-dispatched Claude Code workers skip the workspace-trust
+  dialog (server/claude-trust.js). Codex workers still stop at Codex's
+  "Trust and continue" dialog in every new worktree.
+- **Why:** Same as for Claude Code: unattended dispatch needs one click per
+  Codex card today.
+- **Effort:** S. Codex records trust per path in `~/.codex/config.toml`
+  (`[projects."<path>"] trust_level = "trusted"`), or it may take a
+  `-c projects...` override on the command line, which would avoid writing
+  the file, but the worktree path is not known when `buildJobCommand` runs.
+- **Priority:** P3
+- **Context:** Left out of the Claude Code change (2026-09-25) because it means
+  editing TOML the user owns, or reworking where the command is built.
 
 ## Hand the board tool to Gemini agents
 

@@ -5,6 +5,27 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.2.0] - 2026-09-25
+
+### Added
+
+- **Queued Claude Code jobs start without a click.** Every board worker gets a
+  brand-new worktree, and Claude Code used to stop there at "do you trust this
+  folder?" until someone answered. The board now marks the worktree trusted in
+  `~/.claude.json` before the spawn, adding that one entry and leaving the rest
+  of the file as it was, and picks "Yes" on screen if the dialog shows anyway.
+  A trusted worktree loads the repo's own `.claude/settings.json`, so its
+  hooks run and its permission allow rules apply. `TRUST_BOARD_WORKTREES=0` in
+  `.env` keeps the dialog. Hand-started agents keep it as before. Codex
+  workers still stop at Codex's own trust prompt.
+
+### Fixed
+
+- **Answering the trust dialog no longer risks exiting Claude Code.** The
+  server moved off "No, exit" with the down arrow, whose first byte is Escape,
+  and a lone Escape on that dialog exits. It now sends Ctrl-N, and it only
+  acts when both of the dialog's options are on screen.
+
 ## [0.6.1.0] - 2026-09-25
 
 ### Fixed
