@@ -280,7 +280,7 @@ Billion's own `templates/billion/`, starting as a copy of PR #92's
 Billion's behaviour to a file others edit for their own orchestrators). Copied
 into `~/.agent-007/billion/` on first run.
 
-### The three files at a glance
+### The files at a glance
 
 - **`CHARTER.md` — how Billion works, as Agent 007 ships it.** Role, cycle,
   principles, escalation list, tools and limits. Rewritten by the server on
