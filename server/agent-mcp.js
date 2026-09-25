@@ -29,6 +29,14 @@ export const MCP_CONFIG_DIR = process.env.AGENT007_MCP_DIR
 // agent this app spawns).
 export const MCP_SERVER_NAME = 'agent-007-board';
 
+// How long a worker's permission request waits for Billion (server/approvals.js),
+// and the two limits that must outlast it so the server, answering "no
+// decision", always gives up first: a CLI that times its hook out counts that
+// as a deny. The hook script's own wait, then the CLI's timeout for the hook.
+export const APPROVAL_WAIT_MS = 120_000;
+export const HOOK_WAIT_MS = APPROVAL_WAIT_MS + 20_000;
+export const HOOK_TIMEOUT_S = (APPROVAL_WAIT_MS + 30_000) / 1000;
+
 // Agents run on this machine, so the board is reachable over loopback — which
 // also keeps the token off the network when HOST is a tailnet address. A
 // non-wildcard bind is the one case where loopback may not be listening, so use
@@ -82,8 +90,6 @@ export function writeMcpConfig(sessionId, agentToken) {
 // Billion (server/approvals.js): a PermissionRequest hook running
 // server/permission-hook.js with this session's MCP config. Claude Code only;
 // Codex takes its hook differently and is not wired yet (docs/BILLION.md).
-// The hook's timeout outlasts the server's wait, so it is the server that
-// gives up first, with "no decision", never the CLI with a deny.
 const PERMISSION_HOOK = fileURLToPath(new URL('./permission-hook.js', import.meta.url));
 const shellQuote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
 export function withApprovalHook(file, args, configPath) {
@@ -96,7 +102,7 @@ export function withApprovalHook(file, args, configPath) {
     hooks: {
       PermissionRequest: [{
         matcher: '*',
-        hooks: [{ type: 'command', command: `${shellQuote(process.execPath)} ${shellQuote(PERMISSION_HOOK)} ${shellQuote(configPath)}`, timeout: 150 }],
+        hooks: [{ type: 'command', command: `${shellQuote(process.execPath)} ${shellQuote(PERMISSION_HOOK)} ${shellQuote(configPath)}`, timeout: HOOK_TIMEOUT_S }],
       }],
     },
   };

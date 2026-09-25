@@ -13,6 +13,7 @@ import {
   postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
 import { addRepo } from './git.js';
+import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval } from './approvals.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
@@ -122,9 +123,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
         // each checks again here.
         addRepo: async (path) => {
           if (!req.agentSession.isBillion) return { error: 'Only Billion can add repositories.' };
-          const raw = String(path || '').trim();
-          const abs = raw.startsWith('~/') ? resolve(homedir(), raw.slice(2)) : raw;
-          return addRepo(abs, broadcast);
+          return addRepo(expandHome(path), broadcast);
         },
         closeJob: (fields) => closeJobForAgent({ ...fields, session: req.agentSession }, broadcast, { killSession }),
         answerPermission: ({ id, decision, reason }) => (req.agentSession.isBillion

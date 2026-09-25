@@ -16,8 +16,9 @@ import { config, sessions, orphans, adoptingOrphans, codenamePool, CONFIG_DIR } 
 import { saveConfig, syncOrphansToConfig } from './config.js';
 import { gitExec, removeWorktree } from './git.js';
 import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
-import { safeFilename } from '../lib/helpers.js';
+import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
+import { liveBillion } from './billion.js';
 import {
   createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr,
@@ -290,8 +291,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -316,7 +317,7 @@ export function resolveRepoRef(ref) {
   if (repos.length === 0) return { error: 'No repositories are configured in Agent 007 — add one in the explorer first' };
   const raw = String(ref || '').trim();
   if (!raw) return { error: `Which repository? Pass repo with one of: ${known.map(p => basename(p)).join(', ')}` };
-  const expanded = raw.startsWith('~/') ? resolve(homedir(), raw.slice(2)) : raw;
+  const expanded = expandHome(raw);
   const abs = resolve(expanded);
   const byPath = known.find(p => p === raw || p === abs);
   if (byPath) return { path: byPath };
@@ -396,6 +397,7 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, re
     postedBy: user ? user.id : null,
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
+    postedByBillion: !!session?.isBillion,
   }, broadcast);
   if (result.error) return { error: result.error };
 
@@ -541,6 +543,12 @@ export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr,
       error: `"${job.title}" was queued by ${job.postedByName || 'someone else'}, so this agent cannot edit it. `
         + 'Ask them, or post a new card.',
     };
+  }
+  // Billion's cards carry its trust — its worker asks Billion, not a person,
+  // for permission — and belong to no user, so the check above never fires on
+  // them. Only Billion rewrites them; a person still can, from the board.
+  if (job.postedByBillion && !session?.isBillion) {
+    return { error: `"${job.title}" is ${BILLION_NAME}'s card, so only ${BILLION_NAME} can edit it. Ask it with send_message, or post a new card.` };
   }
 
   const fields = {};
@@ -697,8 +705,8 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
 // trimmed; read_job has the whole of it.
 const NOTICE_SUMMARY_CHARS = 1500;
 export function notifyBillion(job) {
-  if (job.postedByAgent !== BILLION_NAME) return false;
-  const billion = [...sessions.values()].find(s => s.isBillion && !s.exited);
+  if (!job.postedByBillion) return false;
+  const billion = liveBillion();
   if (!billion) return false;
   const summary = job.resultSummary || '';
   const lines = [
@@ -721,20 +729,27 @@ export async function closeJobForAgent({ session, id, accept, note }, broadcast,
   if (!session?.isBillion) return { error: 'Only Billion can close cards.' };
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
-  if (job.postedByAgent !== BILLION_NAME) return { error: `"${job.title}" was not posted by you, so it is not yours to close.` };
+  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to close.` };
   if (job.state !== 'review') return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; only a card in Review can be closed.` };
   const reason = typeof note === 'string' ? note.trim() : '';
   if (accept) {
-    if (job.prUrl) return { error: `"${job.title}" has a pull request (${job.prUrl}). Merge it and the board files the card as Done on its own.` };
+    if (job.prUrl) return { error: `"${job.title}" has a pull request (${job.prUrl}). Merge it, or close it to drop the work: either way the board files the card away on its own.` };
     const result = await moveJob(job.id, 'done', broadcast, { killSession });
     return result.error ? result : { job: jobSummary(job), accepted: true };
   }
   if (!reason) return { error: 'Say why it goes back (note): the next worker only knows what the card tells it.' };
-  const result = await moveJob(job.id, 'todo', broadcast, { killSession });
-  if (result.error) return result;
+  // The note goes on before the move: once the card is back in To do the
+  // dispatcher may hand it out, and the worker must get the reason with it.
+  // The PR is kept for the reply, since the move clears it from the card.
+  const oldPrUrl = job.prUrl || null;
+  const oldDetail = job.detail;
   job.detail = `${job.detail ? `${job.detail}\n\n` : ''}Sent back by ${BILLION_NAME}: ${reason}`.slice(0, MAX_DETAIL_LEN);
-  persist(broadcast);
-  return { job: jobSummary(job), accepted: false };
+  const result = await moveJob(job.id, 'todo', broadcast, { killSession });
+  if (result.error) {
+    job.detail = oldDetail;
+    return result;
+  }
+  return { job: jobSummary(job), accepted: false, oldPrUrl };
 }
 
 // A card stops being editable the moment it leaves To do, whoever is asking.
@@ -1115,7 +1130,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     const result = await createSession(command, null, job.repoPath, branch, job.postedBy || null, {
       spawnedBy: 'board', jobId: job.id, branchSuffixOnCollision: true,
       // Billion's cards ask Billion before they ask a person (part 4).
-      approvalsToBillion: job.postedByAgent === BILLION_NAME,
+      approvalsToBillion: job.postedByBillion === true,
     });
     if (result.error) {
       // Surface the failure on the card and leave it in To do; the next tick

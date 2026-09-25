@@ -32,7 +32,7 @@ import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
-import { BILLION_NAME, billionEnabled, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
 import { transcriptsFor } from './server/agent-transcripts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -166,10 +166,18 @@ function startBillion() {
   let created;
   try {
     ({ created } = ensureBillionRepo(dir));
-    if (!created && refreshCharter(dir)) console.log('  Billion: charter updated to this version');
   } catch (err) {
     console.error(`Billion: could not set up ${dir}:`, err.message);
     return { error: `Could not set up Billion's folder ${dir}: ${err.message}` };
+  }
+  // Best effort: a charter that could not be committed is still the new one on
+  // disk, and a Billion on last version's charter beats no Billion.
+  if (!created) {
+    try {
+      if (refreshCharter(dir)) console.log('  Billion: charter updated to this version');
+    } catch (err) {
+      console.error(`Billion: could not commit the updated charter in ${dir}:`, err.message);
+    }
   }
   const command = billionCommand({
     created,
@@ -205,7 +213,7 @@ async function startup() {
   loadConfig();
   // Reserved whether or not it runs: no other agent may take the name that
   // send_message delivers to Billion by.
-  codenamePool.addUsed(BILLION_NAME);
+  codenamePool.reserve(BILLION_NAME);
   recoverCrashedSessions(broadcast);
   mkdirSync(WORKTREE_DIR, { recursive: true });
   await pruneWorktrees();
@@ -219,9 +227,11 @@ async function startup() {
     killSession,
   });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
-  if (billionEnabled()) {
+  if (billionRuns()) {
     const { error } = startBillion();
     console.log(error ? `  Billion: not started (${error})` : `  Billion: running in ${billionDir()}`);
+  } else if (billionEnabled()) {
+    console.log('  Billion: off while user accounts are enabled');
   }
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.

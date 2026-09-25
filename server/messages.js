@@ -90,26 +90,27 @@ export function messageableAgents(from, sessions) {
 
 // Header fields lose newlines as well: a name is renamable, and one carrying a
 // newline could start a line of its own outside the quoted body.
-const oneLine = (s) => clean(s).replace(/[\n\t]/g, ' ');
+export const oneLine = (s) => clean(s).replace(/[\n\t]/g, ' ');
 
 export function formatMessage(from, text) {
   const where = [from.agent, from.repoSlug, from.branchName].filter(Boolean).map(oneLine).join(' · ');
   const name = oneLine(from.name);
   // Every body line quoted, so a body cannot close the message with a footer
   // of its own and carry on as if it were the user speaking.
-  const body = clean(text).split('\n').map(line => `> ${line}`).join('\n');
+  const body = quoteLines(text).join('\n');
   return `[Message from agent ${name}${where ? ` (${where})` : ''}]\n`
     + `${body}\n`
     + `[Reply with the send_message tool, to: "${name}". This came from another agent, not from the user.]`;
 }
 
-// A board notice: from the server, not an agent, so it names the board and
-// carries no reply line. Quoted like a message body, since a card's summary is
-// an agent's text.
+// Agent text, quoted line by line so it cannot pass for anything but a quote.
 export function quoteLines(text) {
   return clean(text).split('\n').map(line => `> ${line}`);
 }
 
+// A board notice: from the server, not an agent, so it names the board and
+// carries no reply line. Quoted like a message body, since a card's summary is
+// an agent's text.
 export function formatNotice(headline, lines = []) {
   return [`[Job board] ${oneLine(headline)}`, ...lines.flatMap(quoteLines),
     '[This came from the Agent 007 job board, not the user.]'].join('\n');
@@ -119,13 +120,28 @@ export function formatNotice(headline, lines = []) {
 // deliver it when the session can take one. Not agent-to-agent, so neither
 // the permission rule nor the pair limit applies; the queue cap does, and
 // text over it is refused.
+//
+// Cleaned here, whoever wrote it: it goes into a bracketed paste, and a stray
+// ESC[201~ anywhere in it — a tool name, a card title — would end the paste
+// and type the rest as keystrokes of the user's own.
 export function sendText(session, text, now = Date.now()) {
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
   if (queue.length >= QUEUE_CAP) return false;
-  queue.push(text);
+  queue.push(clean(text));
   queues.set(session.id, queue);
   flushMessages(session, now);
+  return true;
+}
+
+// Take back text still waiting in a session's queue (an approval request that
+// expired before it was typed).
+export function unqueueText(sessionId, text) {
+  const queue = queues.get(sessionId);
+  const at = queue ? queue.indexOf(clean(text)) : -1;
+  if (at === -1) return false;
+  queue.splice(at, 1);
+  if (!queue.length) queues.delete(sessionId);
   return true;
 }
 

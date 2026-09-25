@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping } from './messages.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent } from '../lib/jobs.js';
-import { billionEnabled } from './billion.js';
+import { billionRuns } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
@@ -165,7 +165,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
 
     // Tell the client who it is and whether auth is on.
     // platform lets the client offer the right shell preset (bash vs PowerShell).
-    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user), platform: process.platform, billionEnabled: billionEnabled() }));
+    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user), platform: process.platform, billionEnabled: billionRuns() }));
 
     // Send repos list
     ws.send(JSON.stringify({
@@ -254,7 +254,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           break;
         }
         case 'billion-start': {
-          if (!billionEnabled()) break;
+          if (!billionRuns()) break;
           const result = startBillion();
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: result.error }));
           else announceSession(result.session, ws);
@@ -386,6 +386,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           // by a card, a transcript or the default is a guess, and writing it
           // down would make a wrong one permanent.
           const { command, mode, flags } = orphanResumePlan(orphan);
+          // Matched on the branch, as relinkSessionToJob does below.
+          const card = allJobs().find(j => j.branchName && j.branchName === orphan.branchName && j.repoPath === orphan.repoPath);
           const result = createSessionFromConfig({
             sessionId: nextSessionId(),
             name: orphan.name,
@@ -404,6 +406,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
             // recorded flags, it keeps them.
             permissionFlags: mode ? [] : flags,
             origin: orphan.origin === 'board' ? 'board' : 'user',
+            approvalsToBillion: card?.postedByBillion === true,
           }, broadcast);
           if (result.error) {
             adoptingOrphans.delete(msg.orphanId);

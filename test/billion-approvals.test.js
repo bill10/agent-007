@@ -53,7 +53,7 @@ describe('asking Billion', () => {
     const answer = requestApproval(worker, request, { jobTitle: 'Fix login' });
     expect(typed(billion)).toContain('Falcon (card "Fix login", app · fix-login) asks to use Write:');
     expect(typed(billion)).toContain('>   "file_path": "/elsewhere/x.txt",');
-    expect(answerApproval(idOf(billion), 'allow')).toEqual({ worker: 'Falcon', choice: 'allow' });
+    expect(answerApproval(idOf(billion), 'allow')).toEqual({ worker: 'Falcon', choice: 'allow', cut: false });
     expect(await answer).toEqual({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
   });
 
@@ -107,17 +107,22 @@ describe('the hook in the worker\'s command line', () => {
   });
 
   it('stays out of Codex, and out of a command with its own --settings', () => {
-    expect(withApprovalHook('codex', ['x'], '/cfg/s1.json')).toEqual(['x']);
-    expect(withApprovalHook('claude', ['--settings', '{}'], '/cfg/s1.json')).toEqual(['--settings', '{}']);
+    // The same array, not a copy: pty.js records "hooked" by identity.
+    const codex = ['x'];
+    expect(withApprovalHook('codex', codex, '/cfg/s1.json')).toBe(codex);
+    const own = ['--settings', '{}'];
+    expect(withApprovalHook('claude', own, '/cfg/s1.json')).toBe(own);
   });
 
   it('is asked for on Billion\'s cards only', async () => {
-    config.repos = [{ path: mkdtempSync(join(tmpdir(), 'a007-ap-repo-')) }];
+    // One repo per card, so the per-repo limit dispatches all three.
+    config.repos = [1, 2, 3].map(() => ({ path: mkdtempSync(join(tmpdir(), 'a007-ap-repo-')) }));
     config.jobs = [];
     config.jobBoard = null;
     boardSettings();
     sessions.clear();
-    addJob({ title: 'Mine', repoPath: config.repos[0].path, postedByAgent: BILLION_NAME }, () => {});
+    const cards = [BILLION_NAME, 'Viper', undefined].map((postedByAgent, i) =>
+      addJob({ title: `Card ${i}`, repoPath: config.repos[i].path, postedByAgent, postedByBillion: i === 0 }, () => {}).job);
     const metas = [];
     await dispatchOnce(async (command, name, repoPath, branch, ownerId, meta) => {
       metas.push(meta);
@@ -125,7 +130,8 @@ describe('the hook in the worker\'s command line', () => {
       sessions.set(s.id, s);
       return { session: s };
     }, () => {});
-    expect(metas.map(m => m.approvalsToBillion)).toEqual([true]);
+    const hooked = Object.fromEntries(metas.map(m => [m.jobId, m.approvalsToBillion]));
+    expect(cards.map(c => hooked[c.id])).toEqual([true, false, false]);
   });
 });
 

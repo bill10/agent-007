@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import {
   billionEnabled, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, trustDialogKey,
@@ -90,13 +90,14 @@ describe('refreshCharter', () => {
 
 describe('suggestProjectsDir', () => {
   it('picks the folder holding most repos, not their common prefix', () => {
-    expect(suggestProjectsDir(['/u/Projects/a', '/u/Projects/b', '/u/elsewhere/c'])).toBe(join('/u/Projects'));
+    // resolve(), like the code: on Windows it puts a drive in front.
+    expect(suggestProjectsDir(['/u/Projects/a', '/u/Projects/b', '/u/elsewhere/c'])).toBe(resolve('/u/Projects'));
   });
 
   it('ignores repos inside Agent 007\'s own folder', () => {
     const own = join(CONFIG_DIR, 'worktrees', 'x');
     expect(suggestProjectsDir([own, join(own, '..', 'y')])).toBeNull();
-    expect(suggestProjectsDir([own, '/u/Projects/a'])).toBe(join('/u/Projects'));
+    expect(suggestProjectsDir([own, '/u/Projects/a'])).toBe(resolve('/u/Projects'));
   });
 
   it('has nothing to suggest with no repos', () => {

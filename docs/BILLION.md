@@ -1,6 +1,7 @@
 # Billion — the one agent you talk to
 
-Design notes, worked out step by step. Status: **design, nothing built yet.**
+Design notes, worked out step by step. Status: **built** (parts 1–4 and the
+charter split; Codex approvals not wired — see "Order of building").
 Builds on PR #92 (orchestrator charter template and guide).
 
 ## Idea
@@ -16,13 +17,15 @@ Decided:
 1. **On by default**, with a setting to turn it off.
 2. **Repo:** `~/.agent-007/billion/` (under `CONFIG_DIR`, so tests that redirect
    `AGENT007_CONFIG_DIR` never touch the real one). Override with `BILLION_DIR`.
-   First run: `git init`, copy Billion's templates (charter as `CLAUDE.md`,
-   plus `STATE.md` and `COMPANY.md`), commit. Already there: just use it.
+   First run: `git init`, copy Billion's templates (`charter.md` →
+   `CHARTER.md`, `owner.md` → `CLAUDE.md`, plus `STATE.md` and `COMPANY.md`),
+   commit. Already there: just use it (the charter is refreshed on every
+   start; see "Charter upgrades").
 3. **Runs without permission prompts** (`--dangerously-skip-permissions`): it
    works all the time and must never block on a dialog.
 4. **Server restart resumes it**: `claude --continue` when the folder has a
    previous session. Memory files cover whatever the conversation loses.
-5. **No auto-restart** if it exits or crashes: show it stopped, with Re-spawn;
+5. **No auto-restart** if it exits or crashes: show it stopped, with a Start button;
    start it again on the next server start.
 6. **Fixed name "Billion"**, reserved. `send_message` addresses agents by name,
    so no other agent may take it. No cocktail codename.
@@ -60,8 +63,8 @@ Flow:
 2. The hook sends the request (tool, input, agent, repo, branch) to the server
    and waits.
 3. The server hands it to Billion; Billion answers with a new MCP tool
-   `answer_permission {id, allow|deny, reason}`. A deny reason goes back to the
-   worker.
+   `answer_permission {id, decision: allow|deny|owner, reason}`. A deny
+   reason goes back to the worker; owner leaves it to you.
 4. **No answer within ~2 minutes, or Billion not running → no decision**, so
    the dialog appears for you. Never allow by default.
 5. Actions under the escalation rules (destructive, paid, secrets, ...):
@@ -265,8 +268,8 @@ short self-introduction, then asks for the information it needs.
    check: nothing goes to Billion until it calls `billion_ready`.
    - Messages (worker questions, `finish_job` notices) wait and arrive after
      the introduction. Nothing is lost.
-   - Approvals wait up to their ~2-minute hook timeout, then fall back to
-     your dialog as usual.
+   - Approvals get no decision straight away while the inbox is held, so the
+     dialog goes to you at once.
    Rare in practice: after a restart only the board starts workers (its
    running state is saved; first check 2 s after boot, `server/jobs.js`
    `startDispatcher`), and a new install has an empty board.
@@ -274,6 +277,9 @@ short self-introduction, then asks for the information it needs.
    conversation. Later starts: `--continue`, then straight into the loop.
 
 ## Template files
+
+The templates themselves, in `templates/billion/`, are the authority; the
+copies quoted below are how they were designed and may have drifted in wording.
 
 Billion's own `templates/billion/`, starting as a copy of PR #92's
 `templates/orchestrator/` (merge #92 as the general template; don't couple
@@ -314,7 +320,7 @@ Boundary test for Billion:
 - A card's status or full result? → the board
 - Why I decided something? → that cycle's commit message
 
-### `charter.md` (→ `CLAUDE.md`)
+### `charter.md` (→ `CHARTER.md`)
 
 Billion is a founder: it runs the company, not just the office. It turns a
 statement into a plan and the plan into cards.
@@ -328,11 +334,13 @@ statement into a plan and the plan into cards.
   next wake-up. Everything else — start a project, research, build, drop — is
   a decision inside the plan, not a step in the cycle.
 - **`STATE.md` holds the plan and status**, rewritten every cycle. The
-  decisions and why go in each cycle's commit message. No other files.
+  decisions and why go in each cycle's commit message. With `CHARTER.md`,
+  `CLAUDE.md` and `COMPANY.md`, that is all of Billion's files.
 - **It manages work, not agents.** It posts cards, follows them with
   `list_jobs`, and messages only the workers of its own cards. Agents you start
   by hand are yours. Throughput is capped by the board's `maxPerRepo`.
-- **Tools and limits:** as in #92, plus `add_repo` and `answer_permission`.
+- **Tools and limits:** as in #92, plus Billion's own `billion_ready`,
+  `add_repo`, `close_job` and `answer_permission`.
 
 Principles (the charter gives these, not procedures):
 
@@ -359,9 +367,6 @@ to main before merging. Machine-specific quirks (which `gh` account can write,
 for example) are not in the template; Billion learns them and keeps them in
 its own `CLAUDE.md`.
 
-Still to add to the template: `<NAME>` = Billion, the introduction section
-(step 3), approvals (`answer_permission`, when to give no decision), "report
-back to Billion" in every card, drop #92's manual-setup text.
 
 Projects directory for new repos: asked in the introduction (step 3).
 
@@ -473,8 +478,8 @@ cycle: start agent-cost; drop the browser-extension idea
 - Research results come back as **card summaries** (`read_job`), not files.
   `STATE.md` Notes keep only conclusions, never copies of summaries.
 - "Report back to Billion" in every card is **dropped**: `finish_job` is the
-  report. Add: on `finish_job`, the server notifies the card's
-  `postedByAgent`, so Billion wakes at once. A server notification isn't
+  report. Built: when one of Billion's own cards reaches Review, the server
+  sends Billion a notice, so it wakes at once. A server notification isn't
   agent-to-agent, so the guarded/unguarded rule doesn't apply; the messaging
   exemption is now needed only for worker questions and replies.
 - **Gap: Billion can't close a card that has no PR.** PR cards close on merge;
@@ -491,8 +496,8 @@ cycle: start agent-cost; drop the browser-extension idea
    started from `server.js` `startup()`; name reserved; rename refused;
    pinned row with a Start button when stopped; own desk top center; tab
    first and open by default. The charter template is `charter.md` in this
-   repo (copied in as `CLAUDE.md`) so agents working on Agent 007 don't load
-   it. Verified live in an isolated server: repo created and committed,
+   repo (copied in as `CHARTER.md`, with `owner.md` → `CLAUDE.md`) so agents
+   working on Agent 007 don't load it. Verified live in an isolated server: repo created and committed,
    introduction as designed.
 2. **Messaging — built.** Every agent can message Billion (exempt from the
    permission and owner rules as a recipient, `server/messages.js`); its

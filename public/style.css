@@ -748,9 +748,9 @@ body {
   flex-shrink: 0;
 }
 /* Billion's row, pinned above the repos */
-.explorer-billion { border-bottom: 1px solid var(--border); }
 .explorer-billion-name { color: var(--text); font-weight: 600; }
-.explorer-billion-start { margin-left: auto; font-size: 11px; }
+/* The one way back for a stopped Billion, so it reads as the row's action. */
+.explorer-billion-start { margin-left: auto; color: var(--accent); }
 
 .explorer-branch-name {
   overflow: hidden;
@@ -1175,6 +1175,7 @@ body {
 .mobile-nav { display: none; }
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
+  .explorer-billion-start { min-width: 44px; min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
   }

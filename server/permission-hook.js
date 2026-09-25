@@ -9,6 +9,7 @@
 // server that is down, slow or confused can never approve anything.
 
 import { readFileSync } from 'fs';
+import { MCP_SERVER_NAME, HOOK_WAIT_MS } from './agent-mcp.js';
 
 // The worker's own board MCP config (server/agent-mcp.js), passed as the one
 // argument: it already holds the board's address and this agent's token, in a
@@ -16,16 +17,13 @@ import { readFileSync } from 'fs';
 // would inherit that.
 function board(configPath) {
   try {
-    const server = JSON.parse(readFileSync(configPath, 'utf8')).mcpServers['agent-007-board'];
+    const server = JSON.parse(readFileSync(configPath, 'utf8')).mcpServers[MCP_SERVER_NAME];
     return { url: server.url.replace(/\/mcp$/, '/hook/permission'), auth: server.headers.Authorization };
   } catch {
     return null;
   }
 }
 const target = board(process.argv[2]);
-// A little past the server's own wait, which answers "no decision" when
-// Billion is silent; the hook's timeout in the settings is longer still.
-const WAIT_MS = 140_000;
 
 let input = '';
 process.stdin.setEncoding('utf8');
@@ -37,7 +35,7 @@ process.stdin.on('end', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: target.auth },
       body: input,
-      signal: AbortSignal.timeout(WAIT_MS),
+      signal: AbortSignal.timeout(HOOK_WAIT_MS),
     });
     if (!res.ok) return;
     const body = await res.json();

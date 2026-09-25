@@ -20,6 +20,7 @@
 // lib/jobs.js is the pure half of the board — no store, no Express — so the
 // column names come from there rather than being spelled out a second time.
 import { JOB_STATES, STATE_LABELS, JOB_AGENTS } from '../lib/jobs.js';
+import { APPROVAL_WAIT_MS } from './agent-mcp.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -285,10 +286,10 @@ export const CLOSE_JOB_TOOL = {
   name: 'close_job',
   description:
     'Close one of your own cards that is in Review. accept: true files a card with '
-    + 'no pull request as Done (a card with a PR is filed as Done when you merge '
-    + 'the PR). accept: false sends it back to To do with your note added to its '
-    + 'detail, for a fresh worker to redo; close its pull request first if it '
-    + 'has one. Either way its worker is closed.',
+    + 'no pull request as Done (a card with a PR is filed away when you merge the '
+    + 'PR, or close it to drop the work). accept: false sends it back to To do '
+    + 'with your note added to its detail, for a fresh worker to redo; if it had a '
+    + 'pull request, close that one afterwards. Either way its worker is closed.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -307,7 +308,7 @@ export const ANSWER_PERMISSION_TOOL = {
     'Answer a worker\'s permission request, which arrives in your terminal as '
     + '"[Approval <id>] …". allow lets the worker go ahead; deny refuses, and your '
     + 'reason is what the worker reads; owner leaves it to the owner, who then sees '
-    + 'the worker\'s dialog. Unanswered requests go to the owner after 2 minutes.',
+    + `the worker's dialog. Unanswered requests go to the owner after ${APPROVAL_WAIT_MS / 60000} minutes.`,
   inputSchema: {
     type: 'object',
     properties: {
@@ -360,6 +361,8 @@ function summaryLine(job) {
   // The live state of the agent working it, when there is one, is the part a
   // person actually asks about ("is it stuck?").
   if (job.agentName) bits.push(`${job.agentName}${job.status ? ` ${job.status}` : ''}`);
+  // So an agent can tell its own cards apart without a read_job per card.
+  if (job.postedByAgent) bits.push(`posted by ${job.postedByAgent}`);
   if (job.prUrl) bits.push(job.prUrl);
   return `  ${job.id}  ${job.title}\n    ${bits.filter(Boolean).join(' · ')}`;
 }
@@ -506,12 +509,14 @@ const CALLS = {
     if (result.error) return toolText(result.error, true);
     return toolText(result.accepted
       ? `"${result.job.title}" is Done and its worker is closed.`
-      : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`);
+      : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`
+        + (result.oldPrUrl ? ` Its old pull request is still open: close ${result.oldPrUrl}.` : ''));
   },
 
   [ANSWER_PERMISSION_TOOL.name]: (args, ctx) => {
     const result = ctx.answerPermission({ id: args.id, decision: args.decision, reason: args.reason });
     if (result.error) return toolText(result.error, true);
+    if (result.cut) return toolText(`That request was cut short, so your allow went to the owner instead: ${result.worker}'s dialog is showing for them now.`);
     return toolText(result.choice === 'owner'
       ? `Left to the owner: ${result.worker}'s dialog is showing for them now.`
       : `${result.worker} has your answer: ${result.choice}.`);

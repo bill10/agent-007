@@ -23,8 +23,7 @@ function spawn({ isBillion = false, name }) {
   return session;
 }
 
-const PORT = 17117;
-const wsUrl = `ws://127.0.0.1:${PORT}`;
+let wsUrl;   // any free port, set once listening
 const connect = () => new Promise((resolve, reject) => {
   const ws = new WebSocket(wsUrl);
   const seen = [];
@@ -43,8 +42,9 @@ const waitFor = async (seen, pred, ms = 4000) => {
 };
 
 beforeAll(async () => {
-  server.listen(PORT, '127.0.0.1');
+  server.listen(0, '127.0.0.1');
   await new Promise(r => server.once('listening', r));
+  wsUrl = `ws://127.0.0.1:${server.address().port}`;
   codenamePool.addUsed(BILLION_NAME);   // what startup() does
 });
 

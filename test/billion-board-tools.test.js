@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import express from 'express';
 import { createServer } from 'http';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, realpathSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -61,7 +61,7 @@ async function call(name, args, token = BILLION_TOKEN) {
 
 // A card in Review, with a worker still on it (Review keeps its agent).
 function reviewCard(fields = {}) {
-  const { job } = addJob({ title: 'Research pricing', repoPath: REPO, requiresPr: false, postedByAgent: BILLION_NAME, ...fields }, () => {});
+  const { job } = addJob({ title: 'Research pricing', repoPath: REPO, requiresPr: false, postedByAgent: BILLION_NAME, postedByBillion: true, ...fields }, () => {});
   Object.assign(job, { state: 'review', agentSessionId: 's-worker', agentName: 'Cobra', branchName: 'research-pricing', resultSummary: 'done' });
   return job;
 }
@@ -70,7 +70,7 @@ describe('add_repo', () => {
   it('puts a repository on the board for Billion', async () => {
     const r = await call('add_repo', { path: NEW_REPO });
     expect(r.isError).toBe(false);
-    expect(config.repos.some(repo => repo.path.endsWith(NEW_REPO.split('/').pop()))).toBe(true);
+    expect(config.repos.map(repo => repo.path)).toContain(realpathSync(NEW_REPO));
   });
 
   it('refuses a folder that is not a repository', async () => {
@@ -113,13 +113,13 @@ describe('close_job', () => {
   it('leaves a card with a pull request to its merge', async () => {
     const job = reviewCard({ requiresPr: true });
     job.prUrl = 'https://github.com/o/r/pull/7';
-    expect((await call('close_job', { id: job.id, accept: true })).text).toMatch(/Merge it/);
+    expect((await call('close_job', { id: job.id, accept: true })).text).toMatch(/Merge it, or close it/);
     expect(job.state).toBe('review');
     expect(killed).toEqual([]);
   });
 
   it('closes only Billion\'s own cards, and only from Review', async () => {
-    const theirs = reviewCard({ postedByAgent: 'Viper' });
+    const theirs = reviewCard({ postedByAgent: 'Viper', postedByBillion: false });
     expect((await call('close_job', { id: theirs.id, accept: true })).text).toMatch(/not posted by you/);
     const running = reviewCard();
     running.state = 'in-progress';

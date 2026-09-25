@@ -112,7 +112,7 @@ describe('a card Billion posted', () => {
   async function finishedCard(postedByAgent) {
     const b = billion();
     sessions.set(b.id, b);
-    const { job } = addJob({ title: 'Research pricing', repoPath: REPO, requiresPr: false, postedByAgent }, () => {});
+    const { job } = addJob({ title: 'Research pricing', repoPath: REPO, requiresPr: false, postedByAgent, postedByBillion: postedByAgent === BILLION_NAME }, () => {});
     await dispatchOnce(async (command, name, repoPath, branch, ownerId, meta) => {
       const s = agent('Worker', { repoPath, branchName: 'research-pricing', jobId: meta.jobId, state: 'WORKING' });
       sessions.set(s.id, s);
@@ -136,7 +136,7 @@ describe('a card Billion posted', () => {
   });
 
   it('tells its worker that Billion can be asked', () => {
-    expect(buildJobPrompt({ title: 't', postedByAgent: BILLION_NAME })).toMatch(/send_message tool \(to: "Billion"\)/);
+    expect(buildJobPrompt({ title: 't', postedByAgent: BILLION_NAME, postedByBillion: true })).toMatch(/send_message tool \(to: "Billion"\)/);
     expect(buildJobPrompt({ title: 't', postedByAgent: 'Cobra' })).not.toMatch(/Billion/);
   });
 });

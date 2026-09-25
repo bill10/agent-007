@@ -8,13 +8,22 @@
 // "no decision", and the worker shows its dialog to a person as it always did.
 
 import { randomBytes } from 'crypto';
-import { sessions } from './state.js';
-import { sendText, quoteLines } from './messages.js';
+import { sendText, unqueueText, quoteLines, oneLine } from './messages.js';
+import { APPROVAL_WAIT_MS } from './agent-mcp.js';
+import { liveBillion } from './billion.js';
 
-export const APPROVAL_WAIT_MS = 120_000;
+export { APPROVAL_WAIT_MS };
 const INPUT_CHARS = 2000;
 
-const pending = new Map();   // id -> { resolve, timer, worker }
+const pending = new Map();   // id -> { resolve, timer, worker, tool, askedAt }
+
+// One line per request, so how long workers wait on Billion is on record: the
+// design keeps a separate answerer (claude -p with the charter) in reserve for
+// when these waits get long, and this is what would show it.
+function logWait(entry, outcome) {
+  const secs = ((Date.now() - entry.askedAt) / 1000).toFixed(1);
+  console.log(`Billion approval: ${entry.worker.name} ${entry.tool} -> ${outcome} after ${secs}s`);
+}
 
 const NO_DECISION = {};
 const decision = (behavior, message) => ({
@@ -24,20 +33,36 @@ const decision = (behavior, message) => ({
   },
 });
 
-function liveBillion() {
-  return [...sessions.values()].find(s => s.isBillion && !s.exited) || null;
+// A tool name is an identifier (Write, Bash, mcp__server__tool). Anything else
+// is not a request any CLI made, and gets no decision.
+const TOOL_NAME = /^[\w.:-]{1,128}$/;
+
+// The input as Billion sees it. Long input shows its beginning and its end —
+// where a padded command hides what it really does — and is marked cut, so an
+// allow cannot cover what Billion never saw (answerApproval).
+const INPUT_TAIL_CHARS = 500;
+export function approvalInput(request) {
+  let text = '';
+  try { text = JSON.stringify(request?.tool_input ?? {}, null, 2); } catch { text = String(request?.tool_input); }
+  if (text.length <= INPUT_CHARS) return { text, cut: false };
+  const head = INPUT_CHARS - INPUT_TAIL_CHARS;
+  return {
+    text: `${text.slice(0, head)}\n… (${text.length - INPUT_CHARS} characters not shown) …\n${text.slice(-INPUT_TAIL_CHARS)}`,
+    cut: true,
+  };
 }
 
 // What Billion reads. The tool input is the worker's own words (a command, a
-// file's content), so it goes in quoted and trimmed like any agent's text.
+// file's content), so it goes in quoted; every header field is flattened to
+// one line, so none of it can pose as a line of its own.
 export function formatApproval(id, worker, request, jobTitle) {
-  const where = [worker.repoSlug, worker.branchName].filter(Boolean).join(' · ');
-  let input = '';
-  try { input = JSON.stringify(request.tool_input ?? {}, null, 2); } catch { input = String(request.tool_input); }
-  if (input.length > INPUT_CHARS) input = `${input.slice(0, INPUT_CHARS)}\n… (${input.length - INPUT_CHARS} more characters)`;
+  const where = [worker.repoSlug, worker.branchName].filter(Boolean).map(oneLine).join(' · ');
+  const { text: input, cut } = approvalInput(request);
+  const card = jobTitle ? ` (card "${oneLine(jobTitle)}"${where ? `, ${where}` : ''})` : where ? ` (${where})` : '';
   return [
-    `[Approval ${id}] ${worker.name}${jobTitle ? ` (card "${jobTitle}"${where ? `, ${where}` : ''})` : where ? ` (${where})` : ''} asks to use ${request.tool_name || 'a tool'}:`,
+    `[Approval ${id}] ${oneLine(worker.name)}${card} asks to use ${oneLine(request.tool_name || 'a tool')}:`,
     ...quoteLines(input),
+    ...(cut ? ['[Cut short: an allow here goes to the owner instead, since you have not seen all of it.]'] : []),
     `[Answer with answer_permission, id: "${id}". The worker waits ${APPROVAL_WAIT_MS / 60000} minutes, then the owner is asked instead.]`,
   ].join('\n');
 }
@@ -50,15 +75,25 @@ export function requestApproval(worker, request, { jobTitle = null, waitMs = APP
   const billion = liveBillion();
   // Not Billion's to answer: no Billion, one still introducing itself, or a
   // request that is not from a worker at all.
-  if (!billion || billion.messagesHeld || !worker || worker.isBillion || !worker.approvalsToBillion) {
+  if (!billion || billion.messagesHeld || !worker || worker.isBillion || !worker.approvalsToBillion
+    || !TOOL_NAME.test(String(request?.tool_name ?? ''))) {
     return Promise.resolve(NO_DECISION);
   }
   const id = randomBytes(4).toString('hex');
   return new Promise((resolve) => {
-    const timer = setTimeout(() => { pending.delete(id); resolve(NO_DECISION); }, waitMs);
-    pending.set(id, { resolve, timer, worker });
-    if (!sendText(billion, formatApproval(id, worker, request || {}, jobTitle))) {
-      clearTimeout(timer);
+    const text = formatApproval(id, worker, request || {}, jobTitle);
+    const entry = { resolve, worker, tool: request.tool_name, cut: approvalInput(request).cut, askedAt: Date.now() };
+    entry.timer = setTimeout(() => {
+      pending.delete(id);
+      // Still in Billion's queue if it never came to rest: answering it later
+      // would only earn "ran out of time", so it goes.
+      unqueueText(billion.id, text);
+      logWait(entry, 'no answer, to the owner');
+      resolve(NO_DECISION);
+    }, waitMs);
+    pending.set(id, entry);
+    if (!sendText(billion, text)) {
+      clearTimeout(entry.timer);
       pending.delete(id);
       resolve(NO_DECISION);
     }
@@ -72,8 +107,22 @@ export function answerApproval(id, choice, reason) {
   if (!['allow', 'deny', 'owner'].includes(choice)) return { error: 'decision must be "allow", "deny" or "owner".' };
   clearTimeout(entry.timer);
   pending.delete(id);
-  entry.resolve(choice === 'owner' ? NO_DECISION : decision(choice, typeof reason === 'string' ? reason.trim() : ''));
-  return { worker: entry.worker.name, choice };
+  // Billion saw only part of it: a deny stands, an allow goes to the owner.
+  const given = choice === 'allow' && entry.cut ? 'owner' : choice;
+  logWait(entry, given);
+  entry.resolve(given === 'owner' ? NO_DECISION : decision(given, typeof reason === 'string' ? reason.trim() : ''));
+  return { worker: entry.worker.name, choice: given, cut: given !== choice };
+}
+
+// Billion is gone: nobody is left to answer, so every waiting worker gets its
+// dialog now rather than at the end of the wait.
+export function dropApprovals() {
+  for (const entry of pending.values()) {
+    clearTimeout(entry.timer);
+    logWait(entry, 'Billion stopped, to the owner');
+    entry.resolve(NO_DECISION);
+  }
+  pending.clear();
 }
 
 // For tests: forget everything waiting.

@@ -9,8 +9,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
-import { CONFIG_DIR } from './state.js';
+import { CONFIG_DIR, sessions } from './state.js';
+import { authEnabled } from './auth.js';
 
+import { quote } from '../lib/jobs.js';
 export { BILLION_NAME } from '../lib/jobs.js';
 
 const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.url));
@@ -22,11 +24,29 @@ const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.
 // would load Billion's instructions as its own.
 const CHARTER = { from: 'charter.md', to: 'CHARTER.md' };
 const FIRST_RUN_ONLY = { 'owner.md': 'CLAUDE.md', 'STATE.md': 'STATE.md', 'COMPANY.md': 'COMPANY.md' };
-const git = (dir, args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
+// Synchronous, on the server's own thread, so bounded: a global
+// commit.gpgsign waiting on a pinentry, or a hook, must not freeze every
+// terminal. These commits are Agent 007's own bookkeeping in Billion's folder,
+// so the user's signing and hooks are left out of them.
+const GIT_TIMEOUT_MS = 15_000;
+const git = (dir, args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore', timeout: GIT_TIMEOUT_MS });
+const COMMIT = ['-c', 'commit.gpgsign=false', 'commit', '-q', '--no-verify'];
+
+// The running Billion, if there is one.
+export function liveBillion() {
+  return [...sessions.values()].find(s => s.isBillion && !s.exited) || null;
+}
 
 // On unless turned off: BILLION=0 (or false/off/no) in the environment or .env.
 export function billionEnabled(env = process.env) {
   return !/^(0|false|off|no)$/i.test(String(env.BILLION ?? '').trim());
+}
+
+// Whether this server runs Billion. Not with user accounts: Billion belongs
+// to no one, so every signed-in user could drive an agent that never asks
+// before acting. That waits for a Billion per user.
+export function billionRuns(env = process.env) {
+  return billionEnabled(env) && !authEnabled();
 }
 
 export function billionDir(env = process.env) {
@@ -36,8 +56,17 @@ export function billionDir(env = process.env) {
 // First run: a git repo with the templates, committed. An existing repo is left
 // exactly as it is — it is Billion's memory. A folder that exists but is not a
 // repo yet (someone made BILLION_DIR by hand) gets the templates it lacks.
+//
+// A repo without Billion's charter is someone else's (BILLION_DIR pointed at a
+// project, say): refused, rather than committing a charter into it and
+// starting an agent there that never asks before acting.
 export function ensureBillionRepo(dir) {
-  if (existsSync(join(dir, '.git'))) return { created: false };
+  if (existsSync(join(dir, '.git'))) {
+    if (!existsSync(join(dir, CHARTER.to))) {
+      throw new Error(`${dir} is a git repository that isn't Billion's folder (it has no ${CHARTER.to}); point BILLION_DIR somewhere else`);
+    }
+    return { created: false };
+  }
   mkdirSync(dir, { recursive: true });
   for (const [from, to] of [[CHARTER.from, CHARTER.to], ...Object.entries(FIRST_RUN_ONLY)]) {
     const target = join(dir, to);
@@ -46,7 +75,7 @@ export function ensureBillionRepo(dir) {
   git(dir, ['-c', 'init.defaultBranch=main', 'init', '-q']);
   git(dir, ['add', '-A']);
   // An identity of its own, so a machine with no git user.name still commits.
-  git(dir, ['-c', 'user.name=Billion', '-c', 'user.email=billion@agent-007.local', 'commit', '-q', '-m', 'Billion: first run']);
+  git(dir, ['-c', 'user.name=Billion', '-c', 'user.email=billion@agent-007.local', ...COMMIT, '-m', 'Billion: first run']);
   return { created: true };
 }
 
@@ -61,7 +90,7 @@ export function refreshCharter(dir) {
   writeFileSync(target, text);
   git(dir, ['add', '--', CHARTER.to]);
   git(dir, ['-c', 'user.name=Agent 007', '-c', 'user.email=agent-007@agent-007.local',
-    'commit', '-q', '-m', 'Agent 007: update the charter', '--', CHARTER.to]);
+    ...COMMIT, '-m', 'Agent 007: update the charter', '--', CHARTER.to]);
   return true;
 }
 
@@ -83,9 +112,6 @@ export function suggestProjectsDir(repoPaths, { ignoreUnder = CONFIG_DIR } = {})
   return best;
 }
 
-// parseCommand() reads double quotes with backslash escapes (lib/jobs.js
-// quotes job prompts the same way).
-const quote = (text) => `"${String(text).replace(/([\\"])/g, '\\$1')}"`;
 
 // Everything Billion must do lives in its charter; the prompt only says which
 // part applies. A fresh repo gets the introduction. Any later start says both,

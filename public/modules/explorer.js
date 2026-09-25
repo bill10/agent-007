@@ -298,10 +298,12 @@ function renderBillionRow(content) {
   section.className = 'explorer-repo explorer-billion';
   const entry = document.createElement('div');
   entry.className = `explorer-branch${sessionId && sessionId === activeSessionId ? ' active' : ''}`;
-  if (sessionId) entry.onclick = () => switchToSession(sessionId);
+  // The whole row starts a stopped Billion, not just its button.
+  entry.onclick = running ? () => switchToSession(sessionId) : () => send({ type: 'billion-start' });
   const dot = document.createElement('span');
   dot.className = 'explorer-dot';
-  dot.style.background = stateColor(running ? agent.state : 'DISCONNECTED');
+  // Red only for a Billion that ran and stopped; grey for one not started yet.
+  dot.style.background = stateColor(running ? agent.state : agent ? 'DISCONNECTED' : 'IDLE');
   entry.appendChild(dot);
   const name = document.createElement('span');
   name.className = 'explorer-billion-name';

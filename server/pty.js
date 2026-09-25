@@ -14,6 +14,7 @@ import { broadcastJobs } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 import { trustDialogKey } from './billion.js';
+import { dropApprovals } from './approvals.js';
 
 // Regex constants for output filtering (shared, not recreated per event)
 
@@ -111,10 +112,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     const cut = raw.lastIndexOf('\n');
     session.pendingRaw = (cut === -1 ? raw : raw.slice(cut + 1)).slice(-2000);
     const lines = stripAnsiComplete(raw.slice(0, cut + 1)).split('\n').filter(l => l.trim().length > 0);
-    if (session.isBillion && (session.trustKeys || 0) < TRUST_KEY_CAP) {
-      session.trustScreen = ((session.trustScreen || '') + outside).slice(-8000);
-      answerTrustDialog(session);
-    }
+    answerTrustDialog(session, outside, now);
     const partial = stripAnsiComplete(session.pendingRaw).trim();
     // Freshness is judged on THIS read, never on the carry. `partial` is
     // re-derived from accumulated bytes, so counting it here would re-count
@@ -157,6 +155,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // about not leaving credentials lying in the filesystem, not about access.
     removeMcpConfig(sessionId);
     dropMessages(sessionId);
+    if (session.isBillion) dropApprovals();
     updateState(session, broadcast);
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
   });
@@ -169,11 +168,22 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
 // until the screen has been quiet for a moment and the key is chosen from the
 // settled drawing. Collected from the key onwards only, so an answered drawing
 // is never answered twice. Capped, so a dialog that never changes can't be
-// typed at forever.
+// typed at forever. And only just after spawn: the dialog comes before Claude
+// Code's first prompt, and on every start after the first there is none, so a
+// watcher left armed would read Billion's whole session — and could type into
+// it whenever its own output happened to look like that dialog.
 const TRUST_SETTLE_MS = 400;
 const TRUST_KEY_CAP = 4;
-function answerTrustDialog(session) {
+const TRUST_WINDOW_MS = 60_000;
+function answerTrustDialog(session, data, now) {
   if (!session.isBillion || (session.trustKeys || 0) >= TRUST_KEY_CAP) return;
+  if (now - session.createdAt > TRUST_WINDOW_MS) {
+    session.trustKeys = TRUST_KEY_CAP;
+    session.trustScreen = '';
+    clearTimeout(session.trustTimer);
+    return;
+  }
+  session.trustScreen = ((session.trustScreen || '') + data).slice(-8000);
   clearTimeout(session.trustTimer);
   session.trustTimer = setTimeout(() => {
     const key = session.exited ? null : trustDialogKey(stripAnsiComplete(session.trustScreen || ''));
