@@ -12,8 +12,8 @@
 // something the caller can try/catch. Resolving the command to a full path
 // with a launchable extension up front is what keeps it from happening.
 
-import { statSync } from 'fs';
-import { join, resolve } from 'path';
+import { statSync, accessSync, constants } from 'fs';
+import { join, resolve, delimiter } from 'path';
 
 const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD';
 
@@ -99,4 +99,36 @@ export function resolveExecutable(file, env = process.env, platform = process.pl
 export function isUsableCwd(dir) {
   if (!dir) return false;
   try { return statSync(dir).isDirectory(); } catch { return false; }
+}
+
+function isExecutable(p) {
+  try { accessSync(p, constants.X_OK); return statSync(p).isFile(); } catch { return false; }
+}
+
+/**
+ * Whether `file` would launch: a path to an executable, or a name on PATH.
+ *
+ * Checked before a spawn because on macOS and Linux node-pty "starts" a
+ * command that does not exist: the fork succeeds, the exec fails, and the tab
+ * shows an empty terminal that is already dead. Windows goes through
+ * resolveExecutable, the same lookup the spawn itself uses.
+ */
+export function commandExists(file, env = process.env, platform = process.platform, cwd = process.cwd()) {
+  if (!file) return false;
+  if (platform === 'win32') return !!resolveExecutable(file, env, platform, cwd);
+  if (file.includes('/')) return isExecutable(resolve(cwd, file));
+  return (env.PATH || '').split(delimiter).filter(Boolean).some(dir => isExecutable(join(dir, file)));
+}
+
+// Where to get the CLIs the + Agent presets and the board start.
+const INSTALL_HINTS = {
+  claude: 'Install Claude Code: https://docs.anthropic.com/en/docs/claude-code/setup',
+  codex: 'Install Codex: npm install -g @openai/codex',
+  gemini: 'Install Gemini CLI: npm install -g @google/gemini-cli',
+};
+
+// The one line a person sees when `file` is not there.
+export function missingCommandMessage(file) {
+  const hint = INSTALL_HINTS[file];
+  return `"${file}" is not installed, or not on the PATH Agent 007 was started with.${hint ? ` ${hint}` : ''}`;
 }

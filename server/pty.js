@@ -6,7 +6,7 @@ import { basename } from 'path';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames, ptyEnv } from '../lib/helpers.js';
 // Re-exported so the handler's tests reach the parser through the module they drive.
 export { trackSyncFrames } from '../lib/helpers.js';
-import { resolveExecutable, isUsableCwd } from './command-path.js';
+import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken, authEnabled } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook } from './agent-mcp.js';
@@ -217,6 +217,10 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // minted so a doomed spawn never puts a board credential on disk.
   if (!isUsableCwd(cwd)) {
     return { error: `Working directory no longer exists: ${cwd}` };
+  }
+  // A missing CLI "starts" on macOS and Linux and leaves a dead, empty tab.
+  if (!commandExists(file, process.env, process.platform, cwd)) {
+    return { error: missingCommandMessage(file) };
   }
   // Falls back to the bare name when nothing matched, leaving node-pty's own
   // lookup (and its catchable "File not found") in charge.

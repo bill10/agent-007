@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { resolveExecutable, isUsableCwd } from '../server/command-path.js';
+import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from '../server/command-path.js';
 import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'fs';
-import { join } from 'path';
+import { join, delimiter } from 'path';
 import { tmpdir } from 'os';
 
 // CreateProcessW only ever appends `.exe`, so a command installed as a `.cmd`
@@ -110,5 +110,46 @@ describe('isUsableCwd', () => {
     expect(isUsableCwd(join(base, 'file.txt'))).toBe(false);
     expect(isUsableCwd('')).toBe(false);
     expect(isUsableCwd(null)).toBe(false);
+  });
+});
+
+// A missing CLI must be caught before the spawn: on macOS and Linux node-pty
+// "starts" it and the tab is an empty, dead terminal.
+describe('commandExists', () => {
+  let bin;
+  beforeAll(() => {
+    bin = realpathSync(mkdtempSync(join(tmpdir(), 'a007-cmdexists-')));
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'notes'), 'not a program', { mode: 0o644 });
+    mkdirSync(join(bin, 'codex'));
+  });
+  afterAll(() => rmSync(bin, { recursive: true, force: true }));
+
+  it.skipIf(process.platform === 'win32')('finds an executable on PATH, and nothing else', () => {
+    const env = { PATH: ['/no/such/dir', bin].join(delimiter) };
+    expect(commandExists('claude', env, 'linux')).toBe(true);
+    expect(commandExists('gemini', env, 'linux')).toBe(false);
+    expect(commandExists('notes', env, 'linux')).toBe(false);   // not executable
+    expect(commandExists('codex', env, 'linux')).toBe(false);   // a directory
+    expect(commandExists('claude', {}, 'linux')).toBe(false);   // no PATH at all
+    expect(commandExists('', env, 'linux')).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('takes a path as a path, relative to the working directory', () => {
+    expect(commandExists(join(bin, 'claude'), {}, 'linux')).toBe(true);
+    expect(commandExists('./claude', {}, 'linux', bin)).toBe(true);
+    expect(commandExists('./gemini', {}, 'linux', bin)).toBe(false);
+  });
+
+  it('uses the Windows lookup on Windows', () => {
+    writeFileSync(join(bin, 'codex.cmd'), '@echo off\n');
+    expect(commandExists('codex', { PATH: bin, PATHEXT: '.CMD' }, 'win32')).toBe(true);
+    expect(commandExists('claude', { PATH: bin, PATHEXT: '.CMD' }, 'win32')).toBe(false);
+  });
+
+  it('says how to install the CLIs it knows', () => {
+    expect(missingCommandMessage('claude')).toMatch(/"claude" is not installed.*Install Claude Code/);
+    expect(missingCommandMessage('codex')).toMatch(/npm install -g @openai\/codex/);
+    expect(missingCommandMessage('aider')).toBe('"aider" is not installed, or not on the PATH Agent 007 was started with.');
   });
 });

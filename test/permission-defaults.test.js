@@ -18,6 +18,12 @@ vi.mock('../server/pty.js', async (importOriginal) => ({
   }),
 }));
 
+// CI has no claude or codex on PATH; what is under test is the command.
+vi.mock('../server/command-path.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  commandExists: vi.fn(() => true),
+}));
+
 const { createSession, sessions } = await import('../server.js');
 const { config } = await import('../server/state.js');
 const { dispatchOnce, addJob, boardSettings, updateSettings, boardModeFor, orphanResumePlan } = await import('../server/jobs.js');

@@ -33,7 +33,9 @@ import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js
 import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noClaudeCommand } from './server/billion.js';
+import { commandExists, missingCommandMessage } from './server/command-path.js';
+import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 
@@ -57,6 +59,10 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
   // worktree directory's codename: two holders of one name means the first
   // kill frees it while the other still names a directory on disk.
   if (name && codenamePool.has(name)) return { error: `An agent named ${name} already exists` };
+  // A missing CLI, before any worktree is made for it: the board retries a
+  // failed card every tick. A path is left to the spawn, which knows the cwd.
+  const { file } = parseCommand(command);
+  if (!/[\\/]/.test(file) && !commandExists(file)) return { error: missingCommandMessage(file) };
   // An agent someone starts gets the .env default mode for its CLI, unless its
   // command already says how it asks. The board settles its own workers' mode
   // (boardModeFor in server/jobs.js), so their commands are left as built.
@@ -190,12 +196,13 @@ function startBillion() {
       console.error(`Billion: could not commit the updated charter in ${dir}:`, err.message);
     }
   }
-  const command = billionCommand({
+  const hasClaude = commandExists('claude', process.env, process.platform, dir);
+  const command = hasClaude ? billionCommand({
     created,
     hasConversation: !created && hasClaudeTranscript(dir),
     dir,
     projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
-  });
+  }) : noClaudeCommand();
   const result = createSessionFromConfig({
     sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,
     repoPath: null, worktreePath: null, cwd: dir, isBillion: true, ownerId: null,
@@ -205,7 +212,7 @@ function startBillion() {
   // introduction, and at the start of every cycle after a restart.
   result.session.messagesHeld = true;
   sessions.set(result.session.id, result.session);
-  return { session: result.session };
+  return { session: result.session, ...(hasClaude ? {} : { notice: 'Claude Code (claude) is not installed; its tab says how to fix that' }) };
 }
 
 // --- WebSocket ---
@@ -245,8 +252,8 @@ async function startup() {
     else if (raw) console.log(`  ${agent} agents start in ${raw} unless told otherwise`);
   }
   if (billionRuns()) {
-    const { error } = startBillion();
-    console.log(error ? `  Billion: not started (${error})` : `  Billion: running in ${billionDir()}`);
+    const { error, notice } = startBillion();
+    console.log(error ? `  Billion: not started (${error})` : notice ? `  Billion: ${notice}` : `  Billion: running in ${billionDir()}`);
   } else if (billionEnabled()) {
     console.log('  Billion: off while user accounts are enabled');
   }

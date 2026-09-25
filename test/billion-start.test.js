@@ -25,6 +25,12 @@ vi.mock('../server/pty.js', async (importOriginal) => ({
     return { session };
   }),
 }));
+// Whether `claude` is on PATH, decided here rather than by the machine: CI has none.
+let hasClaude = true;
+vi.mock('../server/command-path.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  commandExists: vi.fn(() => hasClaude),
+}));
 let transcript = { agent: null };
 vi.mock('../server/agent-transcripts.js', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -40,6 +46,7 @@ beforeEach(() => {
   sessions.clear();
   spawned.length = 0;
   spawnError = null;
+  hasClaude = true;
   transcript = { agent: null };
   config.repos = [];
   process.env.BILLION_DIR = freshDir();
@@ -101,6 +108,22 @@ describe('startBillion', () => {
     expect(error).toMatch(/Could not set up Billion's folder/);
     expect(spawned).toHaveLength(0);
     expect(sessions.size).toBe(0);
+  });
+
+  it('without claude, its tab says how to install it or turn Billion off', () => {
+    hasClaude = false;
+    const { session, notice } = startBillion();
+    expect(notice).toMatch(/not installed/);
+    expect(session.isBillion).toBe(true);
+    const { file, args } = parseCommand(session.command);
+    expect(file).toBe(process.execPath);
+    const out = execFileSync(file, args, { encoding: 'utf8' });
+    expect(out).toMatch(/Install it from https:\/\/docs\.anthropic\.com/);
+    expect(out).toMatch(/BILLION=0/);
+    // Start checks again: once claude is there, the real Billion starts.
+    session.exited = true;
+    hasClaude = true;
+    expect(startBillion().session.command).toMatch(/^claude /);
   });
 
   it('passes a spawn failure on, leaving no session behind', () => {
