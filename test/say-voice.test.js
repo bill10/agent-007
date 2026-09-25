@@ -28,8 +28,8 @@ const LIST = [
   'Samantha            en_US    # Hello! My name is Samantha.',
   'Daniel (Enhanced)   en_GB    # Hello! My name is Daniel.',
   'Ava (Enhanced)      en_US    # Hello! My name is Ava.',
+  'Ava (Premium)       en-US    # Hello! My name is Ava.',
   'Amélie (Premium)    fr_CA    # Bonjour! Je m’appelle Amélie.',
-  'Zoe (Premium)       en_US    # Hello! My name is Zoe.',
   'Eddy (English (UK)) en_GB    # Hello! My name is Eddy.',
 ].join('\n');
 
@@ -57,20 +57,24 @@ describe('SAY_VOICE and the auto-picked voice', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
+  it('a bare SAY_VOICE takes that voice\'s best quality', async () => {
+    expect((await speak(LIST, { SAY_VOICE: 'Ava' }))[0]).toEqual(['-v', 'Ava (Premium)']);
+  });
+
   it('SAY_VOICE by its bare name matches the listed "Name (English (UK))"', async () => {
     expect((await speak(LIST, { SAY_VOICE: 'eddy' }))[0]).toEqual(['-v', 'Eddy (English (UK))']);
   });
 
   it('a missing SAY_VOICE is logged once, naming it, and falls back to the best voice', async () => {
-    expect(await speak(LIST, { SAY_VOICE: 'Nobody' })).toEqual([['-v', 'Zoe (Premium)'], ['-v', 'Zoe (Premium)']]);
+    expect(await speak(LIST, { SAY_VOICE: 'Nobody' })).toEqual([['-v', 'Ava (Premium)'], ['-v', 'Ava (Premium)']]);
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0][0]).toContain('"Nobody"');
   });
 
   it('prefers English Premium over Enhanced over the default', async () => {
-    expect((await speak(LIST, {}))[0]).toEqual(['-v', 'Zoe (Premium)']);
+    expect((await speak(LIST, {}))[0]).toEqual(['-v', 'Ava (Premium)']);   // a hyphenated locale too
     vi.resetModules(); tools.calls = [];
-    const noPremium = LIST.split('\n').filter(l => !l.startsWith('Zoe')).join('\n');
+    const noPremium = LIST.split('\n').filter(l => !l.startsWith('Ava (Premium)')).join('\n');
     expect((await speak(noPremium, {}))[0]).toEqual(['-v', 'Ava (Enhanced)']);
     vi.resetModules(); tools.calls = [];
     expect((await speak('Albert              en_US    # Hello!', {}))[0]).toEqual([]);

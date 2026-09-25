@@ -81,28 +81,36 @@ export function speechUnavailable(env = process.env, platform = process.platform
 
 // `say -v '?'` lines, e.g. "Ava (Premium)       en_US    # Hello! My name is Ava."
 export function parseVoices(out) {
-  return out.split('\n').map(l => l.match(/^(.+?)\s+([a-z]{2,3}_\w+)\s+#/)).filter(Boolean)
-    .map(([, name, locale]) => ({ name, locale }));
+  return out.split('\n').map(l => l.match(/^(.+?)\s+([a-z]{2,3}[_-]\w+)\s+#/)).filter(Boolean)
+    .map(([, name, locale]) => ({ name, locale: locale.replace('-', '_') }));
 }
 
-// SAY_VOICE if it is installed, else the best English voice installed:
-// Premium, then Enhanced (however macOS words the name), en_US before en_GB. null keeps say's own default.
-export function pickVoice(voices, env = process.env) {
-  const wanted = (env.SAY_VOICE || '').trim();
-  if (wanted) {
-    // "Samantha" also matches "Samantha (English (US))", as `say -v` itself does.
-    const w = wanted.toLowerCase();
-    const found = voices.find(v => v.name.toLowerCase() === w) || voices.find(v => v.name.toLowerCase().startsWith(`${w} (`));
-    if (found) return found.name;
-    console.log(`  Telegram: SAY_VOICE "${wanted}" is not installed (say -v '?' lists what is); using the best installed voice`);
-  }
+// The first Premium voice, then Enhanced (however macOS words the name), in
+// these locales in order.
+function best(voices, locales) {
   for (const tier of ['Premium', 'Enhanced']) {
-    for (const locale of ['en_US', 'en_GB']) {
-      const v = voices.find(v => v.locale === locale && v.name.includes(tier));
-      if (v) return v.name;
+    for (const locale of locales) {
+      const v = voices.find(v => (!locale || v.locale === locale) && v.name.includes(tier));
+      if (v) return v;
     }
   }
   return null;
+}
+
+// SAY_VOICE if it is installed, else the best English voice installed:
+// Premium, then Enhanced, en_US before en_GB. null keeps say's own default.
+export function pickVoice(voices, env = process.env) {
+  const wanted = (env.SAY_VOICE || '').trim();
+  if (wanted) {
+    // "Ava" also matches "Ava (Premium)" or "Samantha" "Samantha (English (US))",
+    // as `say -v` itself does, the best of them first.
+    const w = wanted.toLowerCase();
+    const named = voices.filter(v => v.name.toLowerCase().startsWith(`${w} (`));
+    const found = voices.find(v => v.name.toLowerCase() === w) || best(named, [null]) || named[0];
+    if (found) return found.name;
+    console.log(`  Telegram: SAY_VOICE "${wanted}" is not installed (say -v '?' lists what is); using the best installed voice`);
+  }
+  return best(voices, ['en_US', 'en_GB'])?.name ?? null;
 }
 
 let voicePick;

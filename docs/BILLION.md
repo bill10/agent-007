@@ -534,8 +534,8 @@ anywhere but Telegram, and there is no paid transcription.
   tappable. Links are read out as "link". Without `say` or ffmpeg (Linux,
   Windows) it sends text, and the server log says once why.
 - **Which voice**: `SAY_VOICE` names one from `say -v '?'` (e.g.
-  `SAY_VOICE=Ava (Premium)`; a bare `Samantha` matches
-  `Samantha (English (US))`). Unset, the server picks the best English voice
+  `SAY_VOICE=Ava (Premium)`; a bare `Ava` takes the best Ava installed, and
+  `Samantha` matches `Samantha (English (US))`). Unset, the server picks the best English voice
   installed: a Premium one, then Enhanced, en_US before en_GB, else `say`'s
   old default. The Premium and Enhanced voices sound far more natural and are
   free: System Settings → Accessibility → Spoken Content → System voice →
