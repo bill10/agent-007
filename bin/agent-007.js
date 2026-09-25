@@ -43,6 +43,11 @@ Settings (default in brackets):
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
   TELEGRAM_BOT_TOKEN      Bot token for Billion's questions on your phone [off]
   TELEGRAM_CHAT_ID        Your chat with that bot; only it reaches Billion [none]
+  TELEGRAM_VOICE          mirror, always or never: Billion's messages as
+                          voice (macOS say + ffmpeg) [mirror]
+  WHISPER_MODEL           whisper.cpp model file; your voice notes are
+                          transcribed locally [off]
+  WHISPER_CPP_BIN         whisper.cpp CLI if not on PATH [whisper-cli]
   TRUST_BOARD_WORKTREES   0 keeps Claude Code's and Codex's folder-trust
                           prompt for job board workers [on]
 
