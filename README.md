@@ -3,13 +3,22 @@
 [![Tests (Ubuntu)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml)
 [![Tests (Windows)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml)
 
-**Queue coding jobs, walk away, review the PRs.**
-
-Agents run in parallel, each in its own git worktree; one boss agent runs the board for you; and a pixel office shows who's working and who's waiting on you.
+**From web terminals for your coding agents to a self-running agent company.**
 
 ![An agent walks to its desk and starts work, a job card is posted and dispatched to a second desk, and an agent turns orange when it stops to ask a question](docs/demo.gif)
 
 *Recorded from the running app. If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
+
+Use it as far along as you need:
+
+1. **One task: one agent in a web terminal.** Start Claude Code, Codex or any CLI agent in the browser. Add a repo once; every agent gets its own git worktree and branch, so you never set one up by hand.
+2. **Many tasks across projects: many terminals, one window.** Every repo and every agent in one place, with live terminals, a file explorer, inline diffs, and a pixel office where each agent faces its screen while it works and turns to you when it needs you.
+3. **Stop watching them: a job board.** Put tasks on the board and Claude Code or Codex workers pick them up, each in its own worktree, and move them To do -> In progress -> Review on their own, landing as a pull request (or a summary, for work that isn't code). Cards can run on a cron schedule, and agents can post cards and message each other.
+4. **Stop posting jobs: give Billion a goal.** Billion is one always-on agent that plans, posts the jobs, reviews what comes back and merges the PRs. It only asks you about money, access or anything irreversible.
+
+Claude Code, Codex, any terminal agent is supported -- use your existing subscriptions, no extra charge.
+
+It runs locally on your machine, so agents work while it is on and awake. Billion's plan and memory live in a git repo, so it picks up where it left off after a restart. Every worker is a real terminal you can open and type into, from your phone too ([remote access](docs/REMOTE.md)).
 
 ## Quick Start
 
@@ -52,15 +61,7 @@ Highest wins: command-line flags (`--port`), then environment variables, then
 a `.env` in the directory you start it from, then `~/.agent-007/.env`. The full
 list is in [Configuration](#configuration) and `--help`.
 
-## Highlights
-
-- **A job board, not a babysitting job** -- Each card gets a fresh agent on its own worktree and branch. It moves To do -> In progress -> Review on its own and lands as a pull request (or a summary, for work that isn't code). Cards can also run on a cron schedule.
-- **Billion, the one agent you talk to** -- Give it a mission and it plans, posts cards, reviews what comes back, merges PRs and answers its workers' permission requests. It comes to you only for money, access, anything irreversible and real forks in direction.
-- **Your agents, your subscriptions** -- Claude Code, Codex, any terminal agent is supported -- use your existing subscriptions, no extra charge.
-- **See everything at a glance** -- Every agent gets a desk in the pixel office: facing the screen while it works, turning to face you when it needs you. One window for every repo, with live terminals, a file explorer and inline diffs.
-- **Agents that talk to each other** -- Tell one to "add that to the job board" or "ask Viper what it changed", and it does it over MCP.
-
-Everything else -- scheduled jobs, phone layout, voice input, themes, and the details and caveats of each feature -- is in [docs/FEATURES.md](docs/FEATURES.md).
+The details and caveats of every feature -- phone layout, voice input, themes and more -- are in [docs/FEATURES.md](docs/FEATURES.md).
 
 ## Keyboard Shortcuts
 
