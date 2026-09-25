@@ -16,7 +16,7 @@ import { CONFIG_DIR } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
 import {
-  chooseMode, speechUnavailable, synthesize, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
+  chooseMode, voiceSetting, speechUnavailable, synthesize, sayVoice, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
 } from './voice.js';
 
 export const MAX_NOTIFY_CHARS = 3000;          // Telegram's own limit is 4096
@@ -98,7 +98,7 @@ function saveOwnerMode(mode) {
 export async function sendVoice(text, { env = process.env } = {}) {
   const { chatId } = telegramSettings(env);
   try {
-    const ogg = await synthesize(text);
+    const ogg = await synthesize(text, env);
     const form = new FormData();
     form.append('chat_id', chatId);
     form.append('caption', text);   // under Telegram's 1024: voice is for texts of 900 or fewer
@@ -296,6 +296,9 @@ export function startTelegram({ broadcast, env = process.env } = {}) {
   if (!token || stopper) return false;
   if (!chatId) console.log('  Telegram: send any message to your bot, then set TELEGRAM_CHAT_ID=<id> (the id is shown here when it arrives)');
   else console.log('  Telegram: on');
+  if (voiceSetting(env) !== 'never' && !speechUnavailable(env)) {
+    sayVoice(env).then(v => console.log(`  Telegram: speaking with ${v ? `the ${v} voice` : "say's default voice"}`));
+  }
   const controller = new AbortController();
   stopper = controller;
   (async () => {

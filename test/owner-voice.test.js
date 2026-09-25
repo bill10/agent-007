@@ -19,7 +19,8 @@ vi.mock('child_process', async (importOriginal) => ({
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     process.nextTick(() => {
-      if (cmd === 'say') tools.said.push(readFileSync(args[3], 'utf8'));
+      if (cmd === 'say' && args[1] === '?') child.stdout.emit('data', tools.voices || '');
+      else if (cmd === 'say') tools.said.push(readFileSync(args[args.indexOf('-f') + 1], 'utf8'));
       if (cmd === 'ffmpeg') writeFileSync(args[args.length - 1], 'OGGDATA');
       if (cmd.includes('whisper')) child.stdout.emit('data', `\n ${tools.whisperOut}\n`);
       child.emit('close', cmd.includes('whisper') ? tools.exit : 0);
@@ -109,7 +110,7 @@ describe('when Billion speaks', () => {
     expect(voice.type).toBe('audio/ogg');
     expect(voice.name).toBe('billion.ogg');
     expect(Buffer.from(await voice.arrayBuffer()).toString()).toBe('OGGDATA');
-    const [say, ffmpeg] = tools.calls;
+    const [say, ffmpeg] = tools.calls.filter(c => c[1][1] !== '?');   // say -v '?' found no voices: no -v
     expect(say[0]).toBe('say');
     expect(say[1]).toEqual(['-o', expect.stringMatching(/say\.aiff$/), '-f', expect.stringMatching(/say\.txt$/)]);
     expect(ffmpeg[1]).toEqual(expect.arrayContaining(['-c:a', 'libopus', '-b:a', '32k']));

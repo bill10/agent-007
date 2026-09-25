@@ -79,12 +79,54 @@ export function speechUnavailable(env = process.env, platform = process.platform
   return null;
 }
 
+// `say -v '?'` lines, e.g. "Ava (Premium)       en_US    # Hello! My name is Ava."
+export function parseVoices(out) {
+  return out.split('\n').map(l => l.match(/^(.+?)\s+([a-z]{2,3}[_-]\w+)\s+#/)).filter(Boolean)
+    .map(([, name, locale]) => ({ name, locale: locale.replace('-', '_') }));
+}
+
+// The first Premium voice, then Enhanced (however macOS words the name), in
+// these locales in order.
+function best(voices, locales) {
+  for (const tier of ['Premium', 'Enhanced']) {
+    for (const locale of locales) {
+      const v = voices.find(v => (!locale || v.locale === locale) && v.name.includes(tier));
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
+// SAY_VOICE if it is installed, else the best English voice installed:
+// Premium, then Enhanced, en_US before en_GB. null keeps say's own default.
+export function pickVoice(voices, env = process.env) {
+  const wanted = (env.SAY_VOICE || '').trim();
+  if (wanted) {
+    // "Ava" also matches "Ava (Premium)" or "Samantha" "Samantha (English (US))",
+    // as `say -v` itself does, the best of them first.
+    const w = wanted.toLowerCase();
+    const named = voices.filter(v => v.name.toLowerCase().startsWith(`${w} (`));
+    const found = voices.find(v => v.name.toLowerCase() === w) || best(named, [null]) || named[0];
+    if (found) return found.name;
+    console.log(`  Telegram: SAY_VOICE "${wanted}" is not installed (say -v '?' lists what is); using the best installed voice`);
+  }
+  return best(voices, ['en_US', 'en_GB'])?.name ?? null;
+}
+
+let voicePick;
+// The voice Billion speaks with, chosen once for the process's lifetime.
+export function sayVoice(env = process.env) {
+  voicePick ??= run('say', ['-v', '?']).catch(() => '').then(out => pickVoice(parseVoices(out), env));
+  return voicePick;
+}
+
 // text → OGG/Opus bytes. URLs are said as "link"; the caption carries them.
-export function synthesize(text) {
+export function synthesize(text, env = process.env) {
   return inTempDir(async dir => {
     const txt = join(dir, 'say.txt'), aiff = join(dir, 'say.aiff'), ogg = join(dir, 'say.ogg');
     await writeFile(txt, text.replace(URL_RE, 'link'));
-    await run('say', ['-o', aiff, '-f', txt]);
+    const voice = await sayVoice(env);
+    await run('say', [...(voice ? ['-v', voice] : []), '-o', aiff, '-f', txt]);
     await run('ffmpeg', ['-y', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', aiff, '-c:a', 'libopus', '-b:a', '32k', ogg]);
     return readFile(ogg);
   });
