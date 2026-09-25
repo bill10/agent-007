@@ -2160,6 +2160,8 @@ export function requestDispatch() {
       console.error('Job dispatch pass failed:', err.message);
     }
   }, DISPATCH_DEBOUNCE_MS);
+  // Never the thing keeping a process alive: the interval loop is the board.
+  kickTimer.unref?.();
 }
 
 // --- Loop ---

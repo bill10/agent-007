@@ -3,6 +3,7 @@
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { basename } from 'path';
+import { writeSync } from 'fs';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames, ptyEnv } from '../lib/helpers.js';
 // Re-exported so the handler's tests reach the parser through the module they drive.
 export { trackSyncFrames } from '../lib/helpers.js';
@@ -36,8 +37,10 @@ function installAsyncSpawnGuard() {
     const match = ASYNC_SPAWN_FAILURE_RE.exec(err?.message || '');
     if (!match) {
       // Not ours. Reproduce Node's default uncaughtException behaviour rather
-      // than silently swallowing an unrelated bug.
-      console.error(err);
+      // than silently swallowing an unrelated bug. Written synchronously:
+      // console.error to a pipe is async on Windows, and process.exit dropped
+      // it, leaving a crash with no error to read.
+      try { writeSync(2, `${err?.stack || err}\n`); } catch { /* exiting anyway */ }
       process.exit(1);
     }
 
