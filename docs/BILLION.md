@@ -505,7 +505,16 @@ cycle: start agent-cost; drop the browser-extension idea
 4. Approvals via the `PermissionRequest` hook (Claude Code `--settings`,
    Codex two `-c` flags).
 
-Each part is useful without the next. Until 2–4 land, the charter says so in
+Each part is useful without the next.
+
+**Decide before the first release: charter upgrades.** Templates are copied
+into Billion's folder only on its first run, so once a real Billion exists, a
+later charter change (new tools, approvals) never reaches it — and a charter
+that doesn't call `billion_ready` leaves its inbox closed. Proposed: split it
+into `CHARTER.md` (the app's, rewritten by the server on every start and
+committed in Billion's repo when it changes) and `CLAUDE.md` (the owner's
+rules, importing `@CHARTER.md` and taking precedence). Not needed while
+building: every test starts from a fresh folder. Until 2–4 land, the charter says so in
 its "Limits today" section; update it as each part ships.
 
 Found while verifying part 1:
