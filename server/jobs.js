@@ -1001,7 +1001,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (state !== 'review') {
     clearPrCheckError(job);
     job.prClosedSeenAt = null;   // a closed reading is about this stay in Review only
-    job.ciNotifiedSha = null;    // and so is the CI notice
+    job.ciNotifiedKey = null;    // and so is the CI notice
   }
   // A manual move means "the PR was opened outside the board". Look it up, or
   // the card sits in Review with no link to the thing it produced — nothing
@@ -1884,8 +1884,9 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
 // rather than the dispatch interval, for two things the scan is too slow for:
 //
 //  - Billion hears when CI on its card's PR has finished, once per head commit
-//    (job.ciNotifiedSha), so it merges on that instead of polling gh itself.
-//    A new push is a new SHA, which re-arms it.
+//    and run (job.ciNotifiedKey), so it merges on that instead of polling gh
+//    itself. A new push is a new SHA and a re-run of a failed job finishes
+//    later; either re-arms it.
 //  - A PR seen merged or closed is filed now, through the same merge sweep the
 //    scan runs (agent retired, worktree released, closed-PR confirm window).
 //
@@ -1924,11 +1925,12 @@ export async function checkReviewCi(broadcast, { killSession, viewCi = findPrCi,
     }
     ciBackoff.delete(job.id);
     if (pr.state === 'MERGED' || pr.state === 'CLOSED') { ended.push(job); continue; }
-    if (!pr.ci || !pr.headSha || job.ciNotifiedSha === pr.headSha) continue;
+    const key = pr.ci && pr.headSha ? `${pr.headSha}@${pr.ci.finishedAt || ''}` : null;
+    if (!key || job.ciNotifiedKey === key) continue;
     // Stamped only once the notice is queued, so a Billion that was down
     // still hears about it when it is back.
     if (notifyBillionCi(job, pr.ci)) {
-      job.ciNotifiedSha = pr.headSha;
+      job.ciNotifiedKey = key;
       notified.push(job);
       changed = true;
     }
