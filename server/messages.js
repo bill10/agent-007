@@ -18,7 +18,7 @@
 // (server/pty.js) retries every second. Kept free of node-pty and of the
 // session Map so it is testable on its own: sessions come in as parameters.
 
-import { parseCommand, detectState } from '../lib/helpers.js';
+import { parseCommand, detectState, stripAnsiComplete } from '../lib/helpers.js';
 import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME, isCodexConfigFlag } from '../lib/jobs.js';
 import { takesMcpConfig } from './agent-mcp.js';
 
@@ -316,4 +316,62 @@ const TERMINAL_REPLY_RE = new RegExp([
 
 export function isTyping(data) {
   return String(data).replace(TERMINAL_REPLY_RE, '').length > 0;
+}
+
+// read_agent_screen: the tail of a worker's terminal, for Billion.
+//
+// Who may read whom is send_message's rule narrowed: the reader must be
+// Billion, the worker must be one send_message would let it reach by owner
+// (sameOwner, an agent), AND it must be working a card Billion posted. A
+// screen can show what a message never would — a key that scrolled by, a
+// hand-started agent's private work — so reading asks for more than writing
+// does. Agents the owner started by hand are theirs and stay unreadable. An
+// exited worker still has its buffer and can be read, so Billion can see why
+// it died.
+export const SCREEN_LINES_DEFAULT = 40;
+export const SCREEN_LINES_MAX = 200;
+export const SCREEN_CHARS_MAX = 20000;
+const SCREEN_RAW_CHARS = 256 * 1024;
+const SCREEN_STATUS = { WORKING: 'working', WAITING: 'waiting', MESSAGE: 'needs you' };
+
+// Plain text of the last `lines` lines of a raw pty stream.
+// ponytail: the stream with its escapes stripped, not an emulated screen — a
+// TUI's cursor-addressed repaints come out as the text they drew, in order,
+// not laid out. Good enough to spot a dialog, an error or a question; a
+// headless xterm is the upgrade if Billion needs the exact layout.
+export function screenTail(raw, lines = SCREEN_LINES_DEFAULT) {
+  const n = Math.min(SCREEN_LINES_MAX, Math.max(1, Math.floor(Number(lines)) || SCREEN_LINES_DEFAULT));
+  let text = String(raw ?? '');
+  // Cut the head at a newline: an escape never spans one, so no half sequence
+  // survives the strip as literal garbage.
+  if (text.length > SCREEN_RAW_CHARS) {
+    text = text.slice(-SCREEN_RAW_CHARS);
+    text = text.slice(text.indexOf('\n') + 1);
+  }
+  const all = stripAnsiComplete(text).split('\n')
+    // A carriage return redraws the line: what shows is what came after it.
+    .map(line => clean(line.replace(/\r+$/, '').split('\r').pop()).trimEnd());
+  while (all.length && !all[all.length - 1]) all.pop();
+  return all.slice(-n).join('\n').slice(-SCREEN_CHARS_MAX);
+}
+
+/**
+ * Returns { name, status, text } | { error }. `isBillionCard(jobId)` comes in
+ * as a function so this module stays clear of the job store.
+ */
+export function readAgentScreen({ from, name, lines, sessions, isBillionCard = () => false }) {
+  if (!from?.isBillion) return { error: 'Only Billion can read agent screens.' };
+  const named = [...sessions.values()].filter(s =>
+    s.id !== from.id && s.name === name && sameOwner(from, s) && isAgent(s) && s.jobId && isBillionCard(s.jobId));
+  // A live one over an exited one of the same name.
+  const target = named.find(s => !s.exited) || named[named.length - 1];
+  if (!target) {
+    return { error: `No worker named "${name}" is on a card you posted. You can read only the workers on your own cards, `
+      + 'not agents the owner started by hand; list_jobs shows which agent works each card.' };
+  }
+  return {
+    name: target.name,
+    status: target.exited ? 'exited' : (SCREEN_STATUS[target.state] || String(target.state || 'unknown').toLowerCase()),
+    text: screenTail(target.ringBuffer?.getAll().join('') || '', lines),
+  };
 }
