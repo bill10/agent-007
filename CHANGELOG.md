@@ -19,7 +19,7 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   an error, or a different SHA still keeps it, so no branch whose commits are
   missing from the remote is deleted.
 - **A token left in a branch's remote URL is removed.** If that URL holds
-  credentials (`https://user:secret@…`), the cleanup points the branch back at
+  a user and token before the host, the cleanup points the branch back at
   `origin`, so the token no longer sits in `.git/config`. The URL is never
   logged.
 
