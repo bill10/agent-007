@@ -69,7 +69,7 @@ export function ensureBillionRepo(dir) {
     let marker = null;
     try { marker = readFileSync(join(dir, MARKER.name), 'utf8'); } catch {}
     if (marker !== MARKER.text) {
-      throw new Error(`${dir} is a git repository that isn't Billion's folder (it has no ${MARKER.name} marker); point BILLION_DIR somewhere else`);
+      throw new Error(`${dir} is a git repository without Billion's ${MARKER.name} marker. If it is Billion's folder, restore the file from its git history (git checkout -- ${MARKER.name}); otherwise point BILLION_DIR somewhere else`);
     }
     return { created: false };
   }
