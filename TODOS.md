@@ -158,14 +158,6 @@
 - **Depends on:** Nothing
 - **Context:** Identified during eng review (2026-03-26). Currently masked because `strip-ansi` v7 handles most charset sequences before our regex runs, but edge cases may slip through.
 
-## npm global install + CLI UX
-- **What:** Add `bin` entry, `--help`/`--version`/`--port` flags, `.npmignore`, and `npm publish` workflow so users can `npm install -g agent-007`.
-- **Why:** Dramatically lowers Time-To-Hello-World from clone+install+start to one command.
-- **Effort:** M (human: ~4-8 hours / CC: ~15-30 min)
-- **Priority:** P2
-- **Depends on:** Stable (non-beta) node-pty release, npm account setup
-- **Context:** Deferred from v0.1.0 open-source launch per outside voice review (2026-04-06). The current `node-pty ^1.2.0-beta.12` has inconsistent prebuilds, and the server has no CLI argument parsing. Ship clone-and-run first, npm publish when CLI UX is ready.
-
 ## Collaborative mode
 
 ## Token rotation / expiry + non-URL WS auth

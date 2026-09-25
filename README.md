@@ -14,6 +14,12 @@ Agents run in parallel, each in its own git worktree; one boss agent runs the bo
 ## Quick Start
 
 ```bash
+npx agent-007
+```
+
+Or run it from a clone:
+
+```bash
 git clone https://github.com/bill10/agent-007.git && cd agent-007
 npm install
 npm start
@@ -65,7 +71,11 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 
 Configure via environment variables, either inline or in a `.env` file. On
 startup `npm start` auto-loads `.env` if present (via Node's built-in
-`--env-file-if-exists`). Copy the template to get going:
+`--env-file-if-exists`), and `npx agent-007` loads a `.env` in the directory
+you run it from; variables already set in your environment win over the file.
+`npx agent-007 --port 8080` overrides `PORT`, and `npx agent-007 --help` lists
+the options. Everything the app saves lives in `~/.agent-007`. Copy the
+template to get going:
 
 ```bash
 cp .env.example .env    # then edit; .env is gitignored
@@ -103,6 +113,7 @@ create a user:
 
 ```bash
 npm run adduser -- "Alice"     # prints a one-time login token
+npx agent-007 adduser "Alice"  # the same, without a clone
 ```
 
 The moment the first user exists, the server **requires a token** for every
@@ -166,6 +177,7 @@ server/
   agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)
   auth.js          Login tokens, user accounts, agent session tokens
 bin/
+  agent-007.js     The `agent-007` command (`npx agent-007`): flags, .env, start
   adduser.js       Create a login user (`npm run adduser`)
 public/
   index.html       Three-panel layout, plus the phone's bottom nav

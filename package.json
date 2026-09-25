@@ -1,10 +1,27 @@
 {
   "name": "agent-007",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Pixel office for AI terminal agents. Spawn multiple Claude Code agents, watch them work in a virtual office, manage git worktrees, and view file changes.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bill10/agent-007.git"
+  },
+  "homepage": "https://github.com/bill10/agent-007#readme",
   "type": "module",
   "main": "server.js",
+  "bin": {
+    "agent-007": "bin/agent-007.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "public/",
+    "server/",
+    "templates/",
+    "server.js",
+    "VERSION"
+  ],
   "engines": {
     "node": ">=20.12"
   },
