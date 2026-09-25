@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.2.1] - 2026-09-25
+
+### Changed
+
+- **Install with `npx @bill10/agent-007`.** npm refused the unscoped name
+  `agent-007` as too close to the existing `agent007`, so the package is now
+  `@bill10/agent-007`. The command it installs is still `agent-007`:
+  `npm i -g @bill10/agent-007`, then run `agent-007`. The README, the
+  contributor guide and the release workflow use the new name, and the
+  workflow reads it from `package.json` instead of hard-coding it.
+
 ## [0.6.2.0] - 2026-09-25
 
 ### Added

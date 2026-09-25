@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// agent-007 — the command `npx agent-007` (or a global install) runs.
+// agent-007 — the command `npx @bill10/agent-007` (or a global install) runs.
 //
 // Loads ./.env from the current directory when there is one (the same file
 // `npm start` reads in a clone; variables already in the environment win),

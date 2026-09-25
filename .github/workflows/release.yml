@@ -70,8 +70,9 @@ jobs:
             echo "package.json version is $have, but VERSION is $v (expected $a.$b.$c)"; exit 1
           fi
           npmv="$a.$b.$((10#$c * 1000 + 10#$d))"
-          if [ "$(npm view "agent-007@$npmv" version 2>/dev/null)" = "$npmv" ]; then
-            echo "agent-007@$npmv is already on npm"; exit 0
+          name="$(node -p "require('./package.json').name")"
+          if [ "$(npm view "$name@$npmv" version 2>/dev/null)" = "$npmv" ]; then
+            echo "$name@$npmv is already on npm"; exit 0
           fi
           npm pkg set version="$npmv"
           npm publish --provenance --access public
