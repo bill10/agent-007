@@ -24,8 +24,10 @@ export function voiceSetting(env = process.env) {
 }
 
 const URL_RE = /https?:\/\/\S+/g;
-// Code blocks, inline code, URLs, and path-like words (a slash in them, or ~/).
-const TECHNICAL_RE = /```[\s\S]*?```|`[^`]*`|https?:\/\/\S+|\S*[/\\]\S*|~\S*/g;
+// Code blocks, inline code, URLs, and path-like words: starting with / ~/ ./,
+// two slashes, a slash and a file extension, or a backslash. One slash alone
+// (and/or, 24/7) is prose.
+const TECHNICAL_RE = /```[\s\S]*?```|`[^`]*`|https?:\/\/\S+|(?<!\S)[~.]{0,2}\/\S+|\S+\/\S+\/\S*|\S+\/\S*\.[A-Za-z]\w*|\S*\\\S*/g;
 
 // Why this text should stay text, or null when it can be spoken.
 // ponytail: a character ratio, not a parser; good enough to keep links, code
@@ -49,11 +51,14 @@ export function chooseMode(text, { env = process.env, lastMode } = {}) {
   return { mode: 'text', reason: 'the owner last wrote text' };
 }
 
+const TOOL_TIMEOUT_MS = 5 * 60 * 1000;   // the poll loop waits on this, so a hung tool must not hold it
+
 // Runs one tool. Resolves with its output, rejects with a short reason.
 function run(cmd, args) {
   return new Promise((resolve, reject) => {
     let out = '', err = '';
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], timeout: TOOL_TIMEOUT_MS });
+    child.stdout?.setEncoding?.('utf8');   // a character split across reads stays whole
     child.stdout?.on('data', d => { out += d; });
     child.stderr?.on('data', d => { err += d; });
     child.on('error', e => reject(new Error(`${cmd}: ${e.message}`)));
@@ -80,7 +85,7 @@ export function synthesize(text) {
     const txt = join(dir, 'say.txt'), aiff = join(dir, 'say.aiff'), ogg = join(dir, 'say.ogg');
     await writeFile(txt, text.replace(URL_RE, 'link'));
     await run('say', ['-o', aiff, '-f', txt]);
-    await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', aiff, '-c:a', 'libopus', '-b:a', '32k', ogg]);
+    await run('ffmpeg', ['-y', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', aiff, '-c:a', 'libopus', '-b:a', '32k', ogg]);
     return readFile(ogg);
   });
 }
@@ -100,8 +105,9 @@ export function transcribe(audio, { bin, model }) {
   return inTempDir(async dir => {
     const input = join(dir, 'note.ogg'), wav = join(dir, 'note.wav');
     await writeFile(input, audio);
-    await run('ffmpeg', ['-y', '-loglevel', 'error', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav]);
+    await run('ffmpeg', ['-y', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', input, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', wav]);
     const out = await run(bin, ['-m', model, '-f', wav, '-nt', '-np']);
-    return out.split('\n').map(l => l.trim()).filter(Boolean).join(' ');
+    // Markers like [BLANK_AUDIO] or [Music] are not words.
+    return out.replace(/\[[^\]]*\]/g, ' ').split('\n').map(l => l.trim()).filter(Boolean).join(' ');
   });
 }

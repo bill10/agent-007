@@ -85,7 +85,10 @@ export function lastOwnerMode() {
 
 function saveOwnerMode(mode) {
   if (lastOwnerMode() === mode) return;
-  try { writeFileSync(voiceStatePath(), JSON.stringify({ lastMode: mode })); } catch (err) {
+  try {
+    writeFileSync(`${voiceStatePath()}.tmp`, JSON.stringify({ lastMode: mode }));
+    renameSync(`${voiceStatePath()}.tmp`, voiceStatePath());
+  } catch (err) {
     console.error('Telegram: could not save the last message mode:', err.message);
   }
 }
@@ -129,7 +132,7 @@ async function downloadFile(fileId, env) {
   if (file?.file_size > MAX_NOTE_BYTES) throw new Error('too big');
   const { token } = telegramSettings(env);
   try {
-    const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+    const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`, { signal: AbortSignal.timeout(60 * 1000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const bytes = Buffer.from(await res.arrayBuffer());
     if (bytes.length > MAX_NOTE_BYTES) throw new Error('too big');
@@ -194,7 +197,7 @@ export function dismissWaiting(id, broadcast) {
 
 let sent = [];   // times of recent notify_owner calls
 
-export async function notifyOwner(text, { broadcast, env = process.env, now = Date.now() } = {}) {
+export async function notifyOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -210,7 +213,7 @@ export async function notifyOwner(text, { broadcast, env = process.env, now = Da
   if (!token || !chatId) {
     return { pinned: true, error: 'Pinned under "Waiting on you" in the owner\'s browser, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.' };
   }
-  const result = await sendToOwner(`Billion: ${body}`, { env });
+  const result = await sendToOwner(`Billion: ${body}`, { env, platform });
   if (result.error) return { pinned: true, error: `Pinned under "Waiting on you" in the owner's browser, but the Telegram send failed: ${result.error}` };
   return { ok: true };
 }
@@ -253,7 +256,8 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
       await sendTelegram(heard.reply, { env });
       return heard.result;
     }
-    line = `${OWNER_VOICE_PREFIX} ${heard.transcript}`;
+    const caption = typeof msg.caption === 'string' && msg.caption.trim() ? ` (caption: ${msg.caption.trim()})` : '';
+    line = `${OWNER_VOICE_PREFIX} ${heard.transcript}${caption}`;
   }
   if (!sendText(billion, line)) {
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });

@@ -9,7 +9,7 @@ import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const tools = { available: new Set(), whisperOut: 'Yes, buy the domain.', calls: [] };
+const tools = { available: new Set(), whisperOut: 'Yes, buy the domain.', exit: 0, calls: [], said: [] };
 
 vi.mock('child_process', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -19,9 +19,10 @@ vi.mock('child_process', async (importOriginal) => ({
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     process.nextTick(() => {
+      if (cmd === 'say') tools.said.push(readFileSync(args[3], 'utf8'));
       if (cmd === 'ffmpeg') writeFileSync(args[args.length - 1], 'OGGDATA');
-      if (cmd === 'whisper-cli') child.stdout.emit('data', `\n ${tools.whisperOut}\n`);
-      child.emit('close', 0);
+      if (cmd.includes('whisper')) child.stdout.emit('data', `\n ${tools.whisperOut}\n`);
+      child.emit('close', cmd.includes('whisper') ? tools.exit : 0);
     });
     return child;
   }),
@@ -32,7 +33,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
 }));
 
 const { notifyOwner, sendToOwner, handleUpdate, lastOwnerMode, OWNER_VOICE_PREFIX, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
-const { chooseMode, textOnlyReason, MAX_NOTE_SECONDS, MAX_NOTE_BYTES } = await import('../server/voice.js');
+const { chooseMode, textOnlyReason, whisperSetup, MAX_NOTE_SECONDS, MAX_NOTE_BYTES } = await import('../server/voice.js');
 const { sessions, CONFIG_DIR } = await import('../server/state.js');
 const { dropMessages } = await import('../server/messages.js');
 
@@ -60,6 +61,9 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   tools.available = new Set(['say', 'ffmpeg', 'whisper-cli']);
   tools.calls = [];
+  tools.said = [];
+  tools.exit = 0;
+  tools.whisperOut = 'Yes, buy the domain.';
   rmSync(join(CONFIG_DIR, 'telegram-voice.json'), { force: true });
 });
 afterEach(() => {
@@ -88,11 +92,13 @@ describe('when Billion speaks', () => {
     // A sentence that happens to carry a link is still spoken.
     expect(textOnlyReason('The landing page is live and the signups look good so far, have a look: https://x.co/a')).toBeNull();
     expect(textOnlyReason('Should I buy the domain? I recommend yes.')).toBeNull();
+    expect(textOnlyReason('yes/no? and/or 24/7')).toBeNull();   // one slash is prose
+    expect(textOnlyReason('see server/owner.js')).toBe('mostly links, code or paths');
   });
 
   it('sends voice as multipart sendVoice with the text as its caption, the text never on a command line', async () => {
     setMode('voice');
-    expect(await notifyOwner('Buy the domain? See https://x.co/d for the price, I recommend yes.', { env: ENV, now: now() })).toEqual({ ok: true });
+    expect(await notifyOwner('Buy the domain? See https://x.co/d for the price, I recommend yes.', { env: ENV, now: now(), platform: 'darwin' })).toEqual({ ok: true });
     const [[url, init]] = fetchMock.mock.calls;
     expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/sendVoice`);
     expect(init.headers).toBeUndefined();   // fetch sets the multipart boundary itself
@@ -108,6 +114,7 @@ describe('when Billion speaks', () => {
     expect(say[1]).toEqual(['-o', expect.stringMatching(/say\.aiff$/), '-f', expect.stringMatching(/say\.txt$/)]);
     expect(ffmpeg[1]).toEqual(expect.arrayContaining(['-c:a', 'libopus', '-b:a', '32k']));
     expect(tools.calls.flatMap(c => c[1]).join(' ')).not.toContain('domain');
+    expect(tools.said).toEqual(['Billion: Buy the domain? See link for the price, I recommend yes.']);
   });
 
   it('sends text, and says why once, when say or ffmpeg is missing or this is not macOS', async () => {
@@ -156,6 +163,41 @@ describe('when the owner speaks', () => {
     sessions.set(b.id, b);
     expect(await handleUpdate({ update_id: 1, message: { chat: { id: 42 }, audio: { file_id: 'A1', duration: 10 } } }, { env: ENV })).toBe('delivered');
     expect(typedInto(b)).toContain(OWNER_VOICE_PREFIX);
+  });
+
+  it('finds whisper.cpp by WHISPER_CPP_BIN or its other names, and needs ffmpeg too', () => {
+    tools.available = new Set(['ffmpeg', 'whisper-cpp', '/opt/w/bin/whisper-cli']);
+    expect(whisperSetup(ENV)).toEqual({ bin: 'whisper-cpp', model });
+    expect(whisperSetup({ ...ENV, WHISPER_CPP_BIN: '/opt/w/bin/whisper-cli' })).toEqual({ bin: '/opt/w/bin/whisper-cli', model });
+    tools.available.delete('ffmpeg');
+    expect(whisperSetup(ENV).missing).toMatch(/ffmpeg/);
+  });
+
+  it('answers a note with no words in it, or a failed transcription, and delivers nothing', async () => {
+    const b = billion();
+    sessions.set(b.id, b);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    tools.whisperOut = '[BLANK_AUDIO]';
+    expect(await handleUpdate(voiceUpdate(42), { env: ENV })).toBe('empty');
+    tools.whisperOut = 'hello';
+    tools.exit = 1;
+    expect(await handleUpdate(voiceUpdate(42), { env: ENV })).toBe('failed');
+    expect(b.pty.write).not.toHaveBeenCalled();
+  });
+
+  it('says Billion is not running without transcribing', async () => {
+    expect(await handleUpdate(voiceUpdate(42), { env: ENV })).toBe('not-running');
+    expect(methods()).toEqual(['sendMessage']);
+    expect(tools.calls).toEqual([]);
+  });
+
+  it('keeps a caption the owner typed on the note', async () => {
+    const b = billion();
+    sessions.set(b.id, b);
+    const update = voiceUpdate(42);
+    update.message.caption = 'about the domain';
+    expect(await handleUpdate(update, { env: ENV })).toBe('delivered');
+    expect(typedInto(b)).toContain(`${OWNER_VOICE_PREFIX} Yes, buy the domain. (caption: about the domain)`);
   });
 
   it('ignores a voice note from any other chat: no download, no transcription, no reply', async () => {
