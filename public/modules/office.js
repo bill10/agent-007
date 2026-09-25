@@ -150,7 +150,8 @@ const RUG_PAD_TOP = 7;     // Z units above the desks — the repo label sits he
 const RUG_PAD_BOTTOM = 12; // Z units below — covers the agent name labels
 const POD_TOP_MARGIN = 8;  // Z units of bare floor between FLOOR_TOP and the first rug
 
-// Pure layout: agentInfos is [{ id, repoPath, slug }] in spawn (map) order.
+// Pure layout: agentInfos is [{ id, repoPath, slug, isBillion }] in spawn (map) order.
+// Billion sits alone at the top center, on a row of its own above every pod.
 // Returns { pods, positions } — positions maps id -> { x, y } (top-left px of
 // its desk); pods carry the desk-block rect in px plus the repo label.
 // Agents with no repo land in a final unlabeled pod. Within a pod agents keep
@@ -170,22 +171,25 @@ export function computePodLayout(agentInfos, panelWidth, panelHeight) {
   const maxCols = maxColsFor(panelWidth);
 
   // Group by repo, first-appearance order; no-repo pod goes last.
+  const BILLION = '\0billion';   // cannot collide with a repo path
   const groups = new Map();
   for (const a of agentInfos) {
-    const key = a.repoPath || '';
+    const key = a.isBillion ? BILLION : (a.repoPath || '');
     // filter(Boolean) survives trailing slashes; slice caps fillText re-shaping cost
     if (!groups.has(key)) groups.set(key, { label: String(a.slug || (key ? key.split('/').filter(Boolean).pop() : '') || '').slice(0, 40) || null, ids: [] });
     groups.get(key).ids.push(a.id);
   }
-  const keys = [...groups.keys()].filter(k => k !== '');
+  const keys = [...groups.keys()].filter(k => k !== '' && k !== BILLION);
   if (groups.has('')) keys.push('');
+  if (groups.has(BILLION)) keys.unshift(BILLION);
 
   const pods = keys.map(key => {
     const g = groups.get(key);
     const cols = Math.min(g.ids.length, maxCols);
     const rows = Math.ceil(g.ids.length / cols);
+    const own = key === BILLION;
     return {
-      repoPath: key || null, label: key ? g.label : null, ids: g.ids, cols,
+      repoPath: own ? null : key || null, label: key && !own ? g.label : null, ids: g.ids, cols, own,
       w: cols * WS_W + (cols - 1) * WS_GAP_X,
       h: rows * WS_H + (rows - 1) * WS_GAP_Y,
     };
@@ -199,7 +203,8 @@ export function computePodLayout(agentInfos, panelWidth, panelHeight) {
   let rowW = 0;
   for (const pod of pods) {
     const need = rowW === 0 ? pod.w : rowW + POD_GAP_X + pod.w;
-    if (rowW > 0 && need > panelZ) { podRows.push([pod]); rowW = pod.w; }
+    const afterBillion = podRows[podRows.length - 1].some(p => p.own);
+    if (rowW > 0 && (need > panelZ || afterBillion)) { podRows.push([pod]); rowW = pod.w; }
     else { podRows[podRows.length - 1].push(pod); rowW = need; }
   }
 
@@ -440,7 +445,7 @@ export function computeSpareDesks(pods, decorSpots, panelWidth, panelHeight) {
 
 // The live agents map (spawn/tab order) → pod layout for this panel size.
 function computeOfficeLayout(panelWidth, panelHeight) {
-  const infos = [...agents].map(([id, a]) => ({ id, repoPath: a.repoPath, slug: a.repoSlug }));
+  const infos = [...agents].map(([id, a]) => ({ id, repoPath: a.repoPath, slug: a.repoSlug, isBillion: !!a.isBillion }));
   return computePodLayout(infos, panelWidth, panelHeight);
 }
 

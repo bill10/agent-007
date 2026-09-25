@@ -1,5 +1,5 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
-import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, jobs } from './state.js';
+import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, jobs, billionFirst } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
@@ -84,7 +84,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus, isBillion } = msg;
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
@@ -140,8 +140,20 @@ export async function handleSessionCreated(msg) {
     return true;
   });
 
+  // A restarted Billion replaces the stopped one's tab: the server has already
+  // dropped that session.
+  let replacesActive = false;
+  if (isBillion) {
+    for (const [id, a] of [...agents]) {
+      if (!a.isBillion) continue;
+      if (id === activeSessionId) replacesActive = true;
+      disposeAgent(id);
+    }
+  }
+
   agents.set(sessionId, {
     name, color, command, fitAddon,
+    isBillion: !!isBillion,
     state: state || 'WORKING',
     term, termEl,
     ownerId: ownerId || null,
@@ -182,7 +194,7 @@ export async function handleSessionCreated(msg) {
   // spawns open quietly — the tab dot, the office character and the job card
   // still announce them, and clicking any of them jumps here. A window showing
   // nothing takes it, unless that nothing is the job board being worked on.
-  const stealFocus = focus || (!activeSessionId && !boardActive);
+  const stealFocus = focus || replacesActive || (!activeSessionId && !boardActive);
   if (stealFocus) switchToSession(sessionId);
   updateTabs();
   updateStatusBar();
@@ -372,15 +384,16 @@ export function updateTabs() {
   boardTab.onclick = () => { showJobBoard(); updateTabs(); };
   container.appendChild(boardTab);
 
-  for (const [sessionId, agent] of agents) {
+  for (const [sessionId, agent] of billionFirst(agents)) {
     const tab = document.createElement('div');
     tab.className = `terminal-tab${sessionId === activeSessionId ? ' active' : ''}`;
-    tab.draggable = true;
+    // Billion's tab stays first, and its name is fixed.
+    tab.draggable = !agent.isBillion;
     tab.dataset.sessionId = sessionId;
     tab.onclick = (e) => {
       if (!e.target.classList.contains('close-btn') && !e.target.classList.contains('upload-btn')) switchToSession(sessionId);
     };
-    if (canControlAgent(agent)) {
+    if (canControlAgent(agent) && !agent.isBillion) {
       tab.title = 'Double-click to rename';
       tab.ondblclick = () => promptRename(sessionId);
     }

@@ -481,12 +481,34 @@ cycle: start agent-cost; drop the browser-extension idea
 
 ## Order of building
 
-1. Billion itself: repo, fixed name, desk, pinned panel, resume on restart, off
-   switch.
-2. Messaging exemption, so workers can report back.
-3. Approvals via the `PermissionRequest` hook.
+1. **Billion itself — built.** `server/billion.js` (on/off via `BILLION`,
+   folder via `BILLION_DIR`, first-run repo from `templates/billion/`,
+   command with first-run or resume prompt, projects-folder suggestion),
+   started from `server.js` `startup()`; name reserved; rename refused;
+   pinned row with a Start button when stopped; own desk top center; tab
+   first and open by default. The charter template is `charter.md` in this
+   repo (copied in as `CLAUDE.md`) so agents working on Agent 007 don't load
+   it. Verified live in an isolated server: repo created and committed,
+   introduction as designed.
+2. Messaging: workers can reach Billion (exemption), the queue holds until
+   `billion_ready`, `finish_job` notifies the poster.
+3. Board tools for Billion: `add_repo`, `close_job`.
+4. Approvals via the `PermissionRequest` hook (Claude Code `--settings`,
+   Codex two `-c` flags).
 
-Each part is useful without the next.
+Each part is useful without the next. Until 2–4 land, the charter says so in
+its "Limits today" section; update it as each part ships.
+
+Found while verifying part 1:
+
+- **Claude Code's folder trust dialog** appears on Billion's first start and
+  defaults to "No, exit": pressing Enter without reading closes Billion
+  (Start brings it back). No flag skips it; pre-trusting would mean writing
+  to `~/.claude.json`, which live Claude sessions write concurrently.
+- A server started from inside a Claude Code session passes
+  `CLAUDE_CODE_CHILD_SESSION` to its agents, which turns their transcript
+  saving off — and `--continue` needs a transcript. Only affects a server
+  launched by an agent, not one started from a terminal.
 
 ## Not borrowing from Munder Difflin
 

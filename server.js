@@ -30,8 +30,10 @@ import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings } from './server/jobs.js';
-import { orphans } from './server/state.js';
+import { orphans, config } from './server/state.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
+import { BILLION_NAME, billionEnabled, billionDir, ensureBillionRepo, suggestProjectsDir, billionCommand } from './server/billion.js';
+import { transcriptsFor } from './server/agent-transcripts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -142,15 +144,47 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
     syncOrphansToConfig(broadcast);
     broadcastOrphansList();
     broadcast({ type: 'notification', level: 'info', message: `${session.name} orphaned — worktree kept (${reason} changes)` });
-  } else {
+  } else if (!session.isBillion) {   // Billion's name stays reserved for its next start
     codenamePool.recycle(session.name);
     if (session.worktreePath) codenamePool.recycle(basename(session.worktreePath)); // differs after a rename
   }
   sessions.delete(sessionId);
 }
 
+// Billion (server/billion.js): started at boot, and again only when someone
+// asks — an agent that crashes in a loop is worse than one that stays stopped.
+// Returns the running one if there is one.
+function startBillion() {
+  for (const [id, s] of sessions) {
+    if (!s.isBillion) continue;
+    if (!s.exited) return { session: s };
+    sessions.delete(id);   // a stopped one's tab goes; the new one replaces it
+  }
+  const dir = billionDir();
+  let created;
+  try {
+    ({ created } = ensureBillionRepo(dir));
+  } catch (err) {
+    console.error(`Billion: could not set up ${dir}:`, err.message);
+    return { error: `Could not set up Billion's folder ${dir}: ${err.message}` };
+  }
+  const command = billionCommand({
+    created,
+    hasConversation: !created && transcriptsFor(dir).agent === 'claude',
+    dir,
+    projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
+  });
+  const result = createSessionFromConfig({
+    sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,
+    repoPath: null, worktreePath: null, cwd: dir, isBillion: true, ownerId: null,
+  }, broadcast);
+  if (result.error) return result;
+  sessions.set(result.session.id, result.session);
+  return { session: result.session };
+}
+
 // --- WebSocket ---
-setupWebSocket(wss, { createSession, killSession });
+setupWebSocket(wss, { createSession, killSession, startBillion });
 
 // --- Startup ---
 async function startup() {
@@ -163,6 +197,9 @@ async function startup() {
   // real server running on 7007 while the suite ran.
   sweepMcpConfigs();
   loadConfig();
+  // Reserved whether or not it runs: no other agent may take the name that
+  // send_message delivers to Billion by.
+  codenamePool.addUsed(BILLION_NAME);
   recoverCrashedSessions(broadcast);
   mkdirSync(WORKTREE_DIR, { recursive: true });
   await pruneWorktrees();
@@ -176,6 +213,10 @@ async function startup() {
     killSession,
   });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
+  if (billionEnabled()) {
+    const { error } = startBillion();
+    console.log(error ? `  Billion: not started (${error})` : `  Billion: running in ${billionDir()}`);
+  }
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
     const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
@@ -215,7 +256,7 @@ function gracefulShutdown() {
 }
 
 // --- Exports for testing ---
-export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession };
+export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession, startBillion };
 
 // Auto-start when run directly
 if (isDirectRun(import.meta.url, process.argv[1])) {

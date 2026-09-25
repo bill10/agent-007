@@ -163,9 +163,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion }, broadcast) {
   const { file, args } = parseCommand(command);
-  const cwd = worktreePath || homedir();
+  // ownCwd: a repo-less agent that still has a folder of its own (Billion).
+  const cwd = worktreePath || ownCwd || homedir();
 
   // Both of these are checked up front because Windows reports them from the
   // console host *after* spawn() returns — see server/command-path.js. An
@@ -255,6 +256,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     // dispatcher would otherwise yank the user's cursor away every few minutes.
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,       // job this session was dispatched for, if any
+    isBillion: !!isBillion,     // the one agent you talk to (server/billion.js)
     exited: false,
     stateCheckInterval: null,
     repoPath,

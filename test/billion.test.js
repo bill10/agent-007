@@ -1,0 +1,113 @@
+import { describe, it, expect } from 'vitest';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import {
+  billionEnabled, billionDir, ensureBillionRepo, suggestProjectsDir, billionCommand,
+} from '../server/billion.js';
+import { CONFIG_DIR } from '../server/state.js';
+import { parseCommand } from '../lib/helpers.js';
+
+const fresh = () => join(mkdtempSync(join(tmpdir(), 'a007-billion-')), 'billion');
+const log = (dir) => execFileSync('git', ['log', '--format=%s'], { cwd: dir }).toString().trim().split('\n');
+
+describe('billionEnabled', () => {
+  it('is on unless turned off', () => {
+    expect(billionEnabled({})).toBe(true);
+    expect(billionEnabled({ BILLION: '1' })).toBe(true);
+    expect(billionEnabled({ BILLION: 'yes' })).toBe(true);
+    for (const off of ['0', 'false', 'OFF', ' no ']) expect(billionEnabled({ BILLION: off })).toBe(false);
+  });
+});
+
+describe('billionDir', () => {
+  it('lives under the config dir unless BILLION_DIR says otherwise', () => {
+    expect(billionDir({})).toBe(join(CONFIG_DIR, 'billion'));
+    expect(billionDir({ BILLION_DIR: '/tmp/somewhere/b' })).toMatch(/somewhere[\\/]b$/);
+  });
+});
+
+describe('ensureBillionRepo', () => {
+  it('creates a committed repo from the templates on the first run', () => {
+    const dir = fresh();
+    expect(ensureBillionRepo(dir)).toEqual({ created: true });
+    for (const f of ['CLAUDE.md', 'STATE.md', 'COMPANY.md']) expect(existsSync(join(dir, f))).toBe(true);
+    // The charter is copied in under the name Claude Code loads; the template
+    // name must not come along.
+    expect(existsSync(join(dir, 'charter.md'))).toBe(false);
+    expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toMatch(/You are \*\*Billion\*\*/);
+    expect(readFileSync(join(dir, 'STATE.md'), 'utf8')).toMatch(/^Status: not started$/m);
+    expect(log(dir)).toEqual(['Billion: first run']);
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()).toBe('');
+  });
+
+  it('leaves an existing repo exactly as it is', () => {
+    const dir = fresh();
+    ensureBillionRepo(dir);
+    writeFileSync(join(dir, 'STATE.md'), 'Status: running\n');
+    expect(ensureBillionRepo(dir)).toEqual({ created: false });
+    expect(readFileSync(join(dir, 'STATE.md'), 'utf8')).toBe('Status: running\n');
+    expect(log(dir)).toEqual(['Billion: first run']);
+  });
+
+  it('keeps files already in a folder that is not a repo yet', () => {
+    const dir = fresh();
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'COMPANY.md'), '# Mine\n');
+    expect(ensureBillionRepo(dir)).toEqual({ created: true });
+    expect(readFileSync(join(dir, 'COMPANY.md'), 'utf8')).toBe('# Mine\n');
+    expect(existsSync(join(dir, 'CLAUDE.md'))).toBe(true);
+  });
+});
+
+describe('suggestProjectsDir', () => {
+  it('picks the folder holding most repos, not their common prefix', () => {
+    expect(suggestProjectsDir(['/u/Projects/a', '/u/Projects/b', '/u/elsewhere/c'])).toBe(join('/u/Projects'));
+  });
+
+  it('ignores repos inside Agent 007\'s own folder', () => {
+    const own = join(CONFIG_DIR, 'worktrees', 'x');
+    expect(suggestProjectsDir([own, join(own, '..', 'y')])).toBeNull();
+    expect(suggestProjectsDir([own, '/u/Projects/a'])).toBe(join('/u/Projects'));
+  });
+
+  it('has nothing to suggest with no repos', () => {
+    expect(suggestProjectsDir([])).toBeNull();
+  });
+});
+
+describe('billionCommand', () => {
+  const dir = '/home/me/.agent-007/billion';
+  const promptOf = (cmd) => parseCommand(cmd).args.at(-1);
+
+  it('introduces itself on a fresh repo, never continuing', () => {
+    const cmd = billionCommand({ created: true, hasConversation: true, dir, projectsHint: '/home/me/Projects' });
+    const { file, args } = parseCommand(cmd);
+    expect(file).toBe('claude');
+    expect(args).toContain('--dangerously-skip-permissions');
+    expect(args).not.toContain('--continue');
+    expect(promptOf(cmd)).toMatch(/first run/i);
+    expect(promptOf(cmd)).toContain('Suggest /home/me/Projects');
+    expect(promptOf(cmd)).toContain(dir);
+  });
+
+  it('continues the last conversation after a restart', () => {
+    const cmd = billionCommand({ created: false, hasConversation: true, dir, projectsHint: null });
+    expect(parseCommand(cmd).args).toContain('--continue');
+    // A restart can land mid-introduction, so the prompt covers both.
+    expect(promptOf(cmd)).toMatch(/not started/);
+    expect(promptOf(cmd)).toMatch(/operating loop/);
+    expect(promptOf(cmd)).toMatch(/without suggesting/);
+  });
+
+  it('starts cleanly when there is no conversation to continue', () => {
+    const cmd = billionCommand({ created: false, hasConversation: false, dir, projectsHint: null });
+    expect(parseCommand(cmd).args).not.toContain('--continue');
+  });
+
+  it('keeps a folder with quotes and spaces intact through parseCommand', () => {
+    const odd = '/Users/a "b"\\c/billion';
+    expect(promptOf(billionCommand({ created: true, hasConversation: false, dir: odd, projectsHint: null }))).toContain(odd);
+  });
+});
