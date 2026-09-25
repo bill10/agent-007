@@ -41,7 +41,7 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - `test/client-*.test.js` -- Client module unit tests (auth, state, keyboard shortcuts, the terminal reporting what fits and rendering at the pty's size, resyncing its scroll area when shown so output written while hidden stays reachable (with the xterm version pinned to the one that fix was verified on), voice input, the explorer's collapsible repo sections, the Jobs tab (cards, the job form, its Agent select and the permission modes it hides for a Codex card, pasted and picked attachments), the office whiteboards, whose titles and per-column job counts are checked against the Jobs tab's columns and whose post cap and "+N" overflow are unit-tested, the office character sprites, whose per-agent variant assignment is checked for determinism and for a sheet on disk per variant, and the office motion overlay, whose walk paths (frozen when the walk starts, so a mid-walk spawn cannot re-project the walker), dispatch detection, replay guards, the idle wander (a resting agent walks to a seat pooled from the conference set and the chat-area sofas, routes there without crossing the furniture, sits down in the sheet's seated frame rather than the standing one, and drops its claim when the pool changes shape), and canvas sizing (the backing store follows the canvas box, not the panel, and the last real size is kept while the diff viewer hides it) are unit-tested; `test/client-mobile-view.test.js` covers the phone layout's view state (`setView` moves `body[data-view]` and the bottom nav's `aria-current`, opening a diff lands on the office panel and closing it returns to files, while switching sessions or opening the board in the background leaves the view alone); `test/client-office-pods.test.js` covers the per-repo pod layout, front-facing desk grid, ambient decor placement (the chat area and corner plants, and that the walk-in entrance on the left edge and its strip stay clear of them, of the conference chairs and of the spare desks, with the walk in/out route crossing above the table or along the bottom edge when there is no table), the conference seats, whose four side sitters are checked to land on their chairs rather than hang off the front, the spare-desk row below a single pod row, the bookshelf runs centred under the windows, and that every office sprite path points at a file on disk)
 - `test/billion*.test.js` -- Billion: its folder and templates, starting and resuming it, the tab it shows when Claude Code is not installed, the on/off switches, its mail and board notices, its board tools, answering workers' permission requests through the hook (and every way that falls back to you), and the review-fix edge cases; the client side is `test/client-billion-explorer.test.js` and `test/client-billion-tab.test.js`
 - `test/theme-tokens.test.js` -- Guards the light theme: the DESIGN.md palette fence against the CSS tokens in `public/style.css`, the terminal's background/foreground/cursor in `public/modules/terminal.js` against those tokens, and that every `:root` token has a light override
-- Plus focused server-side suites: the `agent-007` command, `init`, settings-file precedence and the startup Settings line, and the package.json/VERSION match (`cli`), finding a CLI before a spawn and the install hint when it is missing, plus Windows PATHEXT resolution (`test/command-path.test.js`), adduser, auth, origin checks, branch cleanup/sync, worktree cleanup (what is deleted and what is kept as an orphan), git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), the job board's prompt, dispatch, permission mode, agent choice (Claude Code or Codex, the Codex permission-flag mapping, the mid-spawn recheck that abandons a card edited while its agent was starting, and re-spawning an orphan with the CLI it ran and its card's permission mode, or, for a hand-spawned agent, the permission flags it was started with: read through the `PERMISSION_FLAGS` allowlist in `lib/jobs.js` in every spelling, stopping at `--`, one per flag, with a board dispatch recording none and a board orphan whose card is gone following the board's current mode; both the Codex mode mapping and the allowlist's Codex and Claude Code entries are run through the installed CLI's parser when there is one, so the tables cannot drift from what the CLIs accept; and the transcript probe in `server/agent-transcripts.js`, including the Codex session id a re-spawn resumes by, which must be that exact worktree's and never a sibling worktree's) and attachment storage (`test/jobs.test.js`, `test/jobs-dispatch.test.js`, `test/jobs-permission-mode.test.js`, `test/jobs-agent.test.js`), the cron parser, scheduled-job lifecycle and what a server restart recovers, including the CLI note and permission flags an orphan inherits from a crashed session's record (`test/cron.test.js`, `test/jobs-scheduled.test.js`, `test/jobs-scheduled-dispatch.test.js`, `test/jobs-restart.test.js`), the CI watch on Review cards (`test/jobs-ci-watch.test.js`: Billion's CI-finished notice once per head commit, re-armed by a push, never for a card it did not post, and a merged PR filed on the same poll), and the board's MCP tools (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`, `test/agent-mcp-bridge.test.js`), and reaching the owner (`test/owner-telegram.test.js`: notify_owner's Telegram send, its errors with the token redacted and its rate limit, replies from any chat but the owner's ignored and the owner's typed into Billion's terminal, the getUpdates offset, stopping the poll, everything off without settings, and the Waiting on you list persisting and dismissing, all against a mocked fetch), and agent-to-agent messaging (`test/messages.test.js`: delivery only while the recipient rests at its prompt and nobody is typing, who can reach whom including the never-asks rule, `AGENT_MESSAGING=open` lifting it and the reason a refused sender is given, the per-pair rate limit and queue cap, and the `list_agents`/`send_message` tools), and the `.env` permission defaults (`test/permission-defaults.test.js`: `CLAUDE_PERMISSION_MODE`/`CODEX_PERMISSION_MODE` added to a command someone starts unless it already names a permission flag, never to a board worker's command, the board using each CLI's default until a mode is picked in its dropdown, and what a re-spawned agent resumes in), and pre-trusting board worktrees (`test/claude-trust.test.js`: for Claude Code, the one `~/.claude.json` entry added with everything else kept and a malformed or missing file left alone; for Codex, the per-run `-c projects=` trust flag reaching a board worker's spawn and not a hand-started one's, and nothing written; and `TRUST_BOARD_WORKTREES=0` and hand-started agents opting out)
+- Plus focused server-side suites: the `agent-007` command, `init`, settings-file precedence and the startup Settings line, and the package.json/VERSION match (`cli`), turning `changelog.d/` fragments into a version and a CHANGELOG section (`test/release.test.js`), finding a CLI before a spawn and the install hint when it is missing, plus Windows PATHEXT resolution (`test/command-path.test.js`), adduser, auth, origin checks, branch cleanup/sync, worktree cleanup (what is deleted and what is kept as an orphan), git diff, worktree retry, entry-point detection (`test/direct-run.test.js`), the job board's prompt, dispatch, permission mode, agent choice (Claude Code or Codex, the Codex permission-flag mapping, the mid-spawn recheck that abandons a card edited while its agent was starting, and re-spawning an orphan with the CLI it ran and its card's permission mode, or, for a hand-spawned agent, the permission flags it was started with: read through the `PERMISSION_FLAGS` allowlist in `lib/jobs.js` in every spelling, stopping at `--`, one per flag, with a board dispatch recording none and a board orphan whose card is gone following the board's current mode; both the Codex mode mapping and the allowlist's Codex and Claude Code entries are run through the installed CLI's parser when there is one, so the tables cannot drift from what the CLIs accept; and the transcript probe in `server/agent-transcripts.js`, including the Codex session id a re-spawn resumes by, which must be that exact worktree's and never a sibling worktree's) and attachment storage (`test/jobs.test.js`, `test/jobs-dispatch.test.js`, `test/jobs-permission-mode.test.js`, `test/jobs-agent.test.js`), the cron parser, scheduled-job lifecycle and what a server restart recovers, including the CLI note and permission flags an orphan inherits from a crashed session's record (`test/cron.test.js`, `test/jobs-scheduled.test.js`, `test/jobs-scheduled-dispatch.test.js`, `test/jobs-restart.test.js`), the CI watch on Review cards (`test/jobs-ci-watch.test.js`: Billion's CI-finished notice once per head commit, re-armed by a push, never for a card it did not post, and a merged PR filed on the same poll), and the board's MCP tools (`test/mcp-protocol.test.js`, `test/mcp-endpoint.test.js`, `test/agent-mcp-config.test.js`, `test/agent-mcp-bridge.test.js`), and reaching the owner (`test/owner-telegram.test.js`: notify_owner's Telegram send, its errors with the token redacted and its rate limit, replies from any chat but the owner's ignored and the owner's typed into Billion's terminal, the getUpdates offset, stopping the poll, everything off without settings, and the Waiting on you list persisting and dismissing, all against a mocked fetch), and agent-to-agent messaging (`test/messages.test.js`: delivery only while the recipient rests at its prompt and nobody is typing, who can reach whom including the never-asks rule, `AGENT_MESSAGING=open` lifting it and the reason a refused sender is given, the per-pair rate limit and queue cap, and the `list_agents`/`send_message` tools), and the `.env` permission defaults (`test/permission-defaults.test.js`: `CLAUDE_PERMISSION_MODE`/`CODEX_PERMISSION_MODE` added to a command someone starts unless it already names a permission flag, never to a board worker's command, the board using each CLI's default until a mode is picked in its dropdown, and what a re-spawned agent resumes in), and pre-trusting board worktrees (`test/claude-trust.test.js`: for Claude Code, the one `~/.claude.json` entry added with everything else kept and a malformed or missing file left alone; for Codex, the per-run `-c projects=` trust flag reaching a board worker's spawn and not a hand-started one's, and nothing written; and `TRUST_BOARD_WORKTREES=0` and hand-started agents opting out)
 
 > **Windows note:** `vitest.config.js` keeps node-pty external so its native
 > addon is never transformed, which is what lets `test/server.test.js` load on
@@ -53,12 +53,40 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 > both ubuntu and Windows, so a change that passes locally on macOS/Linux can
 > still go red on the Windows leg.
 
-Releases are automatic: when a merge to `main` changes `VERSION`,
-`.github/workflows/release.yml` tags that commit `vX` and publishes a GitHub
-Release whose notes are the `## [X]` section of `CHANGELOG.md`, so bump both
-together. The same workflow then publishes the version to npm as
+### Releases
+
+**A PR never edits `VERSION`, `package.json`'s version, `package-lock.json`'s
+version or `CHANGELOG.md`.** It adds one changelog fragment instead,
+`changelog.d/<branch-name>.md`:
+
+```markdown
+---
+bump: patch
+---
+### Added
+
+- **What changed, in bold.** Why it matters and how to use it.
+```
+
+`bump` is `major`, `minor`, `patch` or `micro` (the part of `VERSION` it
+raises). Each PR's fragment is its own file, so PRs written in parallel never
+conflict on the version or the changelog. Title the PR without a version
+(`feat: ...`, not `v0.6.7.0 feat: ...`): the version is picked at merge.
+
+Releases are automatic. On every push to `main`,
+`.github/workflows/release.yml` runs `scripts/release.js`, which reads the
+fragments, raises `VERSION` by the largest `bump` among them, writes
+`package.json` and `package-lock.json`, adds a `## [X] - date` section to
+`CHANGELOG.md` with the fragments' notes, and deletes the fragments; the
+workflow commits that to `main` as `vX release: <PR headline>`. It then tags
+that commit `vX`, publishes a GitHub Release whose notes are that section, and
+publishes the version to npm as
 `@bill10/agent-007` (npm rejected the unscoped `agent-007` as too close to
-`agent007`). It publishes with OIDC trusted publishing, so there is no npm token: the owner
+`agent007`). PRs merged close together can share one release. A merge with no
+fragment (a typo fix, a test) makes no release. `test/release.test.js` covers
+the version arithmetic and the fragment collection.
+
+npm publishing uses OIDC trusted publishing, so there is no npm token: the owner
 sets it up once on npmjs.com, on the `@bill10/agent-007` package page under
 Settings → Trusted Publisher, with GitHub Actions, repository
 `bill10/agent-007` and workflow `release.yml`. npm only shows that page once
@@ -72,8 +100,7 @@ after `npm pkg set version=` the npm version below).
 three-part semver. Two translations follow from it:
 
 - `package.json` (and `package-lock.json`) carry `MAJOR.MINOR.PATCH`, the
-  first three parts. `/ship` writes this when it bumps `VERSION`; by hand, run
-  `npm pkg set version=...` and `npm install --package-lock-only`.
+  first three parts. `scripts/release.js` writes them with `VERSION`.
   `test/cli.test.js` fails when they disagree, and the release workflow
   refuses to publish.
 - npm gets `MAJOR.MINOR.(PATCH*1000 + MICRO)`, which the release workflow
@@ -121,6 +148,7 @@ server/
   auth.js          Login tokens, ownership, agent session tokens
 bin/agent-007.js   The agent-007 command (npx @bill10/agent-007, npm start): flags, init, settings, start
 bin/adduser.js     Create a login user (npm run adduser)
+scripts/release.js changelog.d/ fragments -> VERSION, package.json, CHANGELOG (run by release.yml)
 lib/               Pure functions, tested (helpers.js, jobs.js job logic, cron.js parser)
 public/            Frontend (vanilla JS, no build)
 templates/billion/ Billion's starting files (charter, owner rules, STATE.md, COMPANY.md)
@@ -132,4 +160,5 @@ templates/billion/ Billion's starting files (charter, owner rules, STATE.md, COM
 2. Create a branch (`git checkout -b my-feature`)
 3. Make your changes
 4. Run tests: `npm test`
-5. Open a PR with a clear description of what and why
+5. Add your `changelog.d/<branch-name>.md` fragment (see [Releases](#releases))
+6. Open a PR with a clear description of what and why

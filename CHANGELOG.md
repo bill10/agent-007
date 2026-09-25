@@ -7,27 +7,22 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
 ## [0.6.7.0] - 2026-09-25
 
-### Added
+### Changed
 
-- **Billion hears when CI finishes on its cards, and merged cards leave the
-  board within a minute.** Every Review card with a pull request is now checked
-  every 60 seconds with `gh pr view`, through the same GitHub accounts the
-  board already uses to find PRs. No webhooks, so it works on a laptop behind
-  NAT. When every check on the PR's latest commit has finished, a card Billion
-  posted sends it `[Job board] CI finished on "<title>" (card <id>, PR #n):
-  all passed`, or `failed: <check names>`. It comes once per commit, and a new
-  push re-arms it. Billion's charter now says to merge on that notice after its
-  diff review, instead of running `gh pr checks --watch`. A PR found merged or
-  closed is filed on that same check, instead of waiting up to 5 minutes for
-  the next board scan. Its worker and worktree are released under the same
-  rules as before. A PR that can't be read is checked less and less often, down
-  to once every 15 minutes. The checks run only while the board is started.
-
-### Fixed
-
-- **Stopping the board during a scan no longer leaves a second scan loop
-  running.** A scan that was still in progress when the dispatcher stopped
-  scheduled its next run anyway.
+- **Parallel PRs no longer conflict on VERSION and CHANGELOG.md.** A PR now
+  adds its release notes as its own file, `changelog.d/<branch-name>.md`, with
+  a `bump:` level (`major`, `minor`, `patch` or `micro`) in its front matter,
+  and never edits `VERSION`, `package.json`'s version or `CHANGELOG.md`. When
+  it merges, the release workflow runs `scripts/release.js`, which picks the
+  next version from the fragments, writes `VERSION`, `package.json`,
+  `package-lock.json` and the `CHANGELOG.md` section, deletes the fragments and
+  commits that to `main`; the tag, GitHub Release and npm publish follow as
+  before, with the same npm version mapping. Two or three workers running at
+  once used to cost a rebase-and-renumber round trip each. `AGENTS.md` (read
+  by Codex, and by Claude Code through `CLAUDE.md`) tells agents to skip
+  /ship's version bump and write the fragment instead; CONTRIBUTING.md
+  "Releases" has the details. A PR that still bumps `VERSION` by hand is
+  released as before.
 
 ## [0.6.6.0] - 2026-09-25
 
