@@ -35,7 +35,7 @@ describe('ensureBillionRepo', () => {
     expect(ensureBillionRepo(dir)).toEqual({ created: true });
     // Exactly these names: listed rather than probed, since macOS matches
     // charter.md to CHARTER.md. The template names must not come along.
-    expect(readdirSync(dir).filter(f => f !== '.git').sort()).toEqual(['CHARTER.md', 'CLAUDE.md', 'COMPANY.md', 'STATE.md']);
+    expect(readdirSync(dir).filter(f => f !== '.git').sort()).toEqual(['.gitignore', 'CHARTER.md', 'CLAUDE.md', 'COMPANY.md', 'STATE.md']);
     expect(readFileSync(join(dir, 'CHARTER.md'), 'utf8')).toMatch(/You are \*\*Billion\*\*/);
     // CLAUDE.md is the owner's, and pulls the charter in.
     expect(readFileSync(join(dir, 'CLAUDE.md'), 'utf8')).toMatch(/^@CHARTER\.md$/m);
@@ -59,6 +59,8 @@ describe('ensureBillionRepo', () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '.DS_Store'), '');
     expect(ensureBillionRepo(dir)).toEqual({ created: true });
+    // Ignored, so not in Billion's history.
+    expect(execFileSync('git', ['ls-files'], { cwd: dir }).toString()).not.toMatch(/DS_Store/);
   });
 
   it('keeps files already in a folder that is not a repo yet', () => {

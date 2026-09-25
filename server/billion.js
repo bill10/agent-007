@@ -24,6 +24,7 @@ const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.
 // would load Billion's instructions as its own.
 const CHARTER = { from: 'charter.md', to: 'CHARTER.md' };
 const FIRST_RUN_ONLY = { 'owner.md': 'CLAUDE.md', 'STATE.md': 'STATE.md', 'COMPANY.md': 'COMPANY.md' };
+const OS_FILES = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
 // Synchronous, on the server's own thread, so bounded: a global
 // commit.gpgsign waiting on a pinentry, or a hook, must not freeze every
 // terminal. These commits are Agent 007's own bookkeeping in Billion's folder,
@@ -70,8 +71,9 @@ export function ensureBillionRepo(dir) {
   // Nor a folder with anything in it (BILLION_DIR at a home or projects
   // folder): setting up there would put all of it in Billion's repo, and run
   // Billion in it. Only the template files may be there already.
-  // The files an OS leaves in any folder it has shown don't count either.
-  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), '.DS_Store', 'Thumbs.db', 'desktop.ini']);
+  // The files an OS leaves in any folder it has shown don't count either;
+  // they are ignored, so neither this commit nor any of Billion's takes them.
+  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), '.gitignore', ...OS_FILES]);
   const theirs = existsSync(dir) ? readdirSync(dir).filter(name => !ours.has(name)) : [];
   if (theirs.length) {
     throw new Error(`${dir} already holds other files (${theirs.slice(0, 3).join(', ')}${theirs.length > 3 ? ', …' : ''}), so it can't be Billion's folder; point BILLION_DIR at a new or empty folder`);
@@ -81,6 +83,8 @@ export function ensureBillionRepo(dir) {
     const target = join(dir, to);
     if (!existsSync(target)) copyFileSync(join(TEMPLATE_DIR, from), target);
   }
+  const ignore = join(dir, '.gitignore');
+  if (!existsSync(ignore)) writeFileSync(ignore, `${OS_FILES.join('\n')}\n`);
   git(dir, ['-c', 'init.defaultBranch=main', 'init', '-q']);
   git(dir, ['add', '-A']);
   // An identity of its own, so a machine with no git user.name still commits.
