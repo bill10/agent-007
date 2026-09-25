@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { app, server, startup, sessions } from '../server.js';
 import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
 import { addJob, deleteJob, allJobs, updateSettings } from '../server/jobs.js';
@@ -331,6 +331,23 @@ describe('PTY lifecycle', () => {
 
     ws.close();
   }, 10000);
+
+  // On macOS and Linux node-pty "starts" a missing command, leaving a dead,
+  // empty tab. It must come back as a spawn error that says what is missing.
+  it('refuses a command that is not installed, with a readable error', async () => {
+    const ws = await new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      ws.on('open', () => resolve(ws));
+      ws.on('error', reject);
+    });
+    const messages = [];
+    ws.on('message', (data) => messages.push(JSON.parse(data.toString())));
+    ws.send(JSON.stringify({ type: 'spawn', command: 'a007-no-such-cli --flag' }));
+    await vi.waitFor(() => expect(messages.find(m => m.type === 'spawn-error')).toBeTruthy(), { timeout: 5000 });
+    expect(messages.find(m => m.type === 'spawn-error').error).toMatch(/^"a007-no-such-cli" is not installed/);
+    expect(messages.find(m => m.type === 'session-created')).toBeUndefined();
+    ws.close();
+  });
 
   it('should kill a session on request', async () => {
     const ws = await new Promise((resolve, reject) => {

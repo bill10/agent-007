@@ -150,6 +150,16 @@ export function billionCommand({ created, hasConversation, dir, projectsHint }) 
   return `claude --dangerously-skip-permissions${!created && hasConversation ? ' --continue' : ''} ${quote(prompt)}`;
 }
 
+// Billion is Claude Code. Without it, its tab runs this instead: one line
+// saying what to do, then an exit. Nothing restarts it, so there is no loop;
+// the Start button checks for claude again. It stays up a moment after
+// printing, since a console host can drop the output of a process that exits
+// at once.
+export const NO_CLAUDE_NOTICE = 'Billion runs on Claude Code, which is not installed (no "claude" on the PATH Agent 007 was started with). Install it from https://docs.anthropic.com/en/docs/claude-code/setup and press Start next to Billion, or restart Agent 007 with BILLION=0 to turn Billion off.';
+export function noClaudeCommand(node = process.execPath) {
+  return `${quote(node)} -e ${quote(`console.log(${JSON.stringify(NO_CLAUDE_NOTICE)}); setTimeout(() => {}, 1000)`)}`;
+}
+
 // Claude Code asks whether to trust a folder the first time it runs there, and
 // highlights "No, exit". Billion's folder is Agent 007's own, holding only
 // what the server put there, so the server answers for it. Board workers get
