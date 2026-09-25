@@ -61,6 +61,46 @@ Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 - **No external linter.** Keep it readable. Match the style of surrounding code.
 - **Design system.** Colors, naming pools, and UI conventions live in [DESIGN.md](DESIGN.md).
 
+## Re-recording the demo
+
+`docs/demo.gif` is the README's hero, and `docs/demos/` holds the same capture as
+MP4 (full app, and office-panel only). They date quickly; re-record when the UI
+moves on.
+
+The capture is driven headlessly against a running server, so nothing has to be
+done by hand and no screen recorder is involved:
+
+```bash
+export AB="agent-browser --session demo"          # npm i -g agent-browser
+$AB open http://localhost:7007/ && $AB set viewport 1440 900
+# hide the explorer and widen the office so the room fills the frame
+$AB eval '(()=>{document.getElementById("btn-toggle-explorer").click();document.getElementById("office-panel").style.width="820px";window.dispatchEvent(new Event("resize"));return "ok"})()'
+$AB record start demo-raw.webm --fps 30 --cursor
+# ... drive the app: #btn-new-agent, #spawn-repo, #btn-spawn-start,
+#     then #btn-new-job-shortcut, #job-title, #job-repo, #job-detail, #btn-dispatch-now
+$AB record stop
+```
+
+Spawn one agent with `claude --permission-mode manual` and ask it to write a
+file: it stops on the permission dialog, which is what turns a sprite orange on
+camera. 30fps, not 60 — the encoder falls behind at 60 and truncates the file.
+
+Then cut with ffmpeg (trim the dead opening, speed up the thinking pauses):
+
+```bash
+ffmpeg -ss 1.5 -i demo-raw.webm -vf "setpts=PTS/1.4,fps=30,scale=1280:-2" \
+  -c:v libx264 -pix_fmt yuv420p -crf 22 -an docs/demos/demo-full.mp4
+ffmpeg -ss 1.5 -i demo-raw.webm -vf "setpts=PTS/1.4,fps=10,scale=760:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=96[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4" docs/demo.gif
+```
+
+Keep `docs/demo.gif` near 2 MB: every clone and every README view downloads it.
+GitHub's markdown sanitiser strips `<video>`, so an animated GIF is the only
+format that plays inline in the README — the MP4s are for posting elsewhere.
+
+Check the frames before committing (`ffmpeg -ss N -i docs/demo.gif -frames:v 1
+out.png`). The capture shows whatever is on screen, including other repos' names
+in the pod labels and whatever the terminal panel is displaying.
+
 ## Architecture
 
 ```
