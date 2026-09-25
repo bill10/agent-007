@@ -8,6 +8,7 @@
 // same from node_modules as from a clone.
 
 import { existsSync, readFileSync } from 'fs';
+import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { parseArgs } from 'util';
 
@@ -55,7 +56,12 @@ if (values.version) {
   process.exit(0);
 }
 
-if (existsSync('.env')) process.loadEnvFile('.env');
+// Said out loud: run from inside another project, its .env (a HOST=0.0.0.0,
+// say) would otherwise change this server without a word.
+if (existsSync('.env')) {
+  process.loadEnvFile('.env');
+  console.error(`  Loaded settings from ${resolve('.env')}`);
+}
 
 if (positionals[0] === 'adduser') {
   // adduser.js reads the display name from argv[2..].
