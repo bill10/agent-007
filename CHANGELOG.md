@@ -16,6 +16,23 @@ and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
   contributor guide and the release workflow use the new name, and the
   workflow reads it from `package.json` instead of hard-coding it.
 
+## [0.6.3.0] - 2026-09-25
+
+### Fixed
+
+- **A first run without Claude Code says what to do instead of showing a
+  dead terminal.** With no `claude` on the PATH, Billion's tab used to open
+  black and already stopped, while the server log said Billion was running.
+  The tab now shows one line: install Claude Code (with the link) and press
+  Start next to Billion, or restart with `BILLION=0` to turn Billion off. The
+  log says Billion was not started and why. Nothing retries on its own.
+- **Starting an agent or a job whose CLI is missing fails with a readable
+  error.** + Agent with Claude Code, Codex or Gemini not installed used to open
+  a tab that was dead from the start and leave its worktree behind. The form
+  now shows `"claude" is not installed, or not on the PATH Agent 007 was
+  started with`, with where to install it, and no worktree is kept. A board
+  card stays in To do with the same message on it.
+
 ## [0.6.2.0] - 2026-09-25
 
 ### Added
