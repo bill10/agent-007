@@ -27,7 +27,7 @@ import {
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
 import { createSessionFromConfig } from './server/pty.js';
-import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient } from './server/ws.js';
+import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
 import { orphans, config } from './server/state.js';
@@ -50,7 +50,7 @@ const wss = new WebSocketServer({ server, verifyClient });
 // argument: http.js must not import ws.js, and a job posted through the MCP
 // tool has to repaint every open board the moment it lands.
 // killSession is a hoisted declaration below: close_job retires a card's worker.
-setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession });
+setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession, respawnAgent });
 
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.
@@ -250,8 +250,11 @@ async function startup() {
   startDispatcher(createSession, broadcast, {
     onSessionCreated: (s) => broadcast(sessionPayload(s)),
     killSession,
+    // Billion's workers orphaned by this restart come back on the first scan.
+    respawnWorkers: () => respawnBoardWorkers(),
   });
   if (boardSettings().running) console.log('  Job board dispatcher: running');
+  if (process.env.RESPAWN_BOARD_WORKERS === '0') console.log('  Board workers stay orphaned after a restart (RESPAWN_BOARD_WORKERS=0)');
   // A misspelt mode would otherwise be ignored without a word.
   for (const [agent, key] of Object.entries(ENV_PERMISSION_MODE)) {
     const raw = (process.env[key] || '').trim();

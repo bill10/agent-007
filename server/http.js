@@ -91,7 +91,7 @@ export function requireAgent(req, res, next) {
 }
 
 // --- Routes ---
-export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
+export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAgent } = {}) {
   app.use(express_static(staticDir));
 
   // --- POST /mcp — the board's MCP server ---
@@ -138,6 +138,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession } = {}) {
           from: req.agentSession, name, lines, sessions,
           isBillionCard: (jobId) => allJobs().some(job => job.id === jobId && job.postedByBillion),
         }),
+        respawnAgent: ({ name }) => (respawnAgent
+          ? respawnAgent(req.agentSession, name)
+          : { error: 'Re-spawning is not available.' }),
         billionReady: () => {
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };

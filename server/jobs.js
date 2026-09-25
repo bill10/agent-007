@@ -19,7 +19,7 @@ import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
 import { liveBillion } from './billion.js';
 import {
-  createJob, selectDispatchableJobs, buildJobCommand, deriveJobStatus,
+  createJob, selectDispatchableJobs, countInFlightByRepo, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr, prCiViewArgs, parsePrCi,
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
@@ -1134,6 +1134,12 @@ function liveSessionIds() {
   return live;
 }
 
+// Whether the board's cap is already full in this repo. A re-spawned worker
+// counts like a dispatched one once relinkSessionToJob ties it to its card.
+export function repoAtCap(repoPath) {
+  return (countInFlightByRepo(allJobs(), liveSessionIds()).get(repoPath) || 0) >= boardSettings().maxPerRepo;
+}
+
 // Repos we can actually spawn into right now. A repo removed from the sidebar
 // (or whose directory has gone missing) leaves its jobs queued rather than
 // failing them — the path may well come back.
@@ -2123,7 +2129,7 @@ let scanInFlight = false;
 // findPr/findMerged are forwarded rather than left to their defaults so the
 // order of the scan — PRs found, then merges swept, then dispatch — is
 // reachable from a test without talking to GitHub.
-export async function runScan(createSession, broadcast, { onSessionCreated, killSession, findPr, findMerged, findClosed } = {}) {
+export async function runScan(createSession, broadcast, { onSessionCreated, killSession, respawnWorkers, findPr, findMerged, findClosed } = {}) {
   if (scanInFlight) return { skipped: true };
   scanInFlight = true;
   try {
@@ -2132,6 +2138,9 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
     await checkMergedPullRequests(broadcast, { killSession, findMerged, findClosed, findPr });
     pruneFinishedRuns(broadcast);
     fireSchedules(broadcast);
+    // Before dispatch: a worker parked by a restart has its slot first, ahead
+    // of a new card in the same repo.
+    if (respawnWorkers) await respawnWorkers();
     await dispatchOnce(createSession, broadcast, { onSessionCreated, killSession });
     return { skipped: false };
   } finally {
@@ -2174,13 +2183,13 @@ let loopGeneration = 0;
 
 // Self-rescheduling rather than setInterval so a slow git/gh pass can never
 // overlap the next tick (same reasoning as startTreeScanLoop in git.js).
-export function startDispatcher(createSession, broadcast, { onSessionCreated, killSession } = {}) {
+export function startDispatcher(createSession, broadcast, { onSessionCreated, killSession, respawnWorkers } = {}) {
   stopDispatcher();
   const generation = loopGeneration;
   const tick = async () => {
     try {
       if (boardSettings().running) {
-        await runScan(createSession, broadcast, { onSessionCreated, killSession });
+        await runScan(createSession, broadcast, { onSessionCreated, killSession, respawnWorkers });
       }
     } catch (err) {
       console.error('Job dispatcher tick failed:', err.message);

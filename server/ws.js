@@ -20,7 +20,7 @@ import { billionRuns } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
-  orphanResumePlan, findJobForBranch,
+  orphanResumePlan, findJobForBranch, repoAtCap, boardSettings,
 } from './jobs.js';
 
 export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Continue your card where you left off.';
@@ -108,6 +108,160 @@ function fitPtyToWatchers(session) {
 
 export function broadcastOrphansList() {
   broadcast({ type: 'orphans-list', orphans: [...orphans.values()] });
+}
+
+// --- Re-spawn ---
+
+// An orphan back as a session in its own worktree, resuming its own
+// conversation: the UI's Re-spawn, Billion's respawn_agent and the startup
+// pass all come through here. Only the UI's Re-spawn (`recreate`) rebuilds a
+// vanished worktree from its branch; the other two never make a worktree and
+// report it instead, leaving the orphan for the owner. `requester` is the
+// window whose tab should take focus. Returns { session } | { error, command? }.
+export async function respawnOrphan(orphanId, { recreate = false, requester = null } = {}) {
+  const orphan = orphans.get(orphanId);
+  if (!orphan) return { error: 'Orphan not found' };
+  if (adoptingOrphans.has(orphanId)) return { error: 'Orphan is already being re-adopted' };
+  adoptingOrphans.add(orphanId);
+  try {
+    if (!existsSync(join(orphan.worktreePath, '.git'))) {
+      if (!recreate) return { error: 'Worktree directory no longer exists', gone: true };
+      let recreated = false;
+      if (orphan.repoPath && orphan.branchName && existsSync(orphan.repoPath)) {
+        try {
+          try { rmSync(orphan.worktreePath, { recursive: true }); } catch {}
+          await gitExec(['-C', orphan.repoPath, 'worktree', 'prune']);
+          await gitExec(['-C', orphan.repoPath, 'worktree', 'add', orphan.worktreePath, orphan.branchName]);
+          recreated = true;
+        } catch (err) { console.error(`Failed to re-create worktree for ${orphan.name}:`, err.message || err.stderr); }
+      }
+      if (!recreated) {
+        // Dropping the orphan record has to hand its codename back, or the
+        // name is burned for the life of the process — nothing else releases
+        // it. The branch needs no bookkeeping: git is asked directly at spawn
+        // time, so whether this branch still exists takes care of itself.
+        codenamePool.recycle(orphan.name);
+        if (orphan.worktreePath) codenamePool.recycle(basename(orphan.worktreePath)); // differs after a rename
+        orphans.delete(orphanId);
+        syncOrphansToConfig(broadcast);
+        broadcastOrphansList();
+        return { error: 'Worktree directory no longer exists' };
+      }
+    }
+    // Per CLI: a Codex agent revived with `claude --continue` has no
+    // conversation to continue and dies at once. The new session keeps
+    // only what the orphan RECORD said (possibly nothing): a CLI picked
+    // by a card, a transcript or the default is a guess, and writing it
+    // down would make a wrong one permanent.
+    const { command, mode, flags } = orphanResumePlan(orphan);
+    // The card it worked on: its saved jobId, or (an older record) the
+    // one on its branch in its repo — the same lookup relinkSessionToJob
+    // makes below. With one, it comes back as that card's board worker.
+    const card = findJobForBranch(orphan);
+    const spawnedBy = card ? 'board' : 'user';
+    const autoTrust = autoTrusts({ spawnedBy, worktreePath: orphan.worktreePath, command });
+    if (autoTrust && sessionAgentFromCommand(command) === 'claude') trustClaudeFolder(orphan.worktreePath);
+    const result = createSessionFromConfig({
+      sessionId: nextSessionId(),
+      name: orphan.name,
+      color: orphan.color,
+      command,
+      repoPath: orphan.repoPath,
+      worktreePath: orphan.worktreePath,
+      branchName: orphan.branchName,
+      repoSlug: orphan.repoSlug,
+      cocktail: (orphan.branchName || '').split('/').pop(),
+      isTUI: true,
+      ownerId: orphan.ownerId || null,
+      agent: isValidJobAgent(orphan.agent) ? orphan.agent : null,
+      // Under a card's or the board's mode the session records no
+      // flags of its own: they decide again next time. Under its own
+      // recorded flags, it keeps them.
+      permissionFlags: mode ? [] : flags,
+      origin: orphan.origin === 'board' ? 'board' : 'user',
+      spawnedBy, jobId: card?.id || null, autoTrust,
+      approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
+    }, broadcast);
+    if (result.error) return { error: result.error, command };
+    const session = result.session;
+    sessions.set(session.id, session);
+    saveActiveSession(session, broadcast);
+    startTreeScanLoop(session, broadcast);
+    // If this orphan was a job's agent, put them back together — matched
+    // on the branch, the only identifier that survives a restart.
+    const relinked = relinkSessionToJob(session, broadcast);
+    if (relinked) {
+      broadcast({
+        type: 'notification', level: 'info',
+        message: `${session.name} reconnected to job "${relinked.title}"`,
+      });
+      // `claude --continue` resumes at the prompt and waits there. Typed
+      // once it rests at the prompt; a card in Review has nothing to do.
+      if (relinked.state === 'in-progress') sendText(session, RESPAWN_NUDGE);
+    }
+    orphans.delete(orphanId);
+    syncOrphansToConfig(broadcast);
+    announceSession(session, requester);
+    broadcastOrphansList();
+    return { session };
+  } finally {
+    adoptingOrphans.delete(orphanId);
+  }
+}
+
+// The card an orphan worked, when Billion posted it; null otherwise. Hand-
+// started agents and other people's cards are never Billion's to bring back.
+function billionCardOf(orphan) {
+  const card = findJobForBranch(orphan);
+  return card?.postedByBillion === true ? card : null;
+}
+
+// Billion's respawn_agent: one orphan on a card it posted, by name. Same
+// access rule as read_agent_screen (same owner, Billion's card), and the
+// board's per-repo cap holds.
+export async function respawnAgent(from, name) {
+  if (!from?.isBillion) return { error: 'Only Billion can re-spawn agents.' };
+  const named = [...orphans.values()].filter(o => o.name === name && (o.ownerId || null) === (from.ownerId || null));
+  if (!named.length) return { error: `No orphaned agent named "${name}". Only agents parked in the orphans list can be re-spawned; list_jobs shows which agent worked each card.` };
+  const orphan = named.find(billionCardOf);
+  if (!orphan) return { error: `${name} is not on a card you posted. You can re-spawn only the workers on your own cards, not agents the owner started by hand or workers on someone else's cards.` };
+  if (!existsSync(join(orphan.worktreePath, '.git'))) {
+    return { error: `${name}'s worktree is gone (${orphan.worktreePath}), so there is nothing to resume. Its work, if any was committed, is on branch ${orphan.branchName}; tell the owner rather than re-posting the card.` };
+  }
+  if (repoAtCap(orphan.repoPath)) {
+    return { error: `${orphan.repoSlug || orphan.repoPath} already has ${boardSettings().maxPerRepo} agent(s) at work, the board's cap. Try again when one finishes.` };
+  }
+  const card = billionCardOf(orphan);
+  const result = await respawnOrphan(orphan.id);
+  if (result.error) return { error: `Could not re-spawn ${name}: ${result.error}` };
+  console.log(`Billion re-spawned ${name} on "${card.title}"`);
+  return { name, card };
+}
+
+// After a restart the board brings back its own workers: each orphan the
+// restart made (reason 'server-restart') whose card Billion posted and is
+// still In progress. A card in Review needs no worker. Paced one spawn per
+// `paceMs`; a repo at its cap keeps the rest as orphans for the next pass
+// (every scan runs one). RESPAWN_BOARD_WORKERS=0 turns it off.
+export const RESPAWN_PACE_MS = 2000;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+export async function respawnBoardWorkers({ paceMs = RESPAWN_PACE_MS, env = process.env } = {}) {
+  if (env.RESPAWN_BOARD_WORKERS === '0') return [];
+  const due = (o) => orphans.has(o.id) && o.reason === 'server-restart'
+    && billionCardOf(o)?.state === 'in-progress' && existsSync(join(o.worktreePath, '.git'));
+  const back = [];
+  for (const orphan of [...orphans.values()].filter(due)) {
+    if (back.length) await sleep(paceMs);
+    // Checked again after the wait: the owner may have acted meanwhile.
+    if (!due(orphan) || repoAtCap(orphan.repoPath)) continue;
+    const card = billionCardOf(orphan);
+    const result = await respawnOrphan(orphan.id);
+    if (result.error) { console.warn(`  Could not re-spawn ${orphan.name}: ${result.error}`); continue; }
+    console.log(`  Re-spawned ${orphan.name} on "${card.title}"`);
+    back.push(orphan.name);
+  }
+  return back;
 }
 
 // --- Presence (phase 1) ---
@@ -370,93 +524,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           const orphan = orphans.get(msg.orphanId);
           if (!orphan) { ws.send(JSON.stringify({ type: 'spawn-error', error: 'Orphan not found' })); break; }
           if (!owns(ws, orphan.ownerId)) { denyControl(ws, orphan.name, orphan.ownerId); break; }
-          if (adoptingOrphans.has(msg.orphanId)) { ws.send(JSON.stringify({ type: 'spawn-error', error: 'Orphan is already being re-adopted' })); break; }
-          adoptingOrphans.add(msg.orphanId);
-          if (!existsSync(join(orphan.worktreePath, '.git'))) {
-            let recreated = false;
-            if (orphan.repoPath && orphan.branchName && existsSync(orphan.repoPath)) {
-              try {
-                try { rmSync(orphan.worktreePath, { recursive: true }); } catch {}
-                await gitExec(['-C', orphan.repoPath, 'worktree', 'prune']);
-                await gitExec(['-C', orphan.repoPath, 'worktree', 'add', orphan.worktreePath, orphan.branchName]);
-                recreated = true;
-              } catch (err) { console.error(`Failed to re-create worktree for ${orphan.name}:`, err.message || err.stderr); }
-            }
-            if (!recreated) {
-              ws.send(JSON.stringify({ type: 'spawn-error', error: 'Worktree directory no longer exists' }));
-              adoptingOrphans.delete(msg.orphanId);
-              // Dropping the orphan record has to hand its codename back, or the
-              // name is burned for the life of the process — nothing else releases
-              // it. The branch needs no bookkeeping: git is asked directly at spawn
-              // time, so whether this branch still exists takes care of itself.
-              codenamePool.recycle(orphan.name);
-              if (orphan.worktreePath) codenamePool.recycle(basename(orphan.worktreePath)); // differs after a rename
-              orphans.delete(msg.orphanId);
-              syncOrphansToConfig(broadcast);
-              broadcastOrphansList();
-              break;
-            }
-          }
-          // Per CLI: a Codex agent revived with `claude --continue` has no
-          // conversation to continue and dies at once. The new session keeps
-          // only what the orphan RECORD said (possibly nothing): a CLI picked
-          // by a card, a transcript or the default is a guess, and writing it
-          // down would make a wrong one permanent.
-          const { command, mode, flags } = orphanResumePlan(orphan);
-          // The card it worked on: its saved jobId, or (an older record) the
-          // one on its branch in its repo — the same lookup relinkSessionToJob
-          // makes below. With one, it comes back as that card's board worker.
-          const card = findJobForBranch(orphan);
-          const spawnedBy = card ? 'board' : 'user';
-          const autoTrust = autoTrusts({ spawnedBy, worktreePath: orphan.worktreePath, command });
-          if (autoTrust && sessionAgentFromCommand(command) === 'claude') trustClaudeFolder(orphan.worktreePath);
-          const result = createSessionFromConfig({
-            sessionId: nextSessionId(),
-            name: orphan.name,
-            color: orphan.color,
-            command,
-            repoPath: orphan.repoPath,
-            worktreePath: orphan.worktreePath,
-            branchName: orphan.branchName,
-            repoSlug: orphan.repoSlug,
-            cocktail: (orphan.branchName || '').split('/').pop(),
-            isTUI: true,
-            ownerId: orphan.ownerId || null,
-            agent: isValidJobAgent(orphan.agent) ? orphan.agent : null,
-            // Under a card's or the board's mode the session records no
-            // flags of its own: they decide again next time. Under its own
-            // recorded flags, it keeps them.
-            permissionFlags: mode ? [] : flags,
-            origin: orphan.origin === 'board' ? 'board' : 'user',
-            spawnedBy, jobId: card?.id || null, autoTrust,
-            approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
-          }, broadcast);
-          if (result.error) {
-            adoptingOrphans.delete(msg.orphanId);
-            ws.send(JSON.stringify({ type: 'spawn-error', command, error: result.error }));
-            break;
-          }
-          const session = result.session;
-          sessions.set(session.id, session);
-          saveActiveSession(session, broadcast);
-          startTreeScanLoop(session, broadcast);
-          // If this orphan was a job's agent, put them back together — matched
-          // on the branch, the only identifier that survives a restart.
-          const relinked = relinkSessionToJob(session, broadcast);
-          if (relinked) {
-            broadcast({
-              type: 'notification', level: 'info',
-              message: `${session.name} reconnected to job "${relinked.title}"`,
-            });
-            // `claude --continue` resumes at the prompt and waits there. Typed
-            // once it rests at the prompt; a card in Review has nothing to do.
-            if (relinked.state === 'in-progress') sendText(session, RESPAWN_NUDGE);
-          }
-          adoptingOrphans.delete(msg.orphanId);
-          orphans.delete(msg.orphanId);
-          syncOrphansToConfig(broadcast);
-          announceSession(session, ws);
-          broadcastOrphansList();
+          const result = await respawnOrphan(msg.orphanId, { recreate: true, requester: ws });
+          if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: result.command, error: result.error }));
           break;
         }
         case 'delete-orphan': {

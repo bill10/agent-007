@@ -39,6 +39,7 @@ Settings (default in brackets):
                           bypassPermissions, manual, dontAsk, plan [Claude's own]
   CODEX_PERMISSION_MODE   The same for Codex agents [Codex's own]
   AGENT_MESSAGING         open = any agent may message any other [guarded]
+  RESPAWN_BOARD_WORKERS   0 = Billion's workers stay orphaned after a restart [on]
   BILLION                 0 turns off Billion, the always-on agent [on]
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
   TELEGRAM_BOT_TOKEN      Bot token for Billion's questions on your phone [off]
