@@ -130,6 +130,13 @@ describe('close_job sending a card back', () => {
     boardSettings();
   });
 
+  it('never lets a long note push out the task itself', async () => {
+    const { job } = addJob({ title: 'Task', detail: 'The actual task.', repoPath: REPO, postedByAgent: BILLION_NAME, postedByBillion: true }, () => {});
+    Object.assign(job, { state: 'review', agentSessionId: worker.id, branchName: 'task' });
+    await closeJobForAgent({ session: billion, id: job.id, accept: false, note: 'y'.repeat(30000) }, () => {}, { killSession: async () => {} });
+    expect(job.detail.startsWith('The actual task.')).toBe(true);
+  });
+
   it('keeps the whole reason even on a card whose detail is already full', async () => {
     const { job } = addJob({ title: 'Big', detail: 'x'.repeat(20000), repoPath: REPO, postedByAgent: BILLION_NAME, postedByBillion: true }, () => {});
     Object.assign(job, { state: 'review', agentSessionId: worker.id, branchName: 'big' });

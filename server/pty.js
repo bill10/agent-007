@@ -160,7 +160,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}` });
   });
 
-  session.stateCheckInterval = setInterval(() => updateState(session, broadcast), 1000);
+  session.stateCheckInterval = setInterval(() => {
+    stopBillionUnderAccounts(session);
+    updateState(session, broadcast);
+  }, 1000);
 }
 
 // Billion only (server/billion.js trustDialogKey). A dialog arrives in several
@@ -322,13 +325,17 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   return { session };
 }
 
-export function updateState(session, broadcast) {
-  // User accounts are read live, so they can appear while Billion runs. It
-  // belongs to no one, so every signed-in user could then drive an agent that
-  // never asks before acting: it stops, and Start stays refused (billionRuns).
+// User accounts are read live, so they can appear while Billion runs. It
+// belongs to no one, so every signed-in user could then drive an agent that
+// never asks before acting: it stops, and Start stays refused (billionRuns).
+// On the one-second tick, not on every chunk of output: it stats a file.
+export function stopBillionUnderAccounts(session) {
   if (session.isBillion && !session.exited && authEnabled()) {
     try { session.pty.kill(); } catch {}
   }
+}
+
+export function updateState(session, broadcast) {
   const prevState = session.state;
   const newState = detectState(session);
   if (newState !== prevState) {

@@ -724,6 +724,7 @@ export function notifyBillion(job) {
 // with a pull request is not accepted here — merging it is what files it as
 // Done, and a Done card whose PR never merged would claim work shipped that
 // did not.
+const SENT_BACK_CHARS = 2000;
 export async function closeJobForAgent({ session, id, accept, note }, broadcast, { killSession } = {}) {
   if (!session?.isBillion) return { error: 'Only Billion can close cards.' };
   const job = allJobs().find(j => j.id === id);
@@ -743,7 +744,8 @@ export async function closeJobForAgent({ session, id, accept, note }, broadcast,
   const oldPrUrl = job.prUrl || null;
   const oldDetail = job.detail;
   // The note always fits: it is the old detail that gives way.
-  const sentBack = `Sent back by ${BILLION_NAME}: ${reason}`.slice(0, MAX_DETAIL_LEN);
+  // Capped well short of the card's limit, so the task itself always survives.
+  const sentBack = `Sent back by ${BILLION_NAME}: ${reason}`.slice(0, SENT_BACK_CHARS);
   const room = MAX_DETAIL_LEN - sentBack.length - 2;
   job.detail = job.detail && room > 0 ? `${job.detail.slice(0, room)}\n\n${sentBack}` : sentBack;
   const result = await moveJob(job.id, 'todo', broadcast, { killSession });

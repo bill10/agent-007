@@ -25,6 +25,9 @@ const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.
 const CHARTER = { from: 'charter.md', to: 'CHARTER.md' };
 const FIRST_RUN_ONLY = { 'owner.md': 'CLAUDE.md', 'STATE.md': 'STATE.md', 'COMPANY.md': 'COMPANY.md' };
 const OS_FILES = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
+// Written at setup: what makes a folder Billion's. A file name alone is not
+// enough (macOS matches CHARTER.md to a project's charter.md).
+const MARKER = { name: '.billion', text: 'This folder is Billion\'s, set up by Agent 007.\n' };
 // Synchronous, on the server's own thread, so bounded: a global
 // commit.gpgsign waiting on a pinentry, or a hook, must not freeze every
 // terminal. These commits are Agent 007's own bookkeeping in Billion's folder,
@@ -63,8 +66,10 @@ export function billionDir(env = process.env) {
 // starting an agent there that never asks before acting.
 export function ensureBillionRepo(dir) {
   if (existsSync(join(dir, '.git'))) {
-    if (!existsSync(join(dir, CHARTER.to))) {
-      throw new Error(`${dir} is a git repository that isn't Billion's folder (it has no ${CHARTER.to}); point BILLION_DIR somewhere else`);
+    let marker = null;
+    try { marker = readFileSync(join(dir, MARKER.name), 'utf8'); } catch {}
+    if (marker !== MARKER.text) {
+      throw new Error(`${dir} is a git repository that isn't Billion's folder (it has no ${MARKER.name} marker); point BILLION_DIR somewhere else`);
     }
     return { created: false };
   }
@@ -73,7 +78,7 @@ export function ensureBillionRepo(dir) {
   // Billion in it. Only the template files may be there already.
   // The files an OS leaves in any folder it has shown don't count either;
   // they are ignored, so neither this commit nor any of Billion's takes them.
-  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), '.gitignore', ...OS_FILES]);
+  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), '.gitignore', MARKER.name, ...OS_FILES]);
   const theirs = existsSync(dir) ? readdirSync(dir).filter(name => !ours.has(name)) : [];
   if (theirs.length) {
     throw new Error(`${dir} already holds other files (${theirs.slice(0, 3).join(', ')}${theirs.length > 3 ? ', …' : ''}), so it can't be Billion's folder; point BILLION_DIR at a new or empty folder`);
@@ -83,6 +88,7 @@ export function ensureBillionRepo(dir) {
     const target = join(dir, to);
     if (!existsSync(target)) copyFileSync(join(TEMPLATE_DIR, from), target);
   }
+  writeFileSync(join(dir, MARKER.name), MARKER.text);
   const ignore = join(dir, '.gitignore');
   if (!existsSync(ignore)) writeFileSync(ignore, `${OS_FILES.join('\n')}\n`);
   git(dir, ['-c', 'init.defaultBranch=main', 'init', '-q']);

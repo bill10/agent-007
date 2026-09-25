@@ -92,6 +92,10 @@ export function writeMcpConfig(sessionId, agentToken) {
 // Codex takes its hook differently and is not wired yet (docs/BILLION.md).
 const PERMISSION_HOOK = fileURLToPath(new URL('./permission-hook.js', import.meta.url));
 const shellQuote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
+// Forward slashes on Windows, which node takes as well: a backslash means
+// something different to each shell a hook might run under (doubled by the
+// quoting above, cmd.exe would read two), so the paths carry none.
+export const hookPath = (p, platform = process.platform) => (platform === 'win32' ? String(p).replace(/\\/g, '/') : String(p));
 export function withApprovalHook(file, args, configPath) {
   if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
   const settings = {
@@ -102,7 +106,7 @@ export function withApprovalHook(file, args, configPath) {
     hooks: {
       PermissionRequest: [{
         matcher: '*',
-        hooks: [{ type: 'command', command: `${shellQuote(process.execPath)} ${shellQuote(PERMISSION_HOOK)} ${shellQuote(configPath)}`, timeout: HOOK_TIMEOUT_S }],
+        hooks: [{ type: 'command', command: [process.execPath, PERMISSION_HOOK, configPath].map(p => shellQuote(hookPath(p))).join(' '), timeout: HOOK_TIMEOUT_S }],
       }],
     },
   };

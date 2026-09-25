@@ -36,6 +36,17 @@ const decision = (behavior, message) => ({
 // A tool name is an identifier (Write, Bash, mcp__server__tool). Anything else
 // is not a request any CLI made, and gets no decision.
 const TOOL_NAME = /^[\w.:-]{1,128}$/;
+// Dialogs that are the owner's by nature: a question put to a person, a plan
+// for them to approve. Billion never answers these.
+const OWNER_ONLY_TOOLS = new Set(['AskUserQuestion', 'ExitPlanMode']);
+// A CLI waits on one dialog at a time; more than this from one worker is not
+// a CLI asking, and must not crowd out everyone else's requests.
+const PENDING_PER_WORKER = 2;
+// What JSON leaves as is but a terminal hides: DEL and C1 controls (which the
+// delivery strips), bidi overrides and zero-width characters. Shown escaped,
+// so an allow never covers a command that reads differently from what runs.
+const HIDDEN = /[\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const showHidden = (text) => text.replace(HIDDEN, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
 
 // The input as Billion sees it. Long input shows its beginning and its end —
 // where a padded command hides what it really does — and is marked cut, so an
@@ -44,6 +55,7 @@ const INPUT_TAIL_CHARS = 500;
 export function approvalInput(request) {
   let text = '';
   try { text = JSON.stringify(request?.tool_input ?? {}, null, 2); } catch { text = String(request?.tool_input); }
+  text = showHidden(text);
   if (text.length <= INPUT_CHARS) return { text, cut: false };
   const head = INPUT_CHARS - INPUT_TAIL_CHARS;
   return {
@@ -76,7 +88,8 @@ export function requestApproval(worker, request, { jobTitle = null, waitMs = APP
   // Not Billion's to answer: no Billion, one still introducing itself, or a
   // request that is not from a worker at all.
   if (!billion || billion.messagesHeld || !worker || worker.isBillion || !worker.approvalsToBillion
-    || !TOOL_NAME.test(String(request?.tool_name ?? ''))) {
+    || !TOOL_NAME.test(String(request?.tool_name ?? '')) || OWNER_ONLY_TOOLS.has(request.tool_name)
+    || [...pending.values()].filter(e => e.worker === worker).length >= PENDING_PER_WORKER) {
     return Promise.resolve(NO_DECISION);
   }
   const id = randomBytes(4).toString('hex');
