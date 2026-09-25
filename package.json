@@ -1,6 +1,6 @@
 {
   "name": "@bill10/agent-007",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Self-hosted office where a manager agent posts jobs to Claude Code and Codex workers in parallel git worktrees, then reviews and merges their PRs. Cron jobs, agent-to-agent messaging, pixel-art status view.",
   "license": "MIT",
   "repository": {
@@ -14,6 +14,7 @@
     "agent-007": "bin/agent-007.js"
   },
   "files": [
+    ".env.example",
     "bin/",
     "lib/",
     "public/",
@@ -26,9 +27,9 @@
     "node": ">=20.12"
   },
   "scripts": {
-    "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --env-file-if-exists=.env --watch server.js",
-    "adduser": "node --env-file-if-exists=.env bin/adduser.js",
+    "start": "node bin/agent-007.js",
+    "dev": "node --watch bin/agent-007.js",
+    "adduser": "node bin/agent-007.js adduser",
     "test": "vitest run",
     "test:watch": "vitest"
   },

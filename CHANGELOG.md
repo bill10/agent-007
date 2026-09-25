@@ -5,6 +5,29 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.6.4.0] - 2026-09-25
+
+### Added
+
+- **A settings file you can find without the repo.** `npx @bill10/agent-007 init`
+  (or `agent-007 init`) writes `~/.agent-007/.env`, a copy of `.env.example`
+  with every setting explained and commented out, so creating it changes
+  nothing until you uncomment a line. It never overwrites a file that is already
+  there; it says so and prints the path. `.env.example` now ships in the npm
+  package, so the template has one copy.
+- **The same settings rules everywhere.** `npx`, a global `agent-007` and
+  `npm start` / `npm run dev` / `npm run adduser` in a clone all read
+  `./.env` and `~/.agent-007/.env` (`AGENT007_CONFIG_DIR/.env` when set).
+  Highest wins: `--port`, then the real environment, then `./.env`, then
+  `~/.agent-007/.env`. Before, settings came only from a `.env` in whatever
+  directory you happened to run the command from.
+- **Startup says where settings came from.** One line: `Settings:` and the
+  files it loaded, or `Settings: defaults (run \`npx @bill10/agent-007 init\`
+  to create ~/.agent-007/.env)`, with the init command in the form you launched
+  it with.
+- **`--help` lists every setting** with its meaning and default, plus the
+  `init` command. The README has a short Settings section after Quick Start.
+
 ## [0.6.2.1] - 2026-09-25
 
 ### Changed
