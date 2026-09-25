@@ -68,7 +68,8 @@ export function ensureBillionRepo(dir) {
   if (existsSync(join(dir, '.git'))) {
     let marker = null;
     try { marker = readFileSync(join(dir, MARKER.name), 'utf8'); } catch {}
-    if (marker !== MARKER.text) {
+    // Line endings aside: restored with git on Windows it may come back CRLF.
+    if (marker?.replace(/\r\n/g, '\n') !== MARKER.text) {
       throw new Error(`${dir} is a git repository without Billion's ${MARKER.name} marker. If it is Billion's folder, restore the file from its git history (git checkout -- ${MARKER.name}); otherwise point BILLION_DIR somewhere else`);
     }
     return { created: false };
