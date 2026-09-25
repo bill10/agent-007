@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.9.3.0] - 2026-09-25
+
+### Fixed
+
+- **A long agent message is acted on, not questioned.** Claude Code turned any message over a few hundred characters into "pasted content", which it treats as maybe not from the user, so a worker handed a long coordination message from Billion asked whether to act on it and waited. Messages, board notices and approval requests now go in as a series of short bracketed pastes, a line or less each, and arrive as an ordinary typed turn. The sender header, the quoted body and the text itself are unchanged.
+
 ## [0.9.2.1] - 2026-09-25
 
 ### Changed
