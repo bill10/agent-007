@@ -29,6 +29,29 @@ npm start
 
 Open [http://localhost:7007](http://localhost:7007). Click **+ Job** to queue work on the board, or **+ Agent** to start one by hand -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. Needs Node.js 20.12+ and Git ([full requirements](#requirements)).
 
+### Settings
+
+It works with no configuration. To change something, create a settings file:
+
+```bash
+npx @bill10/agent-007 init    # writes ~/.agent-007/.env, every line commented out
+```
+
+Uncomment what you want, then restart. The ones people change:
+
+| Setting | What it does |
+|---------|--------------|
+| `BILLION=0` | Turns off Billion, the always-on agent |
+| `HOST=0.0.0.0` + `ALLOWED_ORIGINS=<tailnet name>` | Reach it from your phone or another machine (behind Tailscale only, see [docs/REMOTE.md](docs/REMOTE.md)) |
+| `CLAUDE_PERMISSION_MODE` | Mode Claude Code agents start in, e.g. `bypassPermissions` |
+| `CODEX_PERMISSION_MODE` | The same for Codex |
+| `TRUST_BOARD_WORKTREES=0` | Keeps Claude Code's folder-trust prompt for job board workers |
+| `PORT` | Port to listen on (default `7007`) |
+
+Highest wins: command-line flags (`--port`), then environment variables, then
+a `.env` in the directory you start it from, then `~/.agent-007/.env`. The full
+list is in [Configuration](#configuration) and `--help`.
+
 ## Highlights
 
 - **A job board, not a babysitting job** -- Each card gets a fresh agent on its own worktree and branch. It moves To do -> In progress -> Review on its own and lands as a pull request (or a summary, for work that isn't code). Cards can also run on a cron schedule.
@@ -71,20 +94,15 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 
 ## Configuration
 
-Configure via environment variables, either inline or in a `.env` file. On
-startup `npm start` auto-loads `.env` if present (via Node's built-in
-`--env-file-if-exists`), and `npx @bill10/agent-007` loads a `.env` in the
-directory you run it from; variables already set in your environment win over
-the file. `npx @bill10/agent-007 --port 8080` overrides `PORT`, and
-`npx @bill10/agent-007 --help` lists the options. Everything the app saves
-lives in `~/.agent-007`. Copy the template to get going:
-
-```bash
-cp .env.example .env    # then edit; .env is gitignored
-npm start
-```
-
-Or set them inline:
+Settings are environment variables. Set them inline, in `~/.agent-007/.env`
+(`npx @bill10/agent-007 init` creates it from [`.env.example`](.env.example),
+every setting explained and commented out), or in a `.env` in the directory you
+start from. `npx @bill10/agent-007`, a global `agent-007` and `npm start` in a
+clone all read both files, and the startup log names the ones it loaded. Highest
+wins: flags (`--port 8080` overrides `PORT`), then the environment, then
+`./.env`, then `~/.agent-007/.env`. `--help` lists them all. Everything the app
+saves lives in `~/.agent-007` (`AGENT007_CONFIG_DIR` moves it, and the settings
+file with it).
 
 ```bash
 PORT=8080 npm start                       # Custom port (default: 7007)
@@ -164,6 +182,7 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 server.js          Entry point + orchestrators (createSession, killSession)
 server/
   state.js         Shared mutable state (sessions, orphans, pools, config)
+  settings.js      Config dir and the settings files (./.env, ~/.agent-007/.env)
   config.js        Config persistence (load, save, crash recovery)
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
