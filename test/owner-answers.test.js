@@ -106,6 +106,17 @@ describe('answering in the app', () => {
     expect(calls()).toEqual([{ method: 'editMessageText', body: { chat_id: '42', message_id: 900, text: `Billion (Q2): ${item.text}\n\nAnswered in app: yes` } }]);
   });
 
+  it('edits the phone\'s copy even when the app answered before the send came back', async () => {
+    let finish;
+    fetchMock.mockImplementationOnce(() => new Promise(r => { finish = () => r(reply({ message_id: 901 })); }));
+    const asked = ask('Ship it?', { choices: ['yes', 'no'] });
+    await vi.waitFor(() => expect(finish).toBeDefined());
+    expect((await answerWaiting(waitingItems()[0].id, 'yes', 'app', { env: ENV })).ok).toBe(true);
+    finish();
+    await asked;
+    expect(calls().at(-1)).toEqual({ method: 'editMessageText', body: { chat_id: '42', message_id: 901, text: 'Billion (Q1): Ship it?\n\nAnswered in app: yes' } });
+  });
+
   it('keeps the card open when Billion is not running, and refuses a second answer', async () => {
     await ask('Which name?', { env: {} });
     const [item] = waitingItems();

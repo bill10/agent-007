@@ -137,7 +137,7 @@ export function renderWaiting() {
   const list = document.getElementById('waiting-list');
   if (!list) return;
   // Settled: the server moved it on, so it is no longer ours to wait for.
-  for (const id of pending) {
+  for (const id of new Set([...pending, ...errors.keys(), ...drafts.keys()])) {
     if (!waitingItems.some(item => item.id === id && item.status === 'open')) { pending.delete(id); drafts.delete(id); errors.delete(id); }
   }
   if (!waitingActive) return;

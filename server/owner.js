@@ -260,16 +260,18 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   }
   const done = updateWaiting(id, { status: 'answered', answer: body, answeredAt: new Date().toISOString(), answeredVia: via });
   broadcast?.(waitingPayload());
-  // The phone shows the answer too, and loses its buttons.
-  if (done.tgMessageId) {
-    const { chatId } = telegramSettings(env);
-    const shown = `${questionText(done)}\n\nAnswered${via === 'app' ? ' in app' : ''}: ${body}`;
-    const edit = done.tgVoice
-      ? call('editMessageCaption', { chat_id: chatId, message_id: done.tgMessageId, caption: shown.slice(0, 1024) }, { env })
-      : call('editMessageText', { chat_id: chatId, message_id: done.tgMessageId, text: shown.slice(0, 4096) }, { env });
-    await edit.catch(err => console.error('Telegram: could not mark a question answered:', redact(err.message, env)));
-  }
+  if (done.tgMessageId) await showAnswerOnPhone(done, env);
   return { ok: true, item: done };
+}
+
+// The phone's copy of an answered question shows the answer, and loses its buttons.
+async function showAnswerOnPhone(item, env) {
+  const { chatId } = telegramSettings(env);
+  const shown = `${questionText(item)}\n\nAnswered${item.answeredVia === 'app' ? ' in app' : ''}: ${item.answer}`;
+  const edit = item.tgVoice
+    ? call('editMessageCaption', { chat_id: chatId, message_id: item.tgMessageId, caption: shown.slice(0, 1024) }, { env })
+    : call('editMessageText', { chat_id: chatId, message_id: item.tgMessageId, text: shown.slice(0, 4096) }, { env });
+  await edit.catch(err => console.error('Telegram: could not mark a question answered:', redact(err.message, env)));
 }
 
 // --- notify_owner ---
@@ -304,7 +306,10 @@ export async function notifyOwner(text, { choices, recommended, broadcast, env =
   if (result.error) return { pinned: true, n: item?.n, error: `Pinned under "Waiting on you" in the owner's browser${n}, but the Telegram send failed: ${result.error}` };
   // Kept so a reply to this message, or a tap on its buttons, finds the question.
   if (item && result.messageId) {
-    try { updateWaiting(item.id, { tgMessageId: result.messageId, ...(result.voice ? { tgVoice: true } : {}) }); } catch {}
+    let saved;
+    try { saved = updateWaiting(item.id, { tgMessageId: result.messageId, ...(result.voice ? { tgVoice: true } : {}) }); } catch {}
+    // Answered in the app while the send was on its way.
+    if (saved?.status === 'answered') await showAnswerOnPhone(saved, env);
   }
   return { ok: true, n: item?.n };
 }
