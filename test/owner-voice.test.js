@@ -98,13 +98,13 @@ describe('when Billion speaks', () => {
 
   it('sends voice as multipart sendVoice with the text as its caption, the text never on a command line', async () => {
     setMode('voice');
-    expect(await notifyOwner('Buy the domain? See https://x.co/d for the price, I recommend yes.', { env: ENV, now: now(), platform: 'darwin' })).toEqual({ ok: true });
+    expect(await notifyOwner('Buy the domain? See https://x.co/d for the price, I recommend yes.', { env: ENV, now: now(), platform: 'darwin' })).toMatchObject({ ok: true });
     const [[url, init]] = fetchMock.mock.calls;
     expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/sendVoice`);
     expect(init.headers).toBeUndefined();   // fetch sets the multipart boundary itself
     expect(init.body).toBeInstanceOf(FormData);
     expect(init.body.get('chat_id')).toBe('42');
-    expect(init.body.get('caption')).toBe('Billion: Buy the domain? See https://x.co/d for the price, I recommend yes.');
+    expect(init.body.get('caption')).toMatch(/^Billion \(Q\d+\): Buy the domain\? See https:\/\/x\.co\/d for the price, I recommend yes\.$/);
     const voice = init.body.get('voice');
     expect(voice.type).toBe('audio/ogg');
     expect(voice.name).toBe('billion.ogg');
@@ -114,7 +114,7 @@ describe('when Billion speaks', () => {
     expect(say[1]).toEqual(['-o', expect.stringMatching(/say\.aiff$/), '-f', expect.stringMatching(/say\.txt$/)]);
     expect(ffmpeg[1]).toEqual(expect.arrayContaining(['-c:a', 'libopus', '-b:a', '32k']));
     expect(tools.calls.flatMap(c => c[1]).join(' ')).not.toContain('domain');
-    expect(tools.said).toEqual(['Billion: Buy the domain? See link for the price, I recommend yes.']);
+    expect(tools.said).toEqual([expect.stringMatching(/^Billion \(Q\d+\): Buy the domain\? See link for the price, I recommend yes\.$/)]);
   });
 
   it('sends text, and says why once, when say or ffmpeg is missing or this is not macOS', async () => {

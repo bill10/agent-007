@@ -1,10 +1,11 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
-import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, jobs, billionFirst } from './state.js';
+import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, waitingActive, jobs, billionFirst } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
 import { stopVoice } from './voice.js';
 import { showJobBoard, hideJobBoard } from './jobs.js';
+import { showWaiting, hideWaiting, openCount } from './waiting.js';
 // Circular with office.js (it imports switchToSession), which is fine: both
 // sides only call the other's functions at event time, never during load.
 import { noteAgentDeparture } from './office.js';
@@ -194,7 +195,7 @@ export async function handleSessionCreated(msg) {
   // spawns open quietly — the tab dot, the office character and the job card
   // still announce them, and clicking any of them jumps here. A window showing
   // nothing takes it, unless that nothing is the job board being worked on.
-  const stealFocus = focus || replacesActive || (!activeSessionId && !boardActive);
+  const stealFocus = focus || replacesActive || (!activeSessionId && !boardActive && !waitingActive);
   if (stealFocus) switchToSession(sessionId);
   updateTabs();
   updateStatusBar();
@@ -312,6 +313,7 @@ export function switchToSession(sessionId) {
   // agent land in another's shell after a tab switch (or auto-switch on kill).
   if (sessionId !== activeSessionId) stopVoice({ notice: 'Voice input stopped — switched agents' });
   hideJobBoard();
+  hideWaiting();
   if (activeSessionId && agents.has(activeSessionId)) {
     agents.get(activeSessionId).termEl.style.display = 'none';
   }
@@ -366,6 +368,16 @@ export function removeSession(sessionId) {
   if (onSessionChanged) onSessionChanged();
 }
 
+export const BELL_ICON = '<svg class="board-tab-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M3 8.5V5.5a3 3 0 0 1 6 0v3l1 1H2z"/><path d="M5 11h2"/></svg>';
+
+// The phone's bottom bar carries the same count.
+function updateNavBadge(open) {
+  const badge = document.getElementById('mobile-nav-waiting-count');
+  if (!badge) return;
+  badge.textContent = open > 0 ? String(open) : '';
+  badge.hidden = open === 0;
+}
+
 export function updateTabs() {
   const container = document.getElementById('terminal-tabs');
   container.innerHTML = '';
@@ -391,6 +403,24 @@ export function updateTabs() {
   }
   boardTab.onclick = () => { showJobBoard(); updateTabs(); };
   container.appendChild(boardTab);
+
+  // Pinned next to it: Billion's questions to the owner, counted like Jobs.
+  const waitingTab = document.createElement('div');
+  waitingTab.className = `terminal-tab board-tab waiting-tab${waitingActive ? ' active' : ''}`;
+  waitingTab.title = 'Waiting on you: Billion\'s questions';
+  waitingTab.innerHTML = BELL_ICON;
+  waitingTab.appendChild(document.createTextNode('Waiting'));
+  const open = openCount();
+  if (open > 0) {
+    const badge = document.createElement('span');
+    badge.className = 'board-tab-badge';
+    badge.textContent = String(open);
+    badge.title = `${open} question${open === 1 ? '' : 's'} waiting on you`;
+    waitingTab.appendChild(badge);
+  }
+  waitingTab.onclick = () => { showWaiting(); updateTabs(); };
+  container.appendChild(waitingTab);
+  updateNavBadge(open);
 
   for (const [sessionId, agent] of billionFirst(agents)) {
     const tab = document.createElement('div');

@@ -51,7 +51,7 @@ Uncomment what you want, then restart. The ones people change:
 | Setting | What it does |
 |---------|--------------|
 | `BILLION=0` | Turns off Billion, the always-on agent |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Billion's questions reach your phone, and you answer from there ([setup](docs/BILLION.md#telegram)) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Billion's questions reach your phone as well as the Waiting on you tab, and you answer from either, with a tap when it is a pick ([setup](docs/BILLION.md#telegram)) |
 | `HOST=0.0.0.0` + `ALLOWED_ORIGINS=<tailnet name>` | Reach it from your phone or another machine (behind Tailscale only, see [docs/REMOTE.md](docs/REMOTE.md)) |
 | `CLAUDE_PERMISSION_MODE` | Mode Claude Code agents start in, e.g. `bypassPermissions` |
 | `CODEX_PERMISSION_MODE` | The same for Codex |
@@ -88,9 +88,10 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 ```
 ┌─────────────┬──────────────┬────────────────────┐
 │  Explorer   │  Pixel       │  Jobs + Terminals   │
-│  (repos,    │  Office      │  (job board tab,    │
-│   files,    │  (canvas,    │   xterm.js, one     │
-│   diffs)    │   agents)    │   tab per agent)    │
+│  (repos,    │  Office      │  (job board and     │
+│   files,    │  (canvas,    │   Waiting on you    │
+│   diffs)    │   agents)    │   tabs, xterm.js,   │
+│             │              │   one tab per agent)│
 └─────────────┴──────────────┴────────────────────┘
 ```
 
@@ -220,6 +221,7 @@ public/
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
+    waiting.js     The Waiting on you tab (Billion's questions, answered by a click or a typed line)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts

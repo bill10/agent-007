@@ -3,7 +3,7 @@
 // talks to Telegram.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, sendTelegram, handleUpdate, pollOnce, startTelegram, stopTelegram,
@@ -31,7 +31,7 @@ const calls = () => fetchMock.mock.calls.map(([url, init]) => ({ url, body: JSON
 beforeEach(() => {
   fetchMock = vi.fn(async () => reply(true));
   vi.stubGlobal('fetch', fetchMock);
-  for (const item of waitingItems()) dismissWaiting(item.id);
+  rmSync(join(CONFIG_DIR, 'waiting.json'), { force: true });
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -43,10 +43,10 @@ afterEach(() => {
 describe('notify_owner', () => {
   it('sends "Billion: <text>" to the owner\'s chat and pins it', async () => {
     const broadcast = vi.fn();
-    expect(await notifyOwner('Spend $20 on a domain? I recommend yes.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true });
+    expect(await notifyOwner('Spend $20 on a domain? I recommend yes.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, n: 1 });
     const [c] = calls();
     expect(c.url).toBe(`https://api.telegram.org/bot${TOKEN}/sendMessage`);
-    expect(c.body).toEqual({ chat_id: '42', text: 'Billion: Spend $20 on a domain? I recommend yes.' });
+    expect(c.body).toEqual({ chat_id: '42', text: 'Billion (Q1): Spend $20 on a domain? I recommend yes.' });
     expect(waitingItems().map(i => i.text)).toEqual(['Spend $20 on a domain? I recommend yes.']);
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'waiting-list' }));
   });
@@ -71,12 +71,12 @@ describe('notify_owner', () => {
 
   it('allows a burst, then refuses until the minute has passed', async () => {
     const t = now();
-    for (let i = 0; i < NOTIFY_LIMIT; i++) expect(await notifyOwner(`q${i}`, { env: ENV, now: t + i })).toEqual({ ok: true });
+    for (let i = 0; i < NOTIFY_LIMIT; i++) expect(await notifyOwner(`q${i}`, { env: ENV, now: t + i })).toEqual({ ok: true, n: i + 1 });
     const refused = await notifyOwner('one more', { env: ENV, now: t + 10 });
     expect(refused.error).toMatch(/last minute/);
     expect(fetchMock).toHaveBeenCalledTimes(NOTIFY_LIMIT);
     expect(waitingItems()).toHaveLength(NOTIFY_LIMIT);
-    expect(await notifyOwner('later', { env: ENV, now: t + NOTIFY_WINDOW_MS + 1 })).toEqual({ ok: true });
+    expect(await notifyOwner('later', { env: ENV, now: t + NOTIFY_WINDOW_MS + 1 })).toEqual({ ok: true, n: NOTIFY_LIMIT + 1 });
   });
 
   it('refuses empty text', async () => {
@@ -101,8 +101,9 @@ describe('the Waiting on you list', () => {
     expect(onDisk.map(i => i.text)).toEqual(['first', 'second']);
     const broadcast = vi.fn();
     expect(dismissWaiting(onDisk[0].id, broadcast)).toBe(true);
-    expect(waitingItems().map(i => i.text)).toEqual(['second']);
-    expect(broadcast).toHaveBeenCalledWith({ type: 'waiting-list', items: waitingItems() });
+    expect(waitingItems().map(i => i.status)).toEqual(['dismissed', 'open']);
+    expect(broadcast).toHaveBeenCalledWith({ type: 'waiting-list', items: [expect.objectContaining({ text: 'second' })] });
+    expect(dismissWaiting(onDisk[0].id)).toBe(false);
     expect(dismissWaiting('no-such-id')).toBe(false);
   });
 });

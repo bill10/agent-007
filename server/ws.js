@@ -13,7 +13,7 @@ import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcas
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { waitingPayload, dismissWaiting } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { billionRuns } from './billion.js';
@@ -143,6 +143,12 @@ function owns(ws, ownerId) {
   if (!authEnabled()) return true;
   if (!ownerId) return true;
   return !!(ws.user && ws.user.id === ownerId);
+}
+// Answering or dismissing Billion's questions to the owner. Billion belongs to
+// no one, so with user accounts on nobody may type into it (see pty-input),
+// and nobody may answer for the owner either.
+export function mayAnswerOwner() {
+  return !authEnabled();
 }
 function denyControl(ws, name, ownerId) {
   const owner = userById(ownerId);
@@ -274,7 +280,15 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           break;
         }
         case 'waiting-dismiss': {
-          if (typeof msg.id === 'string') dismissWaiting(msg.id, broadcast);
+          if (typeof msg.id === 'string' && mayAnswerOwner()) dismissWaiting(msg.id, broadcast);
+          break;
+        }
+        case 'waiting-answer': {
+          if (typeof msg.id !== 'string') break;
+          const result = mayAnswerOwner()
+            ? await answerWaiting(msg.id, msg.answer, 'app', { broadcast })
+            : { error: 'Only the owner answers Billion, and with user accounts on nobody does.' };
+          if (result.error) ws.send(JSON.stringify({ type: 'waiting-error', id: msg.id, error: result.error }));
           break;
         }
         case 'kill': {
