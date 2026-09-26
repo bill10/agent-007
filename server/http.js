@@ -130,8 +130,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         answerPermission: ({ id, decision, reason }) => (req.agentSession.isBillion
           ? answerApproval(id, decision, reason)
           : { error: 'Only Billion answers permission requests.' }),
-        notifyOwner: (text) => (req.agentSession.isBillion
-          ? notifyOwner(text, { broadcast })
+        notifyOwner: (text, { choices, recommended } = {}) => (req.agentSession.isBillion
+          ? notifyOwner(text, { choices, recommended, broadcast })
           : { error: 'Only Billion can notify the owner.' }),
         // Never logged: a screen can hold a secret that scrolled by.
         readAgentScreen: ({ name, lines }) => readAgentScreen({

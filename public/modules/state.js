@@ -28,9 +28,13 @@ export let serverPlatform = ''; // process.platform of the server, from the welc
 export let billionEnabled = false;
 export function setBillionEnabled(on) { billionEnabled = !!on; }
 
-// Billion's notify_owner messages the owner has not dismissed (server/owner.js).
+// Billion's notify_owner questions, open and answered, not dismissed
+// (server/owner.js). The "Waiting on you" tab shows them in the terminal
+// viewport, like the job board, and activeSessionId stays put meanwhile too.
 export let waitingItems = [];
 export function setWaitingItems(items) { waitingItems = Array.isArray(items) ? items : []; }
+export let waitingActive = false;
+export function setWaitingActive(on) { waitingActive = !!on; }
 
 // Billion's tab first, then the rest in their own order.
 export function billionFirst(entries) {
@@ -62,9 +66,11 @@ export function canControlAgent(agent) {
 
 // Which panel a phone shows (body[data-view], see .mobile-nav in style.css).
 // Set unconditionally: desktop CSS ignores it, so no width check is needed.
+// The Waiting button is the terminal panel showing the Waiting tab.
 export function setView(view) {
   document.body.dataset.view = view;
-  for (const b of document.querySelectorAll('.mobile-nav button')) b.setAttribute('aria-current', b.dataset.view === view);
+  const lit = view === 'terminal' && waitingActive ? 'waiting' : view;
+  for (const b of document.querySelectorAll('.mobile-nav button')) b.setAttribute('aria-current', b.dataset.view === lit);
 }
 
 export function stateColor(state) {

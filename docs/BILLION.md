@@ -41,7 +41,7 @@ Decided:
 
 Existing code to lean on: repo-less agents already run (`server/pty.js`
 `createSessionFromConfig`, cwd falls back to home), are listed under "(no repo)"
-(`public/modules/explorer.js:260`), and sit in a final pod
+(`public/modules/explorer.js`, the "(no repo)" section), and sit in a final pod
 (`public/modules/office.js:156`). Billion is a repo-less agent whose cwd is its
 own folder.
 
@@ -501,13 +501,32 @@ cycle: start agent-cost; drop the browser-extension idea
 ## Telegram
 
 Billion's questions scroll out of sight in a busy terminal, so its
-`notify_owner` tool puts each one in two places: a **Waiting on you** list
-under Billion's row at the top of the left panel (kept in
-`~/.agent-007/waiting.json` until you dismiss it with ×), and, when a
-Telegram bot is set up, your phone. Whatever you answer the bot is typed into
-Billion's terminal as `[Owner via Telegram] <text>`, the same way board
-notices and agent messages arrive. If Billion is not running the bot says so
-and drops the message.
+`notify_owner` tool puts each one in two places: the **Waiting on you** tab
+next to Jobs (a bell, with a count of open questions; on a phone, the
+*Waiting* button in the bottom bar), and, when a Telegram bot is set up, your
+phone. Each question gets a short number, Q1, Q2 and so on. When the answer
+is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
+it `recommended`.
+
+Answer in the app: click a choice, or type in the reply line under it (Enter
+or Send); the line is there even when there are choices. The answer is typed
+into Billion's terminal as `[Owner via app] Q3: <answer> (re: "<start of the
+question>")`. If Billion is not running the card says so and stays open.
+Answered questions move to a collapsed **Answered** section (the last 20); ×
+dismisses one. With user accounts on (`users.json`) Billion does not run, and
+nobody answers or dismisses for the owner. The list lives in
+`~/.agent-007/waiting.json`; one written before answers existed still loads,
+its items open and numbered in order.
+
+Answer on Telegram: a question with choices arrives with a button for each.
+Tap one, or *reply* to the question's message with text, and it reaches
+Billion as `[Owner via Telegram] Q3: <answer> (re: "...")`; the message is
+edited to show the answer and loses its buttons. An answer in the app edits
+it too, to "Answered in app: <answer>". Whatever else you send the bot (a
+message that is not a reply, a voice note) is typed into Billion's terminal
+as `[Owner via Telegram] <text>`, the same way board notices and agent
+messages arrive. If Billion is not running the bot says so and drops the
+message.
 
 Setup:
 
@@ -518,7 +537,7 @@ Setup:
    check it is yours).
 3. Add `TELEGRAM_CHAT_ID=<id>` to the same file and restart.
 
-The chat id is the only gate: messages from any other chat are ignored
+The chat id is the only gate: messages and button taps from any other chat are ignored
 without a reply, so don't add the bot to a group. The token is never logged or sent to the browser. Billion can notify
 you at most five times a minute. No library: the server long-polls
 `getUpdates` with Node's own `fetch`.

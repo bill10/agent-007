@@ -752,11 +752,6 @@ body {
 /* The one way back for a stopped Billion, so it reads as the row's action. */
 .explorer-billion-start { margin-left: auto; color: var(--accent); }
 /* notify_owner's questions, under Billion's row until dismissed */
-.explorer-waiting { list-style: none; margin: 0 0 4px; padding: 0 10px 0 22px; font-size: 11px; }
-.explorer-waiting-head { color: var(--accent); font-weight: 600; padding: 2px 0; }
-.explorer-waiting-item { display: flex; align-items: flex-start; gap: 4px; color: var(--text-muted); padding: 2px 0; }
-.explorer-waiting-item span { flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.explorer-waiting-item button { flex-shrink: 0; }
 
 .explorer-branch-name {
   overflow: hidden;
@@ -1181,7 +1176,7 @@ body {
 .mobile-nav { display: none; }
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
-  .explorer-billion-start, .explorer-waiting-item button { min-width: 44px; min-height: 44px; }
+  .explorer-billion-start, .waiting-dismiss { min-width: 44px; min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
   }
@@ -1207,6 +1202,10 @@ body {
     cursor: pointer;
   }
   .mobile-nav button:hover, .mobile-nav button[aria-current="true"] { color: var(--accent); }
+  .mobile-nav-waiting { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .mobile-nav-waiting .board-tab-badge { letter-spacing: 0; }
+  .waiting-choice, .waiting-send { min-height: 44px; }
+  .waiting-reply input { min-height: 44px; font-size: 16px; }
   /* Overlays sized for desktop */
   .spawn-form-inner, .dir-browser-inner { width: auto; max-width: 100%; }
   .spawn-form-main, .spawn-presets { flex-wrap: wrap; }
@@ -1301,6 +1300,117 @@ body {
   line-height: 15px;
   text-align: center;
 }
+
+/* ============================================================
+   Waiting on you
+   Billion's questions to the owner. A pinned tab next to Jobs,
+   same viewport, same badge; each open question is a card with
+   its choices and a reply line.
+   ============================================================ */
+
+.waiting-board {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  overflow-y: auto;
+  z-index: 5;
+}
+.waiting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 720px;
+  padding: 14px 12px 24px;
+}
+.waiting-empty { color: var(--text-dim); font-size: 12px; padding: 24px 2px; }
+
+.waiting-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--state-message);
+  border-radius: 3px;
+}
+.waiting-card-head { display: flex; align-items: center; gap: 8px; }
+.waiting-card-n { color: var(--accent); font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.waiting-card-time { color: var(--text-dim); font-size: 10px; flex: 1; }
+.waiting-card-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.waiting-choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.waiting-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.waiting-choice:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.waiting-choice.recommended { border-color: var(--accent); }
+.waiting-choice-tag {
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.waiting-reply { display: flex; gap: 6px; }
+.waiting-reply input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.waiting-reply input:focus { outline: none; border-color: var(--accent); }
+.waiting-send {
+  padding: 5px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.waiting-card :disabled { opacity: 0.55; cursor: default; }
+.waiting-error { margin: 0; color: var(--state-disconnected); font-size: 11px; }
+
+.waiting-answered { color: var(--text-muted); font-size: 11px; margin-top: 6px; }
+.waiting-answered summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+.waiting-answered ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.waiting-answered-item { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 2px; }
+.waiting-answered-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-answered-answer { grid-column: 2; color: var(--text-dim); overflow-wrap: anywhere; }
 
 /* An agent the board created, not you. Subtle — it is still an ordinary agent
    you can type into; the marker only explains where it came from. */

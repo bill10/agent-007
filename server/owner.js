@@ -1,6 +1,6 @@
 // Reaching the owner when they are away from the terminal: Billion's
-// notify_owner tool, the "Waiting on you" list it pins in the browser, and a
-// Telegram bot that carries both ways (docs/BILLION.md, "Telegram").
+// notify_owner tool, the "Waiting on you" tab it fills in the browser (where
+// the owner can answer too), and a Telegram bot that carries both ways (docs/BILLION.md, "Telegram").
 //
 // Telegram is optional: with TELEGRAM_BOT_TOKEN unset nothing here talks to
 // the network and the list still works. Plain fetch against the Bot API, no
@@ -27,6 +27,11 @@ const MAX_BACKOFF_MS = 60 * 1000;
 const WAITING_CAP = 50;
 export const OWNER_PREFIX = '[Owner via Telegram]';
 export const OWNER_VOICE_PREFIX = '[Owner via Telegram, voice]';
+export const APP_PREFIX = '[Owner via app]';
+export const MAX_CHOICES = 5;
+export const MAX_CHOICE_CHARS = 40;
+export const MAX_ANSWER_CHARS = 2000;
+const CLOSED_KEPT = 30;   // answered and dismissed items kept; open ones always are
 
 export function telegramSettings(env = process.env) {
   const token = (env.TELEGRAM_BOT_TOKEN || '').trim();
@@ -62,12 +67,13 @@ async function call(method, params, { env = process.env, signal } = {}) {
   return body.result;
 }
 
-export async function sendTelegram(text, { env = process.env } = {}) {
+// extra: more sendMessage fields (reply_markup). Returns { ok, messageId } or { error }.
+export async function sendTelegram(text, { env = process.env, extra } = {}) {
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) return { error: 'Telegram is not configured' };
   try {
-    await call('sendMessage', { chat_id: chatId, text }, { env });
-    return { ok: true };
+    const sent = await call('sendMessage', { chat_id: chatId, text, ...extra }, { env });
+    return { ok: true, messageId: sent?.message_id };
   } catch (err) {
     return { error: err.message };
   }
@@ -95,7 +101,7 @@ function saveOwnerMode(mode) {
 
 // text spoken, with text as the caption so links stay tappable. Returns
 // { ok } or { error }; the caller sends text instead on an error.
-export async function sendVoice(text, { env = process.env } = {}) {
+export async function sendVoice(text, { env = process.env, extra } = {}) {
   const { chatId } = telegramSettings(env);
   try {
     const ogg = await synthesize(text, env);
@@ -103,8 +109,9 @@ export async function sendVoice(text, { env = process.env } = {}) {
     form.append('chat_id', chatId);
     form.append('caption', text);   // under Telegram's 1024: voice is for texts of 900 or fewer
     form.append('voice', new Blob([ogg], { type: 'audio/ogg' }), 'billion.ogg');
-    await call('sendVoice', form, { env });
-    return { ok: true };
+    if (extra?.reply_markup) form.append('reply_markup', JSON.stringify(extra.reply_markup));
+    const sent = await call('sendVoice', form, { env });
+    return { ok: true, messageId: sent?.message_id, voice: true };
   } catch (err) {
     return { error: redact(err.message, env) };
   }
@@ -113,17 +120,17 @@ export async function sendVoice(text, { env = process.env } = {}) {
 let voiceOffLogged = false;
 
 // A message to the owner, as voice or text by TELEGRAM_VOICE (docs/BILLION.md, "Voice").
-export async function sendToOwner(text, { env = process.env, platform = process.platform } = {}) {
+export async function sendToOwner(text, { env = process.env, platform = process.platform, extra } = {}) {
   if (chooseMode(text, { env, lastMode: lastOwnerMode() }).mode === 'voice') {
     const off = speechUnavailable(env, platform);
-    const result = off ? { error: off } : await sendVoice(text, { env });
+    const result = off ? { error: off } : await sendVoice(text, { env, extra });
     if (!result.error) return result;
     if (!voiceOffLogged) {
       voiceOffLogged = true;
       console.log(`  Telegram: sending text, not voice: ${result.error}`);
     }
   }
-  return sendTelegram(text, { env });
+  return sendTelegram(text, { env, extra });
 }
 
 // A voice note's bytes, or throws a redacted Error.
@@ -160,62 +167,151 @@ async function transcribeNote(note, env) {
 }
 
 // --- The "Waiting on you" list, in the config dir so it survives restarts ---
+//
+// An item: { id, n, text, at, choices?, recommended?, status, answer?,
+// answeredAt?, answeredVia?, tgMessageId?, tgVoice? }. n is the short number
+// the owner sees (Q3). status is open, answered or dismissed. Items written
+// before v0.10 have neither n nor status: they read as open, numbered in order.
 
 const waitingPath = () => join(CONFIG_DIR, 'waiting.json');
 
 export function waitingItems() {
-  try {
-    const items = JSON.parse(readFileSync(waitingPath(), 'utf8'));
-    return Array.isArray(items) ? items : [];
-  } catch { return []; }
+  let items;
+  try { items = JSON.parse(readFileSync(waitingPath(), 'utf8')); } catch { return []; }
+  if (!Array.isArray(items)) return [];
+  return items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open' }));
 }
 
 function saveWaiting(items) {
+  // The newest open questions, and of the rest the newest few.
+  let open = items.filter(item => item.status === 'open').length - WAITING_CAP;
+  let closed = items.length - (open + WAITING_CAP) - CLOSED_KEPT;
+  const kept = items.filter(item => (item.status === 'open' ? open-- <= 0 : closed-- <= 0));
   const tmp = `${waitingPath()}.tmp`;
-  writeFileSync(tmp, JSON.stringify(items, null, 2));
+  writeFileSync(tmp, JSON.stringify(kept, null, 2));
   renameSync(tmp, waitingPath());
 }
 
-export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems() });
+export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems().filter(item => item.status !== 'dismissed') });
 
-export function addWaiting(text, broadcast, now = Date.now()) {
-  const items = [...waitingItems(), { id: randomUUID(), text, at: new Date(now).toISOString() }].slice(-WAITING_CAP);
-  saveWaiting(items);
+// choices: 2-5 short distinct strings, or absent; recommended: one of them.
+export function checkChoices(choices, recommended) {
+  if (choices === undefined || choices === null) {
+    return recommended === undefined || recommended === null ? null : 'recommended needs choices to pick from.';
+  }
+  if (!Array.isArray(choices) || choices.length < 2 || choices.length > MAX_CHOICES) return `choices must be a list of 2 to ${MAX_CHOICES} options.`;
+  if (choices.some(c => typeof c !== 'string' || !c.trim() || c.trim().length > MAX_CHOICE_CHARS)) return `Each choice must be text of 1 to ${MAX_CHOICE_CHARS} characters.`;
+  if (new Set(choices.map(c => c.trim())).size !== choices.length) return 'The choices must all differ.';
+  if (recommended !== undefined && recommended !== null && !(typeof recommended === 'string' && choices.map(c => c.trim()).includes(recommended.trim()))) return 'recommended must be one of the choices.';
+  return null;
+}
+
+export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended } = {}) {
+  const items = waitingItems();
+  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open' };
+  if (choices) item.choices = choices.map(c => c.trim());
+  if (recommended) item.recommended = recommended.trim();
+  saveWaiting([...items, item]);
   broadcast?.(waitingPayload());
+  return item;
+}
+
+function updateWaiting(id, change) {
+  const items = waitingItems();
+  const item = items.find(i => i.id === id);
+  if (!item) return null;
+  Object.assign(item, change);
+  saveWaiting(items);
+  return item;
 }
 
 export function dismissWaiting(id, broadcast) {
-  const items = waitingItems();
-  const kept = items.filter(item => item.id !== id);
-  if (kept.length === items.length) return false;
-  saveWaiting(kept);
+  if (!waitingItems().some(item => item.id === id && item.status !== 'dismissed')) return false;
+  updateWaiting(id, { status: 'dismissed' });
   broadcast?.(waitingPayload());
   return true;
+}
+
+// The line Billion reads: who answered, which question, the answer, and the
+// start of the question so it knows what "yes" is to.
+export function answerLine(prefix, item, answer) {
+  const flat = item.text.replace(/\s+/g, ' ').trim();
+  const context = flat.length > 60 ? `${flat.slice(0, 60).trimEnd()}…` : flat;
+  return `${prefix} Q${item.n}: ${answer} (re: "${context}")`;
+}
+
+// What the owner's Telegram shows for a question.
+const questionText = (item) => `Billion (Q${item.n}): ${item.text}`;
+
+// An answer from the app or Telegram (via 'app' or 'telegram'): into Billion's
+// terminal, then the item is answered everywhere. { ok, item } or { error };
+// on an error the item stays open.
+export async function answerWaiting(id, answer, via, { broadcast, env = process.env } = {}) {
+  const body = typeof answer === 'string' ? answer.replace(/\s+/g, ' ').trim() : '';
+  if (!body) return { error: 'The answer is empty.' };
+  if (body.length > MAX_ANSWER_CHARS) return { error: `Keep the answer under ${MAX_ANSWER_CHARS} characters.` };
+  const item = waitingItems().find(i => i.id === id);
+  if (!item || item.status === 'dismissed') return { error: 'That question is gone.' };
+  if (item.status === 'answered') return { error: `Q${item.n} was answered already: ${item.answer}` };
+  const billion = liveBillion();
+  if (!billion) return { error: 'Billion is not running' };
+  if (!sendText(billion, answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body))) {
+    return { error: 'Billion has too much waiting for it; try again in a while.' };
+  }
+  const done = updateWaiting(id, { status: 'answered', answer: body, answeredAt: new Date().toISOString(), answeredVia: via });
+  broadcast?.(waitingPayload());
+  if (done.tgMessageId) await showAnswerOnPhone(done, env);
+  return { ok: true, item: done };
+}
+
+// The phone's copy of an answered question shows the answer, and loses its buttons.
+async function showAnswerOnPhone(item, env) {
+  const { chatId } = telegramSettings(env);
+  const shown = `${questionText(item)}\n\nAnswered${item.answeredVia === 'app' ? ' in app' : ''}: ${item.answer}`;
+  const edit = item.tgVoice
+    ? call('editMessageCaption', { chat_id: chatId, message_id: item.tgMessageId, caption: shown.slice(0, 1024) }, { env })
+    : call('editMessageText', { chat_id: chatId, message_id: item.tgMessageId, text: shown.slice(0, 4096) }, { env });
+  await edit.catch(err => console.error('Telegram: could not mark a question answered:', redact(err.message, env)));
 }
 
 // --- notify_owner ---
 
 let sent = [];   // times of recent notify_owner calls
 
-export async function notifyOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+export async function notifyOwner(text, { choices, recommended, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
+  const bad = checkChoices(choices, recommended);
+  if (bad) return { error: bad };
   sent = sent.filter(t => now - t < NOTIFY_WINDOW_MS);
   if (sent.length >= NOTIFY_LIMIT) {
     return { error: `Not sent: you have notified the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later, or under Waiting on you in STATE.md.` };
   }
   sent.push(now);
-  try { addWaiting(body, broadcast, now); } catch (err) {
+  let item;
+  try { item = addWaiting(body, broadcast, now, { choices, recommended }); } catch (err) {
     console.error('Could not save the Waiting on you list:', err.message);
   }
+  const n = item ? ` as Q${item.n}` : '';
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) {
-    return { pinned: true, error: 'Pinned under "Waiting on you" in the owner\'s browser, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.' };
+    return { pinned: true, n: item?.n, error: `Pinned under "Waiting on you" in the owner's browser${n}, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.` };
   }
-  const result = await sendToOwner(`Billion: ${body}`, { env, platform });
-  if (result.error) return { pinned: true, error: `Pinned under "Waiting on you" in the owner's browser, but the Telegram send failed: ${result.error}` };
-  return { ok: true };
+  // A button per choice; callback_data is "<id>:<index>", 38 bytes of Telegram's 64.
+  const keyboard = item?.choices && {
+    reply_markup: { inline_keyboard: item.choices.map((c, i) => [{ text: c === item.recommended ? `${c} (recommended)` : c, callback_data: `${item.id}:${i}` }]) },
+  };
+  const result = await sendToOwner(item ? questionText(item) : `Billion: ${body}`, { env, platform, extra: keyboard || undefined });
+  if (result.error) return { pinned: true, n: item?.n, error: `Pinned under "Waiting on you" in the owner's browser${n}, but the Telegram send failed: ${result.error}` };
+  // Kept so a reply to this message, or a tap on its buttons, finds the question.
+  if (item && result.messageId) {
+    let saved;
+    try { saved = updateWaiting(item.id, { tgMessageId: result.messageId, ...(result.voice ? { tgVoice: true } : {}) }); } catch {}
+    // Answered in the app while the send was on its way.
+    if (saved?.status === 'answered') await showAnswerOnPhone(saved, env);
+  }
+  return { ok: true, n: item?.n };
 }
 
 // --- Replies: long-polling getUpdates ---
@@ -224,6 +320,7 @@ const discovered = new Set();   // chat ids already shown, so a stranger's first
 
 // One update. Returns what happened, for the tests and the log.
 export async function handleUpdate(update, { broadcast, env = process.env } = {}) {
+  if (update?.callback_query) return handleButton(update.callback_query, { broadcast, env });
   const msg = update?.message;
   const chat = msg?.chat?.id;
   if (chat === undefined || chat === null) return 'ignored';
@@ -244,6 +341,17 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   const typed = typeof msg.text === 'string' && msg.text.trim() ? msg.text : null;
   if (!note && !typed) return 'ignored';
   saveOwnerMode(note ? 'voice' : 'text');
+  // A typed reply to one of Billion's questions answers that question.
+  const repliedTo = typed && msg.reply_to_message?.message_id;
+  const question = repliedTo && waitingItems().find(i => i.tgMessageId === repliedTo && i.status === 'open');
+  if (question) {
+    const result = await answerWaiting(question.id, typed, 'telegram', { broadcast, env });
+    if (result.error) {
+      await sendTelegram(result.error, { env });
+      return result.error === 'Billion is not running' ? 'not-running' : 'full';
+    }
+    return 'answered';
+  }
   const billion = liveBillion();
   if (!billion) {
     await sendTelegram('Billion is not running', { env });
@@ -266,9 +374,29 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   return 'delivered';
 }
 
+// A tap on a question's button: "<item id>:<choice index>".
+async function handleButton(query, { broadcast, env }) {
+  const { chatId } = telegramSettings(env);
+  // The owner's chat only, and nothing said to anyone else.
+  if (!chatId || String(query.message?.chat?.id) !== chatId) return 'ignored';
+  const [id, index] = String(query.data || '').split(':');
+  const item = waitingItems().find(i => i.id === id);
+  const choice = item?.choices?.[Number(index)];
+  const ack = (text) => call('answerCallbackQuery', { callback_query_id: query.id, text }, { env })
+    .catch(err => console.error('Telegram: could not answer a button:', redact(err.message, env)));
+  if (!choice || item.status !== 'open') {
+    await ack(item?.status === 'answered' ? `Already answered: ${item.answer}` : 'That question is gone.');
+    return 'stale';
+  }
+  const result = await answerWaiting(id, choice, 'telegram', { broadcast, env });
+  await ack(result.error || `Sent: ${choice}`);
+  if (result.error) return result.error === 'Billion is not running' ? 'not-running' : 'full';
+  return 'answered';
+}
+
 // One getUpdates round. Returns the next offset.
 export async function pollOnce(offset, { broadcast, env = process.env, signal } = {}) {
-  const params = { timeout: POLL_TIMEOUT_S, allowed_updates: ['message'] };
+  const params = { timeout: POLL_TIMEOUT_S, allowed_updates: ['message', 'callback_query'] };
   if (offset) params.offset = offset;
   // Longer than Telegram's own wait, so a dead connection still gives up.
   const deadline = AbortSignal.timeout((POLL_TIMEOUT_S + 15) * 1000);

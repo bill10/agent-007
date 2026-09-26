@@ -1,5 +1,5 @@
 // File explorer panel — repo sections, branch trees, inline diffs
-import { agents, repos, orphans, activeSessionId, setView, billionEnabled, waitingItems } from './state.js';
+import { agents, repos, orphans, activeSessionId, setView, billionEnabled } from './state.js';
 import { send } from './ws.js';
 import { switchToSession } from './terminal.js';
 
@@ -326,32 +326,6 @@ function renderBillionRow(content) {
     entry.appendChild(start);
   }
   section.appendChild(entry);
-  // What Billion asked the owner with notify_owner, until they dismiss it.
-  if (waitingItems.length) {
-    const list = document.createElement('ul');
-    list.className = 'explorer-waiting';
-    list.setAttribute('aria-label', 'Waiting on you');
-    const head = document.createElement('li');
-    head.className = 'explorer-waiting-head';
-    head.textContent = 'Waiting on you';
-    list.appendChild(head);
-    for (const item of waitingItems) {
-      const li = document.createElement('li');
-      li.className = 'explorer-waiting-item';
-      const text = document.createElement('span');
-      text.textContent = item.text;
-      text.title = item.text;
-      const dismiss = document.createElement('button');
-      dismiss.className = 'explorer-icon-btn';
-      dismiss.textContent = '\u00d7';
-      dismiss.title = 'Dismiss';
-      dismiss.setAttribute('aria-label', 'Dismiss');
-      dismiss.onclick = () => send({ type: 'waiting-dismiss', id: item.id });
-      li.append(text, dismiss);
-      list.appendChild(li);
-    }
-    section.appendChild(list);
-  }
   content.appendChild(section);
 }
 

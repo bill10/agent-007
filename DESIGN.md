@@ -930,6 +930,29 @@ the same shape as the terminal's upload, and land under
   stragglers every scan, so a deferred or OS-refused removal is reclaimed
   later instead of leaking. Deleting a card earlier removes its directory too.
 
+## Waiting on you
+
+Billion's `notify_owner` questions, in a pinned tab right after Jobs: same
+`.board-tab` shape (muted until active, then `--accent`), a bell icon, and the
+same orange `.board-tab-badge`, here counting open questions. On a phone the
+bottom bar has a fourth button, *Waiting*, with the same badge; it opens the
+terminal panel on this tab.
+
+- One card per open question, newest first, in the job card's frame
+  (`--bg-dark`, hairline border) with an `--state-message` left stripe: it is
+  something waiting on a person. Head: `Q3` in accent, age in `--text-dim`, ×.
+- Choices are outline buttons; the recommended one has an accent border and a
+  small uppercase "recommended" tag. Under them, always, a one-line reply
+  input with an accent Send button.
+- After a click the card's controls dim until the server answers; a refusal
+  ("Billion is not running") shows under the card in `--state-disconnected`
+  and the card stays open with the draft kept.
+- Answered questions fold into a collapsed `<details>` "Answered (n)", the
+  last 20: `Q3`, the question on one line, then `→ answer · app|Telegram · age`.
+- Empty: "Nothing waiting on you." in `--text-dim`.
+- Phones: choices, Send and the input are 44px tall; the input is 16px so iOS
+  does not zoom.
+
 ## Interactive Behaviors
 
 ### Icon buttons
