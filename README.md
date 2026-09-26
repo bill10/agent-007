@@ -5,14 +5,16 @@
 
 **From web terminals for your coding agents to a self-running agent company.**
 
-![An agent walks to its desk and starts work, a job card is posted and dispatched to a second desk, and an agent turns orange when it stops to ask a question](docs/demo.gif)
+![Billion is given a mission, posts two jobs to the board, two agents pick them up and finish the work, and Billion reviews the diffs and merges them: shipped](docs/billion-demo.gif)
 
-*Recorded from the running app. If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
+*Recorded from the running app -- [full 41s video](https://github.com/bill10/agent-007/releases/download/v0.6.4.0/billion-demo.mp4). If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
 
 Use it as far along as you need:
 
 1. **One task: one agent in a web terminal.** Start Claude Code, Codex or any CLI agent in the browser. Add a repo once; every agent gets its own git worktree and branch, so you never set one up by hand.
 2. **Many tasks across projects: many terminals, one window.** Every repo and every agent in one place, with live terminals, a file explorer, inline diffs, and a pixel office where each agent faces its screen while it works and turns to you when it needs you.
+
+   ![An agent walks to its desk and starts work, a job card is posted and dispatched to a second desk, and an agent turns orange when it stops to ask a question](docs/demo.gif)
 3. **Stop watching them: a job board.** Put tasks on the board and Claude Code or Codex workers pick them up, each in its own worktree, and move them To do -> In progress -> Review on their own, landing as a pull request (or a summary, for work that isn't code). Cards can run on a cron schedule and pick their model (strong for hard code, fast for docs), from the models the board finds installed, and agents can post cards and message each other.
 4. **Stop posting jobs: give Billion a goal.** Billion is one always-on agent that plans, posts the jobs, reviews what comes back and merges the PRs. It only asks you about money, access or anything irreversible.
 
