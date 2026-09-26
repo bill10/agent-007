@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
-  notifyOwner, sendTelegram, handleUpdate, pollOnce, startTelegram, stopTelegram,
+  notifyOwner, tellOwner, sendTelegram, handleUpdate, pollOnce, startTelegram, stopTelegram,
   waitingItems, dismissWaiting, redact, NOTIFY_LIMIT, NOTIFY_WINDOW_MS,
 } from '../server/owner.js';
 import { handleMcpMessage } from '../server/mcp.js';
@@ -90,6 +90,45 @@ describe('notify_owner', () => {
     const res = await handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'hi' } } },
       { session: { isBillion: true }, notifyOwner: async () => ({ error: 'nope' }) });
     expect(res.result).toMatchObject({ isError: true, content: [{ text: 'nope' }] });
+  });
+});
+
+describe('tell_owner', () => {
+  it('sends "Billion: <text>" and files no Waiting item or badge change', async () => {
+    const broadcast = vi.fn();
+    expect(await tellOwner('Got it, restart looks clean.', { env: ENV, now: now() })).toEqual({ ok: true });
+    expect(calls()).toEqual([{ url: `https://api.telegram.org/bot${TOKEN}/sendMessage`, body: { chat_id: '42', text: 'Billion: Got it, restart looks clean.' } }]);
+    expect(waitingItems()).toEqual([]);
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
+  it('errors clearly without Telegram and does nothing else', async () => {
+    expect(await tellOwner('hi', { env: {}, now: now() })).toEqual({ error: 'Telegram is not set up; say it in your terminal.' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(waitingItems()).toEqual([]);
+  });
+
+  it('shares notify_owner\'s rate limit', async () => {
+    const t = now();
+    for (let i = 0; i < NOTIFY_LIMIT - 1; i++) expect((await notifyOwner(`q${i}`, { env: ENV, now: t + i })).ok).toBe(true);
+    expect(await tellOwner('ok', { env: ENV, now: t + 5 })).toEqual({ ok: true });
+    expect((await tellOwner('again', { env: ENV, now: t + 6 })).error).toMatch(/last minute/);
+    expect((await notifyOwner('more', { env: ENV, now: t + 7 })).error).toMatch(/last minute/);
+    expect(fetchMock).toHaveBeenCalledTimes(NOTIFY_LIMIT);
+  });
+
+  it('refuses empty or oversized text', async () => {
+    expect((await tellOwner(' ', { env: ENV, now: now() })).error).toMatch(/empty/);
+    expect((await tellOwner('x'.repeat(5000), { env: ENV, now: now() })).error).toMatch(/keep it under/);
+  });
+
+  it('is Billion\'s tool only, over MCP', async () => {
+    const list = (session) => handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { session }).result.tools.map(t => t.name);
+    expect(list({ isBillion: true })).toContain('tell_owner');
+    expect(list({})).not.toContain('tell_owner');
+    const call = (ctx) => handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'tell_owner', arguments: { text: 'hi' } } }, ctx);
+    expect((await call({ session: {} })).error).toBeTruthy();
+    expect((await call({ session: { isBillion: true }, tellOwner: async () => ({ ok: true }) })).result.content[0].text).toBe('Sent to the owner on Telegram.');
   });
 });
 
