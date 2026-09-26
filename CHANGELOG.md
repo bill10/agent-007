@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.12.2.1] - 2026-09-26
+
+### Changed
+
+- **The board asks Codex for its models with `codex debug models`.** Codex's official catalog command replaces reading its private `models_cache.json`, which is still read if the command is missing, fails, times out or prints something that is not a catalog. The server log says which one each refresh used.
+
 ## [0.12.2.0] - 2026-09-26
 
 ### Fixed
