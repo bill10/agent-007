@@ -59,11 +59,17 @@ async function call(method, params, { env = process.env, signal } = {}) {
       ...(form ? { body: params } : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) }),
       signal,
     });
-    body = await res.json().catch(() => ({ ok: false, description: `HTTP ${res.status}` }));
+    body = await res.json().catch(() => ({ ok: false, error_code: res.status, description: `HTTP ${res.status}` }));
   } catch (err) {
-    throw new Error(redact(err.cause?.message || err.message, env));
+    // reason: a short label for the poll loop's offline line.
+    const reason = /ENOTFOUND|EAI_AGAIN/.test(err.cause?.code) ? 'DNS'
+      : err.name === 'TimeoutError' || /timeout/i.test(err.message) ? 'timeout' : 'no network';
+    throw Object.assign(new Error(redact(err.cause?.message || err.message, env)), { reason });
   }
-  if (!body?.ok) throw new Error(redact(body?.description || 'Telegram said no', env));
+  if (!body?.ok) {
+    const status = body?.error_code;
+    throw Object.assign(new Error(redact(body?.description || 'Telegram said no', env)), { status, reason: status ? `HTTP ${status}` : 'Telegram said no' });
+  }
   return body.result;
 }
 
@@ -414,6 +420,16 @@ export async function pollOnce(offset, { broadcast, env = process.env, signal } 
 
 let stopper = null;
 
+// Failures that retrying will not fix, and what the owner should do about them.
+const POLL_HINTS = {
+  401: 'the bot token is wrong or revoked',
+  409: 'another process is polling this bot',
+};
+const OFFLINE_AFTER_MS = 60 * 1000;
+const OFFLINE_AFTER_FAILURES = 3;
+
+const since = ms => ms < 120e3 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60e3)}m`;
+
 const pause = (ms, signal) => new Promise(resolve => {
   const timer = setTimeout(resolve, ms);
   signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
@@ -432,13 +448,27 @@ export function startTelegram({ broadcast, env = process.env } = {}) {
   (async () => {
     let offset = 0;
     let backoff = 1000;
+    // Sleep, wake and network changes fail a poll or two; log only going
+    // offline and coming back, not every retry.
+    let failures = 0, failingSince = 0, offline = false;
     while (!controller.signal.aborted) {
       try {
         offset = await pollOnce(offset, { broadcast, env, signal: controller.signal });
+        if (offline) console.log(`Telegram: back online after ${since(Date.now() - failingSince)}`);
+        failures = 0;
+        offline = false;
         backoff = 1000;
       } catch (err) {
         if (controller.signal.aborted) break;
-        console.error(`Telegram: getUpdates failed (${err.message}); retrying in ${backoff / 1000}s`);
+        if (!failures++) failingSince = Date.now();
+        const hint = POLL_HINTS[err.status];
+        // A hint logs even mid-outage: a token revoked while offline still needs saying.
+        if (hint ? offline !== hint : !offline && (failures >= OFFLINE_AFTER_FAILURES || Date.now() - failingSince > OFFLINE_AFTER_MS)) {
+          offline = hint || true;
+          console.error(hint
+            ? `Telegram: getUpdates failed (${err.message}): ${hint}; retrying quietly`
+            : `Telegram: offline (${err.reason || 'no network'}), retrying quietly`);
+        }
         await pause(backoff, controller.signal);
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
       }
