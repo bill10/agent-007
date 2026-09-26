@@ -36,6 +36,12 @@ export const SERVER_INFO = { name: 'agent-007-board', version: '1' };
 // for and — deliberately — when to reach for it. "When the user asks" is the
 // operative clause: a job board full of work an agent queued for itself is not
 // what this is for.
+// The model field's description. toolsFor appends the models discovered on
+// this machine right now, since those are the only values the board accepts.
+const MODEL_HELP = 'Optional. Which model the card\'s CLI runs, from the list below for its '
+  + 'agent; empty for the CLI\'s default. A strong model for core code, security and '
+  + 'debugging; a fast one for docs, mechanical edits and research.';
+
 export const POST_JOB_TOOL = {
   name: 'post_job',
   description:
@@ -83,6 +89,10 @@ export const POST_JOB_TOOL = {
         description:
           'Optional. Which CLI the board spawns for this card: claude (Claude Code) '
           + 'or codex. Defaults to the one you are running as.',
+      },
+      model: {
+        type: 'string',
+        description: MODEL_HELP,
       },
       requires_pr: {
         type: 'boolean',
@@ -152,7 +162,7 @@ export const EDIT_JOB_TOOL = {
   name: 'edit_job',
   description:
     'Change a card that is still in To do: its title, detail, repository, '
-    + 'schedule or whether it requires a pull request. Only To do cards can be edited — once the board has dispatched a '
+    + 'schedule, model or whether it requires a pull request. Only To do cards can be edited — once the board has dispatched a '
     + 'card its agent has already been handed the text, so a later edit would leave '
     + 'the card describing work nobody was asked to do. Pass only the fields that '
     + 'change; the rest are left alone. Ids come from list_jobs.',
@@ -176,6 +186,10 @@ export const EDIT_JOB_TOOL = {
         description:
           'Replaces the cron schedule (five fields, or an @shorthand). Pass an empty '
           + 'string to turn a scheduled card back into one that runs once.',
+      },
+      model: {
+        type: 'string',
+        description: `${MODEL_HELP} Switching the card's agent without naming a model clears it.`,
       },
       requires_pr: {
         type: 'boolean',
@@ -398,8 +412,21 @@ export const RESPAWN_AGENT_TOOL = {
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
 const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, NOTIFY_OWNER_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL];
 
-export function toolsFor(session) {
-  return session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
+// `models` is { claude: [...], codex: [...] } as server/models.js last found them.
+export function toolsFor(session, models) {
+  const tools = session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
+  if (!models) return tools;
+  const known = JOB_AGENTS.map(a => `${a}: ${models[a]?.length ? models[a].join(', ') : '(none found; leave empty)'}`).join('; ');
+  return tools.map(tool => (tool.inputSchema.properties.model ? {
+    ...tool,
+    inputSchema: {
+      ...tool.inputSchema,
+      properties: {
+        ...tool.inputSchema.properties,
+        model: { ...tool.inputSchema.properties.model, description: `${tool.inputSchema.properties.model.description} Available now — ${known}.` },
+      },
+    },
+  } : tool));
 }
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
@@ -428,6 +455,7 @@ const scheduleText = (job, sep = ', next ') =>
 function summaryLine(job) {
   const bits = [job.repo];
   if (job.agent === 'codex') bits.push('codex');
+  if (job.model) bits.push(`model ${job.model}`);
   if (job.type === 'scheduled') {
     bits.push(`schedule ${scheduleText(job)}`);
   }
@@ -449,6 +477,7 @@ const CALLS = {
       repo: args.repo,
       schedule: args.schedule,
       agent: args.agent,
+      model: args.model,
       requiresPr: args.requires_pr,
       session: ctx.session || null,
     });
@@ -508,6 +537,7 @@ const CALLS = {
       `repo: ${job.repo}`,
       // Only when it is not the default, the way the card's chip works.
       job.agent === 'codex' ? 'runs on: codex' : null,
+      `model: ${job.model || 'CLI default'}`,
       job.type === 'scheduled'
         ? `schedule: ${scheduleText(job, ' — next ')}`
           + `${job.runCount ? ` — posted ${job.runCount} run(s), last ${when(job.lastRunAt)}` : ''}`
@@ -546,6 +576,7 @@ const CALLS = {
       detail: args.detail,
       repo: args.repo,
       schedule: args.schedule,
+      model: args.model,
       requiresPr: args.requires_pr,
     });
     if (result.error) return toolText(result.error, true);
@@ -676,7 +707,7 @@ export function handleMcpMessage(msg, ctx = {}) {
   if (isNotification) return null;
 
   if (method === 'ping') return ok(id, {});
-  if (method === 'tools/list') return ok(id, { tools: toolsFor(ctx.session) });
+  if (method === 'tools/list') return ok(id, { tools: toolsFor(ctx.session, ctx.models) });
 
   if (method === 'tools/call') {
     // hasOwn, not truthiness: a plain object inherits Object.prototype, so a

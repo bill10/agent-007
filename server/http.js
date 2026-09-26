@@ -18,6 +18,7 @@ import { requestApproval, answerApproval } from './approvals.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner } from './owner.js';
+import { availableModels } from './models.js';
 
 // --- Origin Check Middleware (B2) ---
 // Rejects cross-origin requests from disallowed origins. localhost is always
@@ -106,6 +107,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
     try {
       reply = await handleMcpMessage(req.body, {
         session: req.agentSession,
+        models: availableModels(),
         postJob: (fields) => postJobForAgent({ ...fields, user: userById(req.agentSession.ownerId) }, broadcast),
         listJobs: listJobsForAgent,
         readJob: readJobForAgent,
@@ -195,6 +197,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       type: body.type,
       schedule: body.schedule,
       agent: body.agent,
+      model: body.model,
       requiresPr: body.requiresPr ?? body.requires_pr,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),

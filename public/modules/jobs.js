@@ -284,6 +284,13 @@ function renderCard(job) {
     chip.title = 'Finishes with a summary from its agent instead of a pull request';
     title.appendChild(chip);
   }
+  if (job.model) {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = job.model;
+    chip.title = `Runs on the ${job.model} model instead of the CLI's default`;
+    title.appendChild(chip);
+  }
   if (job.permissionMode) {
     // Only when the card overrides the board. The mode decides how much its
     // agent may do unasked, so a card carrying its own must say so on its face
@@ -730,6 +737,32 @@ function syncAgentField() {
     opt.textContent = codex ? opt.dataset.codexLabel : opt.dataset.claudeLabel;
   }
   markDangerousMode(permEl);
+  syncModelField();
+}
+
+// The discovered models for the chosen CLI (server/models.js), plus the one
+// the card already holds if discovery no longer lists it, so opening the form
+// never silently changes it.
+let models = { claude: [], codex: [] };
+let formModel = '';
+let formAgent = 'claude';
+function syncModelField() {
+  const el = document.getElementById('job-model');
+  if (!el) return;
+  const agent = document.getElementById('job-agent')?.value === 'codex' ? 'codex' : 'claude';
+  const list = [...(models[agent] || [])];
+  if (formModel && agent === formAgent && !list.includes(formModel)) list.push(formModel);
+  // The card's own value on open; after that, whatever is picked.
+  const keep = el.dataset.filled ? el.value : formModel;
+  el.dataset.filled = '1';
+  el.innerHTML = '<option value="">CLI default</option>';
+  for (const m of list) {
+    const opt = document.createElement('option');
+    opt.value = m;
+    opt.textContent = m;
+    el.appendChild(opt);
+  }
+  el.value = list.includes(keep) ? keep : '';
 }
 
 // A shape check only — five whitespace-separated fields, or a known @shorthand.
@@ -801,6 +834,12 @@ function openForm(jobId) {
   // which would silently freeze the card onto today's setting.
   if (permEl) permEl.value = job && job.permissionMode ? job.permissionMode : '';
   if (agentEl) agentEl.value = job && job.agent === 'codex' ? 'codex' : 'claude';
+  formModel = job && job.model ? job.model : '';
+  formAgent = agentEl ? agentEl.value : 'claude';
+  const modelEl = document.getElementById('job-model');
+  if (modelEl) delete modelEl.dataset.filled;
+  // The server looks again if its list is over 10 minutes old.
+  send({ type: 'models-refresh' });
   prPicked = false;
   prEl.value = job ? (job.requiresPr === false || (isScheduled(job) && job.requiresPr !== true) ? 'no' : 'yes') : 'yes';
   syncAgentField();   // also marks the danger colour on the permission select
@@ -849,7 +888,11 @@ function saveForm() {
   // The form always holds the complete list; an empty one on an edit means
   // "none left".
   const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
+  const model = document.getElementById('job-model')?.value || '';
   const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, requiresPr, attachments };
+  // An edit that leaves the model alone does not send it, so a card whose
+  // model discovery no longer lists can still be retitled.
+  if (!editingJobId || model !== formModel) fields.model = model;
   if (editingJobId) send({ type: 'job-update', jobId: editingJobId, ...fields });
   else send({ type: 'job-create', ...fields });
   closeForm();
@@ -899,6 +942,7 @@ export function handleJobsList(msg) {
   jobs.clear();
   for (const job of msg.jobs || []) jobs.set(job.id, job);
   if (msg.settings) setBoardSettings(msg.settings);
+  if (msg.models) { models = msg.models; syncModelField(); }
   renderToolbar();
   renderBoard();
   if (window._onBoardVisibilityChanged) window._onBoardVisibilityChanged();

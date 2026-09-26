@@ -167,6 +167,11 @@
                   <option value="codex">Codex</option>
                 </select>
               </label>
+              <label title="Which model this job's agent runs. The list is what the board found for the chosen CLI on this computer; CLI default leaves the choice to the CLI.">Model
+                <select id="job-model">
+                  <option value="">CLI default</option>
+                </select>
+              </label>
               <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different. A Codex card offers auto (Codex's own default) and bypassPermissions (--dangerously-bypass-approvals-and-sandbox); a board set to another mode maps onto Codex's nearest flag: plan is read-only, manual asks before every command, dontAsk never asks.">Permissions
                 <select id="job-permission-mode-field">
                   <option value="">Board default</option>
