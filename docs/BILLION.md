@@ -568,9 +568,11 @@ anywhere but Telegram, and there is no paid transcription.
   chose when Telegram starts. A `SAY_VOICE` that is not installed is logged
   once and the automatic pick is used.
 - **How fast**: `SAY_RATE` in words per minute, 120 to 300 (outside that is
-  clamped, anything but a whole number is logged once and ignored). Unset it
-  is 205, a little faster than `say`'s own 175. The startup line gives both:
-  `Telegram: speaking with the Ava (Premium) voice at 205 wpm`.
+  clamped, anything but a whole number is logged once and ignored). Unset, no
+  `-r` is passed to `say` at all, so each voice speaks at its own system
+  default speed. The startup line gives both:
+  `Telegram: speaking with the Ava (Premium) voice at 205 wpm` (or "...at the
+  system default speed" when `SAY_RATE` is unset).
 - **You speak**: send the bot a voice note (or an audio file) and it is
   transcribed on this machine by [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
   then typed into Billion's terminal as `[Owner via Telegram, voice] <transcript>`.

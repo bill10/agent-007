@@ -93,11 +93,11 @@ describe('SAY_RATE', () => {
     await synthesize('hello', env);
     await synthesize('again', env);
     return tools.calls.filter(([cmd, args]) => cmd === 'say' && args[1] !== '?')
-      .map(([, args]) => args[args.indexOf('-r') + 1]);
+      .map(([, args]) => args.includes('-r') ? args[args.indexOf('-r') + 1] : null);
   };
 
-  it('defaults to 205 wpm', async () => {
-    expect(await rates({})).toEqual(['205', '205']);
+  it('unset means no -r, the voice speaks at its own system rate', async () => {
+    expect(await rates({})).toEqual([null, null]);
     expect(log).not.toHaveBeenCalled();
   });
 
@@ -112,8 +112,8 @@ describe('SAY_RATE', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('ignores garbage with one log line', async () => {
-    expect(await rates({ SAY_RATE: 'fast' })).toEqual(['205', '205']);
+  it('ignores garbage with one log line and no -r', async () => {
+    expect(await rates({ SAY_RATE: 'fast' })).toEqual([null, null]);
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0][0]).toContain('"fast"');
   });
