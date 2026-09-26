@@ -635,7 +635,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
         // The card form opening: look again if the list is over 10 minutes
         // old, so a CLI installed since shows up without a restart.
         case 'models-refresh': {
-          if (refreshIfStale()) broadcastJobs(broadcast);
+          refreshIfStale().then(changed => { if (changed) broadcastJobs(broadcast); }).catch(err => console.error('models-refresh:', err));
           break;
         }
         case 'job-pause': {

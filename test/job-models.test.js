@@ -13,6 +13,9 @@ import { parseCommand } from '../lib/helpers.js';
 import { createJob, createRunJob, buildJobCommand, resumeCommand, resolveJobModel } from '../lib/jobs.js';
 
 const FIXTURE = readFileSync(join(import.meta.dirname, 'fixtures/codex-models-cache.json'), 'utf8');
+// `codex debug models` from codex-cli 0.157.0, prompt text trimmed.
+const DEBUG_MODELS = readFileSync(join(import.meta.dirname, 'fixtures/codex-debug-models.json'), 'utf8');
+const LISTED = ['gpt-6-luna', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5'];
 const REPO = mkdtempSync(join(tmpdir(), 'a007-models-'));
 const noop = () => {};
 const MODELS = { claude: CLAUDE_ALIASES, codex: ['gpt-6-luna', 'gpt-5.5'] };
@@ -32,18 +35,31 @@ describe('discovery', () => {
     expect(parseCodexModels('{"models":{}}')).toEqual([]);
   });
 
-  it('offers Claude\'s aliases and Codex\'s cache, from CODEX_HOME, for CLIs that are installed', () => {
-    const read = (p) => { expect(p).toBe(join('/ch', 'models_cache.json')); return FIXTURE; };
-    const both = discoverModels({ env: { CODEX_HOME: '/ch' }, exists: () => true, read });
-    expect(both.claude).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
-    expect(both.codex).toContain('gpt-6-luna');
-    expect(discoverModels({ env: {}, exists: (f) => f === 'claude', read })).toEqual({ claude: CLAUDE_ALIASES, codex: [] });
+  it('asks `codex debug models`, keeping only the listed models in picker order', async () => {
+    const logs = [];
+    const read = () => { throw new Error('the cache is not read when codex answers'); };
+    const both = await discoverModels({ env: {}, exists: () => true, read, run: async () => DEBUG_MODELS, log: (l) => logs.push(l) });
+    expect(both).toEqual({ claude: ['fable', 'opus', 'sonnet', 'haiku'], codex: LISTED });
+    expect(logs).toEqual(["  Models: Codex's from `codex debug models`"]);
   });
 
-  it('is empty when discovery fails', () => {
+  it('falls back to the cache in CODEX_HOME when the command fails or prints junk', async () => {
+    const read = (p) => { expect(p).toBe(join('/ch', 'models_cache.json')); return FIXTURE; };
+    for (const run of [async () => { throw new Error('ETIMEDOUT'); }, async () => 'not json', async () => '{"models":{}}']) {
+      const logs = [];
+      const found = await discoverModels({ env: { CODEX_HOME: '/ch' }, exists: () => true, read, run, log: (l) => logs.push(l) });
+      expect(found.codex).toEqual(LISTED);
+      expect(logs).toEqual(["  Models: Codex's from models_cache.json"]);
+    }
+  });
+
+  it('offers nothing for a CLI that is not installed, and is empty when discovery fails', async () => {
+    const fail = async () => { throw new Error('ENOENT'); };
     const read = () => { throw new Error('ENOENT'); };
-    expect(discoverModels({ env: {}, exists: () => false, read })).toEqual({ claude: [], codex: [] });
-    expect(discoverModels({ env: {}, exists: () => true, read }).codex).toEqual([]);
+    const run = () => { throw new Error('not run for a missing codex'); };
+    expect(await discoverModels({ env: {}, exists: (f) => f === 'claude', read, run })).toEqual({ claude: CLAUDE_ALIASES, codex: [] });
+    expect(await discoverModels({ env: {}, exists: () => false, read, run })).toEqual({ claude: [], codex: [] });
+    expect((await discoverModels({ env: {}, exists: () => true, read, run: fail, log: noop })).codex).toEqual([]);
   });
 });
 
@@ -81,13 +97,13 @@ describe('command line', () => {
 });
 
 describe('on the board', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     config.repos = [{ path: REPO }];
     config.jobs = [];
     config.jobBoard = null;
     boardSettings();
     sessions.clear();
-    refreshModels({ env: {}, exists: () => true, read: () => FIXTURE });
+    await refreshModels({ env: {}, exists: () => true, read: () => FIXTURE, run: async () => DEBUG_MODELS, log: noop });
   });
 
   it('rejects an unknown model at every door', () => {
