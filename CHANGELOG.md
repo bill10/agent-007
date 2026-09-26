@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.15.1.0] - 2026-09-26
+
+### Fixed
+
+- **Billion hears when a board tool changes under a resumed conversation.** Claude Code keeps each tool's definition from when the conversation first loaded it, so after an upgrade Billion went on reading the old `notify_owner` (no one-tap choices) with nothing to say it had changed. Each start now saves the current board tool definitions to `billion-tools.json` in the config folder, and the restart prompt names the tools that changed since the last start and tells Billion to read them there.
+
 ## [0.15.0.0] - 2026-09-26
 
 ### Added
