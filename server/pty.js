@@ -10,7 +10,7 @@ export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken, authEnabled } from './auth.js';
-import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook } from './agent-mcp.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook, withCodexWorkerTools } from './agent-mcp.js';
 import { broadcastJobs, requestDispatch } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
@@ -244,7 +244,11 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // use it — a plain `bash` tab does not need one.
   const mcpConfigPath = takesMcpConfig(file) ? writeMcpConfig(sessionId, agentToken) : null;
   const codexTrust = autoTrust && sessionAgentFromCommand(command) === 'codex';
-  const mcpArgs = withMcpConfig(file, codexTrust ? [...codexTrustArgs(worktreePath), ...args] : args, mcpConfigPath);
+  const ownArgs = codexTrust ? [...codexTrustArgs(worktreePath), ...args] : args;
+  // Codex has no hook yet, but its worker on Billion's card still gets the
+  // same board tools pre-allowed. Inside withMcpConfig, whose server table
+  // override would otherwise replace them.
+  const mcpArgs = withMcpConfig(file, approvalsToBillion ? withCodexWorkerTools(file, ownArgs, mcpConfigPath) : ownArgs, mcpConfigPath);
   // A worker on one of Billion's cards asks Billion before it asks a person
   // (server/approvals.js) — where the CLI can be hooked, which today is
   // Claude Code only. Recorded as whether the hook actually went in.
