@@ -134,12 +134,30 @@ export function suggestProjectsDir(repoPaths, { ignoreUnder = CONFIG_DIR } = {})
 }
 
 
+// Claude Code keeps each deferred tool's definition from the moment a
+// conversation first loads it (a deferred_tools_record in the transcript), and
+// a resumed conversation goes on using that copy, as it does the MCP server's
+// instructions. A fresh tools/list, notifications/tools/list_changed and
+// loading the tool again with ToolSearch all leave it (Claude Code 2.1.283). So an
+// upgrade that changes a board tool leaves a resumed Billion reading the old
+// one. Its calls still reach this server, which takes the new fields, so
+// Billion only needs telling. This saves the current definitions to file and
+// returns the names that differ from the last saved copy: all of them when
+// there is none, since the conversation may predate any of them.
+export function changedBoardTools(file, tools) {
+  let saved = [];
+  try { saved = JSON.parse(readFileSync(file, 'utf8')); } catch {}
+  const before = new Map((Array.isArray(saved) ? saved : []).map(t => [t?.name, JSON.stringify(t)]));
+  writeFileSync(file, `${JSON.stringify(tools, null, 2)}\n`);
+  return tools.filter(t => before.get(t.name) !== JSON.stringify(t)).map(t => t.name);
+}
+
 // Everything Billion must do lives in its charter; the prompt only says which
 // part applies. A fresh repo gets the introduction. Any later start says both,
 // because a restart can land mid-introduction: the charter tells it to finish
 // the introduction while STATE.md still says "not started". --continue only
 // when a conversation exists, so a lost transcript still starts cleanly.
-export function billionCommand({ created, hasConversation, dir, projectsHint }) {
+export function billionCommand({ created, hasConversation, dir, projectsHint, changedTools = [], toolsFile }) {
   const where = `Your folder is ${dir}.`;
   const hint = projectsHint
     ? `Suggest ${projectsHint} as the projects folder: most of the owner's repos are there.`
@@ -147,7 +165,11 @@ export function billionCommand({ created, hasConversation, dir, projectsHint }) 
   const prompt = created
     ? `This is your first run. Introduce yourself as described in CHARTER.md under "First run". ${where} ${hint}`
     : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} Otherwise start your operating loop (CHARTER.md, "Operating loop"). ${where}`;
-  return `claude --dangerously-skip-permissions${!created && hasConversation ? ' --continue' : ''} ${quote(prompt)}`;
+  const resumed = !created && hasConversation;
+  const stale = resumed && changedTools.length && toolsFile
+    ? ` Agent 007 changed these board tools since you last started: ${changedTools.join(', ')}. This conversation keeps the definitions it first loaded, so yours are out of date, and loading them again does not help. Read the current ones in ${toolsFile} and call those tools by it: the board accepts the new fields even where your copy does not list them.`
+    : '';
+  return `claude --dangerously-skip-permissions${resumed ? ' --continue' : ''} ${quote(prompt + stale)}`;
 }
 
 // Billion is Claude Code. Without it, its tab runs this instead: one line
