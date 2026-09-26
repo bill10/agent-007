@@ -120,17 +120,19 @@ export function sayVoice(env = process.env) {
   return voicePick;
 }
 
-// SAY_RATE in words per minute, 120–300. Unset: 205, about 15% faster than
-// say's own 175, which the owner found a little slow on Ava (Premium).
-export const DEFAULT_SAY_RATE = 205;
-let ratePick;
+// SAY_RATE in words per minute, 120–300. Unset (or invalid): null, so `say`
+// is not given `-r` at all and speaks at the voice's own system rate.
+let ratePick, ratePicked = false;
 export function sayRate(env = process.env) {
-  if (ratePick) return ratePick;
+  if (ratePicked) return ratePick;
+  ratePicked = true;
   const raw = (env.SAY_RATE || '').trim();
   const n = Number(raw);
-  if (raw && !Number.isInteger(n)) console.log(`  Telegram: SAY_RATE "${raw}" is not a whole number of words per minute; using ${DEFAULT_SAY_RATE}`);
-  ratePick = raw && Number.isInteger(n) ? Math.min(300, Math.max(120, n)) : DEFAULT_SAY_RATE;
-  return ratePick;
+  if (raw && !Number.isInteger(n)) {
+    console.log(`  Telegram: SAY_RATE "${raw}" is not a whole number of words per minute; using the system default speed`);
+    return ratePick = null;
+  }
+  return ratePick = raw ? Math.min(300, Math.max(120, n)) : null;
 }
 
 // text → OGG/Opus bytes. URLs are said as "link"; the caption carries them.
@@ -139,7 +141,8 @@ export function synthesize(text, env = process.env) {
     const txt = join(dir, 'say.txt'), aiff = join(dir, 'say.aiff'), ogg = join(dir, 'say.ogg');
     await writeFile(txt, text.replace(URL_RE, 'link'));
     const voice = await sayVoice(env);
-    await run('say', [...(voice ? ['-v', voice] : []), '-o', aiff, '-r', String(sayRate(env)), '-f', txt]);
+    const rate = sayRate(env);
+    await run('say', [...(voice ? ['-v', voice] : []), '-o', aiff, ...(rate ? ['-r', String(rate)] : []), '-f', txt]);
     await run('ffmpeg', ['-y', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', aiff, '-c:a', 'libopus', '-b:a', '32k', ogg]);
     return readFile(ogg);
   });

@@ -460,7 +460,10 @@ export function startTelegram({ broadcast, env = process.env } = {}) {
   if (!chatId) console.log('  Telegram: send any message to your bot, then set TELEGRAM_CHAT_ID=<id> (the id is shown here when it arrives)');
   else console.log('  Telegram: on');
   if (voiceSetting(env) !== 'never' && !speechUnavailable(env)) {
-    sayVoice(env).then(v => console.log(`  Telegram: speaking with ${v ? `the ${v} voice` : "say's default voice"} at ${sayRate(env)} wpm`));
+    sayVoice(env).then(v => {
+      const rate = sayRate(env);
+      console.log(`  Telegram: speaking with ${v ? `the ${v} voice` : "say's default voice"} at ${rate ? `${rate} wpm` : 'the system default speed'}`);
+    });
   }
   const controller = new AbortController();
   stopper = controller;
