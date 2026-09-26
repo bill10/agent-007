@@ -91,6 +91,10 @@ export function writeMcpConfig(sessionId, agentToken) {
 // server/permission-hook.js with this session's MCP config. Claude Code only;
 // Codex takes its hook differently and is not wired yet (docs/BILLION.md).
 const PERMISSION_HOOK = fileURLToPath(new URL('./permission-hook.js', import.meta.url));
+// The two board tools the job prompt tells a worker on Billion's card to use:
+// finishing its card, and asking Billion. Asking permission for those would
+// only send Billion (or the owner) a request to approve its own instructions.
+export const WORKER_BOARD_TOOLS = ['finish_job', 'send_message'];
 const shellQuote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
 // Forward slashes on Windows, which node takes as well: a backslash means
 // something different to each shell a hook might run under (doubled by the
@@ -99,10 +103,7 @@ export const hookPath = (p, platform = process.platform) => (platform === 'win32
 export function withApprovalHook(file, args, configPath) {
   if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
   const settings = {
-    // The two board tools the job prompt tells the worker to use: finishing
-    // its card, and asking Billion. Asking permission for those would only
-    // send Billion a request to approve its own instructions.
-    permissions: { allow: ['finish_job', 'send_message'].map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`) },
+    permissions: { allow: WORKER_BOARD_TOOLS.map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`) },
     hooks: {
       PermissionRequest: [{
         matcher: '*',
@@ -111,6 +112,18 @@ export function withApprovalHook(file, args, configPath) {
     },
   };
   return ['--settings', JSON.stringify(settings), ...args];
+}
+
+// The Codex side of the same pre-allow: per-run -c overrides, one separate argv
+// element each, so ~/.codex/config.toml is never touched. Only these tools;
+// everything else on the server keeps Codex's default (ask). Must come after
+// withMcpConfig's server table on the command line, which replaces the table.
+export function withCodexWorkerTools(file, args, configPath) {
+  if (!configPath || agentName(file) !== 'codex') return args;
+  return [
+    ...WORKER_BOARD_TOOLS.flatMap(tool => ['-c', `mcp_servers.${MCP_SERVER_NAME}.tools.${tool}.approval_mode="approve"`]),
+    ...args,
+  ];
 }
 
 export function removeMcpConfig(sessionId) {

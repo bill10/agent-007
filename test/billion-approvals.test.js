@@ -16,7 +16,7 @@ const { config, sessions } = await import('../server/state.js');
 const { setupRoutes } = await import('../server/http.js');
 const { requestApproval, answerApproval, clearApprovals, APPROVAL_WAIT_MS } = await import('../server/approvals.js');
 const { dropMessages } = await import('../server/messages.js');
-const { withApprovalHook } = await import('../server/agent-mcp.js');
+const { withApprovalHook, withCodexWorkerTools, withMcpConfig } = await import('../server/agent-mcp.js');
 const { mintAgentToken } = await import('../server/auth.js');
 const { addJob, dispatchOnce, boardSettings } = await import('../server/jobs.js');
 const { BILLION_NAME } = await import('../lib/jobs.js');
@@ -112,6 +112,25 @@ describe('the hook in the worker\'s command line', () => {
     expect(withApprovalHook('codex', codex, '/cfg/s1.json')).toBe(codex);
     const own = ['--settings', '{}'];
     expect(withApprovalHook('claude', own, '/cfg/s1.json')).toBe(own);
+  });
+
+  it('pre-allows the same board tools for a Codex worker, one -c per tool', () => {
+    const claudeAllow = JSON.parse(withApprovalHook('claude', [], '/cfg/s1.json')[1]).permissions.allow;
+    const args = withCodexWorkerTools('codex', ['x'], '/cfg/s1.json');
+    expect(args).toEqual([
+      '-c', 'mcp_servers.agent-007-board.tools.finish_job.approval_mode="approve"',
+      '-c', 'mcp_servers.agent-007-board.tools.send_message.approval_mode="approve"',
+      'x',
+    ]);
+    expect(args.filter((a, i) => args[i - 1] === '-c').map(a => `mcp__agent-007-board__${a.split('.')[3]}`)).toEqual(claudeAllow);
+    const claude = ['y'];
+    expect(withCodexWorkerTools('claude', claude, '/cfg/s1.json')).toBe(claude);
+    expect(withCodexWorkerTools('codex.exe', [], null)).toEqual([]);
+    // Wrapped as pty.js does: the server table must come first, since a later
+    // `mcp_servers.agent-007-board={...}` would replace the tools under it.
+    const spawn = withMcpConfig('codex', args, '/cfg/s1.json');
+    expect(spawn.findIndex(a => a.startsWith('mcp_servers.agent-007-board=')))
+      .toBeLessThan(spawn.findIndex(a => a.includes('.tools.')));
   });
 
   it('is asked for on Billion\'s cards only', async () => {
