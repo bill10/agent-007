@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.12.2.2] - 2026-09-26
+
+### Changed
+
+- **The Telegram poller logs going offline and coming back, not every retry.** A Mac sleeping, waking or changing network used to fill the server log with `getUpdates failed` lines. Now a brief blip is silent; an outage past three failures or a minute logs one `Telegram: offline (no network / DNS / timeout / HTTP n), retrying quietly` line, and recovery logs `Telegram: back online after <duration>`. A 401 (wrong or revoked token) or 409 (another process polling this bot) logs right away with a hint.
+
 ## [0.12.2.1] - 2026-09-26
 
 ### Changed
