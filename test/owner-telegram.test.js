@@ -184,3 +184,64 @@ describe('replies from Telegram', () => {
     vi.restoreAllMocks();
   });
 });
+
+describe('the poll loop logs going offline and coming back, not every retry', () => {
+  // A poll that waits until stopped, like a quiet long poll.
+  const hang = (url, init) => new Promise((resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(new Error('aborted')));
+  });
+  const netDown = () => Object.assign(new Error('fetch failed'), { cause: Object.assign(new Error(`connect ENETUNREACH bot${TOKEN}`), { code: 'ENETUNREACH' }) });
+  let lines;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock.mockImplementation(hang);
+    lines = [];
+    const log = (...args) => { if (String(args[0]).startsWith('Telegram:')) lines.push(args.join(' ')); };
+    vi.spyOn(console, 'log').mockImplementation(log);
+    vi.spyOn(console, 'error').mockImplementation(log);
+  });
+  afterEach(() => {
+    stopTelegram();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('a transient timeout then success logs nothing', async () => {
+    fetchMock
+      .mockRejectedValueOnce(new DOMException('The operation was aborted due to timeout', 'TimeoutError'))
+      .mockResolvedValueOnce(reply([]));
+    startTelegram({ env: ENV });
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(lines).toEqual([]);
+  });
+
+  it('a sustained outage logs one offline line and one back-online line, without the token', async () => {
+    for (let i = 0; i < 5; i++) fetchMock.mockRejectedValueOnce(netDown());
+    fetchMock.mockResolvedValueOnce(reply([]));
+    startTelegram({ env: ENV });
+    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000 + 8000 + 16000);
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+    expect(lines).toEqual(['Telegram: offline (no network), retrying quietly', 'Telegram: back online after 31s']);
+    expect(lines.join('\n')).not.toContain(TOKEN);
+  });
+
+  it('a 401 logs right away with a hint', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false, error_code: 401, description: 'Unauthorized' }) });
+    startTelegram({ env: ENV });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(lines).toEqual(['Telegram: getUpdates failed (Unauthorized): the bot token is wrong or revoked; retrying quietly']);
+  });
+
+  it('a 401 during an outage still logs its hint, once', async () => {
+    const unauthorized = { ok: false, json: async () => ({ ok: false, error_code: 401, description: 'Unauthorized' }) };
+    for (let i = 0; i < 3; i++) fetchMock.mockRejectedValueOnce(netDown());
+    fetchMock.mockResolvedValueOnce(unauthorized).mockResolvedValueOnce(unauthorized);
+    startTelegram({ env: ENV });
+    await vi.advanceTimersByTimeAsync(1000 + 2000 + 4000 + 8000);
+    expect(lines).toEqual([
+      'Telegram: offline (no network), retrying quietly',
+      'Telegram: getUpdates failed (Unauthorized): the bot token is wrong or revoked; retrying quietly',
+    ]);
+  });
+});
