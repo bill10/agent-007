@@ -121,7 +121,7 @@ describe('approval edges', () => {
     const text = formatApproval('ab12', worker, { tool_input: { content: 'x'.repeat(5000) } }, null);
     expect(text.split('\n')[0]).toBe('[Approval ab12] Falcon (app · fix-login) asks to use a tool:');
     expect(text).toMatch(/… \(\d+ characters not shown\) …/);
-    expect(text).toMatch(/Cut short: an allow here goes to the owner/);
+    expect(text).toMatch(/Cut short: read it in full with read_approval before allowing/);
     expect(formatApproval('ab12', { name: 'Solo' }, {}, null).split('\n')[0]).toBe('[Approval ab12] Solo asks to use a tool:');
   });
 

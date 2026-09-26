@@ -642,7 +642,9 @@ anywhere but Telegram, and there is no paid transcription.
    into Billion and waits up to 2 minutes for `answer_permission`
    (allow / deny with a reason / owner); anything else — no Billion, one not
    ready, silence, an error — is no decision, and the dialog goes to a
-   person. The same settings pre-allow `finish_job` and `send_message`, the
+   person. Long input is typed in cut short; an allow on it goes to the
+   owner until Billion reads the whole request with `read_approval` (up to
+   20 KB; past that it stays the owner's). The same settings pre-allow `finish_job` and `send_message`, the
    two board tools the job prompt tells workers to use. Your own agents and
    cards are not hooked. Verified live: a worker in manual mode asked to
    Write outside its worktree, Billion allowed it, the file was written, the
