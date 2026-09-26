@@ -651,6 +651,19 @@ describe('checkMergedPullRequests', () => {
     expect(job.prNumber).toBe(9);
   });
 
+  it('re-spawns restart orphans before it dispatches, so they get their slot first', async () => {
+    addJob({ title: 'queued', repoPath: REPO }, noopBroadcast);
+    const order = [];
+    const calls = [];
+    const create = fakeCreateSession(calls);
+    await runScan(async (...args) => { order.push('dispatch'); return create(...args); }, noopBroadcast, {
+      findPr: async () => ({ pr: null }),
+      findMerged: merged(null),
+      respawnWorkers: async () => { order.push('respawn'); },
+    });
+    expect(order).toEqual(['respawn', 'dispatch']);
+  });
+
   it('runs as part of a scan, so a merged PR finishes its job unattended', async () => {
     const job = await inReview();
     await runScan(fakeCreateSession([]), noopBroadcast, {
