@@ -45,6 +45,8 @@ Settings (default in brackets):
   TELEGRAM_CHAT_ID        Your chat with that bot; only it reaches Billion [none]
   TELEGRAM_VOICE          mirror, always or never: Billion's messages as
                           voice (macOS say + ffmpeg) [mirror]
+  SAY_VOICE               macOS voice for that, from say -v '?' [best
+                          installed English Premium/Enhanced voice]
   WHISPER_MODEL           whisper.cpp model file; your voice notes are
                           transcribed locally [off]
   WHISPER_CPP_BIN         whisper.cpp CLI if not on PATH [whisper-cli]
