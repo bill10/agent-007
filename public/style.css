@@ -1202,8 +1202,7 @@ body {
     cursor: pointer;
   }
   .mobile-nav button:hover, .mobile-nav button[aria-current="true"] { color: var(--accent); }
-  .mobile-nav-waiting { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
-  .mobile-nav-waiting .board-tab-badge { letter-spacing: 0; }
+  .mobile-nav-waiting { display: inline-flex; align-items: center; justify-content: center; gap: 12px; }
   .waiting-choice, .waiting-send { min-height: 44px; }
   .waiting-reply input { min-height: 44px; font-size: 16px; }
   /* Overlays sized for desktop */
@@ -1300,6 +1299,25 @@ body {
   line-height: 15px;
   text-align: center;
 }
+
+/* The Waiting tab and phone button: a bell alone, with a phone-style count
+   badge on its top-right corner; dimmed when nothing is open. */
+.waiting-tab { padding: 0 14px; }
+.bell { position: relative; display: inline-flex; flex-shrink: 0; }
+.bell-badge {
+  position: absolute;
+  top: -7px;
+  left: 8px;
+  min-width: 14px;
+  padding: 0 3px;
+  line-height: 14px;
+  letter-spacing: 0;
+  box-shadow: 0 0 0 2px var(--bg-tabs);
+}
+.terminal-tab.waiting-tab.active .bell-badge { box-shadow: 0 0 0 2px var(--bg-terminal); }
+.mobile-nav .bell-badge { box-shadow: 0 0 0 2px var(--bg-dark); }
+.terminal-tab.waiting-tab.empty:not(.active) .board-tab-icon,
+.mobile-nav-waiting.empty:not([aria-current="true"]) svg { opacity: 0.45; }
 
 /* ============================================================
    Waiting on you

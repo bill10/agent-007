@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The "Waiting on you" tab (public/modules/waiting.js): the bell's count, the
+// The "Waiting on you" tab (public/modules/waiting.js): the bell's badge, the
 // cards with their choices and reply line, what answering sends, an inline
 // error that keeps the card open, and the Answered section.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -27,19 +27,36 @@ beforeEach(() => {
 });
 
 describe('the Waiting tab', () => {
-  it('sits next to Jobs with a bell, counting open questions only, here and in the phone bar', () => {
+  it('sits next to Jobs as a bell alone, badged with open questions only, here and in the phone bar', () => {
     setWaitingItems([open(1), open(2), { ...open(3), status: 'answered', answer: 'yes' }]);
     updateTabs();
     const tabs = [...document.querySelectorAll('.terminal-tab')];
-    expect(tabs.map(t => t.textContent.replace(/\d/g, ''))).toEqual(['Jobs', 'Waiting']);
-    expect(tabs[1].querySelector('svg')).not.toBeNull();
-    expect(tabs[1].querySelector('.board-tab-badge').textContent).toBe('2');
+    expect(tabs.map(t => t.textContent.replace(/\d/g, ''))).toEqual(['Jobs', '']);
+    const tab = tabs[1];
+    expect(tab.querySelector('.bell svg')).not.toBeNull();
+    expect(tab.querySelector('.bell .board-tab-badge').textContent).toBe('2');
+    expect(tab.getAttribute('aria-label')).toBe('Waiting on you, 2 questions');
+    expect(tab.title).toBe('Waiting on you, 2 questions');
     const nav = document.getElementById('mobile-nav-waiting-count');
-    expect([nav.textContent, nav.hidden]).toEqual(['2', false]);
+    const navBtn = document.querySelector('.mobile-nav [data-view="waiting"]');
+    expect([nav.textContent, nav.hidden, navBtn.getAttribute('aria-label')]).toEqual(['2', false, 'Waiting on you, 2 questions']);
+
+    setWaitingItems([open(1)]);
+    updateTabs();
+    expect(document.querySelector('.waiting-tab').getAttribute('aria-label')).toBe('Waiting on you, 1 question');
+
+    setWaitingItems(Array.from({ length: 10 }, (_, i) => open(i + 1)));
+    updateTabs();
+    expect(document.querySelector('.waiting-tab .board-tab-badge').textContent).toBe('9+');
+    expect(document.querySelector('.waiting-tab').getAttribute('aria-label')).toBe('Waiting on you, 10 questions');
+    expect(nav.textContent).toBe('9+');
+
     setWaitingItems([]);
     updateTabs();
-    expect(document.querySelector('.waiting-tab .board-tab-badge')).toBeNull();
-    expect(nav.hidden).toBe(true);
+    expect(document.querySelector('.waiting-tab .board-tab-badge').hidden).toBe(true);
+    expect(document.querySelector('.waiting-tab').classList.contains('empty')).toBe(true);
+    expect(document.querySelector('.waiting-tab').getAttribute('aria-label')).toBe('Waiting on you');
+    expect([nav.hidden, navBtn.getAttribute('aria-label'), navBtn.title]).toEqual([true, 'Waiting on you', 'Waiting on you']);
   });
 
   it('opens on "Nothing waiting on you." when there is nothing, and lights the phone button', () => {
