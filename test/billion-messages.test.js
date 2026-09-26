@@ -138,7 +138,7 @@ describe('a card Billion posted', () => {
   });
 
   it('tells its worker that Billion can be asked', () => {
-    expect(buildJobPrompt({ title: 't', postedByAgent: BILLION_NAME, postedByBillion: true })).toMatch(/send_message tool \(to: "Billion"\)/);
+    expect(buildJobPrompt({ title: 't', postedByAgent: BILLION_NAME, postedByBillion: true })).toMatch(/agent-007-board send_message tool \(to: "Billion"\)/);
     expect(buildJobPrompt({ title: 't', postedByAgent: 'Cobra' })).not.toMatch(/Billion/);
   });
 });
