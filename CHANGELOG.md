@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.14.0.2] - 2026-09-26
+
+### Changed
+
+- **README hero shows the Billion demo (goal -> jobs -> merged) instead of the older pixel-office capture.** The office GIF moved down next to step 2, and the hero links to the full 41s video.
+
 ## [0.14.0.1] - 2026-09-26
 
 ### Changed
