@@ -48,6 +48,7 @@ Settings (default in brackets):
                           voice (macOS say + ffmpeg) [mirror]
   SAY_VOICE               macOS voice for that, from say -v '?' [best
                           installed English Premium/Enhanced voice]
+  SAY_RATE                How fast it speaks, words per minute, 120-300 [205]
   WHISPER_MODEL           whisper.cpp model file; your voice notes are
                           transcribed locally [off]
   WHISPER_CPP_BIN         whisper.cpp CLI if not on PATH [whisper-cli]

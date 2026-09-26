@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.12.2.3] - 2026-09-26
+
+### Changed
+
+- **Billion's Telegram voice notes speak a little faster, and `SAY_RATE` sets the pace.** The default is 205 words per minute instead of `say`'s 175; `SAY_RATE` takes 120 to 300. The startup log gives the rate with the voice; see docs/BILLION.md, "Voice".
+
 ## [0.12.2.2] - 2026-09-26
 
 ### Changed
