@@ -5,6 +5,7 @@ import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import {
   billionEnabled, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, trustDialogKey,
+  changedBoardTools,
 } from '../server/billion.js';
 import { CONFIG_DIR } from '../server/state.js';
 import { parseCommand } from '../lib/helpers.js';
@@ -139,6 +140,16 @@ describe('billionCommand', () => {
     expect(promptOf(cmd)).toMatch(/without suggesting/);
   });
 
+  it('names changed board tools and where the current ones are, only when resuming', () => {
+    const opts = { dir, projectsHint: null, changedTools: ['notify_owner', 'close_job'], toolsFile: '/cfg/billion-tools.json' };
+    const resumed = promptOf(billionCommand({ ...opts, created: false, hasConversation: true }));
+    expect(resumed).toContain('notify_owner, close_job');
+    expect(resumed).toContain('/cfg/billion-tools.json');
+    expect(promptOf(billionCommand({ ...opts, created: false, hasConversation: false }))).not.toContain('notify_owner');
+    expect(promptOf(billionCommand({ ...opts, created: true, hasConversation: true }))).not.toContain('notify_owner');
+    expect(promptOf(billionCommand({ ...opts, changedTools: [], created: false, hasConversation: true }))).not.toContain('billion-tools');
+  });
+
   it('starts cleanly when there is no conversation to continue', () => {
     const cmd = billionCommand({ created: false, hasConversation: false, dir, projectsHint: null });
     expect(parseCommand(cmd).args).not.toContain('--continue');
@@ -147,6 +158,26 @@ describe('billionCommand', () => {
   it('keeps a folder with quotes and spaces intact through parseCommand', () => {
     const odd = '/Users/a "b"\\c/billion';
     expect(promptOf(billionCommand({ created: true, hasConversation: false, dir: odd, projectsHint: null }))).toContain(odd);
+  });
+});
+
+describe('changedBoardTools', () => {
+  const tool = (name, description) => ({ name, description, inputSchema: { type: 'object', properties: {} } });
+
+  it('counts every tool as changed with no saved copy, then only the ones that differ', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'a007-tools-')), 'billion-tools.json');
+    const v1 = [tool('notify_owner', 'old'), tool('post_job', 'same')];
+    expect(changedBoardTools(file, v1)).toEqual(['notify_owner', 'post_job']);
+    expect(changedBoardTools(file, v1)).toEqual([]);
+    const v2 = [tool('notify_owner', 'new'), tool('post_job', 'same'), tool('tell_owner', 'added')];
+    expect(changedBoardTools(file, v2)).toEqual(['notify_owner', 'tell_owner']);
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(v2);
+  });
+
+  it('treats an unreadable saved copy as none', () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'a007-tools-')), 'billion-tools.json');
+    writeFileSync(file, '{not json');
+    expect(changedBoardTools(file, [tool('a', 'x')])).toEqual(['a']);
   });
 });
 

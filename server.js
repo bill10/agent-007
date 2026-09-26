@@ -30,10 +30,11 @@ import { createSessionFromConfig } from './server/pty.js';
 import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
-import { orphans, config } from './server/state.js';
+import { orphans, config, CONFIG_DIR } from './server/state.js';
+import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noClaudeCommand } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noClaudeCommand, changedBoardTools } from './server/billion.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
@@ -202,11 +203,23 @@ function startBillion() {
     }
   }
   const hasClaude = commandExists('claude', process.env, process.platform, dir);
+  // Without the model lists toolsFor adds: those follow what is installed,
+  // not an upgrade. Only when claude starts, so no start without it uses up
+  // the notice. Best effort, like the charter.
+  const toolsFile = join(CONFIG_DIR, 'billion-tools.json');
+  let changedTools = [];
+  if (hasClaude) {
+    try { changedTools = changedBoardTools(toolsFile, toolsFor({ isBillion: true })); } catch (err) {
+      console.error(`Billion: could not save the board tool definitions to ${toolsFile}:`, err.message);
+    }
+  }
   const command = hasClaude ? billionCommand({
     created,
     hasConversation: !created && hasClaudeTranscript(dir),
     dir,
     projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
+    changedTools,
+    toolsFile,
   }) : noClaudeCommand();
   const result = createSessionFromConfig({
     sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,

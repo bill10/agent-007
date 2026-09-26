@@ -29,6 +29,10 @@ Decided:
    works all the time and must never block on a dialog.
 4. **Server restart resumes it**: `claude --continue` when the folder has a
    previous session. Memory files cover whatever the conversation loses.
+   A resumed conversation keeps the board tool definitions it first loaded
+   (Claude Code pins them in the transcript), so each start saves the current
+   ones to `billion-tools.json` in the config folder, and the restart prompt
+   names any that changed since the last start and points there.
 5. **No auto-restart** if it exits or crashes: show it stopped, with a Start button;
    start it again on the next server start.
 6. **Fixed name "Billion"**, reserved. `send_message` addresses agents by name,
