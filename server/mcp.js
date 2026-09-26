@@ -399,6 +399,25 @@ export const TELL_OWNER_TOOL = {
   },
 };
 
+export const RESOLVE_QUESTION_TOOL = {
+  name: 'resolve_question',
+  description:
+    'Close a "Waiting on you" question the owner answered somewhere else, such as '
+    + 'typing in this terminal, so the tab and their phone do not hold it open. '
+    + 'Marks it answered with your summary of their answer; nothing comes back '
+    + 'here. Name it by number (3 for Q3) or id.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      number: { type: 'integer', minimum: 1, description: 'The question\'s number: 3 for Q3.' },
+      id: { type: 'string', description: 'The question\'s id, instead of number.' },
+      answer: { type: 'string', description: 'The owner\'s answer, as they gave it.' },
+    },
+    required: ['answer'],
+    additionalProperties: false,
+  },
+};
+
 // Billion's too: reading is narrower than messaging (server/messages.js,
 // readAgentScreen), so it is only for the workers on Billion's own cards.
 export const READ_AGENT_SCREEN_TOOL = {
@@ -445,7 +464,7 @@ export const RESPAWN_AGENT_TOOL = {
 };
 
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
 export function toolsFor(session, models) {
@@ -691,6 +710,15 @@ const CALLS = {
     const result = ctx.tellOwner ? await ctx.tellOwner(args.text) : { error: 'Only Billion can message the owner.' };
     if (result.error) return toolText(result.error, true);
     return toolText('Sent to the owner on Telegram.');
+  },
+
+  [RESOLVE_QUESTION_TOOL.name]: async (args, ctx) => {
+    if (args.number === undefined && !args.id) return toolText('Name the question by number or id.', true);
+    const result = ctx.resolveQuestion
+      ? await ctx.resolveQuestion({ number: args.number, id: args.id }, args.answer)
+      : { error: 'Only Billion can resolve the owner\'s questions.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(`Q${result.item.n} is marked answered: ${result.item.answer}`);
   },
 
   // Quoted line by line, like a message body, so the screen cannot pass for

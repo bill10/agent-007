@@ -513,6 +513,10 @@ clean") go through `tell_owner` instead: same Telegram send, voice rule and
 per-minute limit, but no numbered item and no badge. Without Telegram it
 tells Billion to say it in its terminal.
 
+When you answer a question somewhere else, say by typing in Billion's
+terminal, Billion closes it with `resolve_question`: it moves to **Answered**
+(marked *terminal*) and your phone's copy shows the answer, like any other.
+
 Answer in the app: click a choice, or type in the reply line under it (Enter
 or Send); the line is there even when there are choices. The answer is typed
 into Billion's terminal as `[Owner via app] Q3: <answer> (re: "<start of the

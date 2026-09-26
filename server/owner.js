@@ -175,8 +175,8 @@ async function transcribeNote(note, env) {
 // --- The "Waiting on you" list, in the config dir so it survives restarts ---
 //
 // An item: { id, n, text, at, choices?, recommended?, status, answer?,
-// answeredAt?, answeredVia?, tgMessageId?, tgVoice? }. n is the short number
-// the owner sees (Q3). status is open, answered or dismissed. Items written
+// answeredAt?, answeredVia?, tgMessageId?, tgVoice? }. answeredVia is app,
+// telegram or terminal (resolve_question). n is the short number the owner sees (Q3). status is open, answered or dismissed. Items written
 // before v0.10 have neither n nor status: they read as open, numbered in order.
 
 const waitingPath = () => join(CONFIG_DIR, 'waiting.json');
@@ -264,16 +264,38 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   if (!sendText(billion, answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body))) {
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
-  const done = updateWaiting(id, { status: 'answered', answer: body, answeredAt: new Date().toISOString(), answeredVia: via });
+  return { ok: true, item: await markAnswered(id, body, via, { broadcast, env }) };
+}
+
+// Answered everywhere: the item moves to Answered in every browser, and the
+// phone's copy shows the answer.
+async function markAnswered(id, answer, via, { broadcast, env }) {
+  const done = updateWaiting(id, { status: 'answered', answer, answeredAt: new Date().toISOString(), answeredVia: via });
   broadcast?.(waitingPayload());
   if (done.tgMessageId) await showAnswerOnPhone(done, env);
-  return { ok: true, item: done };
+  return done;
+}
+
+// resolve_question: the owner answered somewhere else (typed in Billion's
+// terminal), so Billion closes the item itself. Nothing goes back into Billion's
+// terminal: it already has the answer. { ok, item } or { error }.
+export async function resolveQuestion({ number, id } = {}, answer, { broadcast, env = process.env } = {}) {
+  const body = typeof answer === 'string' ? answer.replace(/\s+/g, ' ').trim() : '';
+  if (!body) return { error: 'The answer is empty.' };
+  if (body.length > MAX_ANSWER_CHARS) return { error: `Keep the answer under ${MAX_ANSWER_CHARS} characters.` };
+  const item = waitingItems().find(i => (id ? i.id === id : i.n === number));
+  const name = id ? `question ${id}` : `Q${number}`;
+  if (!item) return { error: `There is no ${name}.` };
+  if (item.status === 'dismissed') return { error: `Q${item.n} was dismissed.` };
+  if (item.status === 'answered') return { error: `Q${item.n} was answered already: ${item.answer}` };
+  return { ok: true, item: await markAnswered(item.id, body, 'terminal', { broadcast, env }) };
 }
 
 // The phone's copy of an answered question shows the answer, and loses its buttons.
 async function showAnswerOnPhone(item, env) {
   const { chatId } = telegramSettings(env);
-  const shown = `${questionText(item)}\n\nAnswered${item.answeredVia === 'app' ? ' in app' : ''}: ${item.answer}`;
+  const where = { app: ' in app', terminal: ' in terminal' }[item.answeredVia] || '';
+  const shown = `${questionText(item)}\n\nAnswered${where}: ${item.answer}`;
   const edit = item.tgVoice
     ? call('editMessageCaption', { chat_id: chatId, message_id: item.tgMessageId, caption: shown.slice(0, 1024) }, { env })
     : call('editMessageText', { chat_id: chatId, message_id: item.tgMessageId, text: shown.slice(0, 4096) }, { env });

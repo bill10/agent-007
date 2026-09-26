@@ -128,7 +128,7 @@ function openCard(item) {
 function answeredRow(item) {
   const li = el('li', 'waiting-answered-item');
   li.append(el('span', 'waiting-card-n', `Q${item.n}`), el('span', 'waiting-answered-text', item.text));
-  const via = item.answeredVia === 'telegram' ? 'Telegram' : 'app';
+  const via = { telegram: 'Telegram', terminal: 'terminal' }[item.answeredVia] || 'app';
   li.appendChild(el('span', 'waiting-answered-answer', `→ ${item.answer} · ${via} · ${ago(item.answeredAt)}`));
   return li;
 }

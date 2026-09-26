@@ -8,7 +8,7 @@ import { writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, handleUpdate, waitingItems, waitingPayload, dismissWaiting, answerWaiting, checkChoices,
-  pollOnce, NOTIFY_WINDOW_MS,
+  pollOnce, NOTIFY_WINDOW_MS, resolveQuestion,
 } from '../server/owner.js';
 import { handleMcpMessage, NOTIFY_OWNER_TOOL } from '../server/mcp.js';
 import { dropMessages } from '../server/messages.js';
@@ -216,5 +216,54 @@ describe('who may answer', () => {
     } finally {
       rmSync(USERS_PATH, { force: true });
     }
+  });
+});
+
+describe('resolve_question', () => {
+  const openCount = () => waitingPayload().items.filter(i => i.status === 'open').length;
+
+  it('closes an open question by number, drops the badge, edits the phone copy, types nothing', async () => {
+    await ask('Ship it?', { choices: ['yes', 'no'] });
+    await ask('Option B?');
+    expect(openCount()).toBe(2);
+    fetchMock.mockClear();
+    const broadcast = vi.fn();
+    const result = await resolveQuestion({ number: 1 }, ' yes,  ship ', { broadcast, env: ENV });
+    expect(result.item).toMatchObject({ n: 1, status: 'answered', answer: 'yes, ship', answeredVia: 'terminal' });
+    expect(openCount()).toBe(1);
+    expect(broadcast).toHaveBeenCalledWith(waitingPayload());
+    expect(calls()).toEqual([{ method: 'editMessageText', body: { chat_id: '42', message_id: 900, text: 'Billion (Q1): Ship it?\n\nAnswered in terminal: yes, ship' } }]);
+    expect(typed()).toBe('');
+  });
+
+  it('closes by id too', async () => {
+    const { id } = (await ask('Option B?')) && waitingItems()[0];
+    expect((await resolveQuestion({ id }, 'go', { env: ENV })).item.status).toBe('answered');
+  });
+
+  it('errors for an unknown, answered or dismissed question and changes nothing', async () => {
+    await ask('One?');
+    await ask('Two?');
+    expect((await resolveQuestion({ number: 9 }, 'x', { env: ENV })).error).toMatch(/no Q9/);
+    expect((await resolveQuestion({ id: 'nope' }, 'x', { env: ENV })).error).toMatch(/no question nope/);
+    await resolveQuestion({ number: 1 }, 'yes', { env: ENV });
+    expect((await resolveQuestion({ number: 1 }, 'no', { env: ENV })).error).toMatch(/Q1 was answered already: yes/);
+    dismissWaiting(waitingItems()[1].id);
+    expect((await resolveQuestion({ number: 2 }, 'no', { env: ENV })).error).toMatch(/Q2 was dismissed/);
+    expect((await resolveQuestion({ number: 1 }, '  ', { env: ENV })).error).toMatch(/empty/);
+    expect(waitingItems().map(i => [i.status, i.answer])).toEqual([['answered', 'yes'], ['dismissed', undefined]]);
+  });
+
+  it('is Billion\'s tool only, over MCP', async () => {
+    const list = (session) => handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { session }).result.tools.map(t => t.name);
+    expect(list({ isBillion: true })).toContain('resolve_question');
+    expect(list({})).not.toContain('resolve_question');
+    const call = (args, ctx) => handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'resolve_question', arguments: args } }, ctx);
+    expect((await call({ number: 1, answer: 'yes' }, { session: {} })).error.message).toMatch(/Unknown tool/);
+    expect((await call({ answer: 'yes' }, { session: { isBillion: true } })).result.content[0].text).toMatch(/number or id/);
+    const resolve = vi.fn(async () => ({ ok: true, item: { n: 3, answer: 'yes' } }));
+    const res = await call({ number: 3, answer: 'yes' }, { session: { isBillion: true }, resolveQuestion: resolve });
+    expect(resolve).toHaveBeenCalledWith({ number: 3, id: undefined }, 'yes');
+    expect(res.result.content[0].text).toBe('Q3 is marked answered: yes');
   });
 });
