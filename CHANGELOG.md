@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.14.0.0] - 2026-09-26
+
+### Added
+
+- **Billion can reply to you on Telegram without filing a question.** A new Billion-only `tell_owner` tool sends replies and status updates ("Got it, restart looks clean") to your phone the same way `notify_owner` does (same voice rule, size and per-minute limit) but files no *Waiting on you* item and leaves the bell badge alone. Billion's charter now keeps `notify_owner` for questions and decisions.
+
 ## [0.13.0.0] - 2026-09-26
 
 ### Added
