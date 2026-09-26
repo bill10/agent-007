@@ -16,6 +16,7 @@ import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
 import { waitingPayload, dismissWaiting } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
+import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
@@ -600,6 +601,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
             // card follows the board if that changes before it is dispatched.
             permissionMode: msg.permissionMode,
             agent: msg.agent,
+            model: msg.model,
             requiresPr: msg.requiresPr,
             postedBy: ws.user ? ws.user.id : null,
             postedByName: ws.user ? ws.user.displayName : null,
@@ -611,9 +613,15 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           const result = updateJob(msg.jobId, {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
             type: msg.jobType, schedule: msg.schedule, attachments: msg.attachments,
-            permissionMode: msg.permissionMode, agent: msg.agent, requiresPr: msg.requiresPr,
+            permissionMode: msg.permissionMode, agent: msg.agent, model: msg.model, requiresPr: msg.requiresPr,
           }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        // The card form opening: look again if the list is over 10 minutes
+        // old, so a CLI installed since shows up without a restart.
+        case 'models-refresh': {
+          if (refreshIfStale()) broadcastJobs(broadcast);
           break;
         }
         case 'job-pause': {

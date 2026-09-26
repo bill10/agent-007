@@ -12,6 +12,10 @@ import { switchToSession } from '../public/modules/terminal.js';
 import { agents, jobs, repos, setActiveSession } from '../public/modules/state.js';
 import { handleJobsList, showJobBoard, hideJobBoard, renderBoard, setupJobBoard, openJobForm, closeJobForm } from '../public/modules/jobs.js';
 
+// A card sent to the server. Opening the form also asks for fresh models,
+// which is not a save.
+const JOB_SAVE = expect.objectContaining({ type: expect.stringMatching(/^job-(create|update)$/) });
+
 const BOARD_HTML = `
   <button id="btn-new-job-shortcut"></button>
   <div class="spawn-form" id="spawn-form" style="display:none"></div>
@@ -48,6 +52,7 @@ const BOARD_HTML = `
           <option value="claude">Claude Code</option>
           <option value="codex">Codex</option>
         </select>
+        <select id="job-model"><option value="">CLI default</option></select>
         <label id="job-pr-field">
           <select id="job-requires-pr">
             <option value="yes">Required</option>
@@ -430,6 +435,32 @@ describe('the per-job permission mode', () => {
 });
 
 describe('job form', () => {
+  it('offers the discovered models for the chosen agent, and sends the pick', () => {
+    handleJobsList({ jobs: [], settings: {}, models: { claude: ['opus', 'haiku'], codex: ['gpt-6-luna'] } });
+    document.getElementById('btn-new-job').click();
+    expect(send).toHaveBeenCalledWith({ type: 'models-refresh' });
+    const model = document.getElementById('job-model');
+    expect([...model.options].map(o => o.value)).toEqual(['', 'opus', 'haiku']);
+    document.getElementById('job-agent').value = 'codex';
+    document.getElementById('job-agent').dispatchEvent(new Event('change'));
+    expect([...model.options].map(o => o.value)).toEqual(['', 'gpt-6-luna']);
+    model.value = 'gpt-6-luna';
+    document.getElementById('job-title').value = 'Task';
+    document.getElementById('btn-job-save').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-create', agent: 'codex', model: 'gpt-6-luna' }));
+  });
+
+  it('shows the model on the card and keeps it on an edit that does not touch it', () => {
+    handleJobsList({ jobs: [JOB({ model: 'opus' })], settings: {}, models: { claude: [], codex: [] } });
+    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toContain('opus');
+    [...cards()[0].querySelectorAll('.job-card-btn')].find(b => b.textContent === 'Edit').click();
+    // No longer discovered, but still the card's: offered, selected, not re-sent.
+    expect(document.getElementById('job-model').value).toBe('opus');
+    document.getElementById('btn-job-save').click();
+    const update = send.mock.calls.map(c => c[0]).find(m => m.type === 'job-update');
+    expect(update).not.toHaveProperty('model');
+  });
+
   it('posts a new job with the chosen repo', () => {
     document.getElementById('btn-new-job').click();
     document.getElementById('job-title').value = 'New task';
@@ -437,7 +468,7 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, attachments: [],
+      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, attachments: [], model: '',
     });
   });
 
@@ -540,7 +571,7 @@ describe('job form', () => {
     expect(document.querySelectorAll('.job-attachment')).toHaveLength(1);
     // FileReader is async: a save before it finishes is refused, not sent half-read.
     document.getElementById('btn-job-save').click();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalledWith(JOB_SAVE);
     expect(document.getElementById('job-form-error').textContent).toMatch(/still reading/i);
     await new Promise(r => setTimeout(r, 50));
     document.getElementById('btn-job-save').click();
@@ -571,7 +602,7 @@ describe('job form', () => {
     document.getElementById('btn-new-job').click();
     document.getElementById('job-title').value = '   ';
     document.getElementById('btn-job-save').click();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalledWith(JOB_SAVE);
     expect(document.getElementById('job-form-error').style.display).toBe('block');
   });
 
@@ -580,7 +611,7 @@ describe('job form', () => {
     document.getElementById('btn-new-job').click();
     document.getElementById('job-title').value = 'Task';
     document.getElementById('btn-job-save').click();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalledWith(JOB_SAVE);
     expect(document.getElementById('job-form-error').textContent).toMatch(/repository/i);
   });
 });
@@ -1162,7 +1193,7 @@ describe('the job form and schedules', () => {
     type().value = 'scheduled';
     schedule().value = 'every friday';
     document.getElementById('btn-job-save').click();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalledWith(JOB_SAVE);
     expect(document.getElementById('job-form-error').textContent).toMatch(/cron schedule/i);
   });
 
@@ -1180,7 +1211,7 @@ describe('the job form and schedules', () => {
     document.getElementById('job-title').value = 'Daily digest';
     type().value = 'scheduled';
     document.getElementById('btn-job-save').click();
-    expect(send).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalledWith(JOB_SAVE);
     expect(document.getElementById('job-form-error').textContent).toMatch(/needs a cron schedule/i);
   });
 

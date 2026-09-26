@@ -39,6 +39,7 @@ import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram } from './server/owner.js';
+import { startModelRefresh } from './server/models.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -247,6 +248,8 @@ async function startup() {
   // Keeping one timer alive (instead of creating/destroying it on toggle) means
   // the Start button only has to flip a boolean, and a config restored with
   // running:true resumes dispatching without any extra wiring.
+  // Before the dispatcher: a card's model is checked against this list.
+  startModelRefresh();
   startDispatcher(createSession, broadcast, {
     onSessionCreated: (s) => broadcast(sessionPayload(s)),
     killSession,

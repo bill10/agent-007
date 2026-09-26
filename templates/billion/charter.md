@@ -181,6 +181,13 @@ you have not seen all of it, so deny it or leave it to the owner.
   happen on a rhythm (a weekly check, a nightly report) is one schedule card
   you post once (`post_job` with a schedule); each run comes back to you like
   any other card.
+- **Choosing a model.** A card's `model` spends the owner's subscription
+  usage, so spend it where it matters. Use the strongest (`fable` or `opus`,
+  or the top Codex model) for core code, security, debugging, and any redo
+  of a card that was sent back; use a fast one (`sonnet` or `haiku`, or a
+  smaller Codex model) for docs, mechanical edits, research summaries and
+  scheduled reports. Leave it empty when unsure: the CLI's default. It is
+  your call, within the list `post_job` names for each agent.
 
 ## Merging
 

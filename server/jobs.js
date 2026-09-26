@@ -27,8 +27,9 @@ import {
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
-  BILLION_NAME, envPermissionMode,
+  BILLION_NAME, envPermissionMode, resolveJobModel,
 } from '../lib/jobs.js';
+import { availableModels } from './models.js';
 import { nextCronIso } from '../lib/cron.js';
 
 // --- Board settings ---
@@ -127,7 +128,8 @@ export function jobsPayload() {
   // The .env defaults ride along, so the toolbar can show the mode workers
   // really start in while no mode has been picked there.
   const envModes = { claude: envPermissionMode('claude'), codex: envPermissionMode('codex') };
-  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes } };
+  // The models each CLI's dropdown offers (server/models.js).
+  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes }, models: availableModels() };
 }
 
 export function broadcastJobs(broadcast) {
@@ -303,8 +305,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
+export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -366,7 +368,7 @@ function scheduleTypeError(schedule) {
     : null;
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, type, agent, requiresPr, session, user }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, type, agent, model, requiresPr, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -403,6 +405,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, re
     // Unnamed, the card runs on the same CLI as the agent posting it; a person
     // at the HTTP door with no session gets the board default.
     agent: agent || (session ? jobAgentFromCommand(session.command) : undefined),
+    // Checked against the discovered list by createJob, and put on the argv
+    // as one token by buildJobCommand.
+    model,
     requiresPr,
     // No permissionMode: an agent posting a card must not be able to pick the
     // mode the board will spawn with, which would be a way around every gate
@@ -450,6 +455,7 @@ function jobSummary(job) {
     state: job.state,
     type: jobType(job),
     agent: jobAgent(job),
+    model: job.model || null,
     requiresPr: jobRequiresPr(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
@@ -543,7 +549,7 @@ export function readJobForAgent(jobId) {
 // land says so out loud and leaves its name on the card, because the whole
 // hazard is an edit nobody sees. Reading stays board-wide — every browser
 // already sees every card — but writing does not.
-export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr, session, user }, broadcast) {
+export function editJobForAgent({ id, title, detail, repo, schedule, model, requiresPr, session, user }, broadcast) {
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No job with id "${id}" — list the board to see the ids.` };
   const gate = editableInPlace(job);
@@ -593,6 +599,11 @@ export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr,
     fields.type = text ? 'scheduled' : 'one-time';
     if (text !== (job.schedule || '')) changed.push('schedule');
   }
+  if (model !== undefined && (model || null) !== (job.model || null)) {
+    // updateJob validates it against the card's agent.
+    fields.model = model;
+    changed.push('model');
+  }
   if (requiresPr !== undefined) {
     if (typeof requiresPr !== 'boolean') return { error: 'requires_pr must be true or false' };
     // Always passed on, so a type change in the same call cannot swap it for
@@ -602,7 +613,7 @@ export function editJobForAgent({ id, title, detail, repo, schedule, requiresPr,
   }
 
   if (!changed.length) {
-    return { error: 'Nothing to change — pass a new title, detail, repo, schedule or requires_pr.' };
+    return { error: 'Nothing to change — pass a new title, detail, repo, schedule, model or requires_pr.' };
   }
   const result = updateJob(job.id, fields, broadcast);
   if (result.error) return result;
@@ -815,6 +826,16 @@ export function updateJob(jobId, fields, broadcast) {
     cli = resolveJobAgent(fields.agent);
     if (cli.error) return { error: cli.error };
   }
+  // Checked against the agent the card will have. A card switched to another
+  // CLI with no model named drops its old one, which belongs to the old CLI.
+  const nextAgent = cli ? cli.agent : jobAgent(job);
+  let chosen = null;
+  if (fields.model !== undefined) {
+    chosen = resolveJobModel(fields.model, nextAgent, availableModels());
+    if (chosen.error) return { error: chosen.error };
+  } else if (nextAgent !== jobAgent(job)) {
+    chosen = { model: null };
+  }
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
   // rejected as a pair.
@@ -839,6 +860,7 @@ export function updateJob(jobId, fields, broadcast) {
   if (fields.repoPath) job.repoPath = fields.repoPath;
   if (mode) job.permissionMode = mode.permissionMode;
   if (cli) job.agent = cli.agent;
+  if (chosen) job.model = chosen.model;
   const typeChanged = !!resolved && resolved.type !== jobType(job);
   if (resolved) {
     job.type = resolved.type;
@@ -1327,7 +1349,10 @@ export function orphanResumePlan(orphan, homes) {
   const sessionId = agent !== 'codex' ? null
     : probed ? probed.codexSessionId
     : codexSessionIdFor(orphan.worktreePath, homes);
-  return { agent, mode, flags, command: resumeCommand(agent, mode, flags, sessionId) };
+  // The card's model, when the card is for this CLI: a worker picked for a
+  // strong model comes back on it, not the CLI's default.
+  const model = card && jobAgent(card) === agent ? card.model || null : null;
+  return { agent, mode, flags, command: resumeCommand(agent, mode, flags, sessionId, model) };
 }
 
 export function resumeCommandForOrphan(orphan, homes) {
