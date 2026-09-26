@@ -17,7 +17,7 @@ import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
-import { notifyOwner, tellOwner } from './owner.js';
+import { notifyOwner, tellOwner, resolveQuestion } from './owner.js';
 import { availableModels } from './models.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -141,6 +141,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         tellOwner: (text) => (req.agentSession.isBillion
           ? tellOwner(text)
           : { error: 'Only Billion can message the owner.' }),
+        resolveQuestion: (ref, answer) => (req.agentSession.isBillion
+          ? resolveQuestion(ref, answer, { broadcast })
+          : { error: 'Only Billion can resolve the owner\'s questions.' }),
         // Never logged: a screen can hold a secret that scrolled by.
         readAgentScreen: ({ name, lines }) => readAgentScreen({
           from: req.agentSession, name, lines, sessions,

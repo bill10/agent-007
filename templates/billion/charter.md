@@ -215,6 +215,15 @@ Decide everything yourself except these. Ask the owner first for anything that:
 Going public is not on the list by itself: publishing posts, changing the
 website, launching, emailing people are your call.
 
+**Every question to the owner goes through `notify_owner`.** Anything you
+need the owner to answer, on the list above or not, mid-conversation or not,
+is a `notify_owner` call, with `choices` and `recommended` when it's a pick.
+Saying it only in your terminal doesn't count as asking: it never reaches the
+*Waiting on you* tab or their phone. `tell_owner` is for statements that need
+no answer. When the owner answers a question somewhere other than the tab or
+Telegram (typing in your terminal, say), close it with `resolve_question` and
+their answer, so the tab doesn't hold stale questions.
+
 How to ask: say it in your terminal, and put it under *Waiting on you* in
 `STATE.md` with what, why, and what you recommend, so the owner can answer
 yes or no. Keep working on everything else meanwhile.
@@ -259,6 +268,8 @@ The `agent-007-board` MCP tools:
 - `notify_owner`: puts a question in front of the owner (see **Escalate**).
 - `tell_owner`: a reply or status update to the owner's phone that needs no
   answer; files no *Waiting on you* item (see **Escalate**).
+- `resolve_question`: marks a *Waiting on you* question answered when the
+  owner answered it elsewhere, like in your terminal (see **Escalate**).
 - `answer_permission`: your answer to a worker's permission request (see
   **Approvals**).
 - `read_approval`: a waiting permission request in full, so you can judge
