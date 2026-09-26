@@ -226,6 +226,20 @@ describe('POST /hook/permission and answer_permission', () => {
     expect((await pending).hookSpecificOutput.decision).toEqual({ behavior: 'deny', message: 'Not this card.' });
   });
 
+  it('honours an allow on a cut-short request once Billion has read it over MCP', async () => {
+    worker.agentToken = WORKER_TOKEN;
+    billion.agentToken = BILLION_TOKEN;
+    const long = { tool_name: 'Bash', tool_input: { command: Array.from({ length: 400 }, (_, i) => `echo ${i}`).join('\n') } };
+    const pending = post('/hook/permission', WORKER_TOKEN, long);
+    await vi.waitFor(() => expect(typed(billion)).toContain('read_approval before allowing'));
+    const id = idOf(billion);
+    const read = (token) => post('/mcp', token, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read_approval', arguments: { id } } });
+    expect((await read(WORKER_TOKEN)).error.message).toMatch(/Unknown tool/);
+    expect((await read(BILLION_TOKEN)).result.content[0].text).toContain('>   "command": "echo 0\\necho 1');
+    expect((await answer(BILLION_TOKEN, { id, decision: 'allow' })).result.content[0].text).toBe('Falcon has your answer: allow.');
+    expect((await pending).hookSpecificOutput.decision).toEqual({ behavior: 'allow' });
+  });
+
   it('refuses a request without an agent token', async () => {
     const res = await fetch(`${base}/hook/permission`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(res.ok).toBe(false);
