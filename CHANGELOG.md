@@ -5,6 +5,15 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.14.0.1] - 2026-09-26
+
+### Changed
+
+- **`SAY_RATE` unset now means the voice's own system speed.** Previously
+  unset `SAY_RATE` defaulted to 205 wpm; now no `-r` is passed to `say` at
+  all, so each voice speaks at its own default rate. Set `SAY_RATE` (120-300)
+  to still choose a fixed speed.
+
 ## [0.14.0.0] - 2026-09-26
 
 ### Added
