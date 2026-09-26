@@ -50,7 +50,7 @@ afterEach(async () => {
 
 let n = 0;
 // An orphan on `card` (or none), as recoverCrashedSessions leaves it.
-function orphan({ card = null, reason = 'server-restart', worktree = true, ownerId = null } = {}) {
+function orphan({ card = null, reason = 'server-restart', worktree = true, ownerId = null, ...fields } = {}) {
   const i = ++n;
   const worktreePath = mkdtempSync(join(tmpdir(), 'a007-rbw-wt-'));
   made.dirs.push(worktreePath);
@@ -60,7 +60,7 @@ function orphan({ card = null, reason = 'server-restart', worktree = true, owner
   const o = {
     id: `orphan-rbw-${i}`, name: `Rbw${i}`, repoPath, repoSlug: 'rbw', worktreePath, branchName,
     color: '#fff', ownerId, agent: 'codex', permissionFlags: [], origin: card ? 'board' : 'user',
-    jobId: card?.id || null, approvalsToBillion: !!card?.postedByBillion, reason, createdAt: new Date().toISOString(),
+    jobId: card?.id || null, approvalsToBillion: !!card?.postedByBillion, reason, createdAt: new Date().toISOString(), ...fields,
   };
   orphans.set(o.id, o);
   return o;
@@ -82,6 +82,8 @@ describe.skipIf(!posix)('startup re-spawn', () => {
     const hand = orphan();
     const owners = orphan({ card: card({ billion: false }) });
     const closed = orphan({ card: card(), reason: 'unpushed' });
+    // Started by hand on a Billion card's branch: on the card's branch, but never its worker.
+    const onBranch = orphan({ card: card(), jobId: null, origin: 'user' });
 
     expect(await respawnBoardWorkers({ paceMs: 0 })).toEqual([back.name]);
     expect(live()).toEqual([back.name]);
@@ -89,7 +91,7 @@ describe.skipIf(!posix)('startup re-spawn', () => {
     expect(session).toMatchObject({ spawnedBy: 'board', jobId: mine.id, worktreePath: back.worktreePath });
     expect(allJobs().find(j => j.id === mine.id).agentSessionId).toBe(session.id);
     expect(pendingMessages(session.id)).toBe(1);   // the one "continue your card" nudge
-    expect([...orphans.keys()].sort()).toEqual([inReview.id, hand.id, owners.id, closed.id].sort());
+    expect([...orphans.keys()].sort()).toEqual([inReview.id, hand.id, owners.id, closed.id, onBranch.id].sort());
   }, 15000);
 
   it('respects the per-repo cap and leaves the extras for the next pass', async () => {
@@ -125,6 +127,8 @@ describe.skipIf(!posix)('respawn_agent', () => {
     expect((await respawnAgent(billion, hand.name)).error).toMatch(/not on a card you posted/);
     const owners = orphan({ card: card({ billion: false }) });
     expect((await respawnAgent(billion, owners.name)).error).toMatch(/not on a card you posted/);
+    const theirs = orphan({ card: card(), ownerId: 'someone-else' });
+    expect((await respawnAgent(billion, theirs.name)).error).toMatch(/No orphaned agent named/);
     const gone = orphan({ card: card(), worktree: false });
     expect((await respawnAgent(billion, gone.name)).error).toMatch(/worktree is gone/);
     expect(orphans.has(gone.id)).toBe(true);   // reported, not dropped or rebuilt

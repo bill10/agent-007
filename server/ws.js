@@ -210,10 +210,13 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
 }
 
 // The card an orphan worked, when Billion posted it; null otherwise. Hand-
-// started agents and other people's cards are never Billion's to bring back.
+// started agents and other people's cards are never Billion's to bring back:
+// the orphan must have been that card's worker (its saved card, or a board
+// worker from before cards were saved), not merely an agent on its branch.
 function billionCardOf(orphan) {
   const card = findJobForBranch(orphan);
-  return card?.postedByBillion === true ? card : null;
+  if (card?.postedByBillion !== true) return null;
+  return orphan.jobId === card.id || (!orphan.jobId && orphan.origin === 'board') ? card : null;
 }
 
 // Billion's respawn_agent: one orphan on a card it posted, by name. Same
@@ -238,7 +241,8 @@ export async function respawnAgent(from, name) {
   return { name, card };
 }
 
-// After a restart the board brings back its own workers: each orphan the
+// After a restart the board brings back its own workers, on its first scan
+// while it is running (and every scan after, for any left over): each orphan the
 // restart made (reason 'server-restart') whose card Billion posted and is
 // still In progress. A card in Review needs no worker. Paced one spawn per
 // `paceMs`; a repo at its cap keeps the rest as orphans for the next pass
@@ -251,12 +255,15 @@ export async function respawnBoardWorkers({ paceMs = RESPAWN_PACE_MS, env = proc
   const due = (o) => orphans.has(o.id) && o.reason === 'server-restart'
     && billionCardOf(o)?.state === 'in-progress' && existsSync(join(o.worktreePath, '.git'));
   const back = [];
+  const ready = (o) => due(o) && !repoAtCap(o.repoPath);
   for (const orphan of [...orphans.values()].filter(due)) {
-    if (back.length) await sleep(paceMs);
+    if (!ready(orphan)) continue;
     // Checked again after the wait: the owner may have acted meanwhile.
-    if (!due(orphan) || repoAtCap(orphan.repoPath)) continue;
+    if (back.length) { await sleep(paceMs); if (!ready(orphan)) continue; }
     const card = billionCardOf(orphan);
-    const result = await respawnOrphan(orphan.id);
+    // A throw must not stop the scan: dispatch runs after this pass.
+    let result;
+    try { result = await respawnOrphan(orphan.id); } catch (err) { result = { error: err.message }; }
     if (result.error) { console.warn(`  Could not re-spawn ${orphan.name}: ${result.error}`); continue; }
     console.log(`  Re-spawned ${orphan.name} on "${card.title}"`);
     back.push(orphan.name);
@@ -637,6 +644,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           const { skipped } = await runScan(createSession, broadcast, {
             onSessionCreated: (s) => broadcast(sessionPayload(s)),
             killSession,
+            respawnWorkers: () => respawnBoardWorkers(),
           });
           if (skipped) {
             ws.send(JSON.stringify({ type: 'notification', level: 'info', message: 'A scan is already running' }));
