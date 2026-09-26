@@ -36,6 +36,12 @@ export const MCP_SERVER_NAME = 'agent-007-board';
 export const APPROVAL_WAIT_MS = 120_000;
 export const HOOK_WAIT_MS = APPROVAL_WAIT_MS + 20_000;
 export const HOOK_TIMEOUT_S = (APPROVAL_WAIT_MS + 30_000) / 1000;
+// read_approval returns a request's whole input up to this many bytes of
+// quoted UTF-8; past it the request stays owner-only on allow
+// (server/approvals.js). Bytes, not characters: a token is at least a byte,
+// so this stays under Claude Code's MCP output cap (25k tokens by default)
+// whatever the text is. A result the CLI truncated would still count as seen.
+export const READ_APPROVAL_BYTES = 20 * 1024;
 
 // Agents run on this machine, so the board is reachable over loopback — which
 // also keeps the token off the network when HOST is a tailnet address. A

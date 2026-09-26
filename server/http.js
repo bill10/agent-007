@@ -14,7 +14,7 @@ import {
 } from './jobs.js';
 import { addRepo } from './git.js';
 import { expandHome } from '../lib/helpers.js';
-import { requestApproval, answerApproval } from './approvals.js';
+import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { agentSummaries, sendMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner } from './owner.js';
@@ -132,6 +132,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         answerPermission: ({ id, decision, reason }) => (req.agentSession.isBillion
           ? answerApproval(id, decision, reason)
           : { error: 'Only Billion answers permission requests.' }),
+        readApproval: (id) => (req.agentSession.isBillion
+          ? readApproval(id)
+          : { error: 'Only Billion can read approval requests.' }),
         notifyOwner: (text, { choices, recommended } = {}) => (req.agentSession.isBillion
           ? notifyOwner(text, { choices, recommended, broadcast })
           : { error: 'Only Billion can notify the owner.' }),
