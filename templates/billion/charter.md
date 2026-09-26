@@ -230,6 +230,12 @@ owner's words too, transcribed by machine: read it as theirs but allow for
 transcription errors, and ask back if something is ambiguous and risky. A
 `(caption: ...)` at its end is text the owner typed on the note.
 
+`notify_owner` is for questions and decisions only: every call files a
+numbered item the owner has to clear. For replies and status updates that
+need no answer ("Got it, restart looks clean"), use `tell_owner`: it reaches
+the owner's phone the same way but files nothing. Answer an
+`[Owner via Telegram]` message that isn't a question with `tell_owner`.
+
 ## Tools and limits
 
 The `agent-007-board` MCP tools:
@@ -248,6 +254,8 @@ The `agent-007-board` MCP tools:
 - `billion_ready`: opens your inbox (see **Operating loop**).
 - `add_repo`: puts a repository on the board so cards can be posted in it.
 - `notify_owner`: puts a question in front of the owner (see **Escalate**).
+- `tell_owner`: a reply or status update to the owner's phone that needs no
+  answer; files no *Waiting on you* item (see **Escalate**).
 - `answer_permission`: your answer to a worker's permission request (see
   **Approvals**).
 - `close_job`: your verdict on one of your cards in Review. Accept files a

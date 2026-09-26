@@ -364,6 +364,23 @@ export const NOTIFY_OWNER_TOOL = {
   },
 };
 
+export const TELL_OWNER_TOOL = {
+  name: 'tell_owner',
+  description:
+    'Send the owner a reply or status update that needs no answer ("Got it", '
+    + '"Restart looks clean") over Telegram. Unlike notify_owner it files nothing '
+    + 'under "Waiting on you". Use it to answer an [Owner via Telegram] message '
+    + 'that is not a question. Shares notify_owner\'s limit of a few per minute.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', description: 'The message, written to be read on a phone.' },
+    },
+    required: ['text'],
+    additionalProperties: false,
+  },
+};
+
 // Billion's too: reading is narrower than messaging (server/messages.js,
 // readAgentScreen), so it is only for the workers on Billion's own cards.
 export const READ_AGENT_SCREEN_TOOL = {
@@ -410,7 +427,7 @@ export const RESPAWN_AGENT_TOOL = {
 };
 
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, NOTIFY_OWNER_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
 export function toolsFor(session, models) {
@@ -633,6 +650,12 @@ const CALLS = {
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
     return toolText(`Sent to the owner on Telegram and put under "Waiting on you" as Q${result.n}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
+  },
+
+  [TELL_OWNER_TOOL.name]: async (args, ctx) => {
+    const result = ctx.tellOwner ? await ctx.tellOwner(args.text) : { error: 'Only Billion can message the owner.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText('Sent to the owner on Telegram.');
   },
 
   // Quoted line by line, like a message body, so the screen cannot pass for

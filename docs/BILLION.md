@@ -508,6 +508,11 @@ phone. Each question gets a short number, Q1, Q2 and so on. When the answer
 is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
 it `recommended`.
 
+Replies and status updates that need no answer ("Got it, restart looks
+clean") go through `tell_owner` instead: same Telegram send, voice rule and
+per-minute limit, but no numbered item and no badge. Without Telegram it
+tells Billion to say it in its terminal.
+
 Answer in the app: click a choice, or type in the reply line under it (Enter
 or Send); the line is there even when there are choices. The answer is typed
 into Billion's terminal as `[Owner via app] Q3: <answer> (re: "<start of the

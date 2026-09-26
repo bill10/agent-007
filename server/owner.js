@@ -1,5 +1,5 @@
 // Reaching the owner when they are away from the terminal: Billion's
-// notify_owner tool, the "Waiting on you" tab it fills in the browser (where
+// notify_owner tool (questions) and tell_owner (replies that need no answer), the "Waiting on you" tab it fills in the browser (where
 // the owner can answer too), and a Telegram bot that carries both ways (docs/BILLION.md, "Telegram").
 //
 // Telegram is optional: with TELEGRAM_BOT_TOKEN unset nothing here talks to
@@ -318,6 +318,25 @@ export async function notifyOwner(text, { choices, recommended, broadcast, env =
     if (saved?.status === 'answered') await showAnswerOnPhone(saved, env);
   }
   return { ok: true, n: item?.n };
+}
+
+// --- tell_owner: a reply or status update, no Waiting item, no badge ---
+
+export async function tellOwner(text, { env = process.env, now = Date.now(), platform = process.platform } = {}) {
+  const body = typeof text === 'string' ? text.trim() : '';
+  if (!body) return { error: 'The message is empty.' };
+  if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
+  const { token, chatId } = telegramSettings(env);
+  if (!token || !chatId) return { error: 'Telegram is not set up; say it in your terminal.' };
+  // Shares notify_owner's limit: both land on the same phone.
+  sent = sent.filter(t => now - t < NOTIFY_WINDOW_MS);
+  if (sent.length >= NOTIFY_LIMIT) {
+    return { error: `Not sent: you have messaged the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later.` };
+  }
+  sent.push(now);
+  const result = await sendToOwner(`Billion: ${body}`, { env, platform });
+  if (result.error) return { error: `The Telegram send failed: ${result.error}` };
+  return { ok: true };
 }
 
 // --- Replies: long-polling getUpdates ---
