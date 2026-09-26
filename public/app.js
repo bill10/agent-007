@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
@@ -22,6 +22,7 @@ import { setupShortcuts } from './modules/shortcuts.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
+import { renderWaiting, handleWaitingError, showWaiting, leaveWaiting } from './modules/waiting.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -461,11 +462,14 @@ function setupResize() {
   });
   // Phone bottom nav. The shown panel changes size from 0, so refit after reflow.
   document.getElementById('mobile-nav').onclick = (e) => {
-    const view = e.target.dataset.view;
+    const view = e.target.closest('button')?.dataset.view;
     if (!view) return;
     // The mic's only "recording" cue lives in the terminal panel.
     if (view !== 'terminal') stopVoice({ notice: 'Voice input stopped — left the terminal' });
-    setView(view);
+    // Waiting is the terminal panel showing the Waiting tab.
+    if (view === 'waiting') { showWaiting(); updateTabs(); }
+    else if (view === 'terminal' && waitingActive) { leaveWaiting(); updateTabs(); }
+    setView(view === 'waiting' ? 'terminal' : view);
     requestAnimationFrame(() => { renderOffice(); fitActiveTerminal(); });
   };
 }
@@ -533,7 +537,8 @@ function onMessage(msg) {
     case 'file-diff': handleFileDiff(msg); break;
     case 'full-tree': handleFullTree(msg); break;
     case 'orphans-list': handleOrphansList(msg); break;
-    case 'waiting-list': setWaitingItems(msg.items); renderExplorer(); break;
+    case 'waiting-list': setWaitingItems(msg.items); renderWaiting(); updateTabs(); break;
+    case 'waiting-error': handleWaitingError(msg); break;
     // The office canvas pins one paper per job, so a jobs-list broadcast has
     // to repaint it too — the animation loop skips frames with no live agent.
     case 'jobs-list': handleJobsList(msg); noteJobsUpdate(); renderOffice(); break;

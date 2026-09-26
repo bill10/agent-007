@@ -13,6 +13,8 @@
 // it was written.
 
 import { agents, jobs, boardSettings, setBoardSettings, boardActive, setBoardActive, activeSessionId, repos } from './state.js';
+// Circular with waiting.js, which is fine: each calls the other only at event time.
+import { hideWaiting } from './waiting.js';
 import { send } from './ws.js';
 import { escapeHtml, getToken } from './auth.js';
 import { switchToSession } from './terminal.js';
@@ -914,6 +916,7 @@ export function closeJobForm() {
 // --- Show / hide ---
 
 export function showJobBoard() {
+  hideWaiting();
   // Always open on the columns. Opening the board is the user asking for the
   // live work; the archive is somewhere you go on purpose, not somewhere the
   // Jobs tab can strand you.

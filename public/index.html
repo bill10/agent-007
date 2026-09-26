@@ -219,6 +219,10 @@
             <div class="job-cards" id="job-finished-cards"></div>
           </div>
         </div>
+        <!-- Waiting on you: Billion's questions (public/modules/waiting.js) -->
+        <div class="waiting-board" id="waiting-board" style="display:none">
+          <div class="waiting-list" id="waiting-list" aria-label="Waiting on you"></div>
+        </div>
         <div class="voice-indicator" id="voice-indicator" aria-hidden="true" style="display:none">
           <span class="voice-indicator-dot"></span><span class="voice-indicator-text"></span>
         </div>
@@ -235,6 +239,7 @@
     <button data-view="files">Files</button>
     <button data-view="office" aria-current="true">Office</button>
     <button data-view="terminal">Terminal</button>
+    <button data-view="waiting" class="mobile-nav-waiting" aria-label="Waiting on you"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5V5.5a3 3 0 0 1 6 0v3l1 1H2z"/><path d="M5 11h2"/></svg>Waiting<span class="board-tab-badge" id="mobile-nav-waiting-count" hidden></span></button>
   </nav>
 
   <!-- Reconnecting banner -->

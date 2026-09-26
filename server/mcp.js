@@ -22,6 +22,7 @@
 import { JOB_STATES, STATE_LABELS, JOB_AGENTS } from '../lib/jobs.js';
 import { APPROVAL_WAIT_MS } from './agent-mcp.js';
 import { SCREEN_LINES_DEFAULT, SCREEN_LINES_MAX, quoteLines, oneLine } from './messages.js';
+import { MAX_CHOICES, MAX_CHOICE_CHARS } from './owner.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -340,15 +341,23 @@ export const NOTIFY_OWNER_TOOL = {
   name: 'notify_owner',
   description:
     'Put a question or a decision in front of the owner when they may be away '
-    + 'from the terminal: it is pinned in the "Waiting on you" list at the top of '
-    + 'the owner\'s browser, and sent to their phone over Telegram when that is set '
-    + 'up. One short message: the question, why, and what you recommend. Their '
-    + 'reply, if they answer from Telegram, arrives in this terminal as '
-    + '"[Owner via Telegram] <text>". At most a few per minute.',
+    + 'from the terminal: it goes in the "Waiting on you" tab of the owner\'s '
+    + 'browser, numbered (Q3), and to their phone over Telegram when that is set '
+    + 'up. One short message: the question, why, and what you recommend. When the '
+    + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the '
+    + 'one you recommend: the owner answers with one tap. Their answer arrives in '
+    + 'this terminal as "[Owner via app] Q3: <answer>" or "[Owner via Telegram] Q3: '
+    + '<answer>". At most a few per minute.',
   inputSchema: {
     type: 'object',
     properties: {
       text: { type: 'string', description: 'The message, written to be read on a phone.' },
+      choices: {
+        type: 'array', minItems: 2, maxItems: MAX_CHOICES,
+        items: { type: 'string', minLength: 1, maxLength: MAX_CHOICE_CHARS },
+        description: `2 to ${MAX_CHOICES} short answers the owner can tap. The owner can still type something else.`,
+      },
+      recommended: { type: 'string', description: 'The choice you recommend; must be one of choices.' },
     },
     required: ['text'],
     additionalProperties: false,
@@ -619,9 +628,11 @@ const CALLS = {
   },
 
   [NOTIFY_OWNER_TOOL.name]: async (args, ctx) => {
-    const result = ctx.notifyOwner ? await ctx.notifyOwner(args.text) : { error: 'Only Billion can notify the owner.' };
+    const result = ctx.notifyOwner
+      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended })
+      : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
-    return toolText('Sent to the owner on Telegram and pinned under "Waiting on you". Keep working on everything else; their reply, if any, arrives here as [Owner via Telegram].');
+    return toolText(`Sent to the owner on Telegram and put under "Waiting on you" as Q${result.n}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
   },
 
   // Quoted line by line, like a message body, so the screen cannot pass for
