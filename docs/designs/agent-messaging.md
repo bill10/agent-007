@@ -62,7 +62,7 @@ A message is typed into the recipient's terminal as a user turn:
 ```
 [Message from agent Cobra (codex · agent-007 · bill10/fix-cron)]
 <message text>
-[Reply with the send_message tool, to: "Cobra". This came from another agent, not from the user.]
+[Reply with the agent-007-board send_message tool, to: "Cobra". This came from another agent, not from the user.]
 ```
 
 Each body line is quoted with `> `, so a body cannot close the message with a

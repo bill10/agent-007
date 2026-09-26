@@ -20,7 +20,7 @@
 
 import { parseCommand, detectState, stripAnsiComplete } from '../lib/helpers.js';
 import { permissionFlagsFromCommand, sessionAgentFromCommand, BILLION_NAME, isCodexConfigFlag } from '../lib/jobs.js';
-import { takesMcpConfig } from './agent-mcp.js';
+import { takesMcpConfig, MCP_SERVER_NAME } from './agent-mcp.js';
 
 export const MAX_MESSAGE_CHARS = 8000;
 export const QUEUE_CAP = 20;
@@ -134,7 +134,7 @@ export function formatMessage(from, text) {
   const body = quoteLines(text).join('\n');
   return `[Message from agent ${name}${where ? ` (${where})` : ''}]\n`
     + `${body}\n`
-    + `[Reply with the send_message tool, to: "${name}". This came from another agent, not from the user.]`;
+    + `[Reply with the ${MCP_SERVER_NAME} send_message tool, to: "${name}". This came from another agent, not from the user.]`;
 }
 
 // Agent text, quoted line by line so it cannot pass for anything but a quote.

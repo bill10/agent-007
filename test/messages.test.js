@@ -144,6 +144,12 @@ describe('delivery', () => {
     expect(() => vi.runAllTimers()).not.toThrow();
   });
 
+  // Codex (0.157) has a built-in send_message of its own, and a bare
+  // "send_message" sends the reply there, to nowhere.
+  it('names the board server in the reply line', () => {
+    expect(formatMessage(agent('Cobra'), 'hi').split('\n').pop()).toMatch(/^\[Reply with the agent-007-board send_message tool, to: "Cobra"\./);
+  });
+
   it('cleans the header too, and 8-bit CSI as well as ESC', () => {
     const text = formatMessage(agent('Co\x1bbra', { branchName: 'b\x9b201~' }), 'x\x9b201~');
     expect(text).not.toMatch(/[\x1b\x9b]/);
