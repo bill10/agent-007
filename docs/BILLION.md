@@ -562,6 +562,10 @@ anywhere but Telegram, and there is no paid transcription.
   hundred MB). Restart the server to pick it up; the log says which voice it
   chose when Telegram starts. A `SAY_VOICE` that is not installed is logged
   once and the automatic pick is used.
+- **How fast**: `SAY_RATE` in words per minute, 120 to 300 (outside that is
+  clamped, anything but a whole number is logged once and ignored). Unset it
+  is 205, a little faster than `say`'s own 175. The startup line gives both:
+  `Telegram: speaking with the Ava (Premium) voice at 205 wpm`.
 - **You speak**: send the bot a voice note (or an audio file) and it is
   transcribed on this machine by [whisper.cpp](https://github.com/ggml-org/whisper.cpp),
   then typed into Billion's terminal as `[Owner via Telegram, voice] <transcript>`.

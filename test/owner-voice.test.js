@@ -112,7 +112,7 @@ describe('when Billion speaks', () => {
     expect(Buffer.from(await voice.arrayBuffer()).toString()).toBe('OGGDATA');
     const [say, ffmpeg] = tools.calls.filter(c => c[1][1] !== '?');   // say -v '?' found no voices: no -v
     expect(say[0]).toBe('say');
-    expect(say[1]).toEqual(['-o', expect.stringMatching(/say\.aiff$/), '-f', expect.stringMatching(/say\.txt$/)]);
+    expect(say[1]).toEqual(['-o', expect.stringMatching(/say\.aiff$/), '-r', '205', '-f', expect.stringMatching(/say\.txt$/)]);
     expect(ffmpeg[1]).toEqual(expect.arrayContaining(['-c:a', 'libopus', '-b:a', '32k']));
     expect(tools.calls.flatMap(c => c[1]).join(' ')).not.toContain('domain');
     expect(tools.said).toEqual([expect.stringMatching(/^Billion \(Q\d+\): Buy the domain\? See link for the price, I recommend yes\.$/)]);
