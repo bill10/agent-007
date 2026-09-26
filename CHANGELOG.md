@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.12.1.0] - 2026-09-26
+
+### Fixed
+
+- **Codex agents answer agent messages through the board again.** Codex 0.157 has a built-in `send_message` of its own, and a message's "Reply with the send_message tool" line sent Codex's reply there, where it failed. The reply line, and the line telling a worker on Billion's cards how to ask Billion, now name the `agent-007-board` tool, and Codex uses it.
+
 ## [0.12.0.0] - 2026-09-26
 
 ### Added
