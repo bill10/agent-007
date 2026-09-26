@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.12.1.1] - 2026-09-26
+
+### Changed
+
+- **The Waiting tab is a bell with a notification badge.** The tab drops its "Waiting" label: open questions show as an orange count on the bell's corner ("9+" above 9), and with none open the bell is dimmed. Its name moves to the aria-label and tooltip ("Waiting on you, 3 questions"). The phone's bottom-bar button gets the same bell and badge.
+
 ## [0.12.1.0] - 2026-09-26
 
 ### Fixed
