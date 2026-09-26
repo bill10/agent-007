@@ -41,7 +41,7 @@ Decided:
 
 Existing code to lean on: repo-less agents already run (`server/pty.js`
 `createSessionFromConfig`, cwd falls back to home), are listed under "(no repo)"
-(`public/modules/explorer.js:260`), and sit in a final pod
+(`public/modules/explorer.js`, the "(no repo)" section), and sit in a final pod
 (`public/modules/office.js:156`). Billion is a repo-less agent whose cwd is its
 own folder.
 
