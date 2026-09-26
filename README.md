@@ -200,7 +200,7 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, notify_owner, read_agent_screen)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
