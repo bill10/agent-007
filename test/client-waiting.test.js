@@ -9,7 +9,7 @@ vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 import { send } from '../public/modules/ws.js';
 import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive } from '../public/modules/state.js';
 import { updateTabs } from '../public/modules/terminal.js';
-import { showWaiting, renderWaiting, handleWaitingError } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, leaveWaiting } from '../public/modules/waiting.js';
 
 const open = (n, extra = {}) => ({ id: `w${n}`, n, text: `Question ${n}?`, at: new Date().toISOString(), status: 'open', ...extra });
 const card = (id) => document.querySelector(`.waiting-card[data-id="${id}"]`);
@@ -49,6 +49,11 @@ describe('the Waiting tab', () => {
     expect(document.getElementById('job-board').style.display).toBe('none');
     expect(document.getElementById('waiting-list').textContent).toBe('Nothing waiting on you.');
     expect(document.querySelector('.mobile-nav [data-view="waiting"]').getAttribute('aria-current')).toBe('true');
+    // The phone's Terminal button leaves it.
+    leaveWaiting();
+    expect(document.getElementById('waiting-board').style.display).toBe('none');
+    expect(document.getElementById('terminal-empty').style.display).toBe('flex');
+    expect(document.querySelector('.mobile-nav [data-view="terminal"]').getAttribute('aria-current')).toBe('true');
   });
 });
 
@@ -85,6 +90,15 @@ describe('a question card', () => {
     expect(card('w2').querySelector('.waiting-error').textContent).toBe('Billion is not running');
     expect(card('w2').querySelector('input').value).toBe('  call it Raven ');
     expect(card('w2').querySelector('input').disabled).toBe(false);
+  });
+
+  it('says so on the card, and does not hang on Sending, when the socket is down', () => {
+    setWaitingItems([open(5, { choices: ['yes', 'no'] })]);
+    renderWaiting();
+    send.mockReturnValueOnce(false);
+    card('w5').querySelector('.waiting-choice').click();
+    expect(card('w5').querySelector('.waiting-error').textContent).toMatch(/Not connected/);
+    expect(card('w5').querySelector('.waiting-choice').disabled).toBe(false);
   });
 
   it('dismisses with ×, and moves answered ones to a collapsed Answered section', () => {

@@ -25,6 +25,14 @@ export function showWaiting() {
   if (window._onBoardVisibilityChanged) window._onBoardVisibilityChanged();
 }
 
+// The phone's Terminal button, pressed while this tab is showing: back to
+// the terminal that was open, or to the empty state.
+export function leaveWaiting() {
+  hideWaiting();
+  if (!activeSessionId || !agents.has(activeSessionId)) document.getElementById('terminal-empty').style.display = 'flex';
+  else agents.get(activeSessionId).termEl.style.display = 'block';
+}
+
 export function hideWaiting() {
   const board = document.getElementById('waiting-board');
   if (board) board.style.display = 'none';
@@ -36,8 +44,8 @@ function answer(item, text) {
   const body = text.trim();
   if (!body || pending.has(item.id)) return;
   errors.delete(item.id);
-  pending.add(item.id);
-  send({ type: 'waiting-answer', id: item.id, answer: body });
+  if (send({ type: 'waiting-answer', id: item.id, answer: body })) pending.add(item.id);
+  else errors.set(item.id, 'Not connected to the server; try again in a moment.');
   renderWaiting();
 }
 

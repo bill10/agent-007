@@ -183,9 +183,10 @@ export function waitingItems() {
 }
 
 function saveWaiting(items) {
-  // Every open question stays; of the rest, the newest few.
-  let closed = items.filter(item => item.status !== 'open').length - CLOSED_KEPT;
-  const kept = items.filter(item => item.status === 'open' || closed-- <= 0);
+  // The newest open questions, and of the rest the newest few.
+  let open = items.filter(item => item.status === 'open').length - WAITING_CAP;
+  let closed = items.length - (open + WAITING_CAP) - CLOSED_KEPT;
+  const kept = items.filter(item => (item.status === 'open' ? open-- <= 0 : closed-- <= 0));
   const tmp = `${waitingPath()}.tmp`;
   writeFileSync(tmp, JSON.stringify(kept, null, 2));
   renameSync(tmp, waitingPath());
@@ -201,7 +202,7 @@ export function checkChoices(choices, recommended) {
   if (!Array.isArray(choices) || choices.length < 2 || choices.length > MAX_CHOICES) return `choices must be a list of 2 to ${MAX_CHOICES} options.`;
   if (choices.some(c => typeof c !== 'string' || !c.trim() || c.trim().length > MAX_CHOICE_CHARS)) return `Each choice must be text of 1 to ${MAX_CHOICE_CHARS} characters.`;
   if (new Set(choices.map(c => c.trim())).size !== choices.length) return 'The choices must all differ.';
-  if (recommended !== undefined && recommended !== null && !choices.map(c => c.trim()).includes(String(recommended).trim())) return 'recommended must be one of the choices.';
+  if (recommended !== undefined && recommended !== null && !(typeof recommended === 'string' && choices.map(c => c.trim()).includes(recommended.trim()))) return 'recommended must be one of the choices.';
   return null;
 }
 

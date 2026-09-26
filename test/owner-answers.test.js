@@ -58,6 +58,7 @@ describe('choices and recommended', () => {
     expect(checkChoices(['yes', 'yes'])).toMatch(/differ/);
     expect(checkChoices(['yes', 'no'], 'maybe')).toMatch(/one of the choices/);
     expect(checkChoices(undefined, 'yes')).toMatch(/needs choices/);
+    expect(checkChoices(['1', '2'], 1)).toMatch(/one of the choices/);
   });
 
   it('refuses a bad pick before pinning or sending anything', async () => {
@@ -180,6 +181,18 @@ describe('waiting.json from before answers', () => {
     expect(typed()).toContain('[Owner via app] Q2: done');
     expect((await ask('New', { env: {} })).n).toBe(3);
     expect(waitingItems().map(i => [i.n, i.status])).toEqual([[1, 'open'], [2, 'answered'], [3, 'open']]);
+  });
+});
+
+describe('the list\'s size', () => {
+  it('keeps the newest 50 open questions and the newest 30 closed ones', () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({ id: `x${i}`, n: i + 1, text: 't', at: '', status: i % 2 ? 'open' : 'answered' }));
+    writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify(items));
+    dismissWaiting('x1');   // any save trims
+    const kept = waitingItems();
+    expect(kept.filter(i => i.status === 'open')).toHaveLength(49);
+    expect(kept.filter(i => i.status !== 'open')).toHaveLength(30);
+    expect(kept.at(-1).id).toBe('x99');
   });
 });
 

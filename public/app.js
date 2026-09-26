@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
@@ -22,7 +22,7 @@ import { setupShortcuts } from './modules/shortcuts.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
-import { renderWaiting, handleWaitingError, showWaiting } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, showWaiting, leaveWaiting } from './modules/waiting.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -468,6 +468,7 @@ function setupResize() {
     if (view !== 'terminal') stopVoice({ notice: 'Voice input stopped — left the terminal' });
     // Waiting is the terminal panel showing the Waiting tab.
     if (view === 'waiting') { showWaiting(); updateTabs(); }
+    else if (view === 'terminal' && waitingActive) { leaveWaiting(); updateTabs(); }
     setView(view === 'waiting' ? 'terminal' : view);
     requestAnimationFrame(() => { renderOffice(); fitActiveTerminal(); });
   };
