@@ -502,8 +502,8 @@ cycle: start agent-cost; drop the browser-extension idea
 
 Billion's questions scroll out of sight in a busy terminal, so its
 `notify_owner` tool puts each one in two places: the **Waiting on you** tab
-next to Jobs (a bell, with a count of open questions; on a phone, the
-*Waiting* button in the bottom bar), and, when a Telegram bot is set up, your
+next to Jobs (a bell alone, badged with the count of open questions; on a
+phone, the *Waiting* button in the bottom bar), and, when a Telegram bot is set up, your
 phone. Each question gets a short number, Q1, Q2 and so on. When the answer
 is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
 it `recommended`.
