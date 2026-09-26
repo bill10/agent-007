@@ -204,11 +204,14 @@ function startBillion() {
   }
   const hasClaude = commandExists('claude', process.env, process.platform, dir);
   // Without the model lists toolsFor adds: those follow what is installed,
-  // not an upgrade. Best effort, like the charter.
+  // not an upgrade. Only when claude starts, so no start without it uses up
+  // the notice. Best effort, like the charter.
   const toolsFile = join(CONFIG_DIR, 'billion-tools.json');
   let changedTools = [];
-  try { changedTools = changedBoardTools(toolsFile, toolsFor({ isBillion: true })); } catch (err) {
-    console.error(`Billion: could not save the board tool definitions to ${toolsFile}:`, err.message);
+  if (hasClaude) {
+    try { changedTools = changedBoardTools(toolsFile, toolsFor({ isBillion: true })); } catch (err) {
+      console.error(`Billion: could not save the board tool definitions to ${toolsFile}:`, err.message);
+    }
   }
   const command = hasClaude ? billionCommand({
     created,
