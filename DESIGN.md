@@ -933,10 +933,15 @@ the same shape as the terminal's upload, and land under
 ## Waiting on you
 
 Billion's `notify_owner` questions, in a pinned tab right after Jobs: same
-`.board-tab` shape (muted until active, then `--accent`), a bell icon, and the
-same orange `.board-tab-badge`, here counting open questions. On a phone the
-bottom bar has a fourth button, *Waiting*, with the same badge; it opens the
-terminal panel on this tab.
+`.board-tab` shape (muted until active, then `--accent` with the usual
+underline), but icon only: a bell with no text label. Open questions show as
+the same orange `.board-tab-badge` sitting on the bell's top-right corner like
+a phone notification (`.bell-badge`, ringed in the tab bar's background), "9+"
+above 9. With nothing open the bell is dimmed and has no badge. Without a
+visible label, the tab's `aria-label` and tooltip carry it: "Waiting on you, 3
+questions", or "Waiting on you". On a phone the bottom bar has a fourth
+button, the same bell and badge followed by *Waiting* (the other buttons are
+text labels); it opens the terminal panel on this tab.
 
 - One card per open question, newest first, in the job card's frame
   (`--bg-dark`, hairline border) with an `--state-message` left stripe: it is

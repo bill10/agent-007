@@ -368,14 +368,25 @@ export function removeSession(sessionId) {
   if (onSessionChanged) onSessionChanged();
 }
 
-export const BELL_ICON = '<svg class="board-tab-icon" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M3 8.5V5.5a3 3 0 0 1 6 0v3l1 1H2z"/><path d="M5 11h2"/></svg>';
+export const BELL_ICON = '<svg class="board-tab-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M3 8.5V5.5a3 3 0 0 1 6 0v3l1 1H2z"/><path d="M5 11h2"/></svg>';
 
-// The phone's bottom bar carries the same count.
+// The bell's notification badge: the open count, "9+" above 9, none at zero.
+function bellBadge(badge, open) {
+  badge.textContent = open > 9 ? '9+' : open > 0 ? String(open) : '';
+  badge.hidden = open === 0;
+}
+
+const waitingLabel = (open) => open > 0 ? `Waiting on you, ${open} question${open === 1 ? '' : 's'}` : 'Waiting on you';
+
+// The phone's bottom bar carries the same bell and badge.
 function updateNavBadge(open) {
   const badge = document.getElementById('mobile-nav-waiting-count');
   if (!badge) return;
-  badge.textContent = open > 0 ? String(open) : '';
-  badge.hidden = open === 0;
+  bellBadge(badge, open);
+  const btn = badge.closest('button');
+  btn.classList.toggle('empty', open === 0);
+  btn.setAttribute('aria-label', waitingLabel(open));
+  btn.title = waitingLabel(open);
 }
 
 export function updateTabs() {
@@ -407,18 +418,23 @@ export function updateTabs() {
   // Pinned next to it: Billion's questions to the owner, counted like Jobs.
   const waitingTab = document.createElement('div');
   waitingTab.className = `terminal-tab board-tab waiting-tab${waitingActive ? ' active' : ''}`;
-  waitingTab.title = 'Waiting on you: Billion\'s questions';
-  waitingTab.innerHTML = BELL_ICON;
-  waitingTab.appendChild(document.createTextNode('Waiting'));
   const open = openCount();
-  if (open > 0) {
-    const badge = document.createElement('span');
-    badge.className = 'board-tab-badge';
-    badge.textContent = String(open);
-    badge.title = `${open} question${open === 1 ? '' : 's'} waiting on you`;
-    waitingTab.appendChild(badge);
-  }
+  // Icon only: the label lives in aria-label and the tooltip.
+  waitingTab.classList.toggle('empty', open === 0);
+  waitingTab.setAttribute('role', 'button');
+  waitingTab.tabIndex = 0;
+  waitingTab.setAttribute('aria-label', waitingLabel(open));
+  waitingTab.title = waitingLabel(open);
+  const bell = document.createElement('span');
+  bell.className = 'bell';
+  bell.innerHTML = BELL_ICON;
+  const badge = document.createElement('span');
+  badge.className = 'board-tab-badge bell-badge';
+  bellBadge(badge, open);
+  bell.appendChild(badge);
+  waitingTab.appendChild(bell);
   waitingTab.onclick = () => { showWaiting(); updateTabs(); };
+  waitingTab.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); waitingTab.onclick(); } };
   container.appendChild(waitingTab);
   updateNavBadge(open);
 
