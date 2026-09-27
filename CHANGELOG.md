@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.18.0.1] - 2026-09-27
+
+### Changed
+
+- **New README headline.** "Run your coding agents like a one-person company." replaces the old tagline as the hero line, with a proof line describing Agent 007 as the operations layer for coding agents underneath; the old tagline now introduces the numbered ladder, which is followed by an invite to compare notes if you already run agents this way, and an FAQ answers the questions people ask before trying it (safety of auto-merging, cost, where it runs, which agents it supports, whether Billion is required, and usage limits).
+
 ## [0.18.0.0] - 2026-09-27
 
 ### Added
