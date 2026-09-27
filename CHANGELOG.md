@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.19.0.1] - 2026-09-27
+
+### Documentation
+
+- **Troubleshooting: a repo's local plugin (e.g. Telegram) gets registered in every worker worktree.** Explains why the registrations pile up in `~/.claude/plugins/installed_plugins.json` and how to remove them.
+
 ## [0.19.0.0] - 2026-09-27
 
 ### Added
