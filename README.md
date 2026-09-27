@@ -3,13 +3,15 @@
 [![Tests (Ubuntu)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml)
 [![Tests (Windows)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml)
 
-**From web terminals for your coding agents to a self-running agent company.**
+**Run your coding agents like a one-person company.**
+
+Agent 007 is the operations layer for Claude Code, Codex and other coding agents: it starts them, hands out the work, keeps them running, reviews what they ship, and calls you only when it matters. One command, in your browser.
 
 ![Billion is given a mission, posts two jobs to the board, two agents pick them up and finish the work, and Billion reviews the diffs and merges them: shipped](docs/billion-demo.gif)
 
 *Recorded from the running app -- [full 41s video](https://github.com/bill10/agent-007/releases/download/v0.6.4.0/billion-demo.mp4). If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
 
-Use it as far along as you need:
+From web terminals for your coding agents to a self-running agent company. Use it as far along as you need:
 
 1. **One task: one agent in a web terminal.** Start Claude Code, Codex or any CLI agent in the browser. Add a repo once; every agent gets its own git worktree and branch, so you never set one up by hand.
 2. **Many tasks across projects: many terminals, one window.** Every repo and every agent in one place, with live terminals, a file explorer, inline diffs, and a pixel office where each agent faces its screen while it works and turns to you when it needs you.
@@ -21,6 +23,8 @@ Use it as far along as you need:
 Claude Code, Codex, any terminal agent is supported -- use your existing subscriptions, no extra charge.
 
 It runs locally on your machine, so agents work while it is on and awake. Billion's plan and memory live in a git repo, so it picks up where it left off after a restart. Every worker is a real terminal you can open and type into, from your phone too ([remote access](docs/REMOTE.md)).
+
+If you already run your agents this way with Claude Code and a few scripts, great: [tell us](https://github.com/bill10/agent-007/issues) what you'd do better. If you're tired of being the one who operates them, try this.
 
 ## Quick Start
 
@@ -97,6 +101,32 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 └─────────────┴──────────────┴────────────────────┘
 ```
 
+## FAQ
+
+### Can't Claude Code (or Codex) do this on its own?
+Much of it, with enough setup: Claude Code can loop, run subagents in their own worktrees, resume a session and even call Codex. Agent 007 is that setup already built and running: a board of workers you can watch and type into, a manager that reviews and merges their pull requests, and one place where their questions reach you. Use as much of it as you need.
+
+### How is this different from Munder Difflin?
+[Munder Difflin](https://github.com/chaitanyagiri/munder-difflin) is a great, much bigger desktop app that builds many abilities in: memory, dictation, meetings, Slack, an editor. Agent 007 stays thin. It is a web app you start with one command and can open from any browser, even your phone, and it does only the operations: terminals, a job board, a manager, reviews, and a line to you. What your company can do comes from the agents themselves (Claude Code, Codex, and whatever tools, APIs and MCP servers they can reach), so it gets better every time they do. Free, with no paid tier.
+
+### Is it safe to let agents merge on their own?
+Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Claude Code workers on Billion's cards ask Billion for permissions before they ask you; Codex workers still ask you directly.
+
+### Does it cost anything?
+No. It is free and open source, and it runs the CLIs you already have, on your existing subscriptions. Board workers use your subscription's usage like any session you start yourself.
+
+### Where does it run?
+On your machine. Agents work while it is on and awake; a sleeping laptop pauses them. You can reach it from your phone (see [remote access](docs/REMOTE.md)).
+
+### Which agents does it support?
+Any terminal agent runs in its web terminals. The job board and Billion work with Claude Code and Codex, and each card can pick its model from the ones the board finds installed.
+
+### Do I have to use Billion?
+No. Each step of the list above works on its own: stop at web terminals, or at the job board, and post the cards yourself.
+
+### What happens when I hit a usage limit?
+Cards on that model wait for the reset; nothing is switched behind your back. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex.
+
 ## Configuration
 
 Settings are environment variables. Set them inline, in `~/.agent-007/.env`
@@ -107,7 +137,8 @@ clone all read both files, and the startup log names the ones it loaded. Highest
 wins: flags (`--port 8080` overrides `PORT`), then the environment, then
 `./.env`, then `~/.agent-007/.env`. `--help` lists them all. Everything the app
 saves lives in `~/.agent-007` (`AGENT007_CONFIG_DIR` moves it, and the settings
-file with it).
+file with it). These settings are the server's own: the agents it starts do not
+inherit them, so a worker cannot read your Telegram bot token.
 
 ```bash
 PORT=8080 npm start                       # Custom port (default: 7007)
@@ -221,7 +252,8 @@ server/
   command-path.js  Checks a CLI is installed before a spawn; resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
-  http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
+  http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment downloads, /mcp, origin + auth gates)
+  agent-accounts.js  Installed agent CLIs and the accounts each is logged in with (Settings panel; read-only)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
@@ -250,6 +282,7 @@ public/
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
+    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)

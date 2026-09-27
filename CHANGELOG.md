@@ -5,6 +5,35 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.18.0.2] - 2026-09-27
+
+### Changed
+
+- **README FAQ: added "How is this different from Munder Difflin?"**
+
+## [0.18.0.1] - 2026-09-27
+
+### Changed
+
+- **New README headline.** "Run your coding agents like a one-person company." replaces the old tagline as the hero line, with a proof line describing Agent 007 as the operations layer for coding agents underneath; the old tagline now introduces the numbered ladder, which is followed by an invite to compare notes if you already run agents this way, and an FAQ answers the questions people ask before trying it (safety of auto-merging, cost, where it runs, which agents it supports, whether Billion is required, and usage limits).
+
+## [0.18.0.0] - 2026-09-27
+
+### Added
+
+- **A Settings gear lists the AI agent CLIs on this machine and the accounts each is logged in with.** Next to the light/dark toggle, the gear opens "Agents & accounts": for each CLI found on the PATH (Claude Code, Codex, Gemini CLI, opencode, aider, Hermes, Cursor Agent, Amp, goose, Qwen Code, Crush) its version and path, and under Claude Code, Codex and Gemini CLI each login folder (the default marked) with its email, plan and logged-in state. Scanned once at start; Refresh rescans. Read-only: it only runs each CLI's local status check and reads the email from its login file, and never returns or logs a token.
+
+## [0.17.1.0] - 2026-09-27
+
+### Security
+
+- **Agents no longer see Agent 007's own settings.** Every agent the app starts used to inherit the server's whole environment, including what `~/.agent-007/.env` sets, so any worker (and anything it ran) could read `TELEGRAM_BOT_TOKEN`. Every setting `.env.example` documents (the Telegram token and chat, voice and Whisper settings, `PORT`, `HOST`, `BILLION_*`, the `AGENT007_*` paths and the rest) is now taken out of an agent's environment. What your own shell sets, such as `HOME`, `PATH`, `CODEX_HOME`, `CLAUDE_CONFIG_DIR` and proxies, still passes through.
+
+### Fixed
+
+- **Board workers no longer run Claude Code channel plugins.** A worker whose repo had the Telegram channel plugin installed polled Billion's bot, so your replies could go to the worker instead of Billion. Claude Code board workers, fresh or re-spawned, now start with the official channel plugins (telegram, discord, imessage, fakechat) turned off. Agents you start by hand are unchanged.
+- **The Models line in the server log is said once.** It is logged again only when the source or the list of Codex models changes, and each distinct discovery error once.
+
 ## [0.17.0.0] - 2026-09-27
 
 ### Added

@@ -169,6 +169,45 @@ body {
 }
 .icon-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
+/* Settings panel, anchored under the gear (top/right set in settings.js) */
+#settings-btn { margin-left: auto; }
+.settings-panel {
+  position: fixed;
+  z-index: 160;
+  width: min(420px, calc(100vw - 16px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+  font-size: 12px;
+}
+.settings-panel[hidden] { display: none; }
+.settings-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.settings-section-head h2 { font-size: 13px; font-weight: bold; color: var(--text); }
+.settings-refresh {
+  background: none; color: var(--text-muted); border: 1px solid var(--border);
+  border-radius: 4px; padding: 3px 10px; font: inherit; cursor: pointer;
+}
+.settings-refresh:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+.settings-refresh:disabled { cursor: progress; opacity: 0.7; }
+.settings-agent { padding: 8px 0; border-top: 1px solid var(--border); }
+.settings-agent-name { color: var(--accent); font-weight: bold; }
+.settings-dim, .settings-path { color: var(--text-dim); }
+.settings-path, .settings-folder { overflow-wrap: anywhere; }
+.settings-account {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  margin: 6px 0 0 10px; padding-left: 8px; border-left: 2px solid var(--border);
+}
+.settings-folder { color: var(--text-muted); }
+.settings-tag { font-size: 10px; color: var(--accent-contrast); background: var(--accent); border-radius: 3px; padding: 0 4px; }
+.settings-status.in { color: var(--state-waiting); }
+.settings-status.out { color: var(--state-disconnected); }
+.settings-empty { color: var(--text-dim); }
+
 /* Voice input */
 /* Fab geometry is the single source for the pill's placement below AND the
    presence pill's stacking (presence is a body-level fixed element, so these
