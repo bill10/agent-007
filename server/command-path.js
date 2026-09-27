@@ -114,10 +114,19 @@ function isExecutable(p) {
  * resolveExecutable, the same lookup the spawn itself uses.
  */
 export function commandExists(file, env = process.env, platform = process.platform, cwd = process.cwd()) {
-  if (!file) return false;
-  if (platform === 'win32') return !!resolveExecutable(file, env, platform, cwd);
-  if (file.includes('/')) return isExecutable(resolve(cwd, file));
-  return (env.PATH || '').split(delimiter).filter(Boolean).some(dir => isExecutable(join(dir, file)));
+  return !!commandPath(file, env, platform, cwd);
+}
+
+// Where `file` would launch from, the same lookup as commandExists; null when nowhere.
+export function commandPath(file, env = process.env, platform = process.platform, cwd = process.cwd()) {
+  if (!file) return null;
+  if (platform === 'win32') return resolveExecutable(file, env, platform, cwd);
+  if (file.includes('/')) { const p = resolve(cwd, file); return isExecutable(p) ? p : null; }
+  for (const dir of (env.PATH || '').split(delimiter).filter(Boolean)) {
+    const p = join(dir, file);
+    if (isExecutable(p)) return p;
+  }
+  return null;
 }
 
 // Where to get the CLIs the + Agent presets and the board start.

@@ -137,6 +137,7 @@ server/
   pty.js           PTY lifecycle
   ws.js            WebSocket routing
   http.js          HTTP routes and the user/agent auth gates
+  agent-accounts.js  Installed agent CLIs and their logged-in accounts (Settings panel; read-only)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission)
   messages.js      Agent-to-agent messages and board notices (reach, rate limit, delivery queue)
   billion.js       Billion's folder, templates and charter refresh (docs/BILLION.md)

@@ -154,7 +154,7 @@ Three-panel layout with per-panel headers:
 - **Dividers:** Gradient top (matches header bg) + border below. Gold on hover.
 - **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E
 - **Office:** Centered "+ Agent" and "+ Job" buttons
-- **Terminal:** "Repo:" label + repo name + branch icon + branch name + theme toggle in the header, plus a pencil rename button when the viewer owns the agent; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
+- **Terminal:** "Repo:" label + repo name + branch icon + branch name + Settings gear + theme toggle in the header, plus a pencil rename button when the viewer owns the agent; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
 - **Terminal tabs:** Draggable for reordering, order persisted to localStorage; double-click renames the agent (owner only)
 - **Jobs tab:** Pinned first in the tab bar, not draggable and not closable. Shows
   an orange count badge when any in-progress job needs the user. Selecting it swaps
@@ -961,8 +961,8 @@ text labels); it opens the terminal panel on this tab.
 ## Interactive Behaviors
 
 ### Icon buttons
-- Shared `.icon-btn` primitive (formerly `.theme-toggle`): theme toggle and
-  the rename pencil in the terminal header; the voice mic reuses it with the
+- Shared `.icon-btn` primitive (formerly `.theme-toggle`): Settings gear, theme
+  toggle and the rename pencil in the terminal header; the voice mic reuses it with the
   `.voice-fab` overlay class
 
 ### Voice input
