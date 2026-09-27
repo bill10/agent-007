@@ -90,3 +90,35 @@ describe('the set_next_wake tool', async () => {
     expect(call(ctx, 90).result).toMatchObject({ isError: true, content: [{ text: expect.stringMatching(/3 to 60/) }] });
   });
 });
+
+describe('billionBusy', async () => {
+  const { billionBusy } = await import('../server/billion-wake.js');
+  const NOW = T0 + 60 * MIN;
+  const since = T0;
+  const card = (over) => ({ postedByBillion: true, state: 'in-progress', agentSessionId: 'w', ...over });
+  const worker = (over) => ({ exited: false, state: 'WORKING', lastOutputAt: NOW, ...over });
+  const busy = (jobs, session) => billionBusy(jobs, () => session, since, NOW);
+
+  it('counts a Billion card whose worker is running', () => {
+    expect(busy([card()], worker())).toBe(true);
+    expect(busy([card({ postedByBillion: false })], worker())).toBe(false);
+  });
+
+  it('not a stalled, needs-you or gone worker: a stalled In-progress card keeps the quiet pace', () => {
+    expect(busy([card()], worker({ state: 'WAITING', lastOutputAt: NOW - 60 * MIN }))).toBe(false);
+    expect(busy([card()], worker({ state: 'MESSAGE' }))).toBe(false);
+    expect(busy([card()], null)).toBe(false);
+    const s = billion();
+    const stalled = billionBusy([card()], () => worker({ state: 'WAITING', lastOutputAt: NOW - 60 * MIN }), since, NOW);
+    expect(tick(s, T0 + WAKE_BUSY_MIN * MIN, stalled).woke).toBe(false);
+    expect(tick(s, T0 + WAKE_QUIET_MIN * MIN, stalled).woke).toBe(true);
+  });
+
+  it('counts a card that reached Review or finished CI since the last wake, not one sitting there', () => {
+    const iso = (t) => new Date(t).toISOString();
+    expect(busy([card({ state: 'review', reviewAt: iso(since + MIN) })])).toBe(true);
+    expect(busy([card({ state: 'review', reviewAt: iso(since - MIN), ciNotifiedAt: iso(since + MIN) })])).toBe(true);
+    expect(busy([card({ state: 'review', reviewAt: iso(since - MIN) })])).toBe(false);
+    expect(busy([card({ state: 'done', reviewAt: iso(since + MIN) })])).toBe(false);
+  });
+});

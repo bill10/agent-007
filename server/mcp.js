@@ -470,8 +470,8 @@ export const SET_NEXT_WAKE_TOOL = {
   description:
     'Say when the server should next wake you for an operating cycle, in minutes '
     + `from now (${WAKE_MIN_MIN} to ${WAKE_MAX_MIN}). Only the next wake: after it the server goes back `
-    + `to its own pace, every ${WAKE_QUIET_MIN} minutes, or every ${WAKE_BUSY_MIN} while one of your cards is `
-    + 'In progress or in Review. It still waits until you rest at your prompt and the '
+    + `to its own pace, every ${WAKE_QUIET_MIN} minutes, or every ${WAKE_BUSY_MIN} while a worker on one of your `
+    + 'cards is running or one just reached Review or finished CI. It still waits until you rest at your prompt and the '
     + 'owner is not typing to you.',
   inputSchema: {
     type: 'object',

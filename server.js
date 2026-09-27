@@ -36,7 +36,7 @@ import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
-import { wakeTick, WAKE_TICK_MS } from './server/billion-wake.js';
+import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { takeMessages, restoreMessages } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
@@ -281,14 +281,17 @@ async function switchBillion(to) {
 }
 
 // The server's operating loop for Billion (server/billion-wake.js): sooner
-// while one of its cards is being worked or waits in Review.
-const billionBusy = () => allJobs().some(j => j.postedByBillion && ['in-progress', 'review'].includes(j.state));
+// while one of its cards is being worked, or just reached Review or finished CI.
 let wakeTimer = null;
 function startBillionWakes() {
   clearInterval(wakeTimer);
   wakeTimer = setInterval(() => {
     const session = liveBillion();
-    if (session) wakeTick(session, { busy: billionBusy() });
+    if (!session) return;
+    const now = Date.now();
+    const busy = billionBusy(allJobs(), (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null),
+      session.lastWakeAt || session.createdAt || 0, now);
+    wakeTick(session, { now, busy });
   }, WAKE_TICK_MS);
   wakeTimer.unref?.();
 }

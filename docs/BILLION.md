@@ -528,7 +528,10 @@ it reuses the same switch and never switches back on a timer.)
 - **The loop.** Codex has no `/loop` or ScheduleWakeup, so on both CLIs the
   server drives the loop (`server/billion-wake.js`). It types `Run one
   operating cycle as defined in CHARTER.md.` into Billion's terminal every 30
-  minutes, every 3 while one of Billion's cards is In progress or in Review,
+  minutes, every 3 while its work is moving (a worker on one of its cards
+  running, by the board's own status, or a card that reached Review or
+  finished CI since the last wake; a stalled, waiting, needs-you or gone
+  worker does not count, since each wake re-reads Billion's whole context),
   or when Billion asked with `set_next_wake` (3 to 60 minutes, the next wake
   only). Never mid-turn: only when Billion rests at its prompt, the check mail
   delivery uses, with its inbox open and no mail waiting. Never within 2

@@ -86,8 +86,9 @@ Conversational, not a form. Then:
 
 Agent 007 runs your loop, on Claude Code and Codex alike: it types
 `Run one operating cycle as defined in CHARTER.md.` into your terminal when a
-cycle is due. That is every 30 minutes, every 3 while one of your cards is In
-progress or in Review, or when you said with `set_next_wake`, and only once
+cycle is due. That is every 30 minutes, every 3 while a worker on one of your
+cards is running or a card just reached Review or finished CI (a stalled or
+waiting worker doesn't count), or when you said with `set_next_wake`, and only once
 you rest at your prompt and the owner is not typing to you. Don't start a
 loop of your own (`/loop`, scheduled wake-ups, `sleep`): you would run every
 cycle twice. One cycle, always the same:

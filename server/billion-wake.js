@@ -5,14 +5,15 @@
 // the way mail is typed. One loop for both CLIs, and the charter tells Billion
 // not to start one of its own, so a Claude Billion is never driven twice.
 //
-// When: every WAKE_QUIET_MIN minutes, every WAKE_BUSY_MIN while one of its
-// cards is In progress or in Review, or when Billion said with set_next_wake.
+// When: every WAKE_QUIET_MIN minutes, every WAKE_BUSY_MIN while its work is
+// moving (billionBusy), or when Billion said with set_next_wake.
 // Only while it rests at its prompt (canDeliver, which message delivery uses),
 // with its inbox open, no mail waiting (that is a turn of its own) and the
 // owner quiet in its terminal for OWNER_QUIET_MS: a conversation with the
 // owner is not interrupted by a cycle.
 
 import { canDeliver, pendingMessages, sendText } from './messages.js';
+import { deriveJobStatus } from '../lib/jobs.js';
 
 export const WAKE_PROMPT = 'Run one operating cycle as defined in CHARTER.md.';
 export const WAKE_QUIET_MIN = 30;
@@ -22,6 +23,18 @@ export const WAKE_MAX_MIN = 60;
 export const OWNER_QUIET_MS = 2 * 60_000;
 export const WAKE_TICK_MS = 10_000;
 const MIN = 60_000;
+
+// Whether Billion's work is moving, which earns the short pace: one of its
+// cards has a worker actually running (the board's own status, so a stalled,
+// waiting, needs-you or gone worker does not count: waking every few minutes
+// for a card stuck on a usage reset re-reads Billion's whole context for
+// nothing), or one reached Review or had its CI finish since the last wake.
+export function billionBusy(jobs, sessionFor, since, now = Date.now()) {
+  const after = (iso) => !!iso && Date.parse(iso) > since;
+  return jobs.some(job => job.postedByBillion && (
+    (job.state === 'in-progress' && deriveJobStatus(job, sessionFor(job), { now }) === 'running')
+    || (job.state === 'review' && (after(job.reviewAt) || after(job.ciNotifiedAt)))));
+}
 
 // When the next cycle is due. Measured from the last wake, or the start (whose
 // own prompt runs a cycle); set_next_wake's time instead, when there is one.
