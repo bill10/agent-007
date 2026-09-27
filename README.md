@@ -239,6 +239,8 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 
 **An agent will not start: `"claude" is not installed, or not on the PATH Agent 007 was started with.`** The CLI the agent runs (`claude`, `codex` or `gemini`) was not found, and the message says how to install it. If it is installed, Agent 007 was started from somewhere with a shorter `PATH` than your shell (a launcher or a service manager, say); start it from a terminal where `which claude` finds it. Billion runs on Claude Code too, so without it Billion's tab says what to do instead: install Claude Code and press **Start** next to Billion, or restart with `BILLION=0` to turn Billion off.
 
+**A repo's local plugin (e.g. Telegram) shows up in every board worker's worktree.** If a repo's `.claude/settings.local.json` enables a local-scope plugin, Claude Code registers it for every git worktree or subfolder a session starts in, including board workers' worktrees. Board workers themselves run with channel plugins disabled, so they don't act on it, but the registrations pile up in `~/.claude/plugins/installed_plugins.json`, and a plain `claude` started by hand in one of those worktrees will load the plugin (for Telegram: it steals the bot's updates from your real session). Fix: register such plugins outside any repo you run board cards in, or uninstall the local registration (`claude plugin uninstall <plugin> --scope local`) in the repo and in each worktree that got one.
+
 ## Architecture
 
 ```
