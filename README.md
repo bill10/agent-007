@@ -139,6 +139,24 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 > open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
 > Tailscale setup.
 
+### Moving to another Claude account
+
+For a permanent move from one Claude subscription to another, without losing
+Claude Code's conversations, settings, plugins or trusted folders: log the new
+account in once in a folder of its own (`CLAUDE_CONFIG_DIR=~/.claude-new
+claude`, then `/login`), open **Claude account** at the foot of the left panel,
+give that folder and press **Check folder**. Then either **Switch now**, or
+**Arm** it to switch the moment Claude Code tells Billion it has hit a usage
+limit. The current login is backed up first (0600, under
+`~/.agent-007/account-backup/`), the switch is verified with `claude auth
+status`, and a switch that does not verify is rolled back by itself; **Roll
+back** does the same on request. Nothing happens until you press a button, and
+Billion cannot press it. The new folder stays on disk as a fallback: do not
+start anything with `CLAUDE_CONFIG_DIR` pointing at it afterwards, and once you
+have checked the new login works, **Retire the new folder** renames it (never
+deletes). It is for a permanent move, not for rotating accounts past a usage
+limit. Details in [docs/FEATURES.md](docs/FEATURES.md).
+
 ### Multiplayer & login
 
 By default there are no user accounts and no login — the app runs open on

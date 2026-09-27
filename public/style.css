@@ -641,6 +641,21 @@ body {
 .explorer-content::-webkit-scrollbar-track { background: transparent; }
 .explorer-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+/* The owner's Claude account switch, folded at the foot of the explorer */
+.account-panel { border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+.account-panel > summary { padding: 6px 10px; cursor: pointer; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; user-select: none; }
+.account-body { padding: 0 10px 8px; display: flex; flex-direction: column; gap: 6px; }
+.account-status { line-height: 1.4; word-break: break-word; }
+.account-status[data-status="armed"] { color: var(--accent); }
+.account-status[data-status="migrated"] { color: var(--text); }
+.account-actions { display: flex; flex-direction: column; gap: 4px; }
+.account-folder, .account-btn {
+  font: inherit; font-size: 11px; border: 1px solid var(--border); border-radius: 3px;
+  background: var(--bg-dark); color: var(--text); padding: 4px 6px;
+}
+.account-btn { cursor: pointer; text-align: left; }
+.account-btn:hover { border-color: var(--accent); }
+
 /* Explorer: repo sections */
 .explorer-repo {
   border-bottom: 1px solid var(--border);

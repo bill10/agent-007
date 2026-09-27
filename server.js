@@ -38,6 +38,7 @@ import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRep
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick } from './server/billion-limit.js';
+import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, loadState as accountMigrationState } from './server/account-migration.js';
 import { takeMessages, restoreMessages } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
@@ -282,6 +283,62 @@ async function switchBillion(to, reason) {
   try { return await switching; } finally { switching = null; }
 }
 
+// The owner's Claude account switch (server/account-migration.js): every
+// action here is the browser's, gated in server/ws.js to the owner alone;
+// Billion has no tool that reaches any of it. A switch that lands restarts
+// Billion, since its running claude keeps the old account's session, and tells
+// the owner (emails and the result, never a token). Workers are left alone:
+// claude re-reads its token every 30 seconds and carries on.
+const accountStatePayload = () => ({ type: 'account-state', ...accountState() });
+async function switchAccount(how) {
+  const state = accountMigrationState();
+  if (!state.folder) return { error: 'Set the new account\'s folder up first.' };
+  const result = await migrateAccount(state.folder);
+  broadcast(accountStatePayload());
+  if (result.ok) {
+    const billion = liveBillion();
+    if (billion) {
+      await stopBillion(billion);
+      const started = startBillion();
+      if (!started.error && !started.existing) broadcast(sessionPayload(started.session));
+    }
+  }
+  const text = result.ok
+    ? `Claude account switched${how ? ` (${how})` : ''}: the default Claude Code login is now ${result.newEmail}, was ${result.oldEmail}. Backup in ${result.backupDir}. Leave ${state.folder} alone; retire it from the app once you have checked the switch.`
+    : `Claude account switch to ${state.newEmail || 'the new account'} failed: ${result.error}`;
+  const { error } = await tellOwner(text);
+  if (error) broadcast({ type: 'notification', level: result.ok ? 'info' : 'error', message: text });
+  return result;
+}
+const accountActions = {
+  setup: (msg) => setupAccount(msg.folder),
+  arm: (msg) => armAccount(msg.on !== false),
+  migrate: () => switchAccount('by the owner'),
+  rollback: async () => {
+    const result = await rollbackAccount();
+    if (result.ok) {
+      const text = `Claude account rolled back: the default Claude Code login is ${result.email} again.`;
+      const { error } = await tellOwner(text);
+      if (error) broadcast({ type: 'notification', level: 'info', message: text });
+      const billion = liveBillion();
+      if (billion) {
+        await stopBillion(billion);
+        const started = startBillion();
+        if (!started.error && !started.existing) broadcast(sessionPayload(started.session));
+      }
+    }
+    return result;
+  },
+  retire: () => retireAccount(),
+};
+async function accountAction(msg) {
+  const act = accountActions[msg.action];
+  if (!act) return { error: `Unknown account action ${msg.action}` };
+  const result = await act(msg);
+  broadcast(accountStatePayload());
+  return result;
+}
+
 // The server's operating loop for Billion (server/billion-wake.js): sooner
 // while one of its cards is being worked, or just reached Review or finished CI.
 let wakeTimer = null;
@@ -307,13 +364,15 @@ function startBillionWakes() {
         const { error } = await tellOwner(text);
         if (error) broadcast({ type: 'notification', level: 'info', message: text });
       },
+      // Armed by the owner: the account switch comes before any move to Codex.
+      migration: { armed: () => accountArmed(), run: () => switchAccount('armed, at the usage limit') },
     }).catch(err => console.error('Billion: usage-limit check failed:', err.message));
   }, WAKE_TICK_MS);
   wakeTimer.unref?.();
 }
 
 // --- WebSocket ---
-setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion });
+setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState: accountStatePayload });
 
 // --- Startup ---
 async function startup() {

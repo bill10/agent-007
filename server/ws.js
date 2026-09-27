@@ -322,7 +322,7 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
-export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion }) {
+export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState }) {
   wss.on('connection', (ws, req) => {
     // Auth gate (phase 1): when users are configured, require a valid token
     // (?token= on the WS URL, since browsers can't set handshake headers).
@@ -369,6 +369,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
     ws.send(JSON.stringify(waitingPayload()));
+    if (accountState) ws.send(JSON.stringify(accountState()));
 
     broadcastPresence();
 
@@ -452,6 +453,16 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           const result = await switchBillion(msg.agent);
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'billion', error: result.error }));
           else if (!result.existing) announceSession(result.session, ws);
+          break;
+        }
+        case 'account': {
+          // The owner's Claude account switch (server/account-migration.js):
+          // setup, arm, migrate, rollback, retire. The owner alone, like
+          // answering Billion; an agent has no way in (no board tool).
+          const result = !accountAction ? { error: 'Not available.' }
+            : !mayAnswerOwner() ? { error: 'Only the owner switches the Claude account, and with user accounts on nobody does.' }
+            : await accountAction(msg);
+          if (result?.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }
         case 'waiting-dismiss': {
