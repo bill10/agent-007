@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  sendMessage, flushMessages, dropMessages, formatMessage, canDeliver, isTyping, isUnguarded,
+  sendMessage, withdrawMessage, sendText, flushMessages, dropMessages, formatMessage, canDeliver, isTyping, isUnguarded,
   messageableAgents, pendingMessages, PAIR_LIMIT, PAIR_WINDOW_MS, QUEUE_CAP, USER_TYPING_HOLD_MS, PASTE_CHUNK_CHARS, pasteChunks,
 } from '../server/messages.js';
 import { handleMcpMessage } from '../server/mcp.js';
@@ -306,8 +306,12 @@ describe('MCP tools', () => {
       { sendMessage: () => ({ delivered: true, to: { name: 'Viper' } }) });
     expect(delivered.content[0].text).toMatch(/^Delivered to Viper/);
     const queued = callTool('send_message', { to: 'Viper', message: 'hi' },
-      { sendMessage: () => ({ queued: 2, to: { name: 'Viper' } }) });
-    expect(queued.content[0].text).toMatch(/^Queued for Viper \(position 2\)/);
+      { sendMessage: () => ({ queued: 2, id: 'msg-7', to: { name: 'Viper' } }) });
+    expect(queued.content[0].text).toMatch(/^Queued for Viper \(position 2, message id msg-7\)/);
+    const withdrawn = callTool('withdraw_message', { id: 'msg-7' }, { withdrawMessage: () => ({ withdrawn: true, to: 'Viper' }) });
+    expect(withdrawn.content[0].text).toMatch(/^Withdrew msg-7/);
+    const late = callTool('withdraw_message', { id: 'msg-7' }, { withdrawMessage: () => ({ delivered: true, to: 'Viper' }) });
+    expect(late.content[0].text).toMatch(/already delivered to Viper/);
     const refused = callTool('send_message', { to: 'Nope', message: 'hi' }, { sendMessage: () => ({ error: 'No agent named "Nope"' }) });
     expect(refused.isError).toBe(true);
   });
@@ -357,6 +361,78 @@ describe('edges of sending', () => {
 
   it('leaves the "where" parentheses off a sender with no repo or branch', () => {
     expect(formatMessage({ name: 'Cobra' }, 'hi')).toMatch(/^\[Message from agent Cobra\]\n/);
+  });
+});
+
+describe('withdrawing and replacing a queued message', () => {
+  const busy = () => agent('Viper', { state: 'WORKING' });
+  const send = (from, to, text, replaces) => sendMessage({ from, to: 'Viper', text, replaces, sessions: mapOf(from, to), now: NOW });
+  const deliverAll = (to) => {
+    to.state = 'WAITING';
+    while (flushMessages(to, NOW + 1)) { vi.runAllTimers(); to.stateChangedAt = to.messageDeliveredAt + 1; }
+    return written(to);
+  };
+
+  it('gives a queued message an id its sender can withdraw', () => {
+    const from = agent('Billion');
+    const to = busy();
+    const { queued, id } = send(from, to, 'bump to v0.8.4.0');
+    expect(queued).toBe(1);
+    expect(withdrawMessage({ from, id, sessions: mapOf(from, to) })).toEqual({ withdrawn: true, to: 'Viper' });
+    expect(pendingMessages(to.id)).toBe(0);
+    expect(withdrawMessage({ from, id, sessions: mapOf(from, to) })).toEqual({ delivered: true, to: 'Viper' });
+  });
+
+  it('replaces a queued message in the same position', () => {
+    const from = agent('Billion');
+    const other = agent('Cobra');
+    const to = busy();
+    const { id } = send(from, to, 'first');
+    send(other, to, 'second');
+    expect(send(from, to, 'first, corrected', id)).toMatchObject({ queued: 1, replaced: true });
+    expect(pendingMessages(to.id)).toBe(2);
+    expect(withdrawMessage({ from, id, sessions: mapOf(from, to) })).toHaveProperty('error');   // replaced, not delivered
+    const out = deliverAll(to);
+    expect(out).not.toMatch(/> first\n/);
+    expect(out.indexOf('first, corrected')).toBeLessThan(out.indexOf('second'));
+  });
+
+  it('queues the replacement as new when the old one was delivered, and says so', () => {
+    const from = agent('Billion');
+    const to = busy();
+    const { id } = send(from, to, 'old');
+    deliverAll(to);
+    to.state = 'WORKING';
+    expect(send(from, to, 'new', id)).toMatchObject({ queued: 1, replacedDelivered: true });
+    expect(withdrawMessage({ from, id, sessions: mapOf(from, to) })).toMatchObject({ delivered: true });
+  });
+
+  it('reports a message queued behind another as queued, not delivered', () => {
+    const from = agent('Billion');
+    const to = busy();
+    sendText(to, '[Job board] notice');
+    to.state = 'WAITING';                  // free now: the flush types the notice, not this
+    expect(send(from, to, 'hi')).toMatchObject({ queued: 1 });
+    expect(written(to)).toContain('[Job board] notice');
+  });
+
+  it('refuses another agent\'s message id', () => {
+    const from = agent('Billion');
+    const other = agent('Cobra');
+    const to = busy();
+    const { id } = send(from, to, 'mine');
+    expect(withdrawMessage({ from: other, id, sessions: mapOf(from, other, to) })).toHaveProperty('error');
+    expect(send(other, to, 'hijack', id)).toHaveProperty('error');
+    expect(pendingMessages(to.id)).toBe(1);
+  });
+
+  it('cannot reach server-written entries', () => {
+    const from = agent('Billion');
+    const to = busy();
+    sendText(to, '[Job board] notice');
+    expect(withdrawMessage({ from, id: undefined, sessions: mapOf(from, to) })).toHaveProperty('error');
+    expect(withdrawMessage({ from, id: 'msg-0', sessions: mapOf(from, to) })).toHaveProperty('error');
+    expect(pendingMessages(to.id)).toBe(1);
   });
 });
 
