@@ -3,13 +3,15 @@
 [![Tests (Ubuntu)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml)
 [![Tests (Windows)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml)
 
-**From web terminals for your coding agents to a self-running agent company.**
+**Run your coding agents like a one-person company.**
+
+One command, in your browser: a terminal for every agent, a job board they pick work from, and a manager that calls you only when it matters.
 
 ![Billion is given a mission, posts two jobs to the board, two agents pick them up and finish the work, and Billion reviews the diffs and merges them: shipped](docs/billion-demo.gif)
 
 *Recorded from the running app -- [full 41s video](https://github.com/bill10/agent-007/releases/download/v0.6.4.0/billion-demo.mp4). If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
 
-Use it as far along as you need:
+From web terminals for your coding agents to a self-running agent company. Use it as far along as you need:
 
 1. **One task: one agent in a web terminal.** Start Claude Code, Codex or any CLI agent in the browser. Add a repo once; every agent gets its own git worktree and branch, so you never set one up by hand.
 2. **Many tasks across projects: many terminals, one window.** Every repo and every agent in one place, with live terminals, a file explorer, inline diffs, and a pixel office where each agent faces its screen while it works and turns to you when it needs you.
