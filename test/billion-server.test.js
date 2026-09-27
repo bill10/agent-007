@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import WebSocket from 'ws';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { server, sessions, killSession } from '../server.js';
@@ -8,6 +8,7 @@ import { createSessionFromConfig } from '../server/pty.js';
 import { broadcast } from '../server/ws.js';
 import { codenamePool, nextSessionId } from '../server/state.js';
 import { BILLION_NAME } from '../server/billion.js';
+import { hashToken } from '../server/auth.js';
 
 // A stand-in for Billion that runs anywhere: the real one would start Claude
 // Code. What is under test is how the server treats a session marked isBillion.
@@ -90,5 +91,60 @@ describe('Billion on the server', () => {
     await killSession(billion.id);
     expect(sessions.has(billion.id)).toBe(false);
     expect(codenamePool.has(BILLION_NAME)).toBe(true);
+  });
+});
+
+// The owner's Claude account switch over the socket (server.js accountAction,
+// server/ws.js 'account'). Every action here fails before the module reaches
+// `security` or `claude`: CONFIG_DIR is the suite's temp dir with nothing set
+// up, and the one folder given is relative. Nothing on this machine is touched.
+describe('the Claude account switch over the socket', () => {
+  const refusal = async (ws, seen, msg) => {
+    const before = seen.length;
+    ws.send(JSON.stringify({ type: 'account', ...msg }));
+    return waitFor(seen, (m, i) => i >= before && m.type === 'notification' && m.level === 'error');
+  };
+
+  it('tells a new window the state, and every action answers with its error', async () => {
+    const { ws, seen } = await connect();
+    const state = await waitFor(seen, m => m.type === 'account-state');
+    expect(state).toMatchObject({ status: 'not set up' });
+    expect(JSON.stringify(state)).not.toMatch(/backupDir/);
+    for (const [msg, error] of [
+      [{ action: 'bogus' }, /Unknown account action bogus/],
+      [{ action: 'setup', folder: 'claude-new' }, /absolute path/],
+      [{ action: 'arm' }, /Set the new account's folder up first/],
+      [{ action: 'migrate' }, /Set the new account's folder up first/],
+      [{ action: 'rollback' }, /No backup to roll back to/],
+      [{ action: 'retire' }, /Only a folder whose account has been switched to/],
+    ]) {
+      const got = await refusal(ws, seen, msg);
+      expect(got?.message, msg.action).toMatch(error);
+    }
+    // Each action re-broadcasts the state, still not set up.
+    expect(seen.filter(m => m.type === 'account-state').length).toBeGreaterThan(1);
+    expect(seen.filter(m => m.type === 'account-state').every(m => m.status === 'not set up')).toBe(true);
+    ws.close();
+  });
+
+  it('with user accounts on, nobody switches the account', async () => {
+    const usersPath = process.env.AGENT007_USERS_PATH;
+    const token = 'tokAcct_' + Math.random().toString(36).slice(2, 10);
+    writeFileSync(usersPath, JSON.stringify([{ id: 'u_acct', displayName: 'Owner', color: '#d4a847', tokenHash: hashToken(token) }]));
+    try {
+      const { ws, seen } = await new Promise((resolve, reject) => {
+        const s = new WebSocket(`${wsUrl}/?token=${encodeURIComponent(token)}`);
+        const seen = [];
+        s.on('message', (d) => seen.push(JSON.parse(d)));
+        s.on('open', () => resolve({ ws: s, seen }));
+        s.on('error', reject);
+      });
+      expect((await waitFor(seen, m => m.type === 'welcome')).authEnabled).toBe(true);
+      const got = await refusal(ws, seen, { action: 'setup', folder: '/tmp/never-read' });
+      expect(got.message).toMatch(/Only the owner switches the Claude account, and with user accounts on nobody does/);
+      ws.close();
+    } finally {
+      rmSync(usersPath, { force: true });
+    }
   });
 });

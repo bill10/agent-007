@@ -2,11 +2,11 @@
 // Everything runs against a scratch home and a fake `security` / `claude`:
 // the real Keychain, ~/.claude and ~/.claude.json are never touched.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, realpathSync } from 'fs';
-import { tmpdir } from 'os';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, realpathSync, rmSync } from 'fs';
+import { tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import {
-  preflight, migrate, rollback, retire, setup, setArmed, isArmed, loadState, publicState,
+  preflight, migrate, rollback, retire, setup, setArmed, isArmed, loadState, publicState, authStatus,
   keychainService, keychainAccount, loginOf, writeAccountFields, DEFAULT_SERVICE, ACCOUNT_FIELDS,
 } from '../server/account-migration.js';
 import { limitTick, resetLimitWatch, SETTLE_MS } from '../server/billion-limit.js';
@@ -90,6 +90,10 @@ describe('where a login lives', () => {
     expect(keychainService('/Users/x/.claude-new')).not.toBe(keychainService('/Users/x/.claude-new/'));
     expect(keychainAccount({ USER: 'bill' })).toBe('bill');
     expect(keychainAccount({ USER: 'bad user!' })).toBe('claude-code-user');
+    // NFC: a folder typed with a combining accent hashes like the composed one.
+    expect(keychainService('/Users/x/café')).toBe(keychainService('/Users/x/café'));
+    // No USER in the env: the process's own username, as claude does.
+    expect(keychainAccount({})).toBe(/^[a-zA-Z0-9._-]+$/.test(userInfo().username) ? userInfo().username : 'claude-code-user');
   });
 
   it('the default folder follows CLAUDE_CONFIG_DIR when the server has it, and Linux uses a file', () => {
@@ -130,6 +134,25 @@ describe('preflight', () => {
   it('needs a current login to move away from', async () => {
     keychain.delete(DEFAULT_SERVICE);
     expect((await preflight(newDir, deps)).error).toMatch(/default Claude Code folder is not logged in/);
+  });
+
+  it('names the new folder\'s .claude.json when it is missing or not JSON', async () => {
+    rmSync(join(newDir, '.claude.json'));
+    expect((await preflight(newDir, deps)).error).toMatch(new RegExp(`^${join(newDir, '.claude.json').replace(/[.\\/]/g, '\\$&')}: `));
+    writeFileSync(join(newDir, '.claude.json'), 'not json');
+    expect((await preflight(newDir, deps)).error).toMatch(/\.claude\.json: /);
+    writeFileSync(join(newDir, '.claude.json'), '[1]');
+    expect((await preflight(newDir, deps)).error).toMatch(/not a JSON object/);
+  });
+
+  it('treats a claude that prints no JSON as logged out', async () => {
+    const base = fakeRun();
+    const run = vi.fn(async (f, a, o) => (f === 'claude' && o.env?.CLAUDE_CONFIG_DIR === newDir) ? { code: 0, stdout: 'Logged in as new@example.com\n', stderr: '' } : base(f, a, o));
+    expect(await authStatus(loginOf(newDir, { home, env, platform: 'darwin' }), { run, platform: 'darwin' })).toEqual({ loggedIn: false, email: null, error: 'claude auth status printed no JSON' });
+    expect((await preflight(newDir, { ...deps, run })).error).toMatch(/not logged in/);
+    // loggedIn: true with a non-zero exit is not a login either.
+    const flaky = vi.fn(async () => ({ code: 1, stdout: '{"loggedIn":true,"email":"x@y"}', stderr: '' }));
+    expect((await authStatus(loginOf(null, { home, env, platform: 'darwin' }), { run: flaky, platform: 'darwin' })).loggedIn).toBe(false);
   });
 });
 
@@ -194,6 +217,25 @@ describe('migrate', () => {
     expect(json(defaultJson()).oauthAccount.emailAddress).toBe(OLD);
     expect(result.rolledBack).toBe(false);
     expect(result.error).toMatch(/the backup is in/);
+  });
+
+  it('stops before the backup when the current token cannot be read, and rolls back when the new one cannot', async () => {
+    // The item is there (preflight only checks that) but its secret will not come out.
+    const noRead = (svc) => { const base = fakeRun(); return vi.fn(async (f, a, o) => (f === 'security' && a.includes('-w') && a.includes(svc)) ? { code: 36, stdout: '', stderr: 'denied' } : base(f, a, o)); };
+    const result = await migrate(newDir, { ...deps, run: noRead(DEFAULT_SERVICE) });
+    expect(result.error).toMatch(/Could not read the current token from Keychain item "Claude Code-credentials"; nothing changed/);
+    expect(result.rolledBack).toBeUndefined();
+    expect(existsSync(join(dir, 'account-backup'))).toBe(false);
+    expect(loadState(dir)).toEqual({ status: 'not set up' });
+    expect(json(defaultJson()).oauthAccount.emailAddress).toBe(OLD);
+    // The new token unreadable: the backup exists by then, so the swap is undone.
+    const second = await migrate(newDir, { ...deps, run: noRead(keychainService(newDir)) });
+    expect(second.error).toMatch(/could not read the new token from Keychain item .*\. Rolled back to old@example.com\./);
+    expect(second.rolledBack).toBe(true);
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
+    expect(json(defaultJson())).toMatchObject({ oauthAccount: { emailAddress: OLD }, hasAvailableSubscription: true });
+    expect(loadState(dir)).toMatchObject({ status: 'rolled back', error: expect.stringMatching(/could not read the new token/) });
+    expect(publicState(dir).error).toMatch(/could not read the new token/);
   });
 
   it('on Linux copies .credentials.json at 0600 instead of using the Keychain', async () => {
@@ -272,6 +314,28 @@ describe('rollback and retire', () => {
     expect(result.error).toMatch(/reports new@example.com, not old@example.com/);
   });
 
+  it('rollback finds the newest backup when the state does not name one, and reports a broken backup', async () => {
+    const first = await migrate(newDir, deps);
+    // A second, later backup: an older stamp sorts first, so the newest wins.
+    mkdirSync(join(dir, 'account-backup', '2020-01-01T00-00-00-000Z'));
+    writeFileSync(join(dir, 'account-backup', '2020-01-01T00-00-00-000Z', 'account.json'), '{"email":"stale@example.com"}');
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ status: 'migrated', folder: newDir, newEmail: NEW, oldEmail: OLD }));
+    expect(await rollback(deps)).toEqual({ ok: true, email: OLD });
+    expect(loadState(dir)).toMatchObject({ status: 'rolled back', backupDir: first.backupDir });
+    // A backup with its credentials gone is an error, not a half restore.
+    await migrate(newDir, deps);
+    const state = loadState(dir);
+    rmSync(join(state.backupDir, 'credentials'));
+    const broken = await rollback(deps);
+    expect(broken.error).toMatch(/^Rollback failed: .*credentials/);
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
+    expect(loadState(dir).status).toBe('migrated');
+    // No backups at all under an existing folder.
+    expect((await rollback({ ...deps, dir: join(home, 'other') })).error).toMatch(/No backup/);
+    mkdirSync(join(home, 'other', 'account-backup'), { recursive: true });
+    expect((await rollback({ ...deps, dir: join(home, 'other') })).error).toMatch(/No backup/);
+  });
+
   it('retire renames the migrated folder with the date and never deletes it', async () => {
     expect(retire(deps).error).toMatch(/Only a folder whose account has been switched to/);
     await migrate(newDir, deps);
@@ -314,6 +378,21 @@ describe('setup and arming', () => {
     // A corrupt state file reads as not set up rather than throwing.
     writeFileSync(join(dir, 'account-migration.json'), '{"status":"weird"}');
     expect(loadState(dir)).toEqual({ status: 'not set up' });
+    writeFileSync(join(dir, 'account-migration.json'), '{not json');
+    expect(loadState(dir)).toEqual({ status: 'not set up' });
+    expect(isArmed(dir)).toBe(false);
+    expect(publicState(dir)).toMatchObject({ status: 'not set up', folder: undefined, newEmail: undefined });
+  });
+
+  it('arming again while armed keeps it armed, and a rolled-back state must be checked again first', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    expect(setArmed(true, { dir }).state.status).toBe('armed');
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), status: 'rolled back' }));
+    expect(setArmed(true, { dir }).error).toMatch(/Set the new account's folder up first/);
+    expect(setArmed(false, { dir }).error).toMatch(/Nothing is armed/);
+    // Check again from there brings it back to ready with the state file rewritten.
+    expect((await setup(newDir, deps)).state.status).toBe('ready');
   });
 });
 
@@ -382,6 +461,49 @@ describe('the armed switch at a usage limit', () => {
     expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
     expect(await tick(billion(), { migration: m, switchTo })).toBe('switched');
     expect(m.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('a warning still needs BILLION_AUTO_SWITCH: armed alone never nudges, and never migrates', async () => {
+    const WARN = "You've used 92% of your weekly limit · resets 10am (America/Los_Angeles)";
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    const m = migration();
+    const send = vi.fn();
+    // Auto-switch off: the armed gate lets the tick in, the warning branch sends it back out.
+    expect(await tick(billion(WARN), { migration: m, send, env: { BILLION_AUTO_SWITCH: '0' } })).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+    // Auto-switch on: the nudge as before, and no migration for a mere warning.
+    expect(await tick(billion(WARN), { migration: m, send })).toBe('warned');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(m.run).not.toHaveBeenCalled();
+    expect(isArmed(dir)).toBe(true);
+  });
+
+  it('stays out of a paused Billion, and a Codex Billion with auto-switch off is left alone even when armed', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    const m = migration();
+    const s = billion();
+    resetLimitWatch({ pausedFor: s.id });
+    expect(await tick(s, { migration: m })).toBeNull();
+    resetLimitWatch();
+    expect(await tick(billion("■ You've hit your usage limit. Try again at 4:05 PM.", { agent: 'codex' }), { migration: m, env: { BILLION_AUTO_SWITCH: '0' } })).toBeNull();
+    expect(m.run).not.toHaveBeenCalled();
+    // migration given without armed() (or an exited Billion) is as good as none.
+    expect(await tick(billion(), { migration: {}, env: { BILLION_AUTO_SWITCH: '0' } })).toBeNull();
+    expect(await tick(billion(OUT, { exited: true }), { migration: m })).toBeNull();
+    expect(isArmed(dir)).toBe(true);
+  });
+
+  it('a migration that throws lets go of the tick, so the next one runs', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    const m = { armed: () => isArmed(dir), run: vi.fn(async () => { throw new Error('keychain locked'); }) };
+    await expect(tick(billion(), { migration: m })).rejects.toThrow(/keychain locked/);
+    expect(isArmed(dir)).toBe(true);   // nothing disarmed it: the switch never got as far as the state file
+    // watch.running was cleared: the next tick reaches run() again.
+    await expect(tick(billion(), { migration: m })).rejects.toThrow(/keychain locked/);
+    expect(m.run).toHaveBeenCalledTimes(2);
   });
 
   it('off by default: nothing set up means the tick behaves as before', async () => {

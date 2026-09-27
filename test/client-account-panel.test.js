@@ -68,6 +68,46 @@ describe('the Claude account panel', () => {
     expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'rollback' });
   });
 
+  it('rolled back: says why, offers the folder again, and arms nothing', () => {
+    handleAccountState({ type: 'account-state', status: 'rolled back', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: 'claude auth status reports old@x after the swap, not new@x' });
+    const status = document.querySelector('.account-status');
+    expect(status.textContent).toBe('Rolled back to old@x (claude auth status reports old@x after the swap, not new@x).');
+    expect(status.dataset.status).toBe('rolled back');
+    expect(labels()).toEqual(['Check again']);
+    expect(document.querySelector('.account-folder').value).toBe('/h/.claude-new');
+    click('setup');
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'setup', folder: '/h/.claude-new' });
+    // Without an error to show, the line ends after the email.
+    handleAccountState({ type: 'account-state', status: 'rolled back', oldEmail: 'old@x' });
+    expect(document.querySelector('.account-status').textContent).toBe('Rolled back to old@x.');
+  });
+
+  it('migrated: a cancelled confirm sends nothing, and a retired folder is named', () => {
+    handleAccountState({ type: 'account-state', status: 'migrated', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z' });
+    window.confirm = vi.fn(() => false);
+    click('rollback');
+    click('retire');
+    expect(send).not.toHaveBeenCalled();
+    expect(window.confirm).toHaveBeenCalledTimes(2);
+    expect(window.confirm.mock.calls[0][0]).toMatch(/Roll back to old@x\?/);
+    handleAccountState({ type: 'account-state', status: 'migrated', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z', retiredTo: '/h/.claude-new.retired-2026-09-27' });
+    expect(document.querySelector('.account-status').textContent).toBe('Switched to new@x on 2026-09-27 (was old@x). Folder retired as /h/.claude-new.retired-2026-09-27.');
+    expect(document.querySelector('.account-folder')).toBeNull();
+  });
+
+  it('armed: a cancelled disarm sends nothing; an unknown status shows as is; no panel is a no-op', () => {
+    handleAccountState({ type: 'account-state', status: 'armed', oldEmail: 'old@x', newEmail: 'new@x' });
+    window.confirm = vi.fn(() => false);
+    click('disarm');
+    expect(send).not.toHaveBeenCalled();
+    expect(window.confirm.mock.calls[0][0]).toMatch(/^Disarm\?/);
+    handleAccountState({ type: 'account-state', status: 'something new' });
+    expect(document.querySelector('.account-status').textContent).toBe('something new');
+    expect(labels()).toEqual([]);
+    document.body.innerHTML = '';
+    expect(() => renderAccount()).not.toThrow();
+  });
+
   it('hides with user accounts on, or without Billion', () => {
     handleAccountState({ type: 'account-state', status: 'ready' });
     setSelf('u1', true);
