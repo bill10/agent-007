@@ -204,7 +204,8 @@ server/
   command-path.js  Checks a CLI is installed before a spawn; resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
-  http.js          HTTP routes (/api/browse, /api/jobs, job attachment downloads, /mcp, origin + auth gates)
+  http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment downloads, /mcp, origin + auth gates)
+  agent-accounts.js  Installed agent CLIs and the accounts each is logged in with (Settings panel; read-only)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
@@ -233,6 +234,7 @@ public/
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
+    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
