@@ -111,6 +111,10 @@ export const isArmed = (dir = CONFIG_DIR) => loadState(dir).status === 'armed';
 // Errors are shown in the browser and sent to Telegram: the first line, short,
 // so a JSON.parse snippet of a config file or a long stderr never travels.
 const short = (err) => String(err?.message ?? err).split('\n')[0].slice(0, 200);
+// Emails belong in the browser and on Telegram, never in the server log.
+const EMAIL_RE = /[^\s@"'<>()]+@[^\s@"'<>()]+\.[^\s@"'<>()]+/g;
+export const redactEmails = (text) => String(text).replace(EMAIL_RE, '<email>');
+const logSafe = (log, text) => log(redactEmails(text));
 
 // --- Running things ---
 
@@ -343,7 +347,7 @@ export async function checkSwitch(folderInput, deps = {}) {
   const { dir = CONFIG_DIR, now = () => new Date(), log = console.log } = deps;
   if (inFlight) return { error: BUSY_ERROR };
   const pre = await preflight(folderInput, deps);
-  if (pre.error) { log(`Claude account: switch not started: ${pre.error}`); return noteFailure(dir, pre.error, now); }
+  if (pre.error) { logSafe(log, `Claude account: switch not started: ${pre.error}`); return noteFailure(dir, pre.error, now); }
   return { ok: true, newEmail: pre.newEmail, oldEmail: pre.oldEmail };
 }
 
@@ -367,7 +371,7 @@ async function backupCurrent(current, store, { dir, now, log, run, platform, ema
     at: now().toISOString(), email: email(status.email) || fields.oauthAccount?.emailAddress || null, configJson: current.configJson, where: store.where, account: item.acct, fields,
   }, null, 2), { mode: 0o600 });
   writeFileSync(join(backupDir, 'credentials'), secret, { mode: 0o600 });
-  log(`Claude account: backed up the current login to ${backupDir}`);
+  logSafe(log, `Claude account: backed up the current login to ${backupDir}`);
   return { backupDir, item, secret, fields };
 }
 
@@ -379,7 +383,7 @@ export function migrate(folderInput, deps = {}) {
 }
 async function migrateNow(folderInput, deps) {
   const { home = homedir(), env = process.env, platform = process.platform, run = runCommand, dir = CONFIG_DIR, now = () => new Date(), log = console.log, wait } = deps;
-  const fail = (error) => { log(`Claude account: switch not started: ${error}`); return noteFailure(dir, error, now); };
+  const fail = (error) => { logSafe(log, `Claude account: switch not started: ${error}`); return noteFailure(dir, error, now); };
   // Checked again here on purpose: the server ran checkSwitch before it
   // stopped Billion, and Billion's own shutdown writes land in between.
   const pre = await preflight(folderInput, { home, env, platform, run });
@@ -419,17 +423,17 @@ async function migrateNow(folderInput, deps) {
     // owner gets the error and a working panel, not a dead end.
     if (!configTouched && (await from.read(item.acct)) === backup.secret) {
       saveState({ ...record, status: 'ready', at: now().toISOString(), error: failure }, dir);
-      log(`Claude account: switch to ${newEmail} failed before anything changed (${failure})`);
+      logSafe(log, `Claude account: switch to ${newEmail} failed before anything changed (${failure})`);
       return { error: `${failure}. Nothing changed.`, backupDir };
     }
     const back = await restoreBackup(backupDir, { home, env, platform, run, wait });
     const rolledBack = !back.error;
     saveState({ ...record, status: rolledBack ? 'rolled back' : 'rollback failed', at: now().toISOString(), error: rolledBack ? failure : `${failure}; rollback failed: ${back.error}` }, dir);
-    log(`Claude account: switch to ${newEmail} failed (${failure}); ${rolledBack ? 'rolled back to ' + oldEmail : 'ROLLBACK FAILED: ' + back.error}`);
+    logSafe(log, `Claude account: switch to ${newEmail} failed (${failure}); ${rolledBack ? 'rolled back to ' + oldEmail : 'ROLLBACK FAILED: ' + back.error}`);
     return { error: `${failure}. ${rolledBack ? `Rolled back to ${oldEmail}.` : `Rollback failed too (${back.error}); the backup is in ${backupDir}.`}`, rolledBack, backupDir };
   }
   saveState({ ...record, status: 'migrated', at: now().toISOString() }, dir);
-  log(`Claude account: switched the default login from ${oldEmail} to ${newEmail}`);
+  logSafe(log, `Claude account: switched the default login from ${oldEmail} to ${newEmail}`);
   return { ok: true, oldEmail, newEmail, backupDir };
 }
 
@@ -468,7 +472,7 @@ export function rollback(deps = {}) {
     try { ({ backupDir: before } = await backupCurrent(current, credentialStore(current, { run, platform, env }), { dir, now, log, run, platform })); } catch (err) {
       // No token to preserve is fine (the restore puts one there); anything else stops here.
       if (!/Could not find the current token/.test(err.message)) return { error: `Rollback not started: the current login could not be backed up first (${short(err)}).` };
-      log(`Claude account: rollback goes on without a backup of the current login: ${short(err)}`);
+      logSafe(log, `Claude account: rollback goes on without a backup of the current login: ${short(err)}`);
     }
     const back = await restoreBackup(backupDir, { home, env, platform, run, wait });
     if (back.error) {
@@ -476,7 +480,7 @@ export function rollback(deps = {}) {
       return { error: `Rollback failed: ${back.error}` };
     }
     saveState({ ...state, status: 'rolled back', oldEmail: back.email, backupDir, replacedBackupDir: before ?? undefined, at: now().toISOString(), error: undefined }, dir);
-    log(`Claude account: rolled back to ${back.email}`);
+    logSafe(log, `Claude account: rolled back to ${back.email}`);
     return { ok: true, email: back.email, replacedBackupDir: before };
   }, deps);
 }
@@ -494,7 +498,7 @@ export function retire(deps = {}) {
     for (let n = 2; existsSync(target); n++) target = `${state.folder}.retired-${day}-${n}`;
     try { rename(state.folder, target); } catch (err) { return { error: `Could not rename ${state.folder}: ${short(err)}` }; }
     saveState({ ...state, retiredTo: target, retiredAt: now().toISOString() }, dir);
-    log(`Claude account: retired ${basename(state.folder)} as ${basename(target)}`);
+    logSafe(log, `Claude account: retired ${basename(state.folder)} as ${basename(target)}`);
     return { ok: true, retiredTo: target };
   }, deps);
 }

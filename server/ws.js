@@ -12,6 +12,7 @@ import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js'
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
+import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
 import { waitingPayload, dismissWaiting, answerWaiting } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
@@ -493,7 +494,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
               : !ws.fromBrowser ? { error: 'The Claude account is switched from the browser only.' }
               : await accountAction(msg);
           } catch (err) {
-            console.error('Claude account action failed:', err);
+            console.error('Claude account action failed:', redactEmails(err.message));
             result = { error: `Claude account action failed: ${err.message}` };
           }
           if (result?.error) ws.send(JSON.stringify({ type: 'account-error', message: result.error }));

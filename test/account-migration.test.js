@@ -205,8 +205,14 @@ describe('migrate', () => {
   it('never logs a token', async () => {
     const lines = [];
     await migrate(newDir, { ...deps, log: (l) => lines.push(l) });
-    expect(lines.join('\n')).toMatch(/switched the default login from old@example.com to new@example.com/);
-    expect(lines.join('\n')).not.toMatch(/sk-ant|OLD|NEW/);
+    expect(lines.join('\n')).toMatch(/switched the default login from <email> to <email>/);
+    expect(lines.join('\n')).not.toMatch(/sk-ant|OLD|NEW|@example\.com/);
+    // Every other line the module logs is redacted the same way.
+    const more = [];
+    await rollback({ ...deps, log: (l) => more.push(l) });
+    await migrate(join(home, 'nope'), { ...deps, log: (l) => more.push(l) });
+    expect(more.length).toBeGreaterThan(1);
+    expect(more.join('\n')).not.toMatch(/@example\.com/);
   });
 
   it('rolls back by itself when the verify does not show the new email', async () => {
