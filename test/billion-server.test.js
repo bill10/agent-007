@@ -168,6 +168,17 @@ describe('the Claude account switch over the socket', () => {
     } finally { rmSync(join(cfg, 'account-migration.json'), { force: true }); }
   });
 
+  it('a browser action reaches browser sockets only', async () => {
+    const plain = await connect();
+    const { ws, seen } = await connect(browser());
+    const before = plain.seen.length;
+    ws.send(JSON.stringify({ type: 'account', action: 'arm' }));
+    await waitFor(seen, m => m.type === 'account-error');
+    await new Promise(r => setTimeout(r, 100));
+    expect(plain.seen.slice(before).filter(m => m.type === 'account-state' || m.type === 'account-error' || m.type === 'notification')).toEqual([]);
+    ws.close(); plain.ws.close();
+  });
+
   it('with user accounts on, nobody switches the account', async () => {
     const usersPath = process.env.AGENT007_USERS_PATH;
     const token = 'tokAcct_' + Math.random().toString(36).slice(2, 10);

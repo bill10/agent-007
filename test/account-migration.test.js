@@ -3,6 +3,7 @@
 // the real Keychain, ~/.claude and ~/.claude.json are never touched.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, realpathSync, rmSync, utimesSync } from 'fs';
+import { spawnSync } from 'child_process';
 import { tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import {
@@ -646,6 +647,47 @@ describe('what the reviews asked for', () => {
     expect(await withBillionStopped(async () => 'done', { live: () => ({}), stop, start: () => ({ error: 'no claude' }), announce, failed })).toBe('done');
     expect(failed).toHaveBeenCalledWith('no claude');
     expect(announce).not.toHaveBeenCalled();
+  });
+
+  it('rolls back from a switch the server died in the middle of, and recheck under another action is busy, not an alarm', async () => {
+    await migrate(newDir, deps);
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), status: 'switching' }));
+    expect(await rollback(deps)).toMatchObject({ ok: true, email: OLD });
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
+    expect(loadState(dir).status).toBe('rolled back');
+    // The recheck timer fires while the owner rolls back: busy, and nothing recorded.
+    await migrate(newDir, deps);
+    let release; const gate = new Promise(r => { release = r; });
+    const base = fakeRun();
+    const run = vi.fn(async (f, a, o) => { if (a.includes('-w') && !run.held) { run.held = true; await gate; } return base(f, a, o); });
+    const rb = rollback({ ...deps, run });
+    try {
+      await new Promise(r => setTimeout(r, 20));
+      expect(await recheck(deps)).toEqual({ error: BUSY_ERROR });
+      expect(loadState(dir).error).toBeUndefined();
+    } finally { release(); }
+    expect((await rb).ok).toBe(true);
+  });
+
+  it('the default liveness check tells a dead holder from a live one', async () => {
+    const lock = join(dir, 'account-migration.lock');
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(join(lock, 'pid'), String(spawnSync(process.execPath, ['-e', '0']).pid));
+    expect((await migrate(newDir, deps)).ok).toBe(true);   // dead holder: taken over
+    expect((await rollback(deps)).ok).toBe(true);
+    mkdirSync(lock);
+    writeFileSync(join(lock, 'pid'), String(process.ppid));
+    expect(await migrate(newDir, deps)).toEqual({ error: BUSY_ERROR });   // live holder: wait
+  });
+
+  it('a folder check while armed stays armed', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    expect((await setup(newDir, deps)).state.status).toBe('armed');
+    expect(isArmed(dir)).toBe(true);
+    rmSync(newDir, { recursive: true });
+    expect((await setup(newDir, deps)).error).toMatch(/does not exist/);
+    expect(isArmed(dir)).toBe(true);   // a failed check changes nothing; Disarm is the owner's call
   });
 
   it('canMigrate gates on the state', async () => {

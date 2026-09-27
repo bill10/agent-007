@@ -49,7 +49,7 @@ export const ACCOUNT_FIELDS = ['oauthAccount', 'hasAvailableSubscription', 'subs
 // that died mid-swap shows as such and offers only Roll back; 'rollback failed'
 // the same, plus Check folder as the way out once the store works again.
 const STATUSES = ['not set up', 'ready', 'armed', 'switching', 'migrated', 'rolled back', 'rollback failed'];
-const SETUP_FROM = ['not set up', 'ready', 'rolled back', 'rollback failed'];
+const SETUP_FROM = ['not set up', 'ready', 'armed', 'rolled back', 'rollback failed'];
 const ROLLBACK_FROM = ['migrated', 'switching', 'rollback failed'];
 export const BUSY_ERROR = 'Another Claude account action is still running.';
 const SECURITY = '/usr/bin/security';   // by path: a same-user shim earlier on PATH must not see the token
@@ -499,16 +499,17 @@ export function retire(deps = {}) {
   }, deps);
 }
 
-// The owner's setup: check a folder and remember it as ready (nothing armed).
-// Only from a state with no switch in it; a switch that landed meanwhile keeps
-// its record.
+// The owner's setup: check a folder and remember it as ready, or keep it
+// armed when it was. Only from a state with no switch in it; a switch that
+// landed meanwhile keeps its record.
 export function setup(folderInput, deps = {}) {
   const { dir = CONFIG_DIR, now = () => new Date() } = deps;
   return oneAtATime(dir, async () => {
-    if (!SETUP_FROM.includes(loadState(dir).status)) return { error: 'A switch has been made; roll it back before checking another folder.' };
+    const was = loadState(dir).status;
+    if (!SETUP_FROM.includes(was)) return { error: 'A switch has been made; roll it back before checking another folder.' };
     const pre = await preflight(folderInput, deps);
     if (pre.error) return { error: pre.error };
-    return { ok: true, state: saveState({ status: 'ready', folder: pre.folder, newEmail: pre.newEmail, oldEmail: pre.oldEmail, at: now().toISOString() }, dir) };
+    return { ok: true, state: saveState({ status: was === 'armed' ? 'armed' : 'ready', folder: pre.folder, newEmail: pre.newEmail, oldEmail: pre.oldEmail, at: now().toISOString() }, dir) };
   }, deps);
 }
 

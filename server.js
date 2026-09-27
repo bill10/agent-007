@@ -335,7 +335,7 @@ async function switchAccount(how, { fromBrowser = false } = {}) {
   if (result.ok) {
     setTimeout(async () => {
       const again = await recheckAccount();
-      if (again.error) {
+      if (again.error && again.error !== BUSY_ERROR) {   // busy: another action is on it and reports itself
         announceAccount();
         await tellOwnerOrShow(`Claude account: ${again.error}. Roll back, then Switch now again once the workers are idle.`, 'error');
       }
