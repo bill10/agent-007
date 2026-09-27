@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.18.0.0] - 2026-09-27
+
+### Added
+
+- **A Settings gear lists the AI agent CLIs on this machine and the accounts each is logged in with.** Next to the light/dark toggle, the gear opens "Agents & accounts": for each CLI found on the PATH (Claude Code, Codex, Gemini CLI, opencode, aider, Hermes, Cursor Agent, Amp, goose, Qwen Code, Crush) its version and path, and under Claude Code, Codex and Gemini CLI each login folder (the default marked) with its email, plan and logged-in state. Scanned once at start; Refresh rescans. Read-only: it only runs each CLI's local status check and reads the email from its login file, and never returns or logs a token.
+
 ## [0.17.1.0] - 2026-09-27
 
 ### Security
