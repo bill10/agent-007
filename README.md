@@ -5,7 +5,7 @@
 
 **Run your coding agents like a one-person company.**
 
-One command, in your browser: a terminal for every agent, a job board they pick work from, and a manager that calls you only when it matters.
+Agent 007 is the operations layer for Claude Code, Codex and other coding agents: it starts them, hands out the work, keeps them running, reviews what they ship, and calls you only when it matters. One command, in your browser.
 
 ![Billion is given a mission, posts two jobs to the board, two agents pick them up and finish the work, and Billion reviews the diffs and merges them: shipped](docs/billion-demo.gif)
 
@@ -23,6 +23,8 @@ From web terminals for your coding agents to a self-running agent company. Use i
 Claude Code, Codex, any terminal agent is supported -- use your existing subscriptions, no extra charge.
 
 It runs locally on your machine, so agents work while it is on and awake. Billion's plan and memory live in a git repo, so it picks up where it left off after a restart. Every worker is a real terminal you can open and type into, from your phone too ([remote access](docs/REMOTE.md)).
+
+If you already run your agents this way with Claude Code and a few scripts, great: [tell us](https://github.com/bill10/agent-007/issues) what you'd do better. If you're tired of being the one who operates them, try this.
 
 ## Quick Start
 
@@ -98,6 +100,29 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 │             │              │   one tab per agent)│
 └─────────────┴──────────────┴────────────────────┘
 ```
+
+## FAQ
+
+### Can't Claude Code (or Codex) do this on its own?
+Much of it, with enough setup: Claude Code can loop, run subagents in their own worktrees, resume a session and even call Codex. Agent 007 is that setup already built and running: a board of workers you can watch and type into, a manager that reviews and merges their pull requests, and one place where their questions reach you. Use as much of it as you need.
+
+### Is it safe to let agents merge on their own?
+Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Claude Code workers on Billion's cards ask Billion for permissions before they ask you; Codex workers still ask you directly.
+
+### Does it cost anything?
+No. It is free and open source, and it runs the CLIs you already have, on your existing subscriptions. Board workers use your subscription's usage like any session you start yourself.
+
+### Where does it run?
+On your machine. Agents work while it is on and awake; a sleeping laptop pauses them. You can reach it from your phone (see [remote access](docs/REMOTE.md)).
+
+### Which agents does it support?
+Any terminal agent runs in its web terminals. The job board and Billion work with Claude Code and Codex, and each card can pick its model from the ones the board finds installed.
+
+### Do I have to use Billion?
+No. Each step of the list above works on its own: stop at web terminals, or at the job board, and post the cards yourself.
+
+### What happens when I hit a usage limit?
+Cards on that model wait for the reset; nothing is switched behind your back. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex.
 
 ## Configuration
 
