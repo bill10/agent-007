@@ -110,7 +110,7 @@ describe('where a login lives', () => {
   it('the default folder follows CLAUDE_CONFIG_DIR when the server has it, and Linux uses a file', () => {
     expect(loginOf(null, { home, env: {}, platform: 'darwin' })).toMatchObject({ folder: join(home, '.claude'), configJson: defaultJson(), service: DEFAULT_SERVICE, credentialsFile: null });
     const moved = loginOf(null, { home, env: { CLAUDE_CONFIG_DIR: '/cfg' }, platform: 'darwin' });
-    expect(moved).toMatchObject({ folder: '/cfg', configJson: '/cfg/.claude.json', service: keychainService('/cfg') });
+    expect(moved).toMatchObject({ folder: '/cfg', configJson: join('/cfg', '.claude.json'), service: keychainService('/cfg') });   // join: a backslash on Windows
     expect(moved.env.CLAUDE_CONFIG_DIR).toBe('/cfg');
     const linux = loginOf(newDir, { home, env: {}, platform: 'linux' });
     expect(linux).toMatchObject({ service: null, credentialsFile: join(newDir, '.credentials.json'), configJson: join(newDir, '.claude.json') });
@@ -721,7 +721,8 @@ describe('what the reviews asked for', () => {
   it('runCommand maps exit codes, never throws, feeds stdin, and hands the child the agent env only', async () => {
     const env = { PATH: process.env.PATH, HOME: process.env.HOME, AGENT007_CONFIG_DIR: '/secret', TELEGRAM_BOT_TOKEN: 't', KEEP: 'yes' };
     expect((await runCommand(process.execPath, ['-e', 'process.exit(3)'], { env })).code).toBe(3);
-    expect((await runCommand(process.execPath, ['-e', 'process.stdout.write("hi")'], { env })).stdout).toBe('hi');
+    // No quotes inside the one-liner: on Windows the argument goes through cmd.exe.
+    expect((await runCommand(process.execPath, ['-e', 'process.stdout.write(String.fromCharCode(104,105))'], { env })).stdout).toBe('hi');
     expect((await runCommand(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], { env, input: 'from stdin' })).stdout).toBe('from stdin');
     expect((await runCommand('definitely-not-a-binary-a007', [], { env })).code).toBe(1);   // ENOENT has a string code
     const { stdout } = await runCommand(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.env))'], { env });
