@@ -19,6 +19,7 @@ import { agentSummaries, sendMessage, flushMessages, pendingMessages, readAgentS
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner, tellOwner, resolveQuestion } from './owner.js';
 import { availableModels } from './models.js';
+import { setNextWake } from './billion-wake.js';
 
 // --- Origin Check Middleware (B2) ---
 // Rejects cross-origin requests from disallowed origins. localhost is always
@@ -152,6 +153,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         respawnAgent: ({ name }) => (respawnAgent
           ? respawnAgent(req.agentSession, name)
           : { error: 'Re-spawning is not available.' }),
+        setNextWake: (minutes) => (req.agentSession.isBillion
+          ? setNextWake(req.agentSession, minutes)
+          : { error: 'Only Billion has an operating loop.' }),
         billionReady: () => {
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };

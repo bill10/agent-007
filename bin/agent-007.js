@@ -17,12 +17,15 @@ import { configDir, loadSettings, settingsLine } from '../server/settings.js';
 const HELP = `Usage: agent-007 [--port <n>]
        agent-007 init
        agent-007 adduser "Display Name"
+       agent-007 handover
 
 Starts Agent 007 at http://localhost:7007 (or --port).
 
 Commands:
   init             Create ~/.agent-007/.env, a commented settings template
   adduser          Create a login user and turn on login for the server
+  handover         Write Billion's HANDOVER.md now, from the conversation of
+                   the CLI it runs on (a switch writes one by itself)
 
 Options:
   -p, --port <n>   Port to listen on (overrides PORT)
@@ -42,6 +45,8 @@ Settings (default in brackets):
   RESPAWN_BOARD_WORKERS   0 = Billion's workers stay orphaned after a restart [on]
   BILLION                 0 turns off Billion, the always-on agent [on]
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
+  BILLION_AGENT           claude or codex: the CLI Billion runs on. A switch
+                          from the app holds until this changes [claude]
   TELEGRAM_BOT_TOKEN      Bot token for Billion's questions on your phone [off]
   TELEGRAM_CHAT_ID        Your chat with that bot; only it reaches Billion [none]
   TELEGRAM_VOICE          mirror, always or never: Billion's messages as
@@ -98,7 +103,7 @@ if (values.port !== undefined) {
   // Before the files load, which never overwrite a variable already set.
   process.env.PORT = String(port);
 }
-if (positionals.length && !['init', 'adduser'].includes(positionals[0])) {
+if (positionals.length && !['init', 'adduser', 'handover'].includes(positionals[0])) {
   console.error(`Unknown command: ${positionals[0]}\n\n${HELP}`);
   process.exit(2);
 }
@@ -128,6 +133,12 @@ if (positionals[0] === 'init') {
   // adduser.js reads the display name from argv[2..].
   process.argv = [process.argv[0], fileURLToPath(new URL('./adduser.js', import.meta.url)), ...positionals.slice(1)];
   await import('./adduser.js');
+} else if (positionals[0] === 'handover') {
+  // Imported only now, like server.js: server/state.js reads settings when it loads.
+  const { billionDir, billionAgent } = await import('../server/billion.js');
+  const { writeHandover } = await import('../server/billion-handover.js');
+  const { path, messages } = writeHandover(billionDir(), { from: billionAgent() });
+  console.log(`Wrote ${path} (${messages} messages)`);
 } else {
   // Said out loud: run from inside another project, its .env (a HOST=0.0.0.0,
   // say) would otherwise change this server without a word.

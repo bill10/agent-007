@@ -136,7 +136,7 @@ describe('billionCommand', () => {
     expect(parseCommand(cmd).args).toContain('--continue');
     // A restart can land mid-introduction, so the prompt covers both.
     expect(promptOf(cmd)).toMatch(/not started/);
-    expect(promptOf(cmd)).toMatch(/operating loop/);
+    expect(promptOf(cmd)).toMatch(/operating cycle/);
     expect(promptOf(cmd)).toMatch(/without suggesting/);
   });
 

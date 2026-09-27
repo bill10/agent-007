@@ -23,6 +23,7 @@ import { JOB_STATES, STATE_LABELS, JOB_AGENTS } from '../lib/jobs.js';
 import { APPROVAL_WAIT_MS, READ_APPROVAL_BYTES } from './agent-mcp.js';
 import { SCREEN_LINES_DEFAULT, SCREEN_LINES_MAX, quoteLines, oneLine } from './messages.js';
 import { MAX_CHOICES, MAX_CHOICE_CHARS } from './owner.js';
+import { WAKE_MIN_MIN, WAKE_MAX_MIN, WAKE_QUIET_MIN, WAKE_BUSY_MIN } from './billion-wake.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -463,8 +464,27 @@ export const RESPAWN_AGENT_TOOL = {
   },
 };
 
+// Billion's: the server drives its operating loop (server/billion-wake.js).
+export const SET_NEXT_WAKE_TOOL = {
+  name: 'set_next_wake',
+  description:
+    'Say when the server should next wake you for an operating cycle, in minutes '
+    + `from now (${WAKE_MIN_MIN} to ${WAKE_MAX_MIN}). Only the next wake: after it the server goes back `
+    + `to its own pace, every ${WAKE_QUIET_MIN} minutes, or every ${WAKE_BUSY_MIN} while a worker on one of your `
+    + 'cards is running or one just reached Review or finished CI. It still waits until you rest at your prompt and the '
+    + 'owner is not typing to you.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      minutes: { type: 'integer', minimum: WAKE_MIN_MIN, maximum: WAKE_MAX_MIN, description: 'Minutes from now until the next cycle.' },
+    },
+    required: ['minutes'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
 export function toolsFor(session, models) {
@@ -739,6 +759,12 @@ const CALLS = {
     if (result.error) return toolText(result.error, true);
     return toolText(`${result.name} is back on "${result.card.title}", resuming its own conversation`
       + (result.card.state === 'in-progress' ? ' with a nudge to continue the card.' : '.'));
+  },
+
+  [SET_NEXT_WAKE_TOOL.name]: (args, ctx) => {
+    const result = ctx.setNextWake ? ctx.setNextWake(args.minutes) : { error: 'Only Billion has an operating loop.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(`The server wakes you for the next cycle at ${new Date(result.at).toLocaleTimeString()} or when you next rest after that, then goes back to its own pace.`);
   },
 
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {

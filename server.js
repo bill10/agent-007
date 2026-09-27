@@ -34,10 +34,14 @@ import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noClaudeCommand, changedBoardTools } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion } from './server/billion.js';
+import { writeHandover } from './server/billion-handover.js';
+import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
+import { takeMessages, restoreMessages } from './server/messages.js';
+import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
-import { hasClaudeTranscript } from './server/agent-transcripts.js';
+import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram } from './server/owner.js';
 import { startModelRefresh } from './server/models.js';
@@ -178,8 +182,10 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
 
 // Billion (server/billion.js): started at boot, and again only when someone
 // asks — an agent that crashes in a loop is worse than one that stays stopped.
-// Returns the running one if there is one.
-function startBillion() {
+// Returns the running one if there is one. On whichever CLI billionAgent()
+// says; `handover` starts it fresh after a switch, with `carried` the mail the
+// last one had waiting.
+function startBillion({ handover = false, carried = null } = {}) {
   for (const [id, s] of sessions) {
     if (!s.isBillion) continue;
     if (!s.exited) return { session: s, existing: true };
@@ -202,25 +208,35 @@ function startBillion() {
       console.error(`Billion: could not commit the updated charter in ${dir}:`, err.message);
     }
   }
-  const hasClaude = commandExists('claude', process.env, process.platform, dir);
+  // Codex's copy of the charter and the owner's rules. Best effort too: a
+  // Claude Billion never reads it.
+  try { writeAgentsMd(dir); } catch (err) {
+    console.error(`Billion: could not write AGENTS.md in ${dir}:`, err.message);
+  }
+  const agent = billionAgent();
+  const hasCli = commandExists(agent, process.env, process.platform, dir);
   // Without the model lists toolsFor adds: those follow what is installed,
   // not an upgrade. Only when claude starts, so no start without it uses up
-  // the notice. Best effort, like the charter.
+  // the notice: it is about Claude Code's resumed conversations. Best effort,
+  // like the charter.
   const toolsFile = join(CONFIG_DIR, 'billion-tools.json');
   let changedTools = [];
-  if (hasClaude) {
+  if (hasCli && agent === 'claude') {
     try { changedTools = changedBoardTools(toolsFile, toolsFor({ isBillion: true })); } catch (err) {
       console.error(`Billion: could not save the board tool definitions to ${toolsFile}:`, err.message);
     }
   }
-  const command = hasClaude ? billionCommand({
+  const command = hasCli ? billionCommand({
+    agent,
     created,
-    hasConversation: !created && hasClaudeTranscript(dir),
+    handover,
+    hasConversation: !created && agent === 'claude' && hasClaudeTranscript(dir),
+    codexSessionId: !created && agent === 'codex' ? codexSessionIdFor(dir) : null,
     dir,
     projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
     changedTools,
     toolsFile,
-  }) : noClaudeCommand();
+  }) : noAgentCommand(agent);
   const result = createSessionFromConfig({
     sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,
     repoPath: null, worktreePath: null, cwd: dir, isBillion: true, ownerId: null,
@@ -229,12 +245,59 @@ function startBillion() {
   // Mail waits until Billion calls billion_ready: at the end of its
   // introduction, and at the start of every cycle after a restart.
   result.session.messagesHeld = true;
+  restoreMessages(result.session.id, carried);
   sessions.set(result.session.id, result.session);
-  return { session: result.session, ...(hasClaude ? {} : { notice: 'Claude Code (claude) is not installed; its tab says how to fix that' }) };
+  const cli = agent === 'codex' ? 'Codex (codex)' : 'Claude Code (claude)';
+  return { session: result.session, ...(hasCli ? {} : { notice: `${cli} is not installed; its tab says how to fix that` }) };
+}
+
+// Stops a running Billion and waits for it to go, handing back the mail it
+// had waiting. SIGKILL after a few seconds, as at shutdown.
+function stopBillion(session) {
+  const carried = takeMessages(session.id);
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(timer); session.exited = true; resolve(carried); };
+    const timer = setTimeout(() => {
+      try { process.kill(session.pty.pid, 'SIGKILL'); } catch {}
+      done();
+    }, 3000);
+    session.pty.onExit(done);
+    try { session.pty.kill(); } catch { done(); }
+  });
+}
+
+// Moves Billion to the other CLI, or to `to` (server/billion.js). One at a
+// time: a second click while the first waits on the old one to exit would
+// otherwise start a second Billion.
+let switching = null;
+async function switchBillion(to) {
+  if (switching) return { error: 'Billion is already switching' };
+  const current = liveBillion() || [...sessions.values()].find(s => s.isBillion) || null;
+  switching = switchBillionSteps({
+    to, current, currentAgent: billionAgent(), dir: billionDir(),
+    writeHandover, saveAgent: (agent) => saveBillionAgent(agent), stop: stopBillion, start: startBillion,
+  });
+  try { return await switching; } finally { switching = null; }
+}
+
+// The server's operating loop for Billion (server/billion-wake.js): sooner
+// while one of its cards is being worked, or just reached Review or finished CI.
+let wakeTimer = null;
+function startBillionWakes() {
+  clearInterval(wakeTimer);
+  wakeTimer = setInterval(() => {
+    const session = liveBillion();
+    if (!session) return;
+    const now = Date.now();
+    const busy = billionBusy(allJobs(), (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null),
+      session.lastWakeAt || session.createdAt || 0, now);
+    wakeTick(session, { now, busy });
+  }, WAKE_TICK_MS);
+  wakeTimer.unref?.();
 }
 
 // --- WebSocket ---
-setupWebSocket(wss, { createSession, killSession, startBillion });
+setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion });
 
 // --- Startup ---
 async function startup() {
@@ -278,8 +341,11 @@ async function startup() {
     else if (raw) console.log(`  ${agent} agents start in ${raw} unless told otherwise`);
   }
   if (billionRuns()) {
-    const { error, notice } = startBillion();
-    console.log(error ? `  Billion: not started (${error})` : notice ? `  Billion: ${notice}` : `  Billion: running in ${billionDir()}`);
+    const warning = billionAgentWarning();
+    if (warning) console.warn(`  ${warning}`);
+    const { error, notice, session } = startBillion();
+    startBillionWakes();
+    console.log(error ? `  Billion: not started (${error})` : notice ? `  Billion: ${notice}` : `  Billion: running on ${session.agent} in ${billionDir()}`);
   } else if (billionEnabled()) {
     console.log('  Billion: off while user accounts are enabled');
   }
@@ -303,6 +369,7 @@ function gracefulShutdown() {
   console.log('\nShutting down...');
   stopDispatcher();
   stopTelegram();
+  clearInterval(wakeTimer);
   const killPromises = [];
   for (const [, session] of sessions) {
     clearInterval(session.stateCheckInterval);
@@ -325,7 +392,7 @@ function gracefulShutdown() {
 }
 
 // --- Exports for testing ---
-export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession, startBillion };
+export { app, server, wss, startup, gracefulShutdown, sessions, createSession, killSession, startBillion, switchBillion };
 
 // Auto-start when run directly
 if (isDirectRun(import.meta.url, process.argv[1])) {

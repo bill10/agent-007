@@ -11,8 +11,9 @@ import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { CONFIG_DIR, sessions } from './state.js';
 import { authEnabled } from './auth.js';
+import { HANDOVER_FILE, CLI_NAMES } from './billion-handover.js';
 
-import { quote } from '../lib/jobs.js';
+import { quote, isCodexSessionId } from '../lib/jobs.js';
 import { envSwitchOn } from '../lib/helpers.js';
 export { BILLION_NAME } from '../lib/jobs.js';
 
@@ -25,6 +26,12 @@ const TEMPLATE_DIR = fileURLToPath(new URL('../templates/billion/', import.meta.
 // would load Billion's instructions as its own.
 const CHARTER = { from: 'charter.md', to: 'CHARTER.md' };
 const FIRST_RUN_ONLY = { 'owner.md': 'CLAUDE.md', 'STATE.md': 'STATE.md', 'COMPANY.md': 'COMPANY.md' };
+// Written by the server, never committed: AGENTS.md is made from two committed
+// files (writeAgentsMd), and HANDOVER.md is raw conversation
+// (server/billion-handover.js). Kept out through .git/info/exclude, not the
+// .gitignore, which is Billion's own committed file.
+const AGENTS_MD = 'AGENTS.md';
+const GENERATED = [AGENTS_MD, HANDOVER_FILE];
 const OS_FILES = ['.DS_Store', 'Thumbs.db', 'desktop.ini'];
 // Written at setup: what makes a folder Billion's. A file name alone is not
 // enough (macOS matches CHARTER.md to a project's charter.md).
@@ -80,7 +87,7 @@ export function ensureBillionRepo(dir) {
   // Billion in it. Only the template files may be there already.
   // The files an OS leaves in any folder it has shown don't count either;
   // they are ignored, so neither this commit nor any of Billion's takes them.
-  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), '.gitignore', MARKER.name, ...OS_FILES]);
+  const ours = new Set([CHARTER.to, ...Object.values(FIRST_RUN_ONLY), ...GENERATED, '.gitignore', MARKER.name, ...OS_FILES]);
   const theirs = existsSync(dir) ? readdirSync(dir).filter(name => !ours.has(name)) : [];
   if (theirs.length) {
     throw new Error(`${dir} already holds other files (${theirs.slice(0, 3).join(', ')}${theirs.length > 3 ? ', …' : ''}), so it can't be Billion's folder; point BILLION_DIR at a new or empty folder`);
@@ -113,6 +120,65 @@ export function refreshCharter(dir) {
   git(dir, ['-c', 'user.name=Agent 007', '-c', 'user.email=agent-007@agent-007.local',
     ...COMMIT, '-m', 'Agent 007: update the charter', '--', CHARTER.to]);
   return true;
+}
+
+// Codex reads AGENTS.md, not CLAUDE.md, and follows no @-import. So on every
+// start, like the charter, the server writes out what Claude Code would load:
+// CLAUDE.md with its @CHARTER.md line replaced by the charter, which keeps the
+// owner's rules after it, where they say they take precedence. The owner's
+// file is only read. A CLAUDE.md that lost its import gets the charter first.
+// ponytail: only @CHARTER.md is expanded; another @-import the owner adds
+// reaches Claude Code but not Codex.
+const CHARTER_IMPORT = /^@CHARTER\.md[ \t]*$/m;
+export function agentsMdText(charter, owner) {
+  const head = '<!-- Written by Agent 007 on every start, for Codex, which reads AGENTS.md\n'
+    + '     instead of CLAUDE.md: CHARTER.md, then CLAUDE.md, the owner\'s rules. Never\n'
+    + '     edit it: it is overwritten. The owner\'s rules go in CLAUDE.md. -->\n\n';
+  const body = CHARTER_IMPORT.test(owner)
+    ? owner.replace(CHARTER_IMPORT, () => charter.trimEnd())
+    : `${charter.trimEnd()}\n\n# From CLAUDE.md: the owner's rules, which take precedence over the charter above\n\n${owner}`;
+  return head + body;
+}
+
+export function writeAgentsMd(dir) {
+  let owner = '';
+  try { owner = readFileSync(join(dir, 'CLAUDE.md'), 'utf8'); } catch {}
+  writeFileSync(join(dir, AGENTS_MD), agentsMdText(readFileSync(join(dir, CHARTER.to), 'utf8'), owner));
+  // Local to this clone and needs no commit, unlike .gitignore.
+  const exclude = join(dir, '.git', 'info', 'exclude');
+  let text = '';
+  try { text = readFileSync(exclude, 'utf8'); } catch {}
+  const have = new Set(text.split(/\r?\n/));
+  const missing = GENERATED.map(n => `/${n}`).filter(n => !have.has(n));
+  if (!missing.length) return;
+  mkdirSync(dirname(exclude), { recursive: true });
+  writeFileSync(exclude, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+}
+
+// Which CLI Billion runs on. BILLION_AGENT in .env is the owner's default; a
+// switch (the Billion row's button now, a usage limit later) is saved in the
+// config dir with the BILLION_AGENT it was made under, and holds until that
+// setting changes: an edited .env is the newer word, so it wins again.
+export const BILLION_AGENTS = ['claude', 'codex'];
+export const billionAgentFile = () => join(CONFIG_DIR, 'billion-agent.json');
+const envAgent = (env) => String(env.BILLION_AGENT ?? '').trim().toLowerCase();
+
+export function billionAgent(env = process.env, file = billionAgentFile()) {
+  const fromEnv = BILLION_AGENTS.includes(envAgent(env)) ? envAgent(env) : 'claude';
+  let saved = null;
+  try { saved = JSON.parse(readFileSync(file, 'utf8')); } catch {}
+  return saved && BILLION_AGENTS.includes(saved.agent) && saved.env === envAgent(env) ? saved.agent : fromEnv;
+}
+
+export function saveBillionAgent(agent, env = process.env, file = billionAgentFile()) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify({ agent, env: envAgent(env), at: new Date().toISOString() }, null, 2)}\n`);
+}
+
+// A misspelt BILLION_AGENT would otherwise be ignored without a word.
+export function billionAgentWarning(env = process.env) {
+  const raw = envAgent(env);
+  return raw && !BILLION_AGENTS.includes(raw) ? `BILLION_AGENT=${env.BILLION_AGENT} is not ${BILLION_AGENTS.join(' or ')}; Billion runs on claude` : null;
 }
 
 // The folder holding most of the owner's repos, offered as the place for new
@@ -155,31 +221,61 @@ export function changedBoardTools(file, tools) {
 // Everything Billion must do lives in its charter; the prompt only says which
 // part applies. A fresh repo gets the introduction. Any later start says both,
 // because a restart can land mid-introduction: the charter tells it to finish
-// the introduction while STATE.md still says "not started". --continue only
-// when a conversation exists, so a lost transcript still starts cleanly.
-export function billionCommand({ created, hasConversation, dir, projectsHint, changedTools = [], toolsFile }) {
+// the introduction while STATE.md still says "not started". A switch between
+// CLIs (`handover`) starts the new one fresh, pointed at STATE.md and
+// HANDOVER.md first. Otherwise its own last conversation resumes when there is
+// one: Claude Code's --continue, Codex's session in this folder by id
+// (`codexSessionId`, never --last, which could reach another folder's).
+export function billionCommand({ agent = 'claude', created, hasConversation, codexSessionId, handover, dir, projectsHint, changedTools = [], toolsFile }) {
   const where = `Your folder is ${dir}.`;
   const hint = projectsHint
     ? `Suggest ${projectsHint} as the projects folder: most of the owner's repos are there.`
     : 'The owner has no repos yet, so ask for a projects folder without suggesting one.';
+  const cycle = 'Otherwise run one operating cycle (CHARTER.md, "Operating loop"); the server wakes you for the next.';
   const prompt = created
     ? `This is your first run. Introduce yourself as described in CHARTER.md under "First run". ${where} ${hint}`
-    : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} Otherwise start your operating loop (CHARTER.md, "Operating loop"). ${where}`;
-  const resumed = !created && hasConversation;
+    : handover
+      ? `You now run on ${CLI_NAMES[agent]}, moved over from your previous CLI, and this is a new conversation. Read STATE.md and then ${HANDOVER_FILE} (the end of your last conversation) first. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`
+      : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`;
+  if (agent === 'codex') {
+    const resume = !created && !handover && isCodexSessionId(codexSessionId) ? `resume ${codexSessionId} ` : '';
+    return `codex ${resume}--dangerously-bypass-approvals-and-sandbox ${quote(prompt)}`;
+  }
+  const resumed = !created && !handover && hasConversation;
   const stale = resumed && changedTools.length && toolsFile
     ? ` Agent 007 changed these board tools since you last started: ${changedTools.join(', ')}. This conversation keeps the definitions it first loaded, so yours are out of date, and loading them again does not help. Read the current ones in ${toolsFile} and call those tools by it: the board accepts the new fields even where your copy does not list them.`
     : '';
   return `claude --dangerously-skip-permissions${resumed ? ' --continue' : ''} ${quote(prompt + stale)}`;
 }
 
-// Billion is Claude Code. Without it, its tab runs this instead: one line
-// saying what to do, then an exit. Nothing restarts it, so there is no loop;
-// the Start button checks for claude again. It stays up a moment after
-// printing, since a console host can drop the output of a process that exits
-// at once.
+// Without its CLI, Billion's tab runs this instead: one line saying what to
+// do, then an exit. Nothing restarts it, so there is no loop; the Start button
+// checks for the CLI again. It stays up a moment after printing, since a
+// console host can drop the output of a process that exits at once.
 export const NO_CLAUDE_NOTICE = 'Billion runs on Claude Code, which is not installed (no "claude" on the PATH Agent 007 was started with). Install it from https://docs.anthropic.com/en/docs/claude-code/setup and press Start next to Billion, or restart Agent 007 with BILLION=0 to turn Billion off.';
-export function noClaudeCommand(node = process.execPath) {
-  return `${quote(node)} -e ${quote(`console.log(${JSON.stringify(NO_CLAUDE_NOTICE)}); setTimeout(() => {}, 1000)`)}`;
+export const NO_CODEX_NOTICE = 'Billion runs on Codex, which is not installed (no "codex" on the PATH Agent 007 was started with). Install it (npm install -g @openai/codex) and press Start next to Billion, switch Billion to Claude Code with the button next to its name, or restart Agent 007 with BILLION=0 to turn Billion off.';
+export function noClaudeCommand(node = process.execPath, notice = NO_CLAUDE_NOTICE) {
+  return `${quote(node)} -e ${quote(`console.log(${JSON.stringify(notice)}); setTimeout(() => {}, 1000)`)}`;
+}
+export const noAgentCommand = (agent, node = process.execPath) => noClaudeCommand(node, agent === 'codex' ? NO_CODEX_NOTICE : NO_CLAUDE_NOTICE);
+
+// Moving Billion to the other CLI (or `to`): the handover first, then the
+// choice saved, then the running one stopped, then the new one started fresh.
+// Each step is passed in, so the order is what is tested here; server.js
+// supplies the real ones. Mail waiting for the old Billion goes with it
+// (`stop` hands it over), and everything else Billion uses (the board, the
+// Waiting tab, Telegram) finds whichever Billion is running.
+export async function switchBillion({ to, current, currentAgent, dir, writeHandover, saveAgent, stop, start }) {
+  const from = current?.agent || currentAgent;
+  const target = to ?? BILLION_AGENTS.find(a => a !== from);
+  if (!BILLION_AGENTS.includes(target)) return { error: `Billion runs on ${BILLION_AGENTS.join(' or ')}, not ${to}` };
+  if (target === from && current && !current.exited) return { error: `Billion already runs on ${CLI_NAMES[target]}` };
+  try { writeHandover(dir, { from, to: target }); } catch (err) {
+    console.error(`Billion: could not write the handover in ${dir}:`, err.message);
+  }
+  saveAgent(target);
+  const carried = current && !current.exited ? await stop(current) : null;
+  return start({ handover: true, carried });
 }
 
 // Claude Code asks whether to trust a folder the first time it runs there, and

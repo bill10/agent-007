@@ -1995,6 +1995,7 @@ export async function checkReviewCi(broadcast, { killSession, viewCi = findPrCi,
     // still hears about it when it is back.
     if (notifyBillionCi(job, pr.ci)) {
       job.ciNotifiedKey = key;
+      job.ciNotifiedAt = new Date().toISOString();   // Billion's wake pace (server/billion-wake.js)
       notified.push(job);
       changed = true;
     }

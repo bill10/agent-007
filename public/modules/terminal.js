@@ -85,7 +85,7 @@ export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
   await waitForXterm();
-  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus, isBillion } = msg;
+  const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus, isBillion, agent } = msg;
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
@@ -155,6 +155,7 @@ export async function handleSessionCreated(msg) {
   agents.set(sessionId, {
     name, color, command, fitAddon,
     isBillion: !!isBillion,
+    agent: agent || null,   // 'claude', 'codex' or null: Billion's row shows it
     state: state || 'WORKING',
     term, termEl,
     ownerId: ownerId || null,

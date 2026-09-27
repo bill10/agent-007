@@ -23,17 +23,19 @@ import { isCodexSessionId } from '../lib/jobs.js';
 function claudeHome() { return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'); }
 function codexHome() { return process.env.CODEX_HOME || join(homedir(), '.codex'); }
 
-// Newest transcript's mtime, or null when there is none.
-function newestClaudeTranscript(worktreePath, home) {
+// Newest transcript as { m, path } (its mtime and file), or null when there is none.
+function newestClaudeFile(worktreePath, home) {
   const dir = join(home, 'projects', worktreePath.replace(/[^A-Za-z0-9]/g, '-'));
   let newest = null;
   for (const ent of safeReaddir(dir, { withFileTypes: true })) {
     if (!ent.isFile() || !ent.name.endsWith('.jsonl')) continue;
-    const m = transcriptMtime(join(dir, ent.name));
-    if (m !== null && (newest === null || m > newest)) newest = m;
+    const path = join(dir, ent.name);
+    const m = transcriptMtime(path);
+    if (m !== null && (newest === null || m > newest.m)) newest = { m, path };
   }
   return newest;
 }
+const newestClaudeTranscript = (worktreePath, home) => newestClaudeFile(worktreePath, home)?.m ?? null;
 
 // A transcript's mtime, or null for one that could not be a session: empty,
 // or not a regular file. Both CLIs' homes are the user's own, so this is not
@@ -99,7 +101,7 @@ function rolloutMeta(file) {
   }
 }
 
-// Newest matching rollout as { m, id } (its mtime and session id), or null.
+// Newest matching rollout as { m, id, path } (its mtime, session id and file), or null.
 // Only files newer than `floor` are considered — transcriptsFor passes the
 // Claude transcript's mtime, since a Codex session no newer than that can
 // never win the comparison and so need not be opened; codexSessionIdFor
@@ -137,7 +139,7 @@ function newestCodexTranscript(worktreePaths, home, floor = -Infinity) {
   candidates.sort((a, b) => b.m - a.m);
   for (const { path, m } of candidates.slice(0, ROLLOUT_SCAN_CAP)) {
     const meta = rolloutMeta(path);
-    if (meta && worktreePaths.includes(meta.cwd)) return { m, id: meta.id };
+    if (meta && worktreePaths.includes(meta.cwd)) return { m, id: meta.id, path };
   }
   return null;
 }
@@ -192,4 +194,13 @@ export function agentFromTranscripts(worktreePath, homes) {
 export function codexSessionIdFor(worktreePath, { codex = codexHome() } = {}) {
   if (!worktreePath) return null;
   return newestCodexTranscript(pathForms(worktreePath), codex)?.id ?? null;
+}
+
+// The file holding the newest conversation `agent` ('claude' or 'codex') had
+// in exactly this folder, or null: what Billion's handover is read from.
+export function newestTranscriptFile(agent, dir, { claude = claudeHome(), codex = codexHome() } = {}) {
+  if (!dir) return null;
+  if (agent === 'codex') return newestCodexTranscript(pathForms(dir), codex)?.path ?? null;
+  const found = pathForms(dir).map(p => newestClaudeFile(p, claude)).filter(Boolean);
+  return found.sort((a, b) => b.m - a.m)[0]?.path ?? null;
 }
