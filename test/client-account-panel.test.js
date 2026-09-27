@@ -13,7 +13,7 @@ const labels = () => [...document.querySelectorAll('.account-btn')].map(b => b.t
 const click = (action) => document.querySelector(`.account-btn[data-action="${action}"]`).click();
 
 beforeEach(() => {
-  document.body.innerHTML = '<details id="account-panel" style="display:none"><summary>Claude account</summary><div class="account-body"></div></details>';
+  document.body.innerHTML = '<div id="account-panel" hidden><div class="settings-section-head"><h2>Claude account</h2></div><div class="account-body"></div></div>';
   setBillionEnabled(true);
   setSelf(null, false);
   send.mockClear();
@@ -23,7 +23,7 @@ beforeEach(() => {
 describe('the Claude account panel', () => {
   it('offers only the folder when nothing is set up', () => {
     handleAccountState({ type: 'account-state', status: 'not set up' });
-    expect(document.getElementById('account-panel').style.display).toBe('');
+    expect(document.getElementById('account-panel').hidden).toBe(false);
     expect(document.querySelector('.account-status').textContent).toMatch(/^Not set up/);
     expect(labels()).toEqual(['Check folder']);
     const input = document.querySelector('.account-folder');
@@ -72,10 +72,10 @@ describe('the Claude account panel', () => {
     handleAccountState({ type: 'account-state', status: 'ready' });
     setSelf('u1', true);
     renderAccount();
-    expect(document.getElementById('account-panel').style.display).toBe('none');
+    expect(document.getElementById('account-panel').hidden).toBe(true);
     setSelf(null, false);
     setBillionEnabled(false);
     renderAccount();
-    expect(document.getElementById('account-panel').style.display).toBe('none');
+    expect(document.getElementById('account-panel').hidden).toBe(true);
   });
 });

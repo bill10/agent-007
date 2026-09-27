@@ -175,8 +175,8 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 For a permanent move from one Claude subscription to another, without losing
 Claude Code's conversations, settings, plugins or trusted folders: log the new
 account in once in a folder of its own (`CLAUDE_CONFIG_DIR=~/.claude-new
-claude`, then `/login`), open **Claude account** at the foot of the left panel,
-give that folder and press **Check folder**. Then either **Switch now**, or
+claude`, then `/login`), open the Settings gear in the terminal header, find
+**Claude account**, give that folder and press **Check folder**. Then either **Switch now**, or
 **Arm** it to switch the moment Claude Code tells Billion it has hit a usage
 limit. The current login is backed up first (0600, under
 `~/.agent-007/account-backup/`), the switch is verified with `claude auth

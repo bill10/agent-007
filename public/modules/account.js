@@ -1,7 +1,8 @@
-// The owner's Claude account switch (server/account-migration.js): a folded
-// "Claude account" panel at the foot of the left panel. Every action goes to
-// the server as { type: 'account', action }, and every one but setup asks
-// first. Off by default: with nothing set up the panel only offers the folder.
+// The owner's Claude account switch (server/account-migration.js): the
+// "Claude account" section of the Settings panel (the gear in the terminal
+// header, public/modules/settings.js). Every action goes to the server as
+// { type: 'account', action }, and every one but the folder check asks first.
+// Off by default: with nothing set up the section only offers the folder.
 import { send } from './ws.js';
 import { authEnabled, billionEnabled } from './state.js';
 
@@ -26,7 +27,7 @@ export function renderAccount() {
   const panel = document.getElementById('account-panel');
   if (!panel) return;
   // Billion's owner alone: with user accounts on nobody may (server/ws.js).
-  panel.style.display = authEnabled || !billionEnabled ? 'none' : '';
+  panel.hidden = authEnabled || !billionEnabled;
   const body = panel.querySelector('.account-body');
   const s = state;
   const line = {

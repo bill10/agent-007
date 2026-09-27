@@ -30,7 +30,7 @@ import { homedir, userInfo } from 'os';
 import { basename, dirname, join } from 'path';
 import { resolveExecutable } from './command-path.js';
 import { CONFIG_DIR } from './state.js';
-import { expandHome } from '../lib/helpers.js';
+import { expandHome, ptyEnv } from '../lib/helpers.js';
 
 export const DEFAULT_SERVICE = 'Claude Code-credentials';
 // oauthAccount is the account; the rest are per-account caches claude's own
@@ -86,11 +86,12 @@ export const isArmed = (dir = CONFIG_DIR) => loadState(dir).status === 'armed';
 
 // --- Running things ---
 
-// execFile as a promise that never throws: { code, stdout, stderr }.
+// execFile as a promise that never throws: { code, stdout, stderr }. The child
+// gets what an agent gets (lib/helpers.js ptyEnv): none of the server's own secrets.
 export function runCommand(file, args, { env = process.env, platform = process.platform } = {}) {
   const exe = resolveExecutable(file, env, platform) || file;
   return new Promise((resolve) => {
-    execFile(exe, args, { env, timeout: RUN_TIMEOUT_MS, shell: platform === 'win32', windowsHide: true, maxBuffer: 1 << 20 },
+    execFile(exe, args, { env: ptyEnv(env), timeout: RUN_TIMEOUT_MS, shell: platform === 'win32', windowsHide: true, maxBuffer: 1 << 20 },
       (err, stdout, stderr) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') }));
   });
 }

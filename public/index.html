@@ -76,11 +76,6 @@
         </button>
       </div>
       <div class="explorer-content" id="explorer-content" role="tree"></div>
-      <!-- The owner's Claude account switch (server/account-migration.js). Off until set up. -->
-      <details class="account-panel" id="account-panel" style="display:none">
-        <summary title="Move the default Claude Code login to another account, in place: conversations, settings and plugins stay. For a permanent move, not for getting past a usage limit.">Claude account</summary>
-        <div class="account-body"></div>
-      </details>
     </div>
 
     <!-- Explorer reopen button (visible when collapsed) -->
@@ -125,6 +120,11 @@
             <button class="settings-refresh" id="settings-refresh" type="button">Refresh</button>
           </div>
           <div id="settings-agents"></div>
+          <!-- The owner's Claude account switch (server/account-migration.js). Off until set up; hidden with user accounts on. -->
+          <div class="account-panel" id="account-panel" hidden>
+            <div class="settings-section-head"><h2 title="Move the default Claude Code login to another account, in place: conversations, settings and plugins stay. For a permanent move, not for getting past a usage limit.">Claude account</h2></div>
+            <div class="account-body"></div>
+          </div>
         </div>
         <button class="icon-btn" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">
           <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 14 14" style="display:none"><path d="M12 8.5A5.5 5.5 0 1 1 5.5 2 4 4 0 0 0 12 8.5z" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
