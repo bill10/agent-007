@@ -170,9 +170,10 @@ export function billionAgent(env = process.env, file = billionAgentFile()) {
   return saved && BILLION_AGENTS.includes(saved.agent) && saved.env === envAgent(env) ? saved.agent : fromEnv;
 }
 
-export function saveBillionAgent(agent, env = process.env, file = billionAgentFile()) {
+// `reason`: why the server switched it by itself (server/billion-limit.js).
+export function saveBillionAgent(agent, env = process.env, file = billionAgentFile(), reason) {
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${JSON.stringify({ agent, env: envAgent(env), at: new Date().toISOString() }, null, 2)}\n`);
+  writeFileSync(file, `${JSON.stringify({ agent, env: envAgent(env), at: new Date().toISOString(), ...(reason ? { reason } : {}) }, null, 2)}\n`);
 }
 
 // A misspelt BILLION_AGENT would otherwise be ignored without a word.

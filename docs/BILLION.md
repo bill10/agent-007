@@ -506,8 +506,8 @@ cycle: start agent-cost; drop the browser-extension idea
 
 Billion runs on Claude Code by default, or on Codex with `BILLION_AGENT=codex`.
 The button next to Billion's name in the left panel switches it to the other
-one. (Switching by itself when one side hits its usage limit is the next step;
-it reuses the same switch and never switches back on a timer.)
+one, and the server switches it by itself when the CLI it runs on hits its
+usage limit (below).
 
 - **Which one.** `BILLION_AGENT` in `.env` is the default. A switch is saved in
   `~/.agent-007/billion-agent.json` together with the `BILLION_AGENT` it was
@@ -554,6 +554,24 @@ it reuses the same switch and never switches back on a timer.)
   board tools keep working: all of them find whichever Billion is running.
   Permission requests waiting on the old Billion go to the owner, as they do
   when Billion stops.
+- **Usage limits** (`server/billion-limit.js`, off with
+  `BILLION_AUTO_SWITCH=0`). Every 10 seconds the server reads the bottom 15
+  lines of Billion's screen, and only Billion's, for the CLI's own limit
+  notices: Claude Code's `You've used 92% of your weekly limit · resets …`,
+  `You've hit your session limit …`, `You've reached your Fable limit`,
+  `You're out of usage credits …`; Codex's `Heads up, you have less than 25% of
+  your weekly limit left`, `You've hit your usage limit …`, `You're out of
+  credits`. At a warning past 75% and again past 90% it types, while Billion
+  rests at its prompt, `Your <CLI> usage is at N%; bring STATE.md up to date
+  and commit now, in case you're switched.` At a hard limit, once Billion has
+  printed nothing for 5 seconds, it switches to the other CLI as the button
+  does, saves the reason in `billion-agent.json`, logs one line and tells the
+  owner on Telegram (the browser's notice without it). It never switches back
+  on a timer, and never twice within 30 minutes: a limit on the new CLI that
+  soon, or a target CLI that is not installed or not logged in (`claude auth
+  status --json`, `codex login status`), leaves Billion where it is and puts
+  `Billion paused: both Claude Code and Codex are at their limits` under
+  *Waiting on you* and on Telegram, once, until a new Billion starts.
 
 ## Telegram
 

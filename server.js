@@ -37,13 +37,14 @@ import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISS
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
+import { limitTick } from './server/billion-limit.js';
 import { takeMessages, restoreMessages } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
-import { startTelegram, stopTelegram } from './server/owner.js';
+import { startTelegram, stopTelegram, notifyOwner, tellOwner } from './server/owner.js';
 import { startModelRefresh } from './server/models.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -268,14 +269,15 @@ function stopBillion(session) {
 
 // Moves Billion to the other CLI, or to `to` (server/billion.js). One at a
 // time: a second click while the first waits on the old one to exit would
-// otherwise start a second Billion.
+// otherwise start a second Billion. `reason` is saved when the server made
+// the switch itself (server/billion-limit.js).
 let switching = null;
-async function switchBillion(to) {
+async function switchBillion(to, reason) {
   if (switching) return { error: 'Billion is already switching' };
   const current = liveBillion() || [...sessions.values()].find(s => s.isBillion) || null;
   switching = switchBillionSteps({
     to, current, currentAgent: billionAgent(), dir: billionDir(),
-    writeHandover, saveAgent: (agent) => saveBillionAgent(agent), stop: stopBillion, start: startBillion,
+    writeHandover, saveAgent: (agent) => saveBillionAgent(agent, process.env, undefined, reason), stop: stopBillion, start: startBillion,
   });
   try { return await switching; } finally { switching = null; }
 }
@@ -292,6 +294,20 @@ function startBillionWakes() {
     const busy = billionBusy(allJobs(), (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null),
       session.lastWakeAt || session.createdAt || 0, now);
     wakeTick(session, { now, busy });
+    limitTick(session, {
+      now,
+      switchTo: async (to, reason) => {
+        const result = await switchBillion(to, reason);
+        if (!result.error && !result.existing) broadcast(sessionPayload(result.session));
+        return result;
+      },
+      notify: (text) => notifyOwner(text, { broadcast }),
+      // No Telegram: the browser's notice instead.
+      tell: async (text) => {
+        const { error } = await tellOwner(text);
+        if (error) broadcast({ type: 'notification', level: 'info', message: text });
+      },
+    }).catch(err => console.error('Billion: usage-limit check failed:', err.message));
   }, WAKE_TICK_MS);
   wakeTimer.unref?.();
 }
