@@ -1,7 +1,7 @@
 // A card's model: discovered per CLI at startup (Claude Code's aliases,
 // Codex's model cache), validated against that list, and put on the spawned
 // and re-spawned argv as one token.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -40,7 +40,7 @@ describe('discovery', () => {
     const read = () => { throw new Error('the cache is not read when codex answers'); };
     const both = await discoverModels({ env: {}, exists: () => true, read, run: async () => DEBUG_MODELS, log: (l) => logs.push(l) });
     expect(both).toEqual({ claude: ['fable', 'opus', 'sonnet', 'haiku'], codex: LISTED });
-    expect(logs).toEqual(["  Models: Codex's from `codex debug models`"]);
+    expect(logs).toEqual([`  Models: Codex's from \`codex debug models\`: ${LISTED.join(', ')}`]);
   });
 
   it('falls back to the cache in CODEX_HOME when the command fails or prints junk', async () => {
@@ -49,8 +49,26 @@ describe('discovery', () => {
       const logs = [];
       const found = await discoverModels({ env: { CODEX_HOME: '/ch' }, exists: () => true, read, run, log: (l) => logs.push(l) });
       expect(found.codex).toEqual(LISTED);
-      expect(logs).toEqual(["  Models: Codex's from models_cache.json"]);
+      expect(logs).toEqual([`  Models: Codex's from models_cache.json: ${LISTED.join(', ')}`]);
     }
+  });
+
+  it('logs only when the source or the list changes, and each distinct error once', async () => {
+    const out = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ask = (run) => discoverModels({ env: {}, exists: () => true, read: () => FIXTURE, run });
+    try {
+      for (let i = 0; i < 12; i++) await ask(async () => DEBUG_MODELS);
+      expect(out).toHaveBeenCalledTimes(1);
+      await ask(async () => { throw new Error('ETIMEDOUT'); });   // same list, from the cache
+      await ask(async () => { throw new Error('ETIMEDOUT'); });
+      expect(out).toHaveBeenCalledTimes(2);
+      await ask(async () => DEBUG_MODELS);
+      expect(out).toHaveBeenCalledTimes(3);
+      const boom = () => { throw new Error('boom'); };
+      for (let i = 0; i < 5; i++) await refreshModels({ env: {}, exists: boom });
+      expect(err).toHaveBeenCalledTimes(1);
+    } finally { out.mockRestore(); err.mockRestore(); }
   });
 
   it('offers nothing for a CLI that is not installed, and is empty when discovery fails', async () => {

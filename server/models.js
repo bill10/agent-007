@@ -53,9 +53,15 @@ export function runCodexModels(env) {
   });
 }
 
+// A line is logged only when it differs from the last one: a refresh runs
+// hourly and on every stale ask, and the same answer (or the same error) a
+// dozen times over says nothing.
+let lastLine = null;
+const onChange = (write) => (line) => { if (line !== lastLine) write(lastLine = line); };
+
 export async function discoverModels({
   env = process.env, exists = (f) => commandExists(f, env), read = (p) => readFileSync(p, 'utf8'),
-  run = runCodexModels, log = console.log,
+  run = runCodexModels, log = onChange(console.log),
 } = {}) {
   let codex = [];
   if (exists('codex')) {
@@ -65,7 +71,7 @@ export async function discoverModels({
       source = 'models_cache.json';
       try { codex = parseCodexModels(read(join(codexHome(env), 'models_cache.json'))); } catch { codex = []; source = 'nowhere (no models_cache.json either)'; }
     }
-    log(`  Models: Codex's from ${source}`);
+    log(`  Models: Codex's from ${source}: ${codex.join(', ') || 'none'}`);
   }
   return { claude: exists('claude') ? [...CLAUDE_ALIASES] : [], codex };
 }
@@ -81,7 +87,7 @@ let cachedAt = 0;
 // forget, and a failed look keeps the last answer.
 export async function refreshModels(opts) {
   cachedAt = Date.now();
-  try { cached = await discoverModels(opts); } catch (err) { console.error('  Models: discovery failed:', err); }
+  try { cached = await discoverModels(opts); } catch (err) { onChange(console.error)(`  Models: discovery failed: ${err?.message ?? err}`); }
   return cached;
 }
 
