@@ -47,6 +47,8 @@ Settings (default in brackets):
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
   BILLION_AGENT           claude or codex: the CLI Billion runs on. A switch
                           from the app holds until this changes [claude]
+  BILLION_AUTO_SWITCH     0 = Billion stays on its CLI at a usage limit
+                          instead of switching to the other [on]
   TELEGRAM_BOT_TOKEN      Bot token for Billion's questions on your phone [off]
   TELEGRAM_CHAT_ID        Your chat with that bot; only it reaches Billion [none]
   TELEGRAM_VOICE          mirror, always or never: Billion's messages as
