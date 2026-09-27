@@ -178,10 +178,11 @@ account in once in a folder of its own (`CLAUDE_CONFIG_DIR=~/.claude-new
 claude`, then `/login`), open the Settings gear in the terminal header, find
 **Claude account**, give that folder and press **Check folder**. Then either **Switch now**, or
 **Arm** it to switch the moment Claude Code tells Billion it has hit a usage
-limit. The current login is backed up first (0600, under
-`~/.agent-007/account-backup/`), the switch is verified with `claude auth
-status`, and a switch that does not verify is rolled back by itself; **Roll
-back** does the same on request. Nothing happens until you press a button, and
+limit (that is the trigger; nothing switches back when the limit lifts). The current login is backed up first (0600, under
+`~/.agent-007/account-backup/`), the switch is checked with `claude auth
+status` and a read-back of the token, and one that does not check out is rolled
+back by itself; **Roll back** does the same on request, backing up what it
+replaces first. Nothing happens until you press a button, and
 no board tool can press it (a same-user process could; see [docs/FEATURES.md](docs/FEATURES.md)). The new folder stays on disk as a fallback: do not
 start anything with `CLAUDE_CONFIG_DIR` pointing at it afterwards, and once you
 have checked the new login works, **Retire the new folder** renames it (never

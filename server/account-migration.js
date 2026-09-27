@@ -18,14 +18,17 @@
 //    clears too. Claude Code holds a `.claude.json.lock` directory while it
 //    writes that file; the swap takes the same lock.
 // `claude auth status --json` (loggedIn, email) is the check on both sides,
-// and the token read back from the store must be the one written.
+// and the token read back from the store must be the one written. Neither
+// exercises the token against Anthropic: that is what the owner's own check
+// before retiring the folder is for.
 //
 // The steps, each on its own: preflight, backup (0600, under
 // ~/.agent-007/account-backup/<time>/), swap, verify, and on a failed verify
-// the rollback runs by itself and is verified too. One action at a time. The
-// new folder is never deleted: retire renames it, and only when the owner
-// asks. Secrets are never logged: they pass between the `security` CLI (the
-// token on its stdin, never in argv) or a file and memory, and nowhere else.
+// the rollback runs by itself and is checked the same way. One action at a
+// time, across server processes too (a lock directory in the app's config
+// dir). The new folder is never deleted: retire renames it, and only when the
+// owner asks. Secrets are never logged: they pass between the `security` CLI
+// (the token on its stdin, never in argv) or a file and memory, and nowhere else.
 
 import { execFile } from 'child_process';
 import { createHash } from 'crypto';
@@ -44,13 +47,17 @@ export const ACCOUNT_FIELDS = ['oauthAccount', 'hasAvailableSubscription', 'subs
   'additionalModelOptionsCache', 'additionalModelOptionsAnsweredAt', 'additionalModelCostsCache'];
 // 'switching' is written before the swap and replaced after it, so a server
 // that died mid-swap shows as such and offers only Roll back; 'rollback failed'
-// the same.
-export const STATUSES = ['not set up', 'ready', 'armed', 'switching', 'migrated', 'rolled back', 'rollback failed'];
+// the same, plus Check folder as the way out once the store works again.
+const STATUSES = ['not set up', 'ready', 'armed', 'switching', 'migrated', 'rolled back', 'rollback failed'];
+const SETUP_FROM = ['not set up', 'ready', 'rolled back', 'rollback failed'];
+const ROLLBACK_FROM = ['migrated', 'switching', 'rollback failed'];
 export const BUSY_ERROR = 'Another Claude account action is still running.';
 const SECURITY = '/usr/bin/security';   // by path: a same-user shim earlier on PATH must not see the token
 const RUN_TIMEOUT_MS = 15_000;
 const WRITE_TRIES = 5;
 const LOCK_STALE_MS = 10_000;           // Claude Code's own lock is stale after this (proper-lockfile's default)
+const ACTION_LOCK_STALE_MS = 15 * 60_000; // ours: an action is a few subprocess calls, never minutes
+const SECURITY_LINE_MAX = 4000;         // `security -i` reads a line into a fixed buffer; today's tokens are ~800 chars
 const ACCT_RE = /^[a-zA-Z0-9._-]+$/;
 
 // --- Where things are ---
@@ -82,19 +89,26 @@ export function loginOf(folder, { home = homedir(), env = process.env, platform 
   };
 }
 
-export const stateFile = (dir = CONFIG_DIR) => join(dir, 'account-migration.json');
+const stateFile = (dir) => join(dir, 'account-migration.json');
 export function loadState(dir = CONFIG_DIR) {
   try {
     const s = JSON.parse(readFileSync(stateFile(dir), 'utf8'));
     return STATUSES.includes(s?.status) ? s : { status: 'not set up' };
   } catch { return { status: 'not set up' }; }
 }
-export function saveState(state, dir = CONFIG_DIR) {
+// Written beside and renamed over: a crash mid-write must not lose the
+// pointer to the backup.
+function saveState(state, dir) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(stateFile(dir), `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  const tmp = `${stateFile(dir)}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmp, stateFile(dir));
   return state;
 }
 export const isArmed = (dir = CONFIG_DIR) => loadState(dir).status === 'armed';
+// Errors are shown in the browser and sent to Telegram: the first line, short,
+// so a JSON.parse snippet of a config file or a long stderr never travels.
+const short = (err) => String(err?.message ?? err).split('\n')[0].slice(0, 200);
 
 // --- Running things ---
 
@@ -146,10 +160,14 @@ function credentialStore(login, { run, platform, env = process.env }) {
       // -U updates the item in place. The command goes to `security -i` on
       // stdin, so the token is never on a command line `ps` could show; the
       // hex form (what claude writes) keeps quoting out of it.
-      async write(secret, acct) {
+      line(secret, acct) {
         if (!ACCT_RE.test(acct)) throw new Error(`Keychain account attribute ${JSON.stringify(acct)} is not a plain name`);
         const line = `add-generic-password -U -a "${acct}" -s "${svc}" -X ${Buffer.from(secret, 'utf8').toString('hex')}\n`;
-        const { code, stderr } = await sec(['-i'], line);
+        if (line.length > SECURITY_LINE_MAX) throw new Error(`the token is too long for security -i (${line.length} chars)`);
+        return line;
+      },
+      async write(secret, acct) {
+        const { code, stderr } = await sec(['-i'], this.line(secret, acct));
         if (code !== 0) throw new Error(`security add-generic-password failed (${code}): ${stderr.trim().slice(0, 200)}`);
       },
     };
@@ -159,6 +177,7 @@ function credentialStore(login, { run, platform, env = process.env }) {
     where: file,
     async locate() { return existsSync(file) ? { acct: null } : null; },
     async read() { try { return readFileSync(file, 'utf8'); } catch { return null; } },
+    line() { return ''; },
     async write(secret) {
       mkdirSync(dirname(file), { recursive: true });
       const tmp = `${file}.agent007-${process.pid}.tmp`;
@@ -178,7 +197,8 @@ const pick = (data) => Object.fromEntries(ACCOUNT_FIELDS.filter(k => k in data).
 // Claude Code's lock on its config file: a `<file>.lock` directory, stale
 // once its mtime is LOCK_STALE_MS old (it is left behind after a clean exit).
 // Holding it keeps a claude from writing while we do; a fresh one that is not
-// ours means a claude is mid-write, so we wait for it.
+// ours means a claude is mid-write, so we wait for it. A stale one is renamed
+// away before removal, so two takers cannot both think they cleared it.
 async function withConfigLock(file, wait, fn, { tries = WRITE_TRIES, now = Date.now } = {}) {
   const lock = `${file}.lock`;
   for (let i = 0; i < tries; i++) {
@@ -188,7 +208,11 @@ async function withConfigLock(file, wait, fn, { tries = WRITE_TRIES, now = Date.
       if (err.code !== 'EEXIST') throw err;
       let age = 0;
       try { age = now() - statSync(lock).mtimeMs; } catch { continue; }   // gone between the two calls
-      if (age > LOCK_STALE_MS) { rmSync(lock, { recursive: true, force: true }); continue; }
+      if (age > LOCK_STALE_MS) {
+        const stale = `${lock}.stale-${process.pid}`;
+        try { renameSync(lock, stale); rmSync(stale, { recursive: true, force: true }); } catch {}
+        continue;
+      }
       await wait(100 * (i + 1));
       continue;
     }
@@ -205,13 +229,14 @@ export async function writeAccountFields(file, fields, { tries = WRITE_TRIES, wa
   let real = file;
   try { real = realpathSync(file); } catch {}
   const tmp = `${real}.agent007-${process.pid}.tmp`;
+  // Leftovers of a server killed mid-write, ours or an earlier pid's.
+  try { for (const n of readdirSync(dirname(real))) if (n.startsWith(`${basename(real)}.agent007-`) && n.endsWith('.tmp')) rmSync(join(dirname(real), n), { force: true }); } catch {}
   return withConfigLock(real, wait, async () => {
     for (let i = 0; i < tries; i++) {
       const before = statSync(real);
       const data = readJson(real);
       afterRead?.(i);   // the tests' stand-in for Claude Code writing at this moment
       for (const k of ACCOUNT_FIELDS) { if (k in fields) data[k] = fields[k]; else delete data[k]; }
-      rmSync(tmp, { force: true });
       writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: before.mode & 0o777 || 0o600, flag: 'wx' });
       const after = statSync(real);
       if (after.mtimeMs === before.mtimeMs && after.size === before.size && after.ino === before.ino) {
@@ -229,13 +254,27 @@ export async function writeAccountFields(file, fields, { tries = WRITE_TRIES, wa
 
 const email = (s) => (typeof s === 'string' ? s.trim().toLowerCase() : '');
 const realOr = (p) => { try { return realpathSync(p); } catch { return p; } };
+
 // One action at a time: two switches, or a switch and a rollback, interleaved
-// would back up the wrong token.
+// would back up the wrong token. In this process a promise; across server
+// processes a lock directory in the app's config dir.
 let inFlight = null;
-async function oneAtATime(fn) {
+export const resetInFlight = () => { inFlight = null; };
+async function oneAtATime(dir, fn) {
   if (inFlight) return { error: BUSY_ERROR };
+  const lock = join(dir, 'account-migration.lock');
+  mkdirSync(dir, { recursive: true });
+  try {
+    mkdirSync(lock);
+  } catch (err) {
+    if (err.code !== 'EEXIST') return { error: `Could not take ${lock}: ${short(err)}` };
+    let age = 0;
+    try { age = Date.now() - statSync(lock).mtimeMs; } catch { age = Infinity; }
+    if (age < ACTION_LOCK_STALE_MS) return { error: BUSY_ERROR };
+    try { rmSync(lock, { recursive: true, force: true }); mkdirSync(lock); } catch (e) { return { error: `Could not take ${lock}: ${short(e)}` }; }
+  }
   inFlight = fn();
-  try { return await inFlight; } finally { inFlight = null; }
+  try { return await inFlight; } finally { inFlight = null; rmSync(lock, { recursive: true, force: true }); }
 }
 
 // Everything that must be true before anything is touched. Never reads a secret.
@@ -250,7 +289,7 @@ export async function preflight(folderInput, deps = {}) {
   if (realOr(next.folder) === realOr(current.folder)) return { error: `${folder} is the default Claude Code folder itself; the new account needs a folder of its own.` };
   if (!existsSync(folder)) return { error: `${folder} does not exist. Log the new account in there first: CLAUDE_CONFIG_DIR=${folder} claude, then /login.` };
   let data;
-  try { data = readJson(next.configJson); } catch (err) { return { error: `${next.configJson}: ${err.message}` }; }
+  try { data = readJson(next.configJson); } catch (err) { return { error: `${next.configJson}: ${short(err)}` }; }
   const account = data.oauthAccount;
   if (!isRecord(account) || !email(account.emailAddress)) return { error: `${next.configJson} has no oauthAccount: that folder has not logged in.` };
   let store = credentialStore(next, { run, platform, env });
@@ -269,60 +308,96 @@ export async function preflight(folderInput, deps = {}) {
   return { folder, newEmail, oldEmail, current, next, account: pick(data) };
 }
 
+// A failure before anything changed: an armed state disarms, so the next
+// limit tick takes the ordinary road to Codex instead of running this again
+// every ten seconds; the error shows in the browser either way.
+function noteFailure(dir, error, now) {
+  const state = loadState(dir);
+  if (state.status === 'armed') saveState({ ...state, status: 'ready', error, at: now().toISOString() }, dir);
+  return { error };
+}
+
+// The server's check before it stops Billion for a switch: preflight, with
+// the same disarm on failure that migrate applies.
+export async function checkSwitch(folderInput, deps = {}) {
+  const { dir = CONFIG_DIR, now = () => new Date(), log = console.log } = deps;
+  if (inFlight) return { error: BUSY_ERROR };
+  const pre = await preflight(folderInput, deps);
+  if (pre.error) { log(`Claude account: switch not started: ${pre.error}`); return noteFailure(dir, pre.error, now); }
+  return { ok: true, newEmail: pre.newEmail, oldEmail: pre.oldEmail };
+}
+
+// The current default login, saved under <dir>/account-backup/<time>/:
+// account.json first (email, where, account attribute, the account fields),
+// then the token, so a half-written backup is never mistaken for a whole one.
+async function backupCurrent(current, store, { dir, now, log }) {
+  const item = await store.locate();
+  if (!item) throw new Error(`Could not find the current token in ${store.where}; nothing changed.`);
+  const secret = await store.read(item.acct);
+  if (secret === null) throw new Error(`Could not read the current token from ${store.where}; nothing changed.`);
+  const fields = pick(readJson(current.configJson));
+  const status = await authStatus(current, { run: store.run, platform: store.platform });
+  // Its own directory: a second backup in the same millisecond gets a suffix, never the first one's files.
+  const stamp = join(dir, 'account-backup', now().toISOString().replace(/[:.]/g, '-'));
+  let backupDir = stamp;
+  for (let n = 2; existsSync(backupDir); n++) backupDir = `${stamp}-${n}`;
+  mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(backupDir, 'account.json'), JSON.stringify({
+    at: now().toISOString(), email: email(status.email) || fields.oauthAccount?.emailAddress || null, configJson: current.configJson, where: store.where, account: item.acct, fields,
+  }, null, 2), { mode: 0o600 });
+  writeFileSync(join(backupDir, 'credentials'), secret, { mode: 0o600 });
+  log(`Claude account: backed up the current login to ${backupDir}`);
+  return { backupDir, item, secret, fields };
+}
+const storeFor = (login, deps) => Object.assign(credentialStore(login, deps), { run: deps.run, platform: deps.platform });
+
 // Backup, swap, verify; rollback on a failed verify. Returns
 // { ok, oldEmail, newEmail, backupDir } or { error, rolledBack }.
 export function migrate(folderInput, deps = {}) {
-  return oneAtATime(() => migrateNow(folderInput, deps));
+  return oneAtATime(deps.dir ?? CONFIG_DIR, () => migrateNow(folderInput, deps));
 }
 async function migrateNow(folderInput, deps) {
   const { home = homedir(), env = process.env, platform = process.platform, run = runCommand, dir = CONFIG_DIR, now = () => new Date(), log = console.log, wait } = deps;
-  // A failure before the swap disarms: the next limit tick must take the
-  // ordinary road to Codex, not run this again every ten seconds.
-  const fail = (error) => {
-    const state = loadState(dir);
-    if (state.status === 'armed') saveState({ ...state, status: 'ready', error, at: now().toISOString() }, dir);
-    log(`Claude account: switch not started: ${error}`);
-    return { error };
-  };
+  const fail = (error) => { log(`Claude account: switch not started: ${error}`); return noteFailure(dir, error, now); };
   const pre = await preflight(folderInput, { home, env, platform, run });
   if (pre.error) return fail(pre.error);
   const { current, next, newEmail, oldEmail, folder } = pre;
-  const from = credentialStore(current, { run, platform, env });
-  const to = credentialStore(next, { run, platform, env });
+  const from = storeFor(current, { run, platform, env });
+  const to = storeFor(next, { run, platform, env });
 
-  // Backup: the current token and account fields, account.json first so a
-  // half-written backup is never mistaken for a whole one.
-  const item = await from.locate();
-  if (!item) return fail(`Could not find the current token in ${from.where}; nothing changed.`);
-  const oldSecret = await from.read(item.acct);
-  if (oldSecret === null) return fail(`Could not read the current token from ${from.where}; nothing changed.`);
-  let fields;
-  try { fields = pick(readJson(current.configJson)); } catch (err) { return fail(`${current.configJson}: ${err.message}; nothing changed.`); }
-  const backupDir = join(dir, 'account-backup', now().toISOString().replace(/[:.]/g, '-'));
-  mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-  writeFileSync(join(backupDir, 'account.json'), JSON.stringify({
-    at: now().toISOString(), email: oldEmail, configJson: current.configJson, where: from.where, account: item.acct, fields,
-  }, null, 2), { mode: 0o600 });
-  writeFileSync(join(backupDir, 'credentials'), oldSecret, { mode: 0o600 });
-  log(`Claude account: backed up ${oldEmail}'s login to ${backupDir}`);
+  // Everything up to the first write can still say "nothing changed".
+  let backup, newSecret;
+  try {
+    backup = await backupCurrent(current, from, { dir, now, log });
+    const newItem = await to.locate();
+    newSecret = newItem && await to.read(newItem.acct);
+    if (newSecret === null || newSecret === undefined) throw new Error(`could not read the new token from ${to.where}; nothing changed.`);
+    from.line(newSecret, backup.item.acct);   // the length check, before anything moves
+  } catch (err) { return fail(short(err)); }
+  const { backupDir, item } = backup;
   const record = { folder, newEmail, oldEmail, backupDir };
   saveState({ ...record, status: 'switching', at: now().toISOString() }, dir);
 
   // Swap, then verify: the new email from claude, and the token read back is
   // the one written. Anything short of both puts the backup back.
-  let failure = null;
+  let failure = null, configTouched = false;
   try {
-    const newItem = await to.locate();
-    const newSecret = newItem && await to.read(newItem.acct);
-    if (newSecret === null || newSecret === undefined) throw new Error(`could not read the new token from ${to.where}`);
     await from.write(newSecret, item.acct);
     if ((await from.read(item.acct)) !== newSecret) throw new Error(`${from.where} does not hold the token just written`);
+    configTouched = true;
     await writeAccountFields(current.configJson, pre.account, { wait });
     const after = await authStatus(current, { run, platform });
     if (!after.loggedIn || email(after.email) !== newEmail) failure = `claude auth status reports ${after.email || 'no login'} after the swap, not ${newEmail}`;
-  } catch (err) { failure = err.message; }
+  } catch (err) { failure = short(err); }
 
   if (failure) {
+    // A write that failed before changing anything needs no restore: the
+    // owner gets the error and a working panel, not a dead end.
+    if (!configTouched && (await from.read(item.acct)) === backup.secret) {
+      saveState({ ...record, status: 'ready', at: now().toISOString(), error: failure }, dir);
+      log(`Claude account: switch to ${newEmail} failed before anything changed (${failure})`);
+      return { error: `${failure}. Nothing changed.`, backupDir };
+    }
     const back = await restoreBackup(backupDir, { home, env, platform, run, wait });
     const rolledBack = !back.error;
     saveState({ ...record, status: rolledBack ? 'rolled back' : 'rollback failed', at: now().toISOString(), error: rolledBack ? failure : `${failure}; rollback failed: ${back.error}` }, dir);
@@ -335,7 +410,7 @@ async function migrateNow(folderInput, deps) {
 }
 
 // Puts a backup's token and account fields back, and checks that claude sees
-// the old email again. { ok, email } or { error }.
+// that email again. { ok, email } or { error }.
 async function restoreBackup(backupDir, { home, env, platform, run, wait }) {
   try {
     const meta = readJson(join(backupDir, 'account.json'));
@@ -349,61 +424,66 @@ async function restoreBackup(backupDir, { home, env, platform, run, wait }) {
     const after = await authStatus(current, { run, platform });
     if (!after.loggedIn || email(after.email) !== email(meta.email)) throw new Error(`claude auth status reports ${after.email || 'no login'} after the restore, not ${meta.email}`);
     return { ok: true, email: meta.email };
-  } catch (err) { return { error: err.message }; }
+  } catch (err) { return { error: short(err) }; }
 }
 
-// The owner's Roll back: the backup the state names (else the newest whole
-// one) goes back, verified.
+// The owner's Roll back: the backup the state names goes back, checked. What
+// it replaces is backed up first, so a rollback never destroys the only copy
+// of a working login.
 export function rollback(deps = {}) {
-  return oneAtATime(async () => {
+  return oneAtATime(deps.dir ?? CONFIG_DIR, async () => {
     const { home = homedir(), env = process.env, platform = process.platform, run = runCommand, dir = CONFIG_DIR, now = () => new Date(), log = console.log, wait } = deps;
     const state = loadState(dir);
-    const backupDir = state.backupDir || latestBackup(dir);
-    if (!backupDir) return { error: 'No backup to roll back to.' };
+    if (!ROLLBACK_FROM.includes(state.status)) return { error: state.status === 'rolled back' ? 'Already rolled back.' : 'Nothing to roll back: no switch has been made.' };
+    const { backupDir } = state;
+    if (!backupDir) return { error: 'This state names no backup to roll back to.' };
     const missing = ['account.json', 'credentials'].filter(f => !existsSync(join(backupDir, f)));
     if (missing.length) return { error: `The backup in ${backupDir} is incomplete: ${missing.join(' and ')} missing.` };
+    const current = loginOf(null, { home, env, platform });
+    let before = null;
+    try { ({ backupDir: before } = await backupCurrent(current, storeFor(current, { run, platform, env }), { dir, now, log })); } catch (err) {
+      log(`Claude account: rollback goes on without a backup of the current login: ${short(err)}`);
+    }
     const back = await restoreBackup(backupDir, { home, env, platform, run, wait });
     if (back.error) {
       saveState({ ...state, status: 'rollback failed', backupDir, at: now().toISOString(), error: back.error }, dir);
       return { error: `Rollback failed: ${back.error}` };
     }
-    saveState({ ...state, status: 'rolled back', oldEmail: back.email, backupDir, at: now().toISOString(), error: undefined }, dir);
+    saveState({ ...state, status: 'rolled back', oldEmail: back.email, backupDir, replacedBackupDir: before ?? undefined, at: now().toISOString(), error: undefined }, dir);
     log(`Claude account: rolled back to ${back.email}`);
-    return { ok: true, email: back.email };
+    return { ok: true, email: back.email, replacedBackupDir: before };
   });
-}
-function latestBackup(dir) {
-  const root = join(dir, 'account-backup');
-  try {
-    const whole = readdirSync(root).filter(n => existsSync(join(root, n, 'account.json')) && existsSync(join(root, n, 'credentials'))).sort();
-    return whole.length ? join(root, whole[whole.length - 1]) : null;
-  } catch { return null; }
 }
 
 // Renames the migrated folder out of the way. Never deletes it.
 export function retire(deps = {}) {
   const { dir = CONFIG_DIR, now = () => new Date(), log = console.log, rename = renameSync } = deps;
-  if (inFlight) return { error: BUSY_ERROR };
-  const state = loadState(dir);
-  if (state.status !== 'migrated') return { error: 'Only a folder whose account has been switched to can be retired.' };
-  if (state.retiredTo) return { error: `${state.folder} was already retired as ${state.retiredTo}.` };
-  if (!existsSync(state.folder)) return { error: `${state.folder} is not there any more.` };
-  const day = now().toISOString().slice(0, 10);
-  let target = `${state.folder}.retired-${day}`;
-  for (let n = 2; existsSync(target); n++) target = `${state.folder}.retired-${day}-${n}`;
-  try { rename(state.folder, target); } catch (err) { return { error: `Could not rename ${state.folder}: ${err.message}` }; }
-  saveState({ ...state, retiredTo: target, retiredAt: now().toISOString() }, dir);
-  log(`Claude account: retired ${basename(state.folder)} as ${basename(target)}`);
-  return { ok: true, retiredTo: target };
+  return oneAtATime(dir, async () => {
+    const state = loadState(dir);
+    if (state.status !== 'migrated') return { error: 'Only a folder whose account has been switched to can be retired.' };
+    if (state.retiredTo) return { error: `${state.folder} was already retired as ${state.retiredTo}.` };
+    if (!existsSync(state.folder)) return { error: `${state.folder} is not there any more.` };
+    const day = now().toISOString().slice(0, 10);
+    let target = `${state.folder}.retired-${day}`;
+    for (let n = 2; existsSync(target); n++) target = `${state.folder}.retired-${day}-${n}`;
+    try { rename(state.folder, target); } catch (err) { return { error: `Could not rename ${state.folder}: ${short(err)}` }; }
+    saveState({ ...state, retiredTo: target, retiredAt: now().toISOString() }, dir);
+    log(`Claude account: retired ${basename(state.folder)} as ${basename(target)}`);
+    return { ok: true, retiredTo: target };
+  });
 }
 
 // The owner's setup: check a folder and remember it as ready (nothing armed).
-export async function setup(folderInput, deps = {}) {
+// Only from a state with no switch in it; a switch that landed meanwhile keeps
+// its record.
+export function setup(folderInput, deps = {}) {
   const { dir = CONFIG_DIR, now = () => new Date() } = deps;
-  if (inFlight) return { error: BUSY_ERROR };
-  const pre = await preflight(folderInput, deps);
-  if (pre.error) return { error: pre.error };
-  return { ok: true, state: saveState({ status: 'ready', folder: pre.folder, newEmail: pre.newEmail, oldEmail: pre.oldEmail, at: now().toISOString() }, dir) };
+  return oneAtATime(dir, async () => {
+    if (!SETUP_FROM.includes(loadState(dir).status)) return { error: 'A switch has been made; roll it back before checking another folder.' };
+    const pre = await preflight(folderInput, deps);
+    if (pre.error) return { error: pre.error };
+    return { ok: true, state: saveState({ status: 'ready', folder: pre.folder, newEmail: pre.newEmail, oldEmail: pre.oldEmail, at: now().toISOString() }, dir) };
+  });
 }
 
 // Arm (switch at the next hard usage limit on Billion's screen) or disarm.
@@ -422,6 +502,20 @@ export function canMigrate(dir = CONFIG_DIR) {
   if (status === 'migrated') return { error: 'The default login is already the new account; roll back first if you want to switch again.' };
   if (status === 'switching' || status === 'rollback failed') return { error: 'The last switch did not finish cleanly; roll back first.' };
   return { ok: true, folder };
+}
+
+// A while after a switch: does claude still report the new email? A worker
+// that refreshed its token in the meantime could have written the old
+// account's back. Records the mismatch on the state; the caller tells the owner.
+export async function recheck(deps = {}) {
+  const { home = homedir(), env = process.env, platform = process.platform, run = runCommand, dir = CONFIG_DIR, now = () => new Date() } = deps;
+  const state = loadState(dir);
+  if (state.status !== 'migrated') return { ok: true, skipped: true };
+  const after = await authStatus(loginOf(null, { home, env, platform }), { run, platform });
+  if (after.loggedIn && email(after.email) === email(state.newEmail)) return { ok: true, email: after.email };
+  const error = `claude auth status reports ${after.email || 'no login'}, not ${state.newEmail}, ${Math.round((now() - new Date(state.at)) / 1000)}s after the switch; a running Claude Code may have written its token back`;
+  saveState({ ...state, error, recheckedAt: now().toISOString() }, dir);
+  return { error };
 }
 
 // What the browser shows. Never a secret, never a token: emails, dates, paths.

@@ -279,6 +279,23 @@ export async function switchBillion({ to, current, currentAgent, dir, writeHando
   return start({ handover: true, carried });
 }
 
+// Billion out of the way while the owner's Claude account is swapped
+// (server/account-migration.js): its running claude would keep the old
+// account's session and could write that account's token back. Stopped
+// before, started again after whatever `fn` did, with the mail it had waiting
+// carried over, even when fn throws. `live()`, `stop(session)` and
+// `start({ carried })` are passed in, so the order is what is tested.
+export async function withBillionStopped(fn, { live, stop, start, announce = () => {} }) {
+  const billion = live();
+  const carried = billion ? await stop(billion) : null;
+  try { return await fn(); } finally {
+    if (billion) {
+      const started = start({ carried });
+      if (!started.error && !started.existing) announce(started.session);
+    }
+  }
+}
+
 // Claude Code asks whether to trust a folder the first time it runs there, and
 // highlights "No, exit". Billion's folder is Agent 007's own, holding only
 // what the server put there, so the server answers for it. Board workers get

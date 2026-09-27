@@ -27,18 +27,18 @@ import {
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
 import { createSessionFromConfig } from './server/pty.js';
-import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
+import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick } from './server/billion-limit.js';
-import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate } from './server/account-migration.js';
+import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate, checkSwitch, recheck as recheckAccount, BUSY_ERROR } from './server/account-migration.js';
 import { takeMessages, restoreMessages } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
@@ -286,48 +286,67 @@ async function switchBillion(to, reason) {
 
 // The owner's Claude account switch (server/account-migration.js): every
 // action here is the browser's, gated in server/ws.js to the owner's browser
-// alone; no board tool reaches any of it. Billion is stopped before the swap
-// (its running claude would otherwise keep the old account's session and
-// could write that account's token back) and started again after it, on
-// whatever login the swap left. The owner is told the emails and the result,
-// never a token. Workers are left alone: claude re-reads its token every 30
-// seconds and carries on. The state goes to the browser only where the owner
-// may act (user accounts off), as the actions themselves do.
+// alone; no board tool reaches any of it. The checks run first; only a switch
+// that can start stops Billion (server/billion.js, withBillionStopped: its
+// running claude would otherwise keep the old account's session and could
+// write that account's token back) and starts it again after, on whatever
+// login the swap left. A switch or rollback also holds the CLI-switch lock,
+// so the button next to Billion's name cannot restart it mid-swap. The owner
+// is told the emails and the result, never a token: on Telegram, and in the
+// browser only for the armed switch (a click already gets its answer over the
+// socket). Workers are left alone: claude re-reads its token every 30
+// seconds; RECHECK_MS later the login is looked at again, in case one wrote
+// the old account's token back first. The state goes to browsers only where
+// the owner may act (user accounts off), as the actions themselves do.
+const RECHECK_MS = 40_000;
 const accountStatePayload = () => ({ type: 'account-state', ...accountState() });
-const announceAccount = () => { if (mayAnswerOwner()) broadcast(accountStatePayload()); };
-async function withBillionStopped(fn) {
-  const billion = liveBillion();
-  if (billion) await stopBillion(billion);
-  try { return await fn(); } finally {
-    if (billion) {
-      const started = startBillion();
-      if (!started.error && !started.existing) broadcast(sessionPayload(started.session));
-    }
-  }
-}
-async function tellOwnerOrShow(text, level) {
+const announceAccount = () => { if (mayAnswerOwner()) broadcastToBrowsers(accountStatePayload()); };
+async function tellOwnerOrShow(text, level, { show = true } = {}) {
   const { error } = await tellOwner(text);
-  if (error) broadcast({ type: 'notification', level, message: text });
+  if (error && show && mayAnswerOwner()) broadcastToBrowsers({ type: 'notification', level, message: text });
 }
-async function switchAccount(how) {
+const workersOnClaude = () => [...sessions.values()].filter(s => !s.isBillion && !s.exited && s.agent === 'claude').length;
+async function aroundBillion(fn) {
+  if (switching) return { error: 'Billion is already switching' };
+  switching = withBillionStopped(fn, {
+    live: liveBillion, stop: stopBillion, start: startBillion,
+    announce: (session) => broadcast(sessionPayload(session)),
+  });
+  try { return await switching; } finally { switching = null; }
+}
+async function switchAccount(how, { fromBrowser = false } = {}) {
   const can = canMigrate();
   if (can.error) return can;
-  const result = await withBillionStopped(() => migrateAccount(can.folder));
-  announceAccount();
-  const { newEmail } = accountState();
+  const check = await checkSwitch(can.folder);
+  if (check.error) {
+    if (check.error !== BUSY_ERROR) await tellOwnerOrShow(`Claude account switch to ${check.newEmail || accountState().newEmail || 'the new account'} not started: ${check.error}`, 'error', { show: !fromBrowser });
+    return check;
+  }
+  const result = await aroundBillion(() => migrateAccount(can.folder));
+  if (result.error === BUSY_ERROR) return result;   // the other run tells the owner
+  const workers = workersOnClaude();
   await tellOwnerOrShow(result.ok
-    ? `Claude account switched${how ? ` (${how})` : ''}: the default Claude Code login is now ${result.newEmail}, was ${result.oldEmail}. Backup in ${result.backupDir}. Leave ${can.folder} alone; retire it from the app once you have checked the switch.`
-    : `Claude account switch to ${newEmail || 'the new account'} failed: ${result.error}`, result.ok ? 'info' : 'error');
+    ? `Claude account switched${how ? ` (${how})` : ''}: the default Claude Code login is now ${result.newEmail}, was ${result.oldEmail}. Backup in ${result.backupDir}. Leave ${can.folder} alone; retire it from the app once you have checked the switch.${workers ? ` ${workers} Claude Code worker(s) were running; they pick the new token up within 30 seconds, and the login is checked again in ${RECHECK_MS / 1000} seconds.` : ''}`
+    : `Claude account switch to ${check.newEmail} failed: ${result.error}`, result.ok ? 'info' : 'error', { show: !fromBrowser });
+  if (result.ok) {
+    setTimeout(async () => {
+      const again = await recheckAccount();
+      if (again.error) {
+        announceAccount();
+        await tellOwnerOrShow(`Claude account: ${again.error}. Press Switch now again once the workers are idle, or Roll back.`, 'error');
+      }
+    }, RECHECK_MS).unref?.();
+  }
   return result;
 }
 // Keys looked up with Object.hasOwn: a message naming a prototype key is not an action.
 const accountActions = {
   setup: (msg) => setupAccount(msg.folder),
   arm: (msg) => armAccount(msg.on !== false),
-  migrate: () => switchAccount('by the owner'),
+  migrate: () => switchAccount('by the owner', { fromBrowser: true }),
   rollback: async () => {
-    const result = await withBillionStopped(() => rollbackAccount());
-    if (result.ok) await tellOwnerOrShow(`Claude account rolled back: the default Claude Code login is ${result.email} again.`, 'info');
+    const result = await aroundBillion(() => rollbackAccount());
+    if (result.ok) await tellOwnerOrShow(`Claude account rolled back: the default Claude Code login is ${result.email} again.`, 'info', { show: false });
     return result;
   },
   retire: () => retireAccount(),
@@ -361,12 +380,13 @@ function startBillionWakes() {
       },
       notify: (text) => notifyOwner(text, { broadcast }),
       // No Telegram: the browser's notice instead.
-      tell: async (text) => {
-        const { error } = await tellOwner(text);
-        if (error) broadcast({ type: 'notification', level: 'info', message: text });
+      tell: (text) => tellOwnerOrShow(text, 'info'),
+      // Armed by the owner, and only while the owner may act (user accounts
+      // off): the account switch comes before any move to Codex.
+      migration: {
+        armed: () => mayAnswerOwner() && accountArmed(),
+        run: (hit) => switchAccount(`armed: Claude Code said "${hit.line}"`).finally(announceAccount),
       },
-      // Armed by the owner: the account switch comes before any move to Codex.
-      migration: { armed: () => accountArmed(), run: () => switchAccount('armed, at the usage limit') },
     }).catch(err => console.error('Billion: usage-limit check failed:', err.message));
   }, WAKE_TICK_MS);
   wakeTimer.unref?.();

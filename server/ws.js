@@ -322,6 +322,20 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
+export function fromBrowser(req) {
+  const origin = req.headers.origin;
+  if (!origin || !isAllowedOrigin(origin)) return false;
+  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+}
+
+// To the sockets of the owner's own pages only (fromBrowser above).
+export function broadcastToBrowsers(payload) {
+  const data = JSON.stringify(payload);
+  for (const client of clients) {
+    if (client.readyState === 1 && client.fromBrowser) client.send(data);
+  }
+}
+
 export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState }) {
   wss.on('connection', (ws, req) => {
     // Auth gate (phase 1): when users are configured, require a valid token
@@ -369,11 +383,12 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
     ws.send(JSON.stringify(waitingPayload()));
+    // The page this server serves: an Origin that is allowed and is this
+    // server's own host. A plain socket from a shell sends none, and a page
+    // on another local port has another; both are refused the account switch.
+    ws.fromBrowser = fromBrowser(req);
     // The owner's Claude account state, only where the owner may act on it.
-    if (accountState && mayAnswerOwner()) ws.send(JSON.stringify(accountState()));
-    // Browsers always send an Origin (checked in verifyClient); a plain socket
-    // from a shell does not, and that is what the account switch refuses.
-    ws.fromBrowser = !!req.headers.origin;
+    if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
 
     broadcastPresence();
 

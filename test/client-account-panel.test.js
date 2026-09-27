@@ -27,8 +27,10 @@ describe('the Claude account panel', () => {
     expect(document.querySelector('.account-status').textContent).toMatch(/^Not set up/);
     expect(labels()).toEqual(['Check folder']);
     const input = document.querySelector('.account-folder');
+    expect(input.required).toBe(true);
     click('setup');
-    expect(send).not.toHaveBeenCalled();          // an empty folder sends nothing
+    expect(send).not.toHaveBeenCalled();          // an empty folder sends nothing, and the buttons stay live
+    expect(document.querySelector('.account-btn').disabled).toBe(false)
     input.value = ' ~/.claude-new ';
     click('setup');
     expect(send).toHaveBeenCalledWith({ type: 'account', action: 'setup', folder: '~/.claude-new' });
@@ -37,7 +39,7 @@ describe('the Claude account panel', () => {
 
   it('ready: arm and switch now, each behind a confirm', () => {
     handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x' });
-    expect(labels()).toEqual(['Check again', 'Arm: switch when the current account is used up', 'Switch now']);
+    expect(labels()).toEqual(['Check again', 'Arm', 'Switch now']);
     window.confirm = vi.fn(() => false);
     click('arm');
     click('migrate');
@@ -46,8 +48,14 @@ describe('the Claude account panel', () => {
     click('arm');
     expect(window.confirm.mock.calls[0][0]).toMatch(/permanent move, not for getting past a limit/);
     expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'arm' });
+    // Sent once: every button waits for the server's next state.
+    expect([...document.querySelectorAll('.account-btn')].every(b => b.disabled)).toBe(true);
+    click('migrate');
+    expect(send).toHaveBeenCalledTimes(1);
+    handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x' });
     click('migrate');
     expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'migrate' });
+    expect(document.querySelector('.account-btn').className).toContain('settings-refresh');
   });
 
   it('armed: disarm sends arm off; migrated: roll back and retire, once', () => {
@@ -116,7 +124,7 @@ describe('the Claude account panel', () => {
     expect(labels()).toEqual(['Roll back']);
     handleAccountState({ type: 'account-state', status: 'rollback failed', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: 'boom' });
     expect(document.querySelector('.account-status').textContent).toMatch(/so did the rollback: boom/);
-    expect(labels()).toEqual(['Roll back']);
+    expect(labels()).toEqual(['Check again', 'Roll back']);   // the way out once the store works again
     click('rollback');
     expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'rollback' });
   });

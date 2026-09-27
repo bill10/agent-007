@@ -130,8 +130,9 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
   if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
   if (armed) {
     // Once: run() disarms whatever happens (server/account-migration.js). A
-    // failure leaves the notice on screen, so the next tick takes the
-    // ordinary road to Codex.
+    // switch that cannot start leaves Billion and its notice alone, so the
+    // next tick takes the ordinary road to Codex; one that rolled back
+    // restarted Billion on the old account, which prints the notice again.
     watch.running = true;
     try {
       const result = await migration.run(hit);

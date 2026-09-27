@@ -688,12 +688,13 @@ body {
 .account-status[data-status="armed"] { color: var(--accent); }
 .account-status[data-status="migrated"] { color: var(--text); }
 .account-actions { display: flex; flex-direction: column; gap: 4px; }
-.account-folder, .account-btn {
+.account-folder {
   font: inherit; border: 1px solid var(--border); border-radius: 4px;
   background: var(--bg-dark); color: var(--text); padding: 4px 8px;
 }
-.account-btn { cursor: pointer; text-align: left; }
-.account-btn:hover, .account-folder:focus { border-color: var(--accent); }
+.account-folder:focus { outline: none; border-color: var(--accent); }
+/* The panel's own button recipe (.settings-refresh), left-aligned in the column. */
+.account-btn { text-align: left; }
 
 /* Explorer: repo sections */
 .explorer-repo {

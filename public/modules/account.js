@@ -38,7 +38,7 @@ export function renderAccount() {
     switching: `A switch to ${s.newEmail} started on ${(s.at || '').slice(0, 10)} and did not finish. Roll back to ${s.oldEmail}, then check the folder again.`,
     migrated: `Switched to ${s.newEmail} on ${(s.at || '').slice(0, 10)} (was ${s.oldEmail}).${s.retiredTo ? ` Folder retired as ${s.retiredTo}.` : ` Do not run anything with CLAUDE_CONFIG_DIR=${s.folder}; retire it once checked.`}`,
     'rolled back': `Rolled back to ${s.oldEmail}${s.error ? ` (${s.error})` : ''}.`,
-    'rollback failed': `The switch to ${s.newEmail} failed and so did the rollback: ${s.error || 'see the server log'}. The default login may be half swapped; try Roll back again, or restore ~/.agent-007/account-backup by hand.`,
+    'rollback failed': `The switch to ${s.newEmail} failed and so did the rollback: ${s.error || 'see the server log'}. The default login may be half swapped; try Roll back again, or restore ~/.agent-007/account-backup by hand, then check the folder again.`,
   }[s.status] || s.status;
   body.innerHTML = '';
   const status = document.createElement('div');
@@ -49,33 +49,43 @@ export function renderAccount() {
 
   const actions = document.createElement('div');
   actions.className = 'account-actions';
-  const button = (label, action) => {
+  // Sent once: the buttons go quiet until the server's next account-state
+  // re-renders the panel, so a second click cannot send the action twice.
+  const sendOnce = (msg) => {
+    for (const b of actions.querySelectorAll('button')) b.disabled = true;
+    send(msg);
+  };
+  const button = (label, action, onclick) => {
     const b = document.createElement('button');
-    b.className = 'account-btn';
+    b.className = 'settings-refresh account-btn';
     b.dataset.action = action;
     b.textContent = label;
-    b.onclick = () => {
+    b.onclick = onclick || (() => {
       const ask = CONFIRM[action];
       if (ask && !confirm(ask(s))) return;
-      send(action === 'disarm' ? { type: 'account', action: 'arm', on: false } : { type: 'account', action });
-    };
+      sendOnce(action === 'disarm' ? { type: 'account', action: 'arm', on: false } : { type: 'account', action });
+    });
     actions.appendChild(b);
     return b;
   };
-  if (s.status === 'not set up' || s.status === 'ready' || s.status === 'rolled back') {
+  if (s.status === 'not set up' || s.status === 'ready' || s.status === 'rolled back' || s.status === 'rollback failed') {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'account-folder';
     input.placeholder = '~/.claude-new';
     input.spellcheck = false;
+    input.required = true;
     input.value = s.folder || '';
     input.setAttribute('aria-label', "New account's config folder");
     actions.appendChild(input);
-    const check = button(s.status === 'not set up' ? 'Check folder' : 'Check again', 'setup');
-    check.onclick = () => { if (input.value.trim()) send({ type: 'account', action: 'setup', folder: input.value.trim() }); };
+    button(s.status === 'not set up' ? 'Check folder' : 'Check again', 'setup', () => {
+      const folder = input.value.trim();
+      if (!folder) { input.reportValidity?.(); input.focus(); return; }
+      sendOnce({ type: 'account', action: 'setup', folder });
+    });
   }
   if (s.status === 'ready') {
-    button('Arm: switch when the current account is used up', 'arm');
+    button('Arm', 'arm');
     button('Switch now', 'migrate');
   }
   if (s.status === 'armed') {

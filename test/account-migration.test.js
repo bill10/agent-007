@@ -2,14 +2,15 @@
 // Everything runs against a scratch home and a fake `security` / `claude`:
 // the real Keychain, ~/.claude and ~/.claude.json are never touched.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, realpathSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSync, readdirSync, realpathSync, rmSync, utimesSync } from 'fs';
 import { tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import {
-  preflight, migrate, rollback, retire, setup, setArmed, isArmed, loadState, publicState, canMigrate, runCommand, BUSY_ERROR, authStatus,
+  preflight, migrate, rollback, retire, setup, setArmed, isArmed, loadState, publicState, canMigrate, runCommand, BUSY_ERROR, resetInFlight, checkSwitch, recheck, authStatus,
   keychainService, keychainAccount, loginOf, writeAccountFields, DEFAULT_SERVICE, ACCOUNT_FIELDS,
 } from '../server/account-migration.js';
 import { limitTick, resetLimitWatch, SETTLE_MS } from '../server/billion-limit.js';
+import { withBillionStopped } from '../server/billion.js';
 
 const OLD = 'old@example.com', NEW = 'new@example.com';
 const OLD_TOKEN = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-OLD","refreshToken":"sk-ant-ort01-OLD"}}';
@@ -89,6 +90,7 @@ beforeEach(() => {
   env = { USER: 'bill', PATH: '/usr/bin' };
   deps = { home, env, platform: 'darwin', dir, run: fakeRun(), log: () => {}, wait: async () => {}, now: () => new Date('2026-09-27T10:00:00Z') };
   resetLimitWatch();
+  resetInFlight();
 });
 
 describe('where a login lives', () => {
@@ -221,14 +223,19 @@ describe('migrate', () => {
     expect(isArmed(dir)).toBe(false);
   });
 
-  it('rolls back when the Keychain write itself fails, and changes nothing before the backup exists', async () => {
+  it('a Keychain write that fails before anything changed needs no rollback and leaves the panel usable', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
     const run = fakeRun({ writeFails: true });
     const result = await migrate(newDir, { ...deps, run });
-    expect(result.error).toMatch(/add-generic-password failed/);
-    // The Keychain write never landed and the rollback write failed the same way: the account block must not have moved either.
+    expect(result.error).toMatch(/add-generic-password failed \(1\): boom\. Nothing changed\./);
+    expect(result.rolledBack).toBeUndefined();
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
     expect(json(defaultJson()).oauthAccount.emailAddress).toBe(OLD);
-    expect(result.rolledBack).toBe(false);
-    expect(result.error).toMatch(/the backup is in/);
+    // Disarmed, ready, the error shown; the backup stays for the record.
+    expect(loadState(dir)).toMatchObject({ status: 'ready', error: expect.stringMatching(/boom/), backupDir: result.backupDir });
+    expect(canMigrate(dir).ok).toBe(true);
+    expect((await migrate(newDir, deps)).ok).toBe(true);
   });
 
   it('stops before the backup when the current token cannot be read, and rolls back when the new one cannot', async () => {
@@ -240,14 +247,13 @@ describe('migrate', () => {
     expect(existsSync(join(dir, 'account-backup'))).toBe(false);
     expect(loadState(dir)).toEqual({ status: 'not set up' });
     expect(json(defaultJson()).oauthAccount.emailAddress).toBe(OLD);
-    // The new token unreadable: the backup exists by then, so the swap is undone.
+    // The new token unreadable: found out before anything moved, so nothing to undo.
     const second = await migrate(newDir, { ...deps, run: noRead(keychainService(newDir)) });
-    expect(second.error).toMatch(/could not read the new token from Keychain item .*\. Rolled back to old@example.com\./);
-    expect(second.rolledBack).toBe(true);
+    expect(second.error).toMatch(/could not read the new token from Keychain item .*; nothing changed\./);
+    expect(second.rolledBack).toBeUndefined();
     expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
     expect(json(defaultJson())).toMatchObject({ oauthAccount: { emailAddress: OLD }, hasAvailableSubscription: true });
-    expect(loadState(dir)).toMatchObject({ status: 'rolled back', error: expect.stringMatching(/could not read the new token/) });
-    expect(publicState(dir).error).toMatch(/could not read the new token/);
+    expect(loadState(dir)).toEqual({ status: 'not set up' });   // not armed: nothing to record
   });
 
   it('on Linux copies .credentials.json at 0600 instead of using the Keychain', async () => {
@@ -313,11 +319,11 @@ describe('rollback and retire', () => {
     await migrate(newDir, deps);
     expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
     const result = await rollback(deps);
-    expect(result).toEqual({ ok: true, email: OLD });
+    expect(result).toMatchObject({ ok: true, email: OLD });
     expect(keychain.get(DEFAULT_SERVICE)).toEqual({ acct: 'bill', secret: OLD_TOKEN });
     expect(json(defaultJson())).toMatchObject({ oauthAccount: { emailAddress: OLD }, hasAvailableSubscription: true, numStartups: 40 });
     expect(loadState(dir).status).toBe('rolled back');
-    expect((await rollback({ ...deps, dir: join(home, 'empty') })).error).toMatch(/No backup/);
+    expect((await rollback({ ...deps, dir: join(home, 'empty') })).error).toMatch(/Nothing to roll back/);
   });
 
   it('rollback reports a restore that does not verify', async () => {
@@ -328,14 +334,25 @@ describe('rollback and retire', () => {
     expect(publicState(dir).error).toMatch(/after the restore/);
   });
 
-  it('rollback finds the newest backup when the state does not name one, and reports a broken backup', async () => {
+  it('rollback needs the backup its state names, never whatever is newest on disk, and backs up what it replaces', async () => {
     const first = await migrate(newDir, deps);
-    // A second, later backup: an older stamp sorts first, so the newest wins.
+    // Nothing to roll back from a fresh or a rolled-back state; a state that lost its pointer is refused too.
+    expect((await rollback({ ...deps, dir: join(home, 'other') })).error).toMatch(/Nothing to roll back/);
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ status: 'migrated', folder: newDir, newEmail: NEW, oldEmail: OLD }));
     mkdirSync(join(dir, 'account-backup', '2020-01-01T00-00-00-000Z'));
     writeFileSync(join(dir, 'account-backup', '2020-01-01T00-00-00-000Z', 'account.json'), '{"email":"stale@example.com"}');
-    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ status: 'migrated', folder: newDir, newEmail: NEW, oldEmail: OLD }));
-    expect(await rollback(deps)).toEqual({ ok: true, email: OLD });
-    expect(loadState(dir)).toMatchObject({ status: 'rolled back', backupDir: first.backupDir });
+    writeFileSync(join(dir, 'account-backup', '2020-01-01T00-00-00-000Z', 'credentials'), 'stale');
+    expect((await rollback(deps)).error).toMatch(/names no backup/);
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
+    // With the pointer back: the login being replaced is saved first, then the old one restored.
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ status: 'migrated', folder: newDir, newEmail: NEW, oldEmail: OLD, backupDir: first.backupDir }));
+    const result = await rollback(deps);
+    expect(result).toMatchObject({ ok: true, email: OLD });
+    expect(loadState(dir)).toMatchObject({ status: 'rolled back', backupDir: first.backupDir, replacedBackupDir: result.replacedBackupDir });
+    expect(result.replacedBackupDir).not.toBe(first.backupDir);
+    expect(readFileSync(join(result.replacedBackupDir, 'credentials'), 'utf8')).toBe(NEW_TOKEN);
+    expect(json(join(result.replacedBackupDir, 'account.json'))).toMatchObject({ email: NEW, fields: { oauthAccount: { emailAddress: NEW } } });
+    expect((await rollback(deps)).error).toMatch(/Already rolled back/);
     // A backup with its credentials gone is an error, not a half restore.
     await migrate(newDir, deps);
     const state = loadState(dir);
@@ -344,16 +361,12 @@ describe('rollback and retire', () => {
     expect(broken.error).toMatch(/incomplete: credentials missing/);
     expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
     expect(loadState(dir).status).toBe('migrated');
-    // No backups at all under an existing folder.
-    expect((await rollback({ ...deps, dir: join(home, 'other') })).error).toMatch(/No backup/);
-    mkdirSync(join(home, 'other', 'account-backup'), { recursive: true });
-    expect((await rollback({ ...deps, dir: join(home, 'other') })).error).toMatch(/No backup/);
   });
 
   it('retire renames the migrated folder with the date and never deletes it', async () => {
-    expect(retire(deps).error).toMatch(/Only a folder whose account has been switched to/);
+    expect((await retire(deps)).error).toMatch(/Only a folder whose account has been switched to/);
     await migrate(newDir, deps);
-    const result = retire(deps);
+    const result = await retire(deps);
     expect(result).toEqual({ ok: true, retiredTo: `${newDir}.retired-2026-09-27` });
     expect(existsSync(newDir)).toBe(false);
     expect(json(join(result.retiredTo, '.claude.json')).oauthAccount.emailAddress).toBe(NEW);
@@ -362,18 +375,18 @@ describe('rollback and retire', () => {
     // A second folder retired the same day gets a number, not an overwrite.
     mkdirSync(newDir);
     writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), retiredTo: undefined }));
-    expect(retire(deps).retiredTo).toBe(`${newDir}.retired-2026-09-27-2`);
+    expect((await retire(deps)).retiredTo).toBe(`${newDir}.retired-2026-09-27-2`);
     expect(existsSync(result.retiredTo)).toBe(true);
     // Retired already: the button does nothing twice.
     const rename = vi.fn();
-    expect(retire({ ...deps, rename }).error).toMatch(/already retired as/);
+    expect((await retire({ ...deps, rename })).error).toMatch(/already retired as/);
     writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), retiredTo: undefined }));
-    expect(retire({ ...deps, rename }).error).toMatch(/not there any more/);
+    expect((await retire({ ...deps, rename })).error).toMatch(/not there any more/);
     expect(rename).not.toHaveBeenCalled();
     // A rename that fails is an error, not a throw, and nothing is recorded.
     mkdirSync(newDir);
     const eperm = vi.fn(() => { throw new Error('EPERM: operation not permitted'); });
-    expect(retire({ ...deps, rename: eperm }).error).toMatch(/Could not rename .*EPERM/);
+    expect((await retire({ ...deps, rename: eperm })).error).toMatch(/Could not rename .*EPERM/);
     expect(loadState(dir).retiredTo).toBeUndefined();
   });
 });
@@ -426,13 +439,18 @@ describe('what the reviews asked for', () => {
     const gate = new Promise(r => { release = r; });
     const run = vi.fn(async (f, a, o) => { if (a.includes('-w') && !run.held) { run.held = true; await gate; } return base(f, a, o); });
     const first = migrate(newDir, { ...deps, run });
-    await new Promise(r => setTimeout(r, 20));
-    expect(await migrate(newDir, deps)).toEqual({ error: BUSY_ERROR });
-    expect(await rollback(deps)).toEqual({ error: BUSY_ERROR });
-    expect(retire(deps)).toEqual({ error: BUSY_ERROR });
-    expect(await setup(newDir, deps)).toEqual({ error: BUSY_ERROR });
-    release();
+    try {
+      await new Promise(r => setTimeout(r, 20));
+      expect(await migrate(newDir, deps)).toEqual({ error: BUSY_ERROR });
+      expect(await rollback(deps)).toEqual({ error: BUSY_ERROR });
+      expect(await retire(deps)).toEqual({ error: BUSY_ERROR });
+      expect(await setup(newDir, deps)).toEqual({ error: BUSY_ERROR });
+      expect(await checkSwitch(newDir, deps)).toEqual({ error: BUSY_ERROR });
+      // Another server process holds the same lock on disk.
+      expect(existsSync(join(dir, 'account-migration.lock'))).toBe(true);
+    } finally { release(); }
     expect((await first).ok).toBe(true);
+    expect(existsSync(join(dir, 'account-migration.lock'))).toBe(false);
     expect(readdirSync(join(dir, 'account-backup'))).toHaveLength(1);
     // Free again afterwards.
     expect((await rollback(deps)).ok).toBe(true);
@@ -464,7 +482,7 @@ describe('what the reviews asked for', () => {
     const result = await migrate(`${newDir}///`, deps);
     expect(result).toMatchObject({ ok: true, newEmail: NEW });
     expect(loadState(dir).folder).toBe(newDir);
-    expect(retire(deps).retiredTo).toBe(`${newDir}.retired-2026-09-27`);
+    expect((await retire(deps)).retiredTo).toBe(`${newDir}.retired-2026-09-27`);
   });
 
   it('a token that does not read back as written is a failed swap, rolled back', async () => {
@@ -476,9 +494,10 @@ describe('what the reviews asked for', () => {
       return r;
     });
     const result = await migrate(newDir, { ...deps, run });
-    expect(result.error).toMatch(/does not hold the token just written\. Rolled back to old@example.com/);
+    // The item still holds the old token, so there is nothing to undo.
+    expect(result.error).toMatch(/does not hold the token just written\. Nothing changed\./);
     expect(json(defaultJson()).oauthAccount.emailAddress).toBe(OLD);
-    expect(loadState(dir).status).toBe('rolled back');
+    expect(loadState(dir)).toMatchObject({ status: 'ready', error: expect.stringMatching(/does not hold/) });
   });
 
   it("records 'switching' while the swap is in the air, and 'rollback failed' when the restore fails too", async () => {
@@ -486,18 +505,104 @@ describe('what the reviews asked for', () => {
     const base = fakeRun();
     const run = vi.fn(async (f, a, o) => { if (f === 'claude') seen.push(loadState(dir).status); return base(f, a, o); });
     await migrate(newDir, { ...deps, run });
-    expect(seen).toEqual(['not set up', 'not set up', 'switching']);   // two preflight checks, then the verify
+    expect(seen).toEqual(['not set up', 'not set up', 'not set up', 'switching']);   // two preflight checks, the backup's, then the verify
     expect(loadState(dir).status).toBe('migrated');
-    // Back on the old account, then a write that fails at swap and at restore.
+    // Back on the old account, then a config file that breaks once the token has moved: the swap fails
+    // after its first write, the restore hits the same broken file, and the state says so.
     expect(await rollback(deps)).toMatchObject({ ok: true });
-    const failed = await migrate(newDir, { ...deps, run: fakeRun({ writeFails: true }) });
+    const base2 = fakeRun();
+    const breaking = vi.fn(async (f, a, o) => { const r = await base2(f, a, o); if (a[0] === '-i') writeFileSync(defaultJson(), '[1]'); return r; });
+    const failed = await migrate(newDir, { ...deps, run: breaking });
     expect(failed.rolledBack).toBe(false);
+    expect(failed.error).toMatch(/not a JSON object.*Rollback failed too/);
     expect(loadState(dir)).toMatchObject({ status: 'rollback failed', error: expect.stringMatching(/rollback failed: /) });
     expect(canMigrate(dir).error).toMatch(/did not finish cleanly/);
-    // Roll back by hand once the store works again.
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);   // the restore did put the token back
+    // Roll back by hand once the file is whole again.
+    writeFileSync(defaultJson(), JSON.stringify({ numStartups: 40, oauthAccount: { emailAddress: NEW } }));
     expect(await rollback(deps)).toMatchObject({ ok: true, email: OLD });
     expect(loadState(dir)).toMatchObject({ status: 'rolled back' });
     expect(loadState(dir).error).toBeUndefined();
+  });
+
+  it('finds and keeps an item claude wrote under another account name', async () => {
+    keychain.set(DEFAULT_SERVICE, { acct: 'legacy', secret: OLD_TOKEN });
+    const result = await migrate(newDir, deps);
+    expect(result.ok).toBe(true);
+    expect(deps.run.mock.calls.find(([, a]) => a[0] === '-i')[2].input).toMatch(/-a "legacy"/);
+    expect(json(join(result.backupDir, 'account.json')).account).toBe('legacy');
+    expect(keychain.get(DEFAULT_SERVICE)).toEqual({ acct: 'legacy', secret: NEW_TOKEN });
+    expect([...keychain.keys()]).toEqual([DEFAULT_SERVICE, keychainService(newDir)]);
+    expect((await rollback(deps)).ok).toBe(true);
+    expect(keychain.get(DEFAULT_SERVICE)).toEqual({ acct: 'legacy', secret: OLD_TOKEN });
+    // An account attribute that is not a plain name is not used at all.
+    keychain.set(DEFAULT_SERVICE, { acct: 'bad name!', secret: OLD_TOKEN });
+    expect((await migrate(newDir, deps)).error).toMatch(/Could not find the current token in Keychain item "Claude Code-credentials"; nothing changed/);
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
+  });
+
+  it('writes its state beside and renames over, and refuses setup once a switch is recorded', async () => {
+    await migrate(newDir, deps);
+    expect(readdirSync(dir).filter(f => f.endsWith('.tmp'))).toEqual([]);
+    expect((await setup(newDir, deps)).error).toMatch(/A switch has been made; roll it back/);
+    expect(loadState(dir).status).toBe('migrated');
+    await rollback(deps);
+    expect((await setup(newDir, deps)).ok).toBe(true);
+  });
+
+  it('checkSwitch is the preflight the server runs before stopping Billion, disarming on failure', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    expect(await checkSwitch(newDir, deps)).toEqual({ ok: true, newEmail: NEW, oldEmail: OLD });
+    expect(isArmed(dir)).toBe(true);
+    rmSync(newDir, { recursive: true });
+    expect((await checkSwitch(newDir, deps)).error).toMatch(/does not exist/);
+    expect(loadState(dir)).toMatchObject({ status: 'ready', error: expect.stringMatching(/does not exist/) });
+  });
+
+  it('recheck notices a login that went back to the old account after the switch', async () => {
+    expect(await recheck(deps)).toEqual({ ok: true, skipped: true });
+    await migrate(newDir, deps);
+    expect(await recheck({ ...deps, now: () => new Date('2026-09-27T10:00:40Z') })).toEqual({ ok: true, email: NEW });
+    // A worker wrote the old account back.
+    writeFileSync(defaultJson(), JSON.stringify({ ...json(defaultJson()), oauthAccount: { emailAddress: OLD } }));
+    const result = await recheck({ ...deps, now: () => new Date('2026-09-27T10:00:40Z') });
+    expect(result.error).toMatch(/reports old@example.com, not new@example.com, 40s after the switch; a running Claude Code/);
+    expect(loadState(dir)).toMatchObject({ status: 'migrated', error: expect.stringMatching(/40s after/) });
+    expect(publicState(dir).error).toMatch(/written its token back/);
+  });
+
+  it('a lock another server left on disk blocks, unless it is stale', async () => {
+    const lock = join(dir, 'account-migration.lock');
+    mkdirSync(lock, { recursive: true });
+    expect(await migrate(newDir, deps)).toEqual({ error: BUSY_ERROR });
+    expect(existsSync(lock)).toBe(true);
+    const old = new Date(Date.now() - 16 * 60_000);
+    utimesSync(lock, old, old);
+    expect((await migrate(newDir, deps)).ok).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it('withBillionStopped stops before, restarts after with the carried mail, even when the work throws', async () => {
+    const order = [];
+    const stop = vi.fn(async () => { order.push('stop'); return ['mail']; });
+    const start = vi.fn(({ carried }) => { order.push(`start:${carried}`); return { session: { id: 'b2' } }; });
+    const announce = vi.fn();
+    expect(await withBillionStopped(async () => { order.push('fn'); return 'ok'; }, { live: () => ({ id: 'b1' }), stop, start, announce })).toBe('ok');
+    expect(order).toEqual(['stop', 'fn', 'start:mail']);
+    expect(announce).toHaveBeenCalledWith({ id: 'b2' });
+    order.length = 0;
+    await expect(withBillionStopped(() => { order.push('fn'); throw new Error('x'); }, { live: () => ({ id: 'b1' }), stop, start, announce })).rejects.toThrow('x');
+    expect(order).toEqual(['stop', 'fn', 'start:mail']);
+    // No Billion: nothing stopped, nothing started.
+    stop.mockClear(); start.mockClear();
+    expect(await withBillionStopped(async () => 1, { live: () => null, stop, start, announce })).toBe(1);
+    expect(stop).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    // A start that reports an existing session is not announced twice.
+    announce.mockClear();
+    await withBillionStopped(async () => 1, { live: () => ({}), stop, start: () => ({ existing: true, session: {} }), announce });
+    expect(announce).not.toHaveBeenCalled();
   });
 
   it('canMigrate gates on the state', async () => {
