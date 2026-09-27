@@ -108,6 +108,19 @@ describe('the Claude account panel', () => {
     expect(() => renderAccount()).not.toThrow();
   });
 
+  it("shows the last error on a ready line, and offers only Roll back while a switch hangs or a rollback failed", () => {
+    handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: '/h/.claude-new does not exist' });
+    expect(document.querySelector('.account-status').textContent).toMatch(/Nothing armed\. Last attempt: \/h\/.claude-new does not exist/);
+    handleAccountState({ type: 'account-state', status: 'switching', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z' });
+    expect(document.querySelector('.account-status').textContent).toMatch(/started on 2026-09-27 and did not finish/);
+    expect(labels()).toEqual(['Roll back']);
+    handleAccountState({ type: 'account-state', status: 'rollback failed', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: 'boom' });
+    expect(document.querySelector('.account-status').textContent).toMatch(/so did the rollback: boom/);
+    expect(labels()).toEqual(['Roll back']);
+    click('rollback');
+    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'rollback' });
+  });
+
   it('hides with user accounts on, or without Billion', () => {
     handleAccountState({ type: 'account-state', status: 'ready' });
     setSelf('u1', true);

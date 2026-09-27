@@ -30,12 +30,15 @@ export function renderAccount() {
   panel.hidden = authEnabled || !billionEnabled;
   const body = panel.querySelector('.account-body');
   const s = state;
+  const lastError = s.error ? ` Last attempt: ${s.error}` : '';
   const line = {
     'not set up': 'Not set up. Log the new account in once in a folder of its own (CLAUDE_CONFIG_DIR=~/.claude-new claude, then /login) and give that folder here.',
-    ready: `Ready: ${s.oldEmail} now, ${s.newEmail} in ${s.folder}. Nothing armed.`,
+    ready: `Ready: ${s.oldEmail} now, ${s.newEmail} in ${s.folder}. Nothing armed.${lastError}`,
     armed: `Armed: switches ${s.oldEmail} → ${s.newEmail} at Billion's next hard usage limit.`,
+    switching: `A switch to ${s.newEmail} started on ${(s.at || '').slice(0, 10)} and did not finish. Roll back to ${s.oldEmail}, then check the folder again.`,
     migrated: `Switched to ${s.newEmail} on ${(s.at || '').slice(0, 10)} (was ${s.oldEmail}).${s.retiredTo ? ` Folder retired as ${s.retiredTo}.` : ` Do not run anything with CLAUDE_CONFIG_DIR=${s.folder}; retire it once checked.`}`,
     'rolled back': `Rolled back to ${s.oldEmail}${s.error ? ` (${s.error})` : ''}.`,
+    'rollback failed': `The switch to ${s.newEmail} failed and so did the rollback: ${s.error || 'see the server log'}. The default login may be half swapped; try Roll back again, or restore ~/.agent-007/account-backup by hand.`,
   }[s.status] || s.status;
   body.innerHTML = '';
   const status = document.createElement('div');
@@ -46,7 +49,7 @@ export function renderAccount() {
 
   const actions = document.createElement('div');
   actions.className = 'account-actions';
-  const button = (label, action, extra = {}) => {
+  const button = (label, action) => {
     const b = document.createElement('button');
     b.className = 'account-btn';
     b.dataset.action = action;
@@ -54,7 +57,7 @@ export function renderAccount() {
     b.onclick = () => {
       const ask = CONFIRM[action];
       if (ask && !confirm(ask(s))) return;
-      send({ type: 'account', action: action === 'disarm' ? 'arm' : action, ...(action === 'disarm' ? { on: false } : {}), ...extra });
+      send(action === 'disarm' ? { type: 'account', action: 'arm', on: false } : { type: 'account', action });
     };
     actions.appendChild(b);
     return b;
@@ -68,12 +71,8 @@ export function renderAccount() {
     input.value = s.folder || '';
     input.setAttribute('aria-label', "New account's config folder");
     actions.appendChild(input);
-    const check = document.createElement('button');
-    check.className = 'account-btn';
-    check.dataset.action = 'setup';
-    check.textContent = s.status === 'not set up' ? 'Check folder' : 'Check again';
+    const check = button(s.status === 'not set up' ? 'Check folder' : 'Check again', 'setup');
     check.onclick = () => { if (input.value.trim()) send({ type: 'account', action: 'setup', folder: input.value.trim() }); };
-    actions.appendChild(check);
   }
   if (s.status === 'ready') {
     button('Arm: switch when the current account is used up', 'arm');
@@ -83,9 +82,9 @@ export function renderAccount() {
     button('Disarm', 'disarm');
     button('Switch now', 'migrate');
   }
-  if (s.status === 'migrated') {
+  if (s.status === 'migrated' || s.status === 'switching' || s.status === 'rollback failed') {
     button('Roll back', 'rollback');
-    if (!s.retiredTo) button('Retire the new folder', 'retire');
+    if (s.status === 'migrated' && !s.retiredTo) button('Retire the new folder', 'retire');
   }
   body.appendChild(actions);
 }

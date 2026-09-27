@@ -182,7 +182,7 @@ limit. The current login is backed up first (0600, under
 `~/.agent-007/account-backup/`), the switch is verified with `claude auth
 status`, and a switch that does not verify is rolled back by itself; **Roll
 back** does the same on request. Nothing happens until you press a button, and
-Billion cannot press it. The new folder stays on disk as a fallback: do not
+no board tool can press it (a same-user process could; see [docs/FEATURES.md](docs/FEATURES.md)). The new folder stays on disk as a fallback: do not
 start anything with `CLAUDE_CONFIG_DIR` pointing at it afterwards, and once you
 have checked the new login works, **Retire the new folder** renames it (never
 deletes). It is for a permanent move, not for rotating accounts past a usage

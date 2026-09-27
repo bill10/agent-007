@@ -25,8 +25,8 @@ function spawn({ isBillion = false, name }) {
 }
 
 let wsUrl;   // any free port, set once listening
-const connect = () => new Promise((resolve, reject) => {
-  const ws = new WebSocket(wsUrl);
+const connect = (opts = {}) => new Promise((resolve, reject) => {
+  const ws = new WebSocket(wsUrl, opts);
   const seen = [];
   ws.on('message', (d) => seen.push(JSON.parse(d)));
   ws.on('open', () => resolve({ ws, seen }));
@@ -105,16 +105,29 @@ describe('the Claude account switch over the socket', () => {
     return waitFor(seen, (m, i) => i >= before && m.type === 'notification' && m.level === 'error');
   };
 
-  it('tells a new window the state, and every action answers with its error', async () => {
+  // What a browser sends; a socket without it is not a browser (server/ws.js).
+  const browser = () => ({ headers: { origin: `http://127.0.0.1:${new URL(wsUrl).port}` } });
+
+  it('refuses a socket that carries no Origin: a script in an agent shell is not the browser', async () => {
     const { ws, seen } = await connect();
+    const got = await refusal(ws, seen, { action: 'setup', folder: '/tmp/never-read' });
+    expect(got.message).toMatch(/switched from the browser only/);
+    ws.close();
+  });
+
+  it('tells a new window the state, and every action answers with its error', async () => {
+    const { ws, seen } = await connect(browser());
     const state = await waitFor(seen, m => m.type === 'account-state');
     expect(state).toMatchObject({ status: 'not set up' });
     expect(JSON.stringify(state)).not.toMatch(/backupDir/);
     for (const [msg, error] of [
       [{ action: 'bogus' }, /Unknown account action bogus/],
+      [{ action: 'constructor' }, /Unknown account action constructor/],
+      [{ action: ['migrate'] }, /Unknown account action migrate/],
       [{ action: 'setup', folder: 'claude-new' }, /absolute path/],
       [{ action: 'arm' }, /Set the new account's folder up first/],
       [{ action: 'migrate' }, /Set the new account's folder up first/],
+      [{ action: 'arm', on: false }, /Nothing is armed/],
       [{ action: 'rollback' }, /No backup to roll back to/],
       [{ action: 'retire' }, /Only a folder whose account has been switched to/],
     ]) {
@@ -125,6 +138,26 @@ describe('the Claude account switch over the socket', () => {
     expect(seen.filter(m => m.type === 'account-state').length).toBeGreaterThan(1);
     expect(seen.filter(m => m.type === 'account-state').every(m => m.status === 'not set up')).toBe(true);
     ws.close();
+  });
+
+  it('a switch that fails before the swap reaches the owner as a notification, with no Billion to restart', async () => {
+    const cfg = process.env.AGENT007_CONFIG_DIR;
+    // A folder that exists but never logged in: preflight fails before any `security` or `claude` call.
+    const folder = mkdtempSync(join(tmpdir(), 'acct-empty-'));
+    writeFileSync(join(cfg, 'account-migration.json'), JSON.stringify({ status: 'ready', folder, newEmail: 'new@x', oldEmail: 'old@x' }));
+    expect([...sessions.values()].some(s => s.isBillion && !s.exited)).toBe(false);   // nothing to stop or start
+    try {
+      const { ws, seen } = await connect(browser());
+      expect(await waitFor(seen, m => m.type === 'account-state' && m.status === 'ready')).toBeTruthy();
+      const before = seen.length;
+      ws.send(JSON.stringify({ type: 'account', action: 'migrate' }));
+      // Telegram is not set up here, so the owner's message is the browser notice.
+      const note = await waitFor(seen, (m, i) => i >= before && m.type === 'notification' && /Claude account switch to new@x failed: .*\.claude\.json/.test(m.message));
+      expect(note).toBeTruthy();
+      expect(note.message).not.toMatch(/sk-ant/);
+      expect(seen.slice(before).some(m => m.type === 'account-state' && m.status === 'ready')).toBe(true);
+      ws.close();
+    } finally { rmSync(join(cfg, 'account-migration.json'), { force: true }); }
   });
 
   it('with user accounts on, nobody switches the account', async () => {

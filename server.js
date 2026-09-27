@@ -27,7 +27,7 @@ import {
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
 import { createSessionFromConfig } from './server/pty.js';
-import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers } from './server/ws.js';
+import { setupWebSocket, broadcast, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
@@ -38,7 +38,7 @@ import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRep
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick } from './server/billion-limit.js';
-import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, loadState as accountMigrationState } from './server/account-migration.js';
+import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate } from './server/account-migration.js';
 import { takeMessages, restoreMessages } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
@@ -285,58 +285,58 @@ async function switchBillion(to, reason) {
 }
 
 // The owner's Claude account switch (server/account-migration.js): every
-// action here is the browser's, gated in server/ws.js to the owner alone;
-// Billion has no tool that reaches any of it. A switch that lands restarts
-// Billion, since its running claude keeps the old account's session, and tells
-// the owner (emails and the result, never a token). Workers are left alone:
-// claude re-reads its token every 30 seconds and carries on.
+// action here is the browser's, gated in server/ws.js to the owner's browser
+// alone; no board tool reaches any of it. Billion is stopped before the swap
+// (its running claude would otherwise keep the old account's session and
+// could write that account's token back) and started again after it, on
+// whatever login the swap left. The owner is told the emails and the result,
+// never a token. Workers are left alone: claude re-reads its token every 30
+// seconds and carries on. The state goes to the browser only where the owner
+// may act (user accounts off), as the actions themselves do.
 const accountStatePayload = () => ({ type: 'account-state', ...accountState() });
-async function switchAccount(how) {
-  const state = accountMigrationState();
-  if (!state.folder) return { error: 'Set the new account\'s folder up first.' };
-  const result = await migrateAccount(state.folder);
-  broadcast(accountStatePayload());
-  if (result.ok) {
-    const billion = liveBillion();
+const announceAccount = () => { if (mayAnswerOwner()) broadcast(accountStatePayload()); };
+async function withBillionStopped(fn) {
+  const billion = liveBillion();
+  if (billion) await stopBillion(billion);
+  try { return await fn(); } finally {
     if (billion) {
-      await stopBillion(billion);
       const started = startBillion();
       if (!started.error && !started.existing) broadcast(sessionPayload(started.session));
     }
   }
-  const text = result.ok
-    ? `Claude account switched${how ? ` (${how})` : ''}: the default Claude Code login is now ${result.newEmail}, was ${result.oldEmail}. Backup in ${result.backupDir}. Leave ${state.folder} alone; retire it from the app once you have checked the switch.`
-    : `Claude account switch to ${state.newEmail || 'the new account'} failed: ${result.error}`;
+}
+async function tellOwnerOrShow(text, level) {
   const { error } = await tellOwner(text);
-  if (error) broadcast({ type: 'notification', level: result.ok ? 'info' : 'error', message: text });
+  if (error) broadcast({ type: 'notification', level, message: text });
+}
+async function switchAccount(how) {
+  const can = canMigrate();
+  if (can.error) return can;
+  const result = await withBillionStopped(() => migrateAccount(can.folder));
+  announceAccount();
+  const { newEmail } = accountState();
+  await tellOwnerOrShow(result.ok
+    ? `Claude account switched${how ? ` (${how})` : ''}: the default Claude Code login is now ${result.newEmail}, was ${result.oldEmail}. Backup in ${result.backupDir}. Leave ${can.folder} alone; retire it from the app once you have checked the switch.`
+    : `Claude account switch to ${newEmail || 'the new account'} failed: ${result.error}`, result.ok ? 'info' : 'error');
   return result;
 }
+// Keys looked up with Object.hasOwn: a message naming a prototype key is not an action.
 const accountActions = {
   setup: (msg) => setupAccount(msg.folder),
   arm: (msg) => armAccount(msg.on !== false),
   migrate: () => switchAccount('by the owner'),
   rollback: async () => {
-    const result = await rollbackAccount();
-    if (result.ok) {
-      const text = `Claude account rolled back: the default Claude Code login is ${result.email} again.`;
-      const { error } = await tellOwner(text);
-      if (error) broadcast({ type: 'notification', level: 'info', message: text });
-      const billion = liveBillion();
-      if (billion) {
-        await stopBillion(billion);
-        const started = startBillion();
-        if (!started.error && !started.existing) broadcast(sessionPayload(started.session));
-      }
-    }
+    const result = await withBillionStopped(() => rollbackAccount());
+    if (result.ok) await tellOwnerOrShow(`Claude account rolled back: the default Claude Code login is ${result.email} again.`, 'info');
     return result;
   },
   retire: () => retireAccount(),
 };
 async function accountAction(msg) {
-  const act = accountActions[msg.action];
-  if (!act) return { error: `Unknown account action ${msg.action}` };
-  const result = await act(msg);
-  broadcast(accountStatePayload());
+  const name = typeof msg.action === 'string' && Object.hasOwn(accountActions, msg.action) ? msg.action : null;
+  if (!name) return { error: `Unknown account action ${String(msg.action).slice(0, 40)}` };
+  const result = await accountActions[name](msg);
+  announceAccount();
   return result;
 }
 

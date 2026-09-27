@@ -369,7 +369,11 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
     ws.send(JSON.stringify(waitingPayload()));
-    if (accountState) ws.send(JSON.stringify(accountState()));
+    // The owner's Claude account state, only where the owner may act on it.
+    if (accountState && mayAnswerOwner()) ws.send(JSON.stringify(accountState()));
+    // Browsers always send an Origin (checked in verifyClient); a plain socket
+    // from a shell does not, and that is what the account switch refuses.
+    ws.fromBrowser = !!req.headers.origin;
 
     broadcastPresence();
 
@@ -458,10 +462,21 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         case 'account': {
           // The owner's Claude account switch (server/account-migration.js):
           // setup, arm, migrate, rollback, retire. The owner alone, like
-          // answering Billion; an agent has no way in (no board tool).
-          const result = !accountAction ? { error: 'Not available.' }
-            : !mayAnswerOwner() ? { error: 'Only the owner switches the Claude account, and with user accounts on nobody does.' }
-            : await accountAction(msg);
+          // answering Billion, and only from a browser: no board tool reaches
+          // it, and a socket opened without an Origin (a script in an agent's
+          // shell) is refused. That is friction, not a sandbox: a process
+          // running as the owner can forge an Origin, and can reach the
+          // Keychain itself without this server. The charter forbids it.
+          let result;
+          try {
+            result = !accountAction ? { error: 'Not available.' }
+              : !mayAnswerOwner() ? { error: 'Only the owner switches the Claude account, and with user accounts on nobody does.' }
+              : !ws.fromBrowser ? { error: 'The Claude account is switched from the browser only.' }
+              : await accountAction(msg);
+          } catch (err) {
+            console.error('Claude account action failed:', err);
+            result = { error: `Claude account action failed: ${err.message}` };
+          }
           if (result?.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }

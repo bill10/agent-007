@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, statSy
 import { tmpdir, userInfo } from 'os';
 import { join } from 'path';
 import {
-  preflight, migrate, rollback, retire, setup, setArmed, isArmed, loadState, publicState, authStatus,
+  preflight, migrate, rollback, retire, setup, setArmed, isArmed, loadState, publicState, canMigrate, runCommand, BUSY_ERROR, authStatus,
   keychainService, keychainAccount, loginOf, writeAccountFields, DEFAULT_SERVICE, ACCOUNT_FIELDS,
 } from '../server/account-migration.js';
 import { limitTick, resetLimitWatch, SETTLE_MS } from '../server/billion-limit.js';
@@ -21,26 +21,34 @@ let home, dir, newDir, keychain, calls, env, deps;
 // --json` that answers as the real one does: logged in when the folder's
 // .claude.json has an oauthAccount and its token exists, email from that block.
 function fakeRun(over = {}) {
+  // `security -i` takes its command on stdin: parse the one line the module writes.
+  const parseLine = (line) => {
+    const m = /^add-generic-password -U -a "([^"]*)" -s "([^"]*)" -X ([0-9a-f]+)\n$/.exec(line);
+    if (!m) throw new Error(`fake security -i: unexpected command ${JSON.stringify(line)}`);
+    return { acct: m[1], svc: m[2], secret: Buffer.from(m[3], 'hex').toString('utf8') };
+  };
   return vi.fn(async (file, args, opts = {}) => {
-    calls.push([file, ...args]);
-    if (file === 'security') {
-      const svc = args[args.indexOf('-s') + 1];
-      const item = keychain.get(svc);
-      if (args[0] === 'find-generic-password') {
-        if (!item) return { code: 44, stdout: '', stderr: 'The specified item could not be found in the keychain.' };
-        return args.includes('-w')
-          ? { code: 0, stdout: `${item.secret}\n`, stderr: '' }
-          : { code: 0, stdout: `keychain: "login"\nclass: "genp"\nattributes:\n    "acct"<blob>="${item.acct}"\n    "svce"<blob>="${svc}"\n`, stderr: '' };
-      }
-      if (args[0] === 'add-generic-password') {
+    calls.push([file, ...args, ...(opts.input ? ['<stdin>'] : [])]);
+    if (file === '/usr/bin/security') {
+      if (args[0] === '-i') {
         if (over.writeFails) return { code: 1, stdout: '', stderr: 'boom' };
-        const acct = args[args.indexOf('-a') + 1];
-        const secret = Buffer.from(args[args.indexOf('-X') + 1], 'hex').toString('utf8');
+        const { acct, svc, secret } = parseLine(opts.input);
+        const item = keychain.get(svc);
         // -U updates the item with this account and service; another account would be a second item.
         if (item && item.acct !== acct) keychain.set(`${svc}@${acct}`, { acct, secret });
         else keychain.set(svc, { acct, secret });
         return { code: 0, stdout: '', stderr: '' };
       }
+      const svc = args[args.indexOf('-s') + 1];
+      const acct = args.includes('-a') ? args[args.indexOf('-a') + 1] : null;
+      const item = keychain.get(svc);
+      if (args[0] === 'find-generic-password') {
+        if (!item || (acct && item.acct !== acct)) return { code: 44, stdout: '', stderr: 'The specified item could not be found in the keychain.' };
+        return args.includes('-w')
+          ? { code: 0, stdout: `${item.secret}\n`, stderr: '' }
+          : { code: 0, stdout: `keychain: "login"\nclass: "genp"\nattributes:\n    "acct"<blob>="${item.acct}"\n    "svce"<blob>="${svc}"\n`, stderr: '' };
+      }
+      throw new Error(`fake security: unexpected ${args.join(' ')}`);
     }
     if (file === 'claude') {
       const folder = opts.env?.CLAUDE_CONFIG_DIR;
@@ -164,8 +172,12 @@ describe('migrate', () => {
     expect(keychain.get(DEFAULT_SERVICE)).toEqual({ acct: 'bill', secret: NEW_TOKEN });
     expect([...keychain.keys()]).toEqual([DEFAULT_SERVICE, keychainService(newDir)]);
     expect(keychain.get(keychainService(newDir)).secret).toBe(NEW_TOKEN);   // the new folder is left alone
-    const add = calls.find(c => c[1] === 'add-generic-password');
-    expect(add).toEqual(['security', 'add-generic-password', '-U', '-a', 'bill', '-s', DEFAULT_SERVICE, '-X', Buffer.from(NEW_TOKEN).toString('hex')]);
+    // The write went to `security -i` on stdin: no token on any command line.
+    expect(calls.find(c => c[1] === '-i')).toEqual(['/usr/bin/security', '-i', '<stdin>']);
+    expect(calls.flat().join(' ')).not.toMatch(/add-generic-password|sk-ant|[0-9a-f]{40}/);
+    expect(deps.run.mock.calls.find(([, a]) => a[0] === '-i')[2].input).toBe(`add-generic-password -U -a "bill" -s "${DEFAULT_SERVICE}" -X ${Buffer.from(NEW_TOKEN).toString('hex')}\n`);
+    // Read back after the write, with the account claude itself uses.
+    expect(calls.filter(c => c.includes('-w')).every(c => c.includes('-a') && c.includes('bill'))).toBe(true);
     // Only the account fields changed in ~/.claude.json.
     const after = json(defaultJson());
     expect(after.oauthAccount).toEqual({ accountUuid: 'a-new', emailAddress: NEW, organizationName: 'New org' });
@@ -221,7 +233,7 @@ describe('migrate', () => {
 
   it('stops before the backup when the current token cannot be read, and rolls back when the new one cannot', async () => {
     // The item is there (preflight only checks that) but its secret will not come out.
-    const noRead = (svc) => { const base = fakeRun(); return vi.fn(async (f, a, o) => (f === 'security' && a.includes('-w') && a.includes(svc)) ? { code: 36, stdout: '', stderr: 'denied' } : base(f, a, o)); };
+    const noRead = (svc) => { const base = fakeRun(); return vi.fn(async (f, a, o) => (f === '/usr/bin/security' && a.includes('-w') && a.includes(svc)) ? { code: 36, stdout: '', stderr: 'denied' } : base(f, a, o)); };
     const result = await migrate(newDir, { ...deps, run: noRead(DEFAULT_SERVICE) });
     expect(result.error).toMatch(/Could not read the current token from Keychain item "Claude Code-credentials"; nothing changed/);
     expect(result.rolledBack).toBeUndefined();
@@ -311,7 +323,9 @@ describe('rollback and retire', () => {
   it('rollback reports a restore that does not verify', async () => {
     await migrate(newDir, deps);
     const result = await rollback({ ...deps, run: fakeRun({ reportEmail: () => NEW }) });
-    expect(result.error).toMatch(/reports new@example.com, not old@example.com/);
+    expect(result.error).toMatch(/^Rollback failed: claude auth status reports new@example.com after the restore, not old@example.com/);
+    expect(loadState(dir).status).toBe('rollback failed');
+    expect(publicState(dir).error).toMatch(/after the restore/);
   });
 
   it('rollback finds the newest backup when the state does not name one, and reports a broken backup', async () => {
@@ -327,7 +341,7 @@ describe('rollback and retire', () => {
     const state = loadState(dir);
     rmSync(join(state.backupDir, 'credentials'));
     const broken = await rollback(deps);
-    expect(broken.error).toMatch(/^Rollback failed: .*credentials/);
+    expect(broken.error).toMatch(/incomplete: credentials missing/);
     expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
     expect(loadState(dir).status).toBe('migrated');
     // No backups at all under an existing folder.
@@ -350,9 +364,17 @@ describe('rollback and retire', () => {
     writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), retiredTo: undefined }));
     expect(retire(deps).retiredTo).toBe(`${newDir}.retired-2026-09-27-2`);
     expect(existsSync(result.retiredTo)).toBe(true);
+    // Retired already: the button does nothing twice.
     const rename = vi.fn();
+    expect(retire({ ...deps, rename }).error).toMatch(/already retired as/);
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), retiredTo: undefined }));
     expect(retire({ ...deps, rename }).error).toMatch(/not there any more/);
     expect(rename).not.toHaveBeenCalled();
+    // A rename that fails is an error, not a throw, and nothing is recorded.
+    mkdirSync(newDir);
+    const eperm = vi.fn(() => { throw new Error('EPERM: operation not permitted'); });
+    expect(retire({ ...deps, rename: eperm }).error).toMatch(/Could not rename .*EPERM/);
+    expect(loadState(dir).retiredTo).toBeUndefined();
   });
 });
 
@@ -393,6 +415,130 @@ describe('setup and arming', () => {
     expect(setArmed(false, { dir }).error).toMatch(/Nothing is armed/);
     // Check again from there brings it back to ready with the state file rewritten.
     expect((await setup(newDir, deps)).state.status).toBe('ready');
+  });
+});
+
+describe('what the reviews asked for', () => {
+  it('one action at a time: a second switch while one runs is refused, and one backup is written', async () => {
+    // Slow the first switch down at its first `security -w` read.
+    const base = fakeRun();
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const run = vi.fn(async (f, a, o) => { if (a.includes('-w') && !run.held) { run.held = true; await gate; } return base(f, a, o); });
+    const first = migrate(newDir, { ...deps, run });
+    await new Promise(r => setTimeout(r, 20));
+    expect(await migrate(newDir, deps)).toEqual({ error: BUSY_ERROR });
+    expect(await rollback(deps)).toEqual({ error: BUSY_ERROR });
+    expect(retire(deps)).toEqual({ error: BUSY_ERROR });
+    expect(await setup(newDir, deps)).toEqual({ error: BUSY_ERROR });
+    release();
+    expect((await first).ok).toBe(true);
+    expect(readdirSync(join(dir, 'account-backup'))).toHaveLength(1);
+    // Free again afterwards.
+    expect((await rollback(deps)).ok).toBe(true);
+  });
+
+  it('a failure before the swap disarms, so the next limit tick can take the ordinary road', async () => {
+    await setup(newDir, deps);
+    setArmed(true, { dir });
+    rmSync(newDir, { recursive: true });
+    const result = await migrate(newDir, deps);
+    expect(result.error).toMatch(/does not exist/);
+    expect(loadState(dir)).toMatchObject({ status: 'ready', error: expect.stringMatching(/does not exist/) });
+    expect(isArmed(dir)).toBe(false);
+    expect(publicState(dir).error).toMatch(/does not exist/);
+    // Not armed: the same failure leaves the state alone.
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ status: 'ready', folder: newDir, newEmail: NEW, oldEmail: OLD }));
+    await migrate(newDir, deps);
+    expect(loadState(dir).error).toBeUndefined();
+  });
+
+  it('a folder typed with a trailing slash finds the item claude made for it either way', async () => {
+    // Logged in as CLAUDE_CONFIG_DIR=~/.claude-new/ : the hash covers the slash.
+    keychain.delete(keychainService(newDir));
+    keychain.set(keychainService(`${newDir}/`), { acct: 'bill', secret: NEW_TOKEN });
+    const pre = await preflight(`${newDir}/`, deps);
+    expect(pre.folder).toBe(newDir);                       // stored without the slash
+    expect(pre.next.folder).toBe(`${newDir}/`);            // used as claude hashed it
+    expect(pre.next.env.CLAUDE_CONFIG_DIR).toBe(`${newDir}/`);
+    const result = await migrate(`${newDir}///`, deps);
+    expect(result).toMatchObject({ ok: true, newEmail: NEW });
+    expect(loadState(dir).folder).toBe(newDir);
+    expect(retire(deps).retiredTo).toBe(`${newDir}.retired-2026-09-27`);
+  });
+
+  it('a token that does not read back as written is a failed swap, rolled back', async () => {
+    const base = fakeRun();
+    const run = vi.fn(async (f, a, o) => {
+      const r = await base(f, a, o);
+      // The write "succeeds" but the item keeps the old secret.
+      if (a[0] === '-i' && keychain.get(DEFAULT_SERVICE).secret === NEW_TOKEN) keychain.set(DEFAULT_SERVICE, { acct: 'bill', secret: OLD_TOKEN });
+      return r;
+    });
+    const result = await migrate(newDir, { ...deps, run });
+    expect(result.error).toMatch(/does not hold the token just written\. Rolled back to old@example.com/);
+    expect(json(defaultJson()).oauthAccount.emailAddress).toBe(OLD);
+    expect(loadState(dir).status).toBe('rolled back');
+  });
+
+  it("records 'switching' while the swap is in the air, and 'rollback failed' when the restore fails too", async () => {
+    const seen = [];
+    const base = fakeRun();
+    const run = vi.fn(async (f, a, o) => { if (f === 'claude') seen.push(loadState(dir).status); return base(f, a, o); });
+    await migrate(newDir, { ...deps, run });
+    expect(seen).toEqual(['not set up', 'not set up', 'switching']);   // two preflight checks, then the verify
+    expect(loadState(dir).status).toBe('migrated');
+    // Back on the old account, then a write that fails at swap and at restore.
+    expect(await rollback(deps)).toMatchObject({ ok: true });
+    const failed = await migrate(newDir, { ...deps, run: fakeRun({ writeFails: true }) });
+    expect(failed.rolledBack).toBe(false);
+    expect(loadState(dir)).toMatchObject({ status: 'rollback failed', error: expect.stringMatching(/rollback failed: /) });
+    expect(canMigrate(dir).error).toMatch(/did not finish cleanly/);
+    // Roll back by hand once the store works again.
+    expect(await rollback(deps)).toMatchObject({ ok: true, email: OLD });
+    expect(loadState(dir)).toMatchObject({ status: 'rolled back' });
+    expect(loadState(dir).error).toBeUndefined();
+  });
+
+  it('canMigrate gates on the state', async () => {
+    expect(canMigrate(dir).error).toMatch(/Set the new account/);
+    await setup(newDir, deps);
+    expect(canMigrate(dir)).toEqual({ ok: true, folder: newDir });
+    await migrate(newDir, deps);
+    expect(canMigrate(dir).error).toMatch(/already the new account; roll back first/);
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), status: 'switching' }));
+    expect(canMigrate(dir).error).toMatch(/did not finish cleanly/);
+  });
+
+  it("takes Claude Code's own lock on .claude.json, waits out a fresh one and clears a stale one", async () => {
+    const file = defaultJson();
+    const lock = `${file}.lock`;
+    // A fresh lock: someone is writing; we wait and then give up.
+    mkdirSync(lock);
+    const waits = [];
+    await expect(writeAccountFields(file, { oauthAccount: { emailAddress: NEW } }, { tries: 3, wait: async (ms) => waits.push(ms) }))
+      .rejects.toThrow(/locked by Claude Code \(\.claude\.json\.lock\)/);
+    expect(waits).toEqual([100, 200, 300]);
+    expect(json(file).oauthAccount.emailAddress).toBe(OLD);
+    expect(existsSync(lock)).toBe(true);                    // not ours: left alone
+    // A stale lock (older than 10 s): claude left it behind, so it is removed and the write goes through.
+    expect(await writeAccountFields(file, { oauthAccount: { emailAddress: NEW } }, { tries: 3, wait: async () => {}, now: () => Date.now() + 60_000 })).toBe(true);
+    expect(json(file).oauthAccount.emailAddress).toBe(NEW);
+    expect(existsSync(lock)).toBe(false);                   // ours, released
+    expect(readdirSync(home).filter(f => f.includes('.tmp'))).toEqual([]);
+  });
+
+  it('runCommand maps exit codes, never throws, feeds stdin, and hands the child the agent env only', async () => {
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME, AGENT007_CONFIG_DIR: '/secret', TELEGRAM_BOT_TOKEN: 't', KEEP: 'yes' };
+    expect((await runCommand(process.execPath, ['-e', 'process.exit(3)'], { env })).code).toBe(3);
+    expect((await runCommand(process.execPath, ['-e', 'process.stdout.write("hi")'], { env })).stdout).toBe('hi');
+    expect((await runCommand(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], { env, input: 'from stdin' })).stdout).toBe('from stdin');
+    expect((await runCommand('definitely-not-a-binary-a007', [], { env })).code).toBe(1);   // ENOENT has a string code
+    const { stdout } = await runCommand(process.execPath, ['-e', 'process.stdout.write(JSON.stringify(process.env))'], { env });
+    const child = JSON.parse(stdout);
+    expect(child.KEEP).toBe('yes');
+    expect(child.AGENT007_CONFIG_DIR).toBeUndefined();
+    expect(child.TELEGRAM_BOT_TOKEN).toBeUndefined();
   });
 });
 

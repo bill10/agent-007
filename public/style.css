@@ -682,7 +682,7 @@ body {
 
 /* The owner's Claude account switch, a section of the Settings panel */
 .account-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
-.account-panel[hidden] { display: none; }
+.account-intro { margin-bottom: 8px; line-height: 1.4; }
 .account-body { display: flex; flex-direction: column; gap: 8px; }
 .account-status { line-height: 1.4; overflow-wrap: anywhere; }
 .account-status[data-status="armed"] { color: var(--accent); }
@@ -693,7 +693,7 @@ body {
   background: var(--bg-dark); color: var(--text); padding: 4px 8px;
 }
 .account-btn { cursor: pointer; text-align: left; }
-.account-btn:hover { border-color: var(--accent); }
+.account-btn:hover, .account-folder:focus { border-color: var(--accent); }
 
 /* Explorer: repo sections */
 .explorer-repo {
@@ -1234,6 +1234,7 @@ body {
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
   .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss { min-width: 44px; min-height: 44px; }
+  .account-btn, .account-folder { min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
   }

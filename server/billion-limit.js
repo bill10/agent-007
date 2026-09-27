@@ -99,15 +99,15 @@ export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: n
 
 /**
  * One look at Billion's screen. Returns what it did: 'warned', 'switched',
- * 'paused' or null. The actions come in so the tests need no CLI:
- * switchTo(agent, reason), notify(text) (a Waiting item and Telegram),
- * tell(text) (Telegram only), ready(agent) (cliReady).
+ * 'paused', 'migrated', 'migration-failed' or null. The actions come in so
+ * the tests need no CLI: switchTo(agent, reason), notify(text) (a Waiting
+ * item and Telegram), tell(text) (Telegram only), ready(agent) (cliReady),
+ * and migration { armed(), run(hit) }: the owner's armed Claude account
+ * switch, which needs no BILLION_AUTO_SWITCH and applies to a Claude Billion.
  */
 export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log, migration = null } = {}) {
   if (!session?.isBillion || session.exited || watch.running) return null;
   const agent = session.agent;
-  // migration: { armed(), run() } — the armed account switch, which needs no
-  // BILLION_AUTO_SWITCH and only applies to a Claude Billion.
   const armed = agent === 'claude' && !!migration?.armed?.();
   if (!autoSwitchOn(env) && !armed) return null;
   const to = { claude: 'codex', codex: 'claude' }[agent];
@@ -129,8 +129,9 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
   if (watch.pausedFor === session.id) return null;
   if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
   if (armed) {
-    // Once: run() disarms whatever happens. A failure leaves the notice on
-    // screen, so the next tick takes the ordinary road to Codex.
+    // Once: run() disarms whatever happens (server/account-migration.js). A
+    // failure leaves the notice on screen, so the next tick takes the
+    // ordinary road to Codex.
     watch.running = true;
     try {
       const result = await migration.run(hit);
@@ -140,7 +141,6 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
       watch.running = false;
     }
   }
-  if (!autoSwitchOn(env)) return null;
   watch.running = true;
   try {
     const why = now - watch.switchAt < SWITCH_GAP_MS
