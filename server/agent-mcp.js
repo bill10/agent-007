@@ -106,9 +106,29 @@ const shellQuote = (s) => `"${String(s).replace(/(["\\$`])/g, '\\$1')}"`;
 // something different to each shell a hook might run under (doubled by the
 // quoting above, cmd.exe would read two), so the paths carry none.
 export const hookPath = (p, platform = process.platform) => (platform === 'win32' ? String(p).replace(/\\/g, '/') : String(p));
+// Claude Code's channel plugins run an MCP server that polls a chat service
+// (Telegram's getUpdates, Discord's gateway) from whatever folder they are
+// enabled in, and a worker's worktree inherits a "local" install made for its
+// repo. A board worker's copy would compete with the owner's own session for
+// the bot's messages, so it gets them turned off. Flag settings outrank local
+// ones (claude 2.1.283's enabledPlugins docs; checked with `claude --settings
+// ... plugin list`); a false entry for a plugin that is not installed is
+// ignored. There is no switch for "every channel plugin": channelsEnabled is
+// managed-policy only and gates the notifications, not the polling server.
+// ponytail: the official channel plugins by name; a third-party one needs adding here.
+export const CHANNEL_PLUGINS = ['telegram', 'discord', 'imessage', 'fakechat'].map(p => `${p}@claude-plugins-official`);
+const noChannelPlugins = () => Object.fromEntries(CHANNEL_PLUGINS.map(id => [id, false]));
+
+// The --settings every Claude Code board worker gets; withApprovalHook adds to it.
+export function withBoardWorkerSettings(file, args) {
+  if (agentName(file) !== 'claude' || args.includes('--settings')) return args;
+  return ['--settings', JSON.stringify({ enabledPlugins: noChannelPlugins() }), ...args];
+}
+
 export function withApprovalHook(file, args, configPath) {
   if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
   const settings = {
+    enabledPlugins: noChannelPlugins(),
     permissions: { allow: WORKER_BOARD_TOOLS.map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`) },
     hooks: {
       PermissionRequest: [{
