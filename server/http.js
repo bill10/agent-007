@@ -15,7 +15,7 @@ import {
 import { addRepo } from './git.js';
 import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
-import { agentSummaries, sendMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
+import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner, tellOwner, resolveQuestion } from './owner.js';
 import { availableModels } from './models.js';
@@ -122,7 +122,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         }, broadcast),
         listAgents: () => agentSummaries(req.agentSession, sessions,
           (jobId) => allJobs().find(job => job.id === jobId)?.title),
-        sendMessage: ({ to, text }) => sendMessage({ from: req.agentSession, to, text, sessions }),
+        sendMessage: ({ to, text, replaces }) => sendMessage({ from: req.agentSession, to, text, replaces, sessions }),
+        withdrawMessage: (id) => withdrawMessage({ from: req.agentSession, id, sessions }),
         finishJob: (fields) => finishJobForAgent({ ...fields, session: req.agentSession }, broadcast),
         // Billion's own tools: toolsFor() lists them only for its session, and
         // each checks again here.

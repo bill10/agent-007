@@ -44,13 +44,24 @@ export const SUBMIT_DELAY_MS = 150;
 export const PASTE_CHUNK_CHARS = 200;
 export const PASTE_GAP_MS = 10;
 
-const queues = new Map();   // recipient session id -> [formatted text]
+// Each entry is { text }, plus { id, fromId } for an agent's message so its
+// sender can withdraw or replace it (withdrawMessage, sendMessage's replaces).
+const queues = new Map();   // recipient session id -> [{ text, id?, fromId? }]
 // How many at the front of a queue the server wrote (approvals, board
 // notices). They go ahead of agent messages and count against their own cap,
 // so agents messaging Billion cannot push its approvals past their wait, or
 // crowd them out of the queue altogether.
 const serverAhead = new Map();
 const sends = new Map();    // `${from.id}>${to.id}` -> [timestamps]
+// Every agent message's id -> { fromId, toId }, kept past delivery so a late
+// withdraw can say "already delivered" rather than "no such message".
+const sent = new Map();
+const SENT_KEPT = 1000;   // oldest forgotten first; a withdraw that old reads "no such message"
+let lastId = 0;
+function remember(id, fromId, toId) {
+  sent.set(id, { fromId, toId });
+  if (sent.size > SENT_KEPT) sent.delete(sent.keys().next().value);
+}
 
 // Everything but newline and tab. The text goes inside bracketed pastes, and a
 // message carrying ESC[201~ would end the paste early and type the rest as raw
@@ -163,7 +174,7 @@ export function sendText(session, text, now = Date.now()) {
   const queue = queues.get(session.id) || [];
   const ahead = serverAhead.get(session.id) || 0;
   if (ahead >= QUEUE_CAP) return false;
-  queue.splice(ahead, 0, clean(text));
+  queue.splice(ahead, 0, { text: clean(text) });
   queues.set(session.id, queue);
   serverAhead.set(session.id, ahead + 1);
   flushMessages(session, now);
@@ -174,7 +185,7 @@ export function sendText(session, text, now = Date.now()) {
 // expired before it was typed).
 export function unqueueText(sessionId, text) {
   const queue = queues.get(sessionId);
-  const at = queue ? queue.indexOf(clean(text)) : -1;
+  const at = queue ? queue.findIndex(e => !e.id && e.text === clean(text)) : -1;
   if (at === -1) return false;
   queue.splice(at, 1);
   const ahead = serverAhead.get(sessionId) || 0;
@@ -252,10 +263,11 @@ function deliver(session, text, now) {
 
 /**
  * Send `text` from one agent session to another, named as list_agents shows it.
- * Returns { delivered: true, to } | { queued: n, to } | { error }, `to` being
- * the recipient session.
+ * Returns { delivered: true, id, to } | { queued: n, id, to, replaced? } | { error },
+ * `to` being the recipient session; replacedDelivered when `replaces` named a
+ * message already typed in.
  */
-export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
+export function sendMessage({ from, to, text, replaces, sessions, now = Date.now() }) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_MESSAGE_CHARS) {
@@ -274,6 +286,10 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
     return { error: why && why !== HIDDEN_AGENT ? `${to} ${why}. ${reach}` : `No agent named "${to}" is running. ${reach}` };
   }
 
+  const old = replaces ? sent.get(replaces) : null;
+  if (replaces && old?.fromId !== from.id) return { error: `You sent no message with id ${replaces}.` };
+  if (old && old.toId !== target.id) return { error: `Message ${replaces} went to another agent, not ${target.name}.` };
+
   // Two agents that each answer every message would talk for ever.
   const key = `${from.id}>${target.id}`;
   const recent = (sends.get(key) || []).filter(t => now - t < PAIR_WINDOW_MS);
@@ -281,15 +297,50 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
     return { error: `You have sent ${target.name} ${PAIR_LIMIT} messages in the last ${PAIR_WINDOW_MS / 60000} minutes, which is the limit. Tell the user what you need from ${target.name} instead.` };
   }
   const queue = queues.get(target.id) || [];
+  const id = `msg-${++lastId}`;
+  const entry = { text: formatMessage(from, body), id, fromId: from.id };
+  const at = old ? queue.findIndex(e => e.id === replaces) : -1;
+  if (at !== -1) {
+    recent.push(now);
+    sends.set(key, recent);
+    remember(id, from.id, target.id);
+    sent.delete(replaces);
+    queue[at] = entry;
+    return { queued: at + 1, id, to: target, replaced: true };
+  }
   if (queue.length - (serverAhead.get(target.id) || 0) >= QUEUE_CAP) {
     return { error: `${target.name} already has ${QUEUE_CAP} messages waiting for it. Try again once it has caught up.` };
   }
 
   recent.push(now);
   sends.set(key, recent);
-  queue.push(formatMessage(from, body));
+  remember(id, from.id, target.id);
+  queue.push(entry);
   queues.set(target.id, queue);
-  return flushMessages(target, now) ? { delivered: true, to: target } : { queued: queue.length, to: target };
+  const late = old ? { replacedDelivered: true } : {};
+  // The flush types the head of the queue, which is this one only if nothing
+  // was waiting ahead of it.
+  flushMessages(target, now);
+  const position = queue.indexOf(entry) + 1;
+  return position ? { queued: position, id, to: target, ...late } : { delivered: true, id, to: target, ...late };
+}
+
+/**
+ * Take back a message `from` sent that is still waiting in its recipient's
+ * queue. Returns { withdrawn: true, to } | { delivered: true, to } | { error },
+ * `to` being the recipient's name. Server entries carry no id, so are out of
+ * reach.
+ */
+export function withdrawMessage({ from, id, sessions }) {
+  const msg = sent.get(id);
+  if (msg?.fromId !== from.id) return { error: `You sent no message with id ${id}.` };
+  const to = sessions.get(msg.toId)?.name || 'its recipient';
+  const queue = queues.get(msg.toId);
+  const at = queue ? queue.findIndex(e => e.id === id) : -1;
+  if (at === -1) return { delivered: true, to };
+  queue.splice(at, 1);
+  if (!queue.length) queues.delete(msg.toId);
+  return { withdrawn: true, to };
 }
 
 // Type the next waiting message into this session if it can take one now.
@@ -298,7 +349,7 @@ export function sendMessage({ from, to, text, sessions, now = Date.now() }) {
 export function flushMessages(session, now = Date.now()) {
   const queue = queues.get(session.id);
   if (!queue?.length || !canDeliver(session, now)) return false;
-  deliver(session, queue.shift(), now);
+  deliver(session, queue.shift().text, now);
   const ahead = serverAhead.get(session.id) || 0;
   if (ahead) serverAhead.set(session.id, ahead - 1);
   if (!queue.length) queues.delete(session.id);
@@ -345,6 +396,7 @@ export function dropMessages(sessionId) {
   for (const key of sends.keys()) {
     if (key.startsWith(`${sessionId}>`) || key.endsWith(`>${sessionId}`)) sends.delete(key);
   }
+  for (const [id, msg] of sent) if (msg.fromId === sessionId || msg.toId === sessionId) sent.delete(id);
 }
 
 // Whether a pty-input write is someone typing, as opposed to the terminal

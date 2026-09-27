@@ -255,7 +255,7 @@ export const SEND_MESSAGE_TOOL = {
     + 'reply comes back to you the same way — this call does not wait for one. '
     + 'Use it when the user asks you to ask, tell or coordinate with another '
     + 'agent; do not start conversations of your own accord. Names come from '
-    + 'list_agents.',
+    + 'list_agents. A queued message comes back with an id for replaces and withdraw_message.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -265,8 +265,29 @@ export const SEND_MESSAGE_TOOL = {
         description: 'What to say. The recipient was not in this conversation, so '
           + 'include the context it needs to answer.',
       },
+      replaces: {
+        type: 'string',
+        description: 'Optional. The id of a message you sent this agent that may still be queued, '
+          + 'when events have made it stale: this one takes its place in the queue. If it was '
+          + 'already delivered, this one is queued as usual and you are told so.',
+      },
     },
     required: ['to', 'message'],
+    additionalProperties: false,
+  },
+};
+
+export const WITHDRAW_MESSAGE_TOOL = {
+  name: 'withdraw_message',
+  description:
+    'Take back a message you sent with send_message that is still queued, by the id '
+    + 'send_message returned. Use it when events have made the message stale (the PR it '
+    + 'asks about was merged, the instruction was superseded) so the agent never acts on it. '
+    + 'Says so if it was already delivered.',
+  inputSchema: {
+    type: 'object',
+    properties: { id: { type: 'string', description: 'The message id send_message returned.' } },
+    required: ['id'],
     additionalProperties: false,
   },
 };
@@ -483,7 +504,7 @@ export const SET_NEXT_WAKE_TOOL = {
   },
 };
 
-export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL];
+export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL, WITHDRAW_MESSAGE_TOOL];
 const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
@@ -780,13 +801,22 @@ const CALLS = {
   },
 
   [SEND_MESSAGE_TOOL.name]: (args, ctx) => {
-    const result = ctx.sendMessage({ to: args.to, text: args.message });
+    const result = ctx.sendMessage({ to: args.to, text: args.message, replaces: args.replaces });
     if (result.error) return toolText(result.error, true);
+    const late = result.replacedDelivered ? `Message ${args.replaces} was already delivered, so this one does not replace it. ` : '';
     // Say which, so an agent does not report "asked it" and then wait on an
     // answer that cannot come until the other one stops working.
-    return toolText(result.delivered
+    return toolText(late + (result.delivered
       ? `Delivered to ${result.to.name}. Its reply, if any, will arrive as a message in this terminal.`
-      : `Queued for ${result.to.name} (position ${result.queued}); it gets the message once it is next free at its prompt. Its reply, if any, will arrive as a message in this terminal.`);
+      : `${result.replaced ? `Replaced ${args.replaces} in the queue for` : 'Queued for'} ${result.to.name} (position ${result.queued}, message id ${result.id}); it gets the message once it is next free at its prompt. Its reply, if any, will arrive as a message in this terminal.`));
+  },
+
+  [WITHDRAW_MESSAGE_TOOL.name]: (args, ctx) => {
+    const result = ctx.withdrawMessage(args.id);
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.withdrawn
+      ? `Withdrew ${args.id}; ${result.to} will not get it.`
+      : `${args.id} was already delivered to ${result.to}; it cannot be taken back. Send a correction with send_message.`);
   },
 };
 
