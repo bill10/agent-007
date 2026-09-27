@@ -120,6 +120,12 @@
             <button class="settings-refresh" id="settings-refresh" type="button">Refresh</button>
           </div>
           <div id="settings-agents"></div>
+          <!-- The owner's Claude account switch (server/account-migration.js). Off until set up; hidden with user accounts on. -->
+          <div class="account-panel" id="account-panel" hidden>
+            <div class="settings-section-head"><h2>Claude account</h2></div>
+            <p class="account-intro">Move the default Claude Code login to another account, in place; conversations, settings and plugins stay. This is a one-way move to another subscription: once armed, the next usage limit triggers it, and nothing switches back when the limit lifts.</p>
+            <div class="account-body"></div>
+          </div>
         </div>
         <button class="icon-btn" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">
           <svg id="theme-icon-moon" width="14" height="14" viewBox="0 0 14 14" style="display:none"><path d="M12 8.5A5.5 5.5 0 1 1 5.5 2 4 4 0 0 0 12 8.5z" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>

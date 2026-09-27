@@ -680,6 +680,24 @@ body {
 .explorer-content::-webkit-scrollbar-track { background: transparent; }
 .explorer-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
+/* The owner's Claude account switch, a section of the Settings panel */
+.account-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
+.account-intro { margin-bottom: 8px; line-height: 1.4; }
+.account-body { display: flex; flex-direction: column; gap: 8px; }
+.account-status { line-height: 1.4; overflow-wrap: anywhere; }
+.account-status[data-status="armed"] { color: var(--accent); }
+.account-status[data-status="migrated"] { color: var(--text); }
+.account-status[data-status="switching"], .account-status[data-status="rollback failed"], .account-error { color: var(--state-disconnected); }
+.account-error { line-height: 1.4; overflow-wrap: anywhere; }
+.account-actions { display: flex; flex-direction: column; gap: 4px; }
+.account-folder {
+  font: inherit; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--bg-dark); color: var(--text); padding: 4px 8px;
+}
+.account-folder:focus { outline: none; border-color: var(--accent); }
+/* The panel's own button recipe (.settings-refresh), left-aligned in the column. */
+.account-btn { text-align: left; }
+
 /* Explorer: repo sections */
 .explorer-repo {
   border-bottom: 1px solid var(--border);
@@ -1219,6 +1237,7 @@ body {
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
   .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss { min-width: 44px; min-height: 44px; }
+  .account-btn, .account-folder { min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
   }

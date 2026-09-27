@@ -10,6 +10,11 @@
 // its own limit. If that happens within SWITCH_GAP_MS of the last switch, or
 // the other CLI is missing or logged out, both are spent: Billion stays where
 // it is and the owner is told, once, until a new Billion starts.
+//
+// One thing comes before the switch: an armed Claude account migration
+// (server/account-migration.js). At a Claude Billion's first hard limit it runs
+// once, disarms, and Billion stays on Claude with the new account; only if it
+// fails (and rolls back) does the next tick switch to Codex as usual.
 
 import { execFile } from 'child_process';
 import { screenTail, sendText } from './messages.js';
@@ -94,19 +99,24 @@ export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: n
 
 /**
  * One look at Billion's screen. Returns what it did: 'warned', 'switched',
- * 'paused' or null. The actions come in so the tests need no CLI:
- * switchTo(agent, reason), notify(text) (a Waiting item and Telegram),
- * tell(text) (Telegram only), ready(agent) (cliReady).
+ * 'paused', 'migrated', 'migration-failed' or null. The actions come in so
+ * the tests need no CLI: switchTo(agent, reason), notify(text) (a Waiting
+ * item and Telegram), tell(text) (Telegram only), ready(agent) (cliReady),
+ * and migration { armed(), run(hit) }: the owner's armed Claude account
+ * switch, which needs no BILLION_AUTO_SWITCH and applies to a Claude Billion.
  */
-export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log } = {}) {
-  if (!session?.isBillion || session.exited || watch.running || !autoSwitchOn(env)) return null;
+export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log, migration = null } = {}) {
+  if (!session?.isBillion || session.exited || watch.running) return null;
   const agent = session.agent;
+  const armed = agent === 'claude' && !!migration?.armed?.();
+  if (!autoSwitchOn(env) && !armed) return null;
   const to = { claude: 'codex', codex: 'claude' }[agent];
   if (!to) return null;
   const hit = matchLimit(screenTail(session.ringBuffer?.getAll().join('') || '', TAIL_LINES));
   if (!hit) return null;
 
   if (hit.kind === 'warning') {
+    if (!autoSwitchOn(env)) return null;
     const step = WARN_AT.filter(p => hit.used >= p).pop();
     const key = `${hit.limit}:${step}`;
     if (step === undefined || session.limitWarned?.has(key)) return null;
@@ -118,6 +128,22 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
 
   if (watch.pausedFor === session.id) return null;
   if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
+  if (armed) {
+    // Once: run() disarms on any failure of its own (server/account-migration.js);
+    // a busy server (another account action, Billion mid-switch) leaves it
+    // armed for the next tick. A switch that cannot start leaves Billion and
+    // its notice alone, so the next tick takes the ordinary road to Codex;
+    // one that rolled back restarted Billion on the old account, which
+    // prints the notice again.
+    watch.running = true;
+    try {
+      const result = await migration.run(hit);
+      log(`Billion: Claude account migration at the limit ("${hit.line}"): ${result?.error || 'switched to ' + result?.newEmail}`);
+      return result?.error ? 'migration-failed' : 'migrated';
+    } finally {
+      watch.running = false;
+    }
+  }
   watch.running = true;
   try {
     const why = now - watch.switchAt < SWITCH_GAP_MS

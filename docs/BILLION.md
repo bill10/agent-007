@@ -572,6 +572,12 @@ usage limit (below).
   status --json`, `codex login status`), leaves Billion where it is and puts
   `Billion paused: both Claude Code and Codex are at their limits` under
   *Waiting on you* and on Telegram, once, until a new Billion starts.
+  An armed Claude account switch (`server/account-migration.js`; the
+  **Claude account** section of the Settings gear, described in
+  [FEATURES.md](FEATURES.md)) comes before any of that: at a Claude Billion's
+  first hard limit it moves the default login to the new account, restarts
+  Billion there and disarms, with or without `BILLION_AUTO_SWITCH`. Only if
+  that fails does the next tick switch to Codex as above.
 
 ## Telegram
 

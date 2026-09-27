@@ -12,6 +12,7 @@ import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js'
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
+import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
 import { waitingPayload, dismissWaiting, answerWaiting } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
@@ -322,7 +323,23 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
-export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion }) {
+// Both sides normalised through URL, so a default port written one way and
+// not the other still matches.
+function fromBrowser(req) {
+  const origin = req.headers.origin;
+  if (!origin || !isAllowedOrigin(origin)) return false;
+  try { return new URL(origin).host === new URL(`http://${req.headers.host}`).host; } catch { return false; }
+}
+
+// To the sockets of the owner's own pages only (fromBrowser above).
+export function broadcastToBrowsers(payload) {
+  const data = JSON.stringify(payload);
+  for (const client of clients) {
+    if (client.readyState === 1 && client.fromBrowser) client.send(data);
+  }
+}
+
+export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState }) {
   wss.on('connection', (ws, req) => {
     // Auth gate (phase 1): when users are configured, require a valid token
     // (?token= on the WS URL, since browsers can't set handshake headers).
@@ -369,6 +386,12 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
     ws.send(JSON.stringify(waitingPayload()));
+    // The page this server serves: an Origin that is allowed and is this
+    // server's own host. A plain socket from a shell sends none, and a page
+    // on another local port has another; both are refused the account switch.
+    ws.fromBrowser = fromBrowser(req);
+    // The owner's Claude account state, only where the owner may act on it.
+    if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
 
     broadcastPresence();
 
@@ -452,6 +475,30 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           const result = await switchBillion(msg.agent);
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'billion', error: result.error }));
           else if (!result.existing) announceSession(result.session, ws);
+          break;
+        }
+        case 'account': {
+          // The owner's Claude account switch (server/account-migration.js):
+          // setup, arm, migrate, rollback, retire. The owner alone, like
+          // answering Billion, and only from this server's own page: no board
+          // tool reaches it, and a socket opened without an Origin (a script
+          // in an agent's shell), or with another site's, is refused. That is
+          // friction, not a sandbox: a process running as the owner can forge
+          // an Origin, and can reach the Keychain itself without this server.
+          // The charter forbids it. A refusal goes back as account-error, which
+          // the panel shows in place; the state follows so its buttons wake up.
+          let result;
+          try {
+            result = !accountAction ? { error: 'Not available.' }
+              : !mayAnswerOwner() ? { error: 'Only the owner switches the Claude account, and with user accounts on nobody does.' }
+              : !ws.fromBrowser ? { error: 'The Claude account is switched from the browser only.' }
+              : await accountAction(msg);
+          } catch (err) {
+            console.error('Claude account action failed:', redactEmails(err.message));
+            result = { error: `Claude account action failed: ${err.message}` };
+          }
+          if (result?.error) ws.send(JSON.stringify({ type: 'account-error', message: result.error }));
+          if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
           break;
         }
         case 'waiting-dismiss': {
