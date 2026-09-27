@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.18.0.2] - 2026-09-27
+
+### Changed
+
+- **README FAQ: added "How is this different from Munder Difflin?"**
+
 ## [0.18.0.1] - 2026-09-27
 
 ### Changed
