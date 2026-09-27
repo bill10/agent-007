@@ -687,6 +687,8 @@ body {
 .account-status { line-height: 1.4; overflow-wrap: anywhere; }
 .account-status[data-status="armed"] { color: var(--accent); }
 .account-status[data-status="migrated"] { color: var(--text); }
+.account-status[data-status="switching"], .account-status[data-status="rollback failed"], .account-error { color: var(--state-disconnected); }
+.account-error { line-height: 1.4; overflow-wrap: anywhere; }
 .account-actions { display: flex; flex-direction: column; gap: 4px; }
 .account-folder {
   font: inherit; border: 1px solid var(--border); border-radius: 4px;

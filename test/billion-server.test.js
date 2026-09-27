@@ -99,10 +99,11 @@ describe('Billion on the server', () => {
 // `security` or `claude`: CONFIG_DIR is the suite's temp dir with nothing set
 // up, and the one folder given is relative. Nothing on this machine is touched.
 describe('the Claude account switch over the socket', () => {
+  // A refusal comes back as account-error, for the panel to show in place.
   const refusal = async (ws, seen, msg) => {
     const before = seen.length;
     ws.send(JSON.stringify({ type: 'account', ...msg }));
-    return waitFor(seen, (m, i) => i >= before && m.type === 'notification' && m.level === 'error');
+    return waitFor(seen, (m, i) => i >= before && m.type === 'account-error');
   };
 
   // What a browser sends; a socket without it is not a browser (server/ws.js).
@@ -154,13 +155,14 @@ describe('the Claude account switch over the socket', () => {
       expect(await waitFor(seen, m => m.type === 'account-state' && m.status === 'ready')).toBeTruthy();
       const before = seen.length;
       ws.send(JSON.stringify({ type: 'account', action: 'migrate' }));
-      // The click gets its answer over the socket, once: no second, broadcast copy.
-      const note = await waitFor(seen, (m, i) => i >= before && m.type === 'notification' && /\.claude\.json/.test(m.message));
+      // The click gets its answer over the socket, once, for the panel: no broadcast copy.
+      const note = await waitFor(seen, (m, i) => i >= before && m.type === 'account-error' && /\.claude\.json/.test(m.message));
       try {
         expect(note).toBeTruthy();
         expect(note.message).not.toMatch(/sk-ant|Claude account switch to/);
         await new Promise(r => setTimeout(r, 200));
-        expect(seen.slice(before).filter(m => m.type === 'notification')).toHaveLength(1);
+        expect(seen.slice(before).filter(m => m.type === 'account-error')).toHaveLength(1);
+        expect(seen.slice(before).filter(m => m.type === 'notification')).toHaveLength(0);
         expect(seen.slice(before).some(m => m.type === 'account-state' && m.status === 'ready')).toBe(true);
       } finally { ws.close(); }
     } finally { rmSync(join(cfg, 'account-migration.json'), { force: true }); }

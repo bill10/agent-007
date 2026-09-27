@@ -274,8 +274,9 @@ function stopBillion(session) {
 // otherwise start a second Billion. `reason` is saved when the server made
 // the switch itself (server/billion-limit.js).
 let switching = null;
+const BILLION_SWITCHING = 'Billion is already switching';
 async function switchBillion(to, reason) {
-  if (switching) return { error: 'Billion is already switching' };
+  if (switching) return { error: BILLION_SWITCHING };
   const current = liveBillion() || [...sessions.values()].find(s => s.isBillion) || null;
   switching = switchBillionSteps({
     to, current, currentAgent: billionAgent(), dir: billionDir(),
@@ -307,23 +308,26 @@ async function tellOwnerOrShow(text, level, { show = true } = {}) {
 }
 const workersOnClaude = () => [...sessions.values()].filter(s => !s.isBillion && !s.exited && s.agent === 'claude').length;
 async function aroundBillion(fn) {
-  if (switching) return { error: 'Billion is already switching' };
+  if (switching) return { error: BILLION_SWITCHING };
   switching = withBillionStopped(fn, {
     live: liveBillion, stop: stopBillion, start: startBillion,
     announce: (session) => broadcast(sessionPayload(session)),
+    failed: (error) => tellOwnerOrShow(`Billion did not restart after the Claude account action: ${error}. Press Start next to Billion.`, 'error'),
   });
   try { return await switching; } finally { switching = null; }
 }
+// While Billion is out of the way for a swap, nobody starts another one under it.
+const startBillionUnlessSwitching = () => (switching ? { error: BILLION_SWITCHING } : startBillion());
 async function switchAccount(how, { fromBrowser = false } = {}) {
   const can = canMigrate();
   if (can.error) return can;
   const check = await checkSwitch(can.folder);
   if (check.error) {
-    if (check.error !== BUSY_ERROR) await tellOwnerOrShow(`Claude account switch to ${check.newEmail || accountState().newEmail || 'the new account'} not started: ${check.error}`, 'error', { show: !fromBrowser });
+    if (check.error !== BUSY_ERROR) await tellOwnerOrShow(`Claude account switch to ${accountState().newEmail || 'the new account'} not started: ${check.error}`, 'error', { show: !fromBrowser });
     return check;
   }
   const result = await aroundBillion(() => migrateAccount(can.folder));
-  if (result.error === BUSY_ERROR) return result;   // the other run tells the owner
+  if (result.error === BUSY_ERROR || result.error === BILLION_SWITCHING) return result;   // the other run tells the owner
   const workers = workersOnClaude();
   await tellOwnerOrShow(result.ok
     ? `Claude account switched${how ? ` (${how})` : ''}: the default Claude Code login is now ${result.newEmail}, was ${result.oldEmail}. Backup in ${result.backupDir}. Leave ${can.folder} alone; retire it from the app once you have checked the switch.${workers ? ` ${workers} Claude Code worker(s) were running; they pick the new token up within 30 seconds, and the login is checked again in ${RECHECK_MS / 1000} seconds.` : ''}`
@@ -333,7 +337,7 @@ async function switchAccount(how, { fromBrowser = false } = {}) {
       const again = await recheckAccount();
       if (again.error) {
         announceAccount();
-        await tellOwnerOrShow(`Claude account: ${again.error}. Press Switch now again once the workers are idle, or Roll back.`, 'error');
+        await tellOwnerOrShow(`Claude account: ${again.error}. Roll back, then Switch now again once the workers are idle.`, 'error');
       }
     }, RECHECK_MS).unref?.();
   }
@@ -346,7 +350,9 @@ const accountActions = {
   migrate: () => switchAccount('by the owner', { fromBrowser: true }),
   rollback: async () => {
     const result = await aroundBillion(() => rollbackAccount());
-    if (result.ok) await tellOwnerOrShow(`Claude account rolled back: the default Claude Code login is ${result.email} again.`, 'info', { show: false });
+    if (result.error !== BUSY_ERROR && result.error !== BILLION_SWITCHING) {
+      await tellOwnerOrShow(result.ok ? `Claude account rolled back: the default Claude Code login is ${result.email} again.` : `Claude account rollback failed: ${result.error}`, result.ok ? 'info' : 'error', { show: false });
+    }
     return result;
   },
   retire: () => retireAccount(),
@@ -393,7 +399,7 @@ function startBillionWakes() {
 }
 
 // --- WebSocket ---
-setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState: accountStatePayload });
+setupWebSocket(wss, { createSession, killSession, startBillion: startBillionUnlessSwitching, switchBillion, accountAction, accountState: accountStatePayload });
 
 // --- Startup ---
 async function startup() {

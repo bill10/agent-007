@@ -505,7 +505,7 @@ describe('what the reviews asked for', () => {
     const base = fakeRun();
     const run = vi.fn(async (f, a, o) => { if (f === 'claude') seen.push(loadState(dir).status); return base(f, a, o); });
     await migrate(newDir, { ...deps, run });
-    expect(seen).toEqual(['not set up', 'not set up', 'not set up', 'switching']);   // two preflight checks, the backup's, then the verify
+    expect(seen).toEqual(['not set up', 'not set up', 'switching']);   // two preflight checks, then the verify; the backup reuses preflight's email
     expect(loadState(dir).status).toBe('migrated');
     // Back on the old account, then a config file that breaks once the token has moved: the swap fails
     // after its first write, the restore hits the same broken file, and the state says so.
@@ -572,15 +572,54 @@ describe('what the reviews asked for', () => {
     expect(publicState(dir).error).toMatch(/written its token back/);
   });
 
-  it('a lock another server left on disk blocks, unless it is stale', async () => {
+  it('a lock another server left on disk blocks, unless it is stale or its holder is dead', async () => {
     const lock = join(dir, 'account-migration.lock');
     mkdirSync(lock, { recursive: true });
-    expect(await migrate(newDir, deps)).toEqual({ error: BUSY_ERROR });
+    writeFileSync(join(lock, 'pid'), '4242');
+    // Its holder is alive: wait.
+    expect(await migrate(newDir, { ...deps, alive: () => true })).toEqual({ error: BUSY_ERROR });
+    expect(await rollback({ ...deps, alive: () => true })).toEqual({ error: BUSY_ERROR });
     expect(existsSync(lock)).toBe(true);
+    // Its holder died mid-action: the owner is not locked out of Roll back for a quarter of an hour.
+    expect((await migrate(newDir, { ...deps, alive: () => false })).ok).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+    // Very old, no pid file: stale by age.
+    mkdirSync(lock);
     const old = new Date(Date.now() - 16 * 60_000);
     utimesSync(lock, old, old);
-    expect((await migrate(newDir, deps)).ok).toBe(true);
+    expect((await rollback(deps)).ok).toBe(true);
     expect(existsSync(lock)).toBe(false);
+    // Our own lock carries our pid while held.
+    let pidSeen;
+    const run = vi.fn(async (f, a, o) => { if (a[0] === '-i') pidSeen = readFileSync(join(lock, 'pid'), 'utf8'); return fakeRun()(f, a, o); });
+    await migrate(newDir, { ...deps, run });
+    expect(pidSeen).toBe(String(process.pid));
+  });
+
+  it('recheck never writes over a state that moved on, and rollback stops when it cannot save what it replaces', async () => {
+    await migrate(newDir, deps);
+    // The owner rolls back while the recheck is in the air: its result is dropped.
+    const racing = vi.fn(async (f, a, o) => {
+      if (f === 'claude') writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), status: 'rolled back', at: '2026-09-27T10:00:30Z' }));
+      return fakeRun({ reportEmail: () => OLD })(f, a, o);
+    });
+    const result = await recheck({ ...deps, run: racing, now: () => new Date('2026-09-27T10:00:40Z') });
+    expect(result.error).toMatch(/reports old@example.com/);
+    expect(loadState(dir)).toMatchObject({ status: 'rolled back', at: '2026-09-27T10:00:30Z' });
+    expect(loadState(dir).error).toBeUndefined();
+    // A current login whose config cannot be read is not overwritten by a rollback.
+    writeFileSync(join(dir, 'account-migration.json'), JSON.stringify({ ...loadState(dir), status: 'migrated' }));
+    const good = readFileSync(defaultJson(), 'utf8');
+    writeFileSync(defaultJson(), 'not json');
+    const blocked = await rollback(deps);
+    expect(blocked.error).toMatch(/Rollback not started: the current login could not be backed up first/);
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
+    expect(loadState(dir).status).toBe('migrated');
+    writeFileSync(defaultJson(), good);
+    // A missing current token is nothing to preserve: the rollback goes on and puts one there.
+    keychain.delete(DEFAULT_SERVICE);
+    expect((await rollback(deps)).ok).toBe(true);
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
   });
 
   it('withBillionStopped stops before, restarts after with the carried mail, even when the work throws', async () => {
@@ -599,9 +638,13 @@ describe('what the reviews asked for', () => {
     expect(await withBillionStopped(async () => 1, { live: () => null, stop, start, announce })).toBe(1);
     expect(stop).not.toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
-    // A start that reports an existing session is not announced twice.
+    // A start that reports an existing session is not announced twice; one that fails is reported.
     announce.mockClear();
     await withBillionStopped(async () => 1, { live: () => ({}), stop, start: () => ({ existing: true, session: {} }), announce });
+    expect(announce).not.toHaveBeenCalled();
+    const failed = vi.fn();
+    expect(await withBillionStopped(async () => 'done', { live: () => ({}), stop, start: () => ({ error: 'no claude' }), announce, failed })).toBe('done');
+    expect(failed).toHaveBeenCalledWith('no claude');
     expect(announce).not.toHaveBeenCalled();
   });
 
@@ -621,13 +664,13 @@ describe('what the reviews asked for', () => {
     // A fresh lock: someone is writing; we wait and then give up.
     mkdirSync(lock);
     const waits = [];
-    await expect(writeAccountFields(file, { oauthAccount: { emailAddress: NEW } }, { tries: 3, wait: async (ms) => waits.push(ms) }))
+    await expect(writeAccountFields(file, { oauthAccount: { emailAddress: NEW } }, { lockTries: 3, wait: async (ms) => waits.push(ms) }))
       .rejects.toThrow(/locked by Claude Code \(\.claude\.json\.lock\)/);
-    expect(waits).toEqual([100, 200, 300]);
+    expect(waits).toEqual([400, 400, 400]);   // 30 of these by default: longer than a fresh lock stays fresh
     expect(json(file).oauthAccount.emailAddress).toBe(OLD);
     expect(existsSync(lock)).toBe(true);                    // not ours: left alone
     // A stale lock (older than 10 s): claude left it behind, so it is removed and the write goes through.
-    expect(await writeAccountFields(file, { oauthAccount: { emailAddress: NEW } }, { tries: 3, wait: async () => {}, now: () => Date.now() + 60_000 })).toBe(true);
+    expect(await writeAccountFields(file, { oauthAccount: { emailAddress: NEW } }, { lockTries: 3, wait: async () => {}, now: () => Date.now() + 60_000 })).toBe(true);
     expect(json(file).oauthAccount.emailAddress).toBe(NEW);
     expect(existsSync(lock)).toBe(false);                   // ours, released
     expect(readdirSync(home).filter(f => f.includes('.tmp'))).toEqual([]);

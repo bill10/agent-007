@@ -7,7 +7,7 @@ vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { send } from '../public/modules/ws.js';
 import { setBillionEnabled, setSelf } from '../public/modules/state.js';
-import { handleAccountState, renderAccount } from '../public/modules/account.js';
+import { handleAccountState, handleAccountError, renderAccount } from '../public/modules/account.js';
 
 const labels = () => [...document.querySelectorAll('.account-btn')].map(b => b.textContent);
 const click = (action) => document.querySelector(`.account-btn[data-action="${action}"]`).click();
@@ -48,11 +48,17 @@ describe('the Claude account panel', () => {
     click('arm');
     expect(window.confirm.mock.calls[0][0]).toMatch(/permanent move, not for getting past a limit/);
     expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'arm' });
-    // Sent once: every button waits for the server's next state.
+    // Sent once: every button waits for the server's next state, and the clicked one says what it is doing.
     expect([...document.querySelectorAll('.account-btn')].every(b => b.disabled)).toBe(true);
+    expect(document.querySelector('.account-btn[data-action="arm"]').textContent).toBe('Arming…');
     click('migrate');
-    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);   // disabled: nothing sent
+    // A refusal shows in the panel and the buttons are live again; the next state clears it.
+    handleAccountError({ type: 'account-error', message: 'Nothing is armed.' });
+    expect(document.querySelector('.account-error').textContent).toBe('Nothing is armed.');
+    expect([...document.querySelectorAll('.account-btn')].some(b => b.disabled)).toBe(false);
     handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x' });
+    expect(document.querySelector('.account-error')).toBeNull();
     click('migrate');
     expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'migrate' });
     expect(document.querySelector('.account-btn').className).toContain('settings-refresh');
@@ -79,7 +85,7 @@ describe('the Claude account panel', () => {
   it('rolled back: says why, offers the folder again, and arms nothing', () => {
     handleAccountState({ type: 'account-state', status: 'rolled back', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: 'claude auth status reports old@x after the swap, not new@x' });
     const status = document.querySelector('.account-status');
-    expect(status.textContent).toBe('Rolled back to old@x (claude auth status reports old@x after the swap, not new@x).');
+    expect(status.textContent).toBe('Rolled back to old@x. Last attempt: claude auth status reports old@x after the swap, not new@x');
     expect(status.dataset.status).toBe('rolled back');
     expect(labels()).toEqual(['Check again']);
     expect(document.querySelector('.account-folder').value).toBe('/h/.claude-new');

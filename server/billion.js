@@ -283,15 +283,18 @@ export async function switchBillion({ to, current, currentAgent, dir, writeHando
 // (server/account-migration.js): its running claude would keep the old
 // account's session and could write that account's token back. Stopped
 // before, started again after whatever `fn` did, with the mail it had waiting
-// carried over, even when fn throws. `live()`, `stop(session)` and
-// `start({ carried })` are passed in, so the order is what is tested.
-export async function withBillionStopped(fn, { live, stop, start, announce = () => {} }) {
+// carried over, even when fn throws; a restart that fails is reported through
+// `failed(error)`, since fn's own result says nothing about it. `live()`,
+// `stop(session)` and `start({ carried })` are passed in, so the order is what
+// is tested.
+export async function withBillionStopped(fn, { live, stop, start, announce = () => {}, failed = () => {} }) {
   const billion = live();
   const carried = billion ? await stop(billion) : null;
   try { return await fn(); } finally {
     if (billion) {
       const started = start({ carried });
-      if (!started.error && !started.existing) announce(started.session);
+      if (started.error) failed(started.error);
+      else if (!started.existing) announce(started.session);
     }
   }
 }

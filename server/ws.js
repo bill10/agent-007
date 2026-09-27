@@ -322,10 +322,12 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
-export function fromBrowser(req) {
+// Both sides normalised through URL, so a default port written one way and
+// not the other still matches.
+function fromBrowser(req) {
   const origin = req.headers.origin;
   if (!origin || !isAllowedOrigin(origin)) return false;
-  try { return new URL(origin).host === req.headers.host; } catch { return false; }
+  try { return new URL(origin).host === new URL(`http://${req.headers.host}`).host; } catch { return false; }
 }
 
 // To the sockets of the owner's own pages only (fromBrowser above).
@@ -477,11 +479,13 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         case 'account': {
           // The owner's Claude account switch (server/account-migration.js):
           // setup, arm, migrate, rollback, retire. The owner alone, like
-          // answering Billion, and only from a browser: no board tool reaches
-          // it, and a socket opened without an Origin (a script in an agent's
-          // shell) is refused. That is friction, not a sandbox: a process
-          // running as the owner can forge an Origin, and can reach the
-          // Keychain itself without this server. The charter forbids it.
+          // answering Billion, and only from this server's own page: no board
+          // tool reaches it, and a socket opened without an Origin (a script
+          // in an agent's shell), or with another site's, is refused. That is
+          // friction, not a sandbox: a process running as the owner can forge
+          // an Origin, and can reach the Keychain itself without this server.
+          // The charter forbids it. A refusal goes back as account-error, which
+          // the panel shows in place; the state follows so its buttons wake up.
           let result;
           try {
             result = !accountAction ? { error: 'Not available.' }
@@ -492,7 +496,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             console.error('Claude account action failed:', err);
             result = { error: `Claude account action failed: ${err.message}` };
           }
-          if (result?.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          if (result?.error) ws.send(JSON.stringify({ type: 'account-error', message: result.error }));
+          if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
           break;
         }
         case 'waiting-dismiss': {

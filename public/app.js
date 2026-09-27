@@ -24,7 +24,7 @@ import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
 import { renderWaiting, handleWaitingError, showWaiting, leaveWaiting } from './modules/waiting.js';
-import { handleAccountState, renderAccount } from './modules/account.js';
+import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
 // Cross-module coordination: when sessions change, re-render office + explorer
@@ -543,6 +543,7 @@ function onMessage(msg) {
     case 'waiting-list': setWaitingItems(msg.items); renderWaiting(); updateTabs(); break;
     case 'waiting-error': handleWaitingError(msg); break;
     case 'account-state': handleAccountState(msg); break;
+    case 'account-error': handleAccountError(msg); break;
     // The office canvas pins one paper per job, so a jobs-list broadcast has
     // to repaint it too — the animation loop skips frames with no live agent.
     case 'jobs-list': handleJobsList(msg); noteJobsUpdate(); renderOffice(); break;

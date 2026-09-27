@@ -7,6 +7,8 @@ import { send } from './ws.js';
 import { authEnabled, billionEnabled } from './state.js';
 
 let state = { status: 'not set up' };
+let lastError = null;   // the server's answer to the last click, until the next state
+const PROGRESS = { setup: 'Checking…', arm: 'Arming…', disarm: 'Disarming…', migrate: 'Switching…', rollback: 'Rolling back…', retire: 'Retiring…' };
 
 const CONFIRM = {
   arm: (s) => `Arm the switch to ${s.newEmail}?\n\nThe first time Claude Code tells Billion it has hit a usage limit, the default Claude Code login (${s.oldEmail}) is replaced by ${s.newEmail}, in place, and Billion restarts on it. This is for a permanent move, not for getting past a limit.`,
@@ -19,6 +21,13 @@ const CONFIRM = {
 export function handleAccountState(msg) {
   state = { ...msg };
   delete state.type;
+  lastError = null;
+  renderAccount();
+}
+
+// A refused or failed action, shown under the buttons (server/ws.js).
+export function handleAccountError(msg) {
+  lastError = msg.message;
   renderAccount();
 }
 
@@ -30,14 +39,14 @@ export function renderAccount() {
   panel.hidden = authEnabled || !billionEnabled;
   const body = panel.querySelector('.account-body');
   const s = state;
-  const lastError = s.error ? ` Last attempt: ${s.error}` : '';
+  const lastAttempt = s.error ? ` Last attempt: ${s.error}` : '';
   const line = {
     'not set up': 'Not set up. Log the new account in once in a folder of its own (CLAUDE_CONFIG_DIR=~/.claude-new claude, then /login) and give that folder here.',
-    ready: `Ready: ${s.oldEmail} now, ${s.newEmail} in ${s.folder}. Nothing armed.${lastError}`,
-    armed: `Armed: switches ${s.oldEmail} → ${s.newEmail} at Billion's next hard usage limit.`,
+    ready: `Ready: ${s.oldEmail} now, ${s.newEmail} in ${s.folder}. Nothing armed.${lastAttempt}`,
+    armed: `Armed: switches ${s.oldEmail} → ${s.newEmail} at Billion's next usage limit.`,
     switching: `A switch to ${s.newEmail} started on ${(s.at || '').slice(0, 10)} and did not finish. Roll back to ${s.oldEmail}, then check the folder again.`,
-    migrated: `Switched to ${s.newEmail} on ${(s.at || '').slice(0, 10)} (was ${s.oldEmail}).${s.retiredTo ? ` Folder retired as ${s.retiredTo}.` : ` Do not run anything with CLAUDE_CONFIG_DIR=${s.folder}; retire it once checked.`}`,
-    'rolled back': `Rolled back to ${s.oldEmail}${s.error ? ` (${s.error})` : ''}.`,
+    migrated: `Switched to ${s.newEmail} on ${(s.at || '').slice(0, 10)} (was ${s.oldEmail}).${s.retiredTo ? ` Folder retired as ${s.retiredTo}.` : ` Do not run anything with CLAUDE_CONFIG_DIR=${s.folder}; retire it once checked.`}${lastAttempt}`,
+    'rolled back': `Rolled back to ${s.oldEmail}.${lastAttempt}`,
     'rollback failed': `The switch to ${s.newEmail} failed and so did the rollback: ${s.error || 'see the server log'}. The default login may be half swapped; try Roll back again, or restore ~/.agent-007/account-backup by hand, then check the folder again.`,
   }[s.status] || s.status;
   body.innerHTML = '';
@@ -51,8 +60,9 @@ export function renderAccount() {
   actions.className = 'account-actions';
   // Sent once: the buttons go quiet until the server's next account-state
   // re-renders the panel, so a second click cannot send the action twice.
-  const sendOnce = (msg) => {
-    for (const b of actions.querySelectorAll('button')) b.disabled = true;
+  const sendOnce = (b, action, msg) => {
+    for (const other of actions.querySelectorAll('button')) other.disabled = true;
+    b.textContent = PROGRESS[action] || b.textContent;
     send(msg);
   };
   const button = (label, action, onclick) => {
@@ -63,7 +73,7 @@ export function renderAccount() {
     b.onclick = onclick || (() => {
       const ask = CONFIRM[action];
       if (ask && !confirm(ask(s))) return;
-      sendOnce(action === 'disarm' ? { type: 'account', action: 'arm', on: false } : { type: 'account', action });
+      sendOnce(b, action, action === 'disarm' ? { type: 'account', action: 'arm', on: false } : { type: 'account', action });
     });
     actions.appendChild(b);
     return b;
@@ -78,10 +88,10 @@ export function renderAccount() {
     input.value = s.folder || '';
     input.setAttribute('aria-label', "New account's config folder");
     actions.appendChild(input);
-    button(s.status === 'not set up' ? 'Check folder' : 'Check again', 'setup', () => {
+    const check = button(s.status === 'not set up' ? 'Check folder' : 'Check again', 'setup', () => {
       const folder = input.value.trim();
       if (!folder) { input.reportValidity?.(); input.focus(); return; }
-      sendOnce({ type: 'account', action: 'setup', folder });
+      sendOnce(check, 'setup', { type: 'account', action: 'setup', folder });
     });
   }
   if (s.status === 'ready') {
@@ -97,4 +107,10 @@ export function renderAccount() {
     if (s.status === 'migrated' && !s.retiredTo) button('Retire the new folder', 'retire');
   }
   body.appendChild(actions);
+  if (lastError) {
+    const err = document.createElement('div');
+    err.className = 'account-error';
+    err.textContent = lastError;
+    body.appendChild(err);
+  }
 }
