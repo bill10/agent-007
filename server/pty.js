@@ -10,7 +10,7 @@ export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken, authEnabled } from './auth.js';
-import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook, withCodexWorkerTools } from './agent-mcp.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook, withBoardWorkerSettings, withCodexWorkerTools } from './agent-mcp.js';
 import { broadcastJobs, requestDispatch } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
@@ -254,8 +254,12 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // A worker on one of Billion's cards asks Billion before it asks a person
   // (server/approvals.js) — where the CLI can be hooked, which today is
   // Claude Code only. Recorded as whether the hook actually went in.
-  const spawnArgs = approvalsToBillion ? withApprovalHook(file, mcpArgs, mcpConfigPath) : mcpArgs;
-  const hooked = spawnArgs !== mcpArgs;
+  const hookedArgs = approvalsToBillion ? withApprovalHook(file, mcpArgs, mcpConfigPath) : mcpArgs;
+  const hooked = hookedArgs !== mcpArgs;
+  // No channel plugins in a board worker (withBoardWorkerSettings). A no-op
+  // when the hook's --settings, which carries the same, went in above.
+  const boardWorker = spawnedBy === 'board' || origin === 'board';
+  const spawnArgs = boardWorker ? withBoardWorkerSettings(file, hookedArgs) : hookedArgs;
 
   installAsyncSpawnGuard();
   let ptyProcess;

@@ -107,7 +107,8 @@ clone all read both files, and the startup log names the ones it loaded. Highest
 wins: flags (`--port 8080` overrides `PORT`), then the environment, then
 `./.env`, then `~/.agent-007/.env`. `--help` lists them all. Everything the app
 saves lives in `~/.agent-007` (`AGENT007_CONFIG_DIR` moves it, and the settings
-file with it).
+file with it). These settings are the server's own: the agents it starts do not
+inherit them, so a worker cannot read your Telegram bot token.
 
 ```bash
 PORT=8080 npm start                       # Custom port (default: 7007)
