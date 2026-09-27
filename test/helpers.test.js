@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
 import { safeFilename,
   createCodenamePool, createCocktailPool, createColorCycler,
   stripAnsiComplete, detectState, parseGitStatus, buildFileTree,
@@ -749,5 +750,20 @@ describe('ptyEnv', () => {
     expect(ptyEnv({ TERM: 'dumb' }).TERM).toBe('xterm-256color');
     expect(ptyEnv({ LC_CTYPE: 'UTF-8' }).LANG).toBeUndefined();
     expect(ptyEnv({ LANG: '' }).LANG).toBe('en_US.UTF-8');   // empty is unset
+  });
+
+  it("takes out Agent 007's own settings and keeps the owner's", () => {
+    const kept = { HOME: '/h', PATH: '/bin', CODEX_HOME: '/c', CLAUDE_CONFIG_DIR: '/cc', HTTPS_PROXY: 'http://p', ANTHROPIC_API_KEY: 'k', LANG: 'C' };
+    const env = ptyEnv({
+      ...kept, TELEGRAM_BOT_TOKEN: '123:abc', TELEGRAM_CHAT_ID: '1', TELEGRAM_VOICE: 'always',
+      WHISPER_MODEL: '/m', SAY_VOICE: 'Ava', AGENT007_USERS_PATH: '/u', AGENT007_CONFIG_DIR: '/a', PORT: '7007', telegram_bot_token: 'x',
+    });
+    expect(env).toEqual({ ...kept, TERM: 'xterm-256color' });
+  });
+
+  it('lists every setting .env.example documents', () => {
+    const keys = [...readFileSync('.env.example', 'utf8').matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map(m => m[1]);
+    expect(keys.length).toBeGreaterThan(10);
+    for (const key of keys) expect(Object.keys(ptyEnv({ [key]: 'x', LANG: 'C' }))).not.toContain(key);
   });
 });
