@@ -141,6 +141,7 @@ server/
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission)
   messages.js      Agent-to-agent messages and board notices (reach, rate limit, delivery queue)
   billion.js       Billion's folder, templates and charter refresh (docs/BILLION.md)
+  account-migration.js  The owner's Claude account switch: backup, token and account-block write, check, rollback, retire (docs/FEATURES.md)
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  Claude Code PermissionRequest hook for workers on Billion's cards
   agent-mcp.js     Per-session MCP config for spawned Claude Code and Codex agents

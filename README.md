@@ -125,7 +125,7 @@ Any terminal agent runs in its web terminals. The job board and Billion work wit
 No. Each step of the list above works on its own: stop at web terminals, or at the job board, and post the cards yourself.
 
 ### What happens when I hit a usage limit?
-Cards on that model wait for the reset; nothing is switched behind your back. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex.
+Cards on that model wait for the reset; nothing is switched behind your back. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex, or, if you armed it, move to another Claude account first (see [Moving to another Claude account](#moving-to-another-claude-account)).
 
 ## Configuration
 
@@ -258,6 +258,7 @@ server/
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
+  account-migration.js  The owner's Claude account switch (backup, Keychain or .credentials.json write, ~/.claude.json account block, check, rollback, retire; armed, it runs at Billion's first hard limit)
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  Claude Code PermissionRequest hook a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
@@ -283,7 +284,8 @@ public/
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation)
     auth.js        Login tokens, presence, HTML escaping
-    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts)
+    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Claude account)
+    account.js     The Claude account section of the Settings panel (Check folder, Switch now, Arm, Roll back, Retire the new folder)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
