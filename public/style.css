@@ -751,6 +751,9 @@ body {
 .explorer-billion-name { color: var(--text); font-weight: 600; }
 /* The one way back for a stopped Billion, so it reads as the row's action. */
 .explorer-billion-start { margin-left: auto; color: var(--accent); }
+/* The CLI it runs on; a click switches to the other. */
+.explorer-billion-cli { margin-left: auto; width: auto; padding: 0 4px; font-size: 11px; }
+.explorer-billion-start + .explorer-billion-cli { margin-left: 0; }
 /* notify_owner's questions, under Billion's row until dismissed */
 
 .explorer-branch-name {
@@ -1176,7 +1179,7 @@ body {
 .mobile-nav { display: none; }
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
-  .explorer-billion-start, .waiting-dismiss { min-width: 44px; min-height: 44px; }
+  .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss { min-width: 44px; min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
   }

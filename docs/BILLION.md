@@ -502,6 +502,56 @@ cycle: start agent-cost; drop the browser-extension idea
   note), or Review fills with idle workers.
 - Recurring work → a schedule card Billion posts once.
 
+## Claude Code or Codex
+
+Billion runs on Claude Code by default, or on Codex with `BILLION_AGENT=codex`.
+The button next to Billion's name in the left panel switches it to the other
+one. (Switching by itself when one side hits its usage limit is the next step;
+it reuses the same switch and never switches back on a timer.)
+
+- **Which one.** `BILLION_AGENT` in `.env` is the default. A switch is saved in
+  `~/.agent-007/billion-agent.json` together with the `BILLION_AGENT` it was
+  made under, and holds across restarts until that setting changes: an edited
+  `.env` is the newer word, so it wins again. An automatic switch can then
+  change the CLI without touching `.env`.
+- **Codex's launch.** `codex --dangerously-bypass-approvals-and-sandbox` in
+  Billion's folder, with the board MCP server and the folder's trust passed as
+  per-run `-c` overrides (never written to `~/.codex/config.toml`), like a
+  board worker. A restart resumes Codex's newest session in that folder by id
+  (`codex resume <id>`, never `--last`). Without `codex` on the PATH its tab
+  says how to install it, as it does for `claude`.
+- **Instructions.** Codex reads `AGENTS.md`, not `CLAUDE.md`, and follows no
+  `@`-import, so the server writes `AGENTS.md` on every start: the owner's
+  `CLAUDE.md` with its `@CHARTER.md` line replaced by the charter. The owner's
+  rules stay after the charter, where they say they take precedence, and
+  `CLAUDE.md` itself is only read. Only `@CHARTER.md` is expanded.
+- **The loop.** Codex has no `/loop` or ScheduleWakeup, so on both CLIs the
+  server drives the loop (`server/billion-wake.js`). It types `Run one
+  operating cycle as defined in CHARTER.md.` into Billion's terminal every 30
+  minutes, every 3 while one of Billion's cards is In progress or in Review,
+  or when Billion asked with `set_next_wake` (3 to 60 minutes, the next wake
+  only). Never mid-turn: only when Billion rests at its prompt, the check mail
+  delivery uses, with its inbox open and no mail waiting. Never within 2
+  minutes of the owner typing in its terminal. The charter tells Billion not to
+  run a loop of its own, so a Claude Billion is not driven twice.
+- **The handover.** A switch writes `HANDOVER.md` in Billion's folder, stops
+  the running Billion (its waiting mail moves to the new one), and starts the
+  other CLI in a new conversation whose first prompt says to read `STATE.md`
+  and `HANDOVER.md` first. `HANDOVER.md` is the last 20 messages of the old
+  CLI's newest conversation in that folder as plain text (from
+  `~/.claude/projects/<folder>/*.jsonl` or `~/.codex/sessions/...`), with no
+  model involved, plus pointers to `STATE.md` and `git log -10`.
+  `agent-007 handover` writes one on demand. The new CLI starts fresh rather
+  than resuming its own older conversation, which would be out of date.
+- **Not committed.** `AGENTS.md` and `HANDOVER.md` are listed in the repo's
+  `.git/info/exclude`. `AGENTS.md` is made from two committed files, so it
+  would only repeat them. `HANDOVER.md` is raw conversation, which can hold
+  whatever the owner typed, and is replaced at every switch.
+- **Across a switch** the inbox, the *Waiting on you* tab, Telegram and the
+  board tools keep working: all of them find whichever Billion is running.
+  Permission requests waiting on the old Billion go to the owner, as they do
+  when Billion stops.
+
 ## Telegram
 
 Billion's questions scroll out of sight in a busy terminal, so its

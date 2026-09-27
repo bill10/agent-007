@@ -109,7 +109,7 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // agent runs in; anything else is a partial repaint, merged onto the pane.
     const { outside, straddle } = session.framesTrusted === false
       ? { outside: data, straddle: 0 }
-      : trackSyncFrames(session, data, now, { pane: (text) => isCodexPane(text, session.worktreePath) });
+      : trackSyncFrames(session, data, now, { pane: (text) => isCodexPane(text, session.worktreePath || session.cwd) });
     const recentResize = (now - (session.lastResizeAt || 0)) < 2000;
     const carry = straddle ? (session.pendingRaw || '').slice(0, -straddle) : (session.pendingRaw || '');
     const raw = carry + outside;
@@ -243,8 +243,10 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // would put a live board credential on disk for terminals that have no way to
   // use it — a plain `bash` tab does not need one.
   const mcpConfigPath = takesMcpConfig(file) ? writeMcpConfig(sessionId, agentToken) : null;
-  const codexTrust = autoTrust && sessionAgentFromCommand(command) === 'codex';
-  const ownArgs = codexTrust ? [...codexTrustArgs(worktreePath), ...args] : args;
+  // Billion's folder is Agent 007's own, so Codex trusts it the way a board
+  // worker's worktree is trusted.
+  const codexTrust = !!(autoTrust || isBillion) && sessionAgentFromCommand(command) === 'codex';
+  const ownArgs = codexTrust ? [...codexTrustArgs(cwd), ...args] : args;
   // Codex has no hook yet, but its worker on Billion's card still gets the
   // same board tools pre-allowed. Inside withMcpConfig, whose server table
   // override would otherwise replace them.
@@ -328,6 +330,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     stateCheckInterval: null,
     repoPath,
     worktreePath,
+    cwd,
     branchName,
     repoSlug,
     cocktail,

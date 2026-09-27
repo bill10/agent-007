@@ -88,4 +88,18 @@ describe('billionFirst', () => {
     const m = new Map([['a', {}], ['b', { isBillion: true }], ['c', {}]]);
     expect(billionFirst(m).map(([id]) => id)).toEqual(['b', 'a', 'c']);
   });
+
+  it('shows the CLI Billion runs on, and switches to the other once confirmed', () => {
+    agents.set('b', { name: 'Billion', isBillion: true, state: 'WAITING', repoPath: null, agent: 'claude' });
+    renderExplorer();
+    const cli = row().querySelector('.explorer-billion-cli');
+    expect(cli.textContent).toBe('claude');
+    globalThis.confirm = vi.fn(() => false);
+    cli.click();
+    expect(send).not.toHaveBeenCalled();
+    globalThis.confirm = vi.fn(() => true);
+    cli.click();
+    expect(send).toHaveBeenCalledWith({ type: 'billion-switch', agent: 'codex' });
+    expect(switchToSession).not.toHaveBeenCalled();
+  });
 });

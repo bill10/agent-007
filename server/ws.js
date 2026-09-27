@@ -67,6 +67,7 @@ export function sessionPayload(session) {
     spawnedBy: session.spawnedBy || 'user',
     jobId: session.jobId || null,
     isBillion: !!session.isBillion,
+    agent: session.agent || null,
     // So a client builds its xterm at the pty's size before the scrollback
     // replay lands, instead of reflowing it into xterm's default 80x24.
     cols: session.pty.cols,
@@ -321,7 +322,7 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
-export function setupWebSocket(wss, { createSession, killSession, startBillion }) {
+export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion }) {
   wss.on('connection', (ws, req) => {
     // Auth gate (phase 1): when users are configured, require a valid token
     // (?token= on the WS URL, since browsers can't set handshake headers).
@@ -438,6 +439,18 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion }
           const result = startBillion();
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: result.error }));
           // Already running (a second click): everyone has its tab already.
+          else if (!result.existing) announceSession(result.session, ws);
+          break;
+        }
+        case 'billion-switch': {
+          // Moves Billion to the other CLI: handover, stop, start
+          // (server/billion.js). Refused where Start is.
+          if (!billionRuns()) {
+            ws.send(JSON.stringify({ type: 'spawn-error', command: 'billion', error: 'Billion is off: turned off with BILLION=0, or user accounts are enabled' }));
+            break;
+          }
+          const result = await switchBillion(msg.agent);
+          if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'billion', error: result.error }));
           else if (!result.existing) announceSession(result.session, ws);
           break;
         }

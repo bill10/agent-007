@@ -325,6 +325,23 @@ function renderBillionRow(content) {
     };
     entry.appendChild(start);
   }
+  // Which CLI it runs on, and the switch to the other: a handover file, then a
+  // fresh conversation there (docs/BILLION.md, "Claude Code or Codex").
+  if (agent?.agent === 'claude' || agent?.agent === 'codex') {
+    const [now, other] = agent.agent === 'codex' ? ['Codex', 'Claude Code'] : ['Claude Code', 'Codex'];
+    const cli = document.createElement('button');
+    cli.className = 'explorer-icon-btn explorer-billion-cli';
+    cli.textContent = agent.agent;
+    cli.title = `Billion runs on ${now}. Switch it to ${other}`;
+    cli.setAttribute('aria-label', cli.title);
+    cli.onclick = (e) => {
+      e.stopPropagation();
+      if (confirm(`Switch Billion to ${other}?\n\nIt stops, the end of its conversation goes into HANDOVER.md, and ${other} starts a new conversation that reads STATE.md and HANDOVER.md first.`)) {
+        send({ type: 'billion-switch', agent: agent.agent === 'codex' ? 'claude' : 'codex' });
+      }
+    };
+    entry.appendChild(cli);
+  }
   section.appendChild(entry);
   content.appendChild(section);
 }

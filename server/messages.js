@@ -320,6 +320,23 @@ export function agentSummaries(from, sessions, jobTitle = () => null) {
   }));
 }
 
+// Billion moving to the other CLI (server/billion.js, switchBillion): its
+// waiting mail is taken off the old session before it stops, which would drop
+// it, and put on the new one, where it waits for billion_ready like any other.
+export function takeMessages(sessionId) {
+  const taken = { queue: queues.get(sessionId) || [], ahead: serverAhead.get(sessionId) || 0 };
+  queues.delete(sessionId);
+  serverAhead.delete(sessionId);
+  return taken;
+}
+
+// Onto a session with nothing queued yet: one just started.
+export function restoreMessages(sessionId, taken) {
+  if (!taken?.queue.length) return;
+  queues.set(sessionId, taken.queue);
+  if (taken.ahead) serverAhead.set(sessionId, taken.ahead);
+}
+
 // The recipient is gone. Sessions do not survive a restart, so neither does
 // anything addressed to one.
 export function dropMessages(sessionId) {

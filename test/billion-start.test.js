@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import WebSocket from 'ws';
-import { mkdtempSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join, resolve } from 'path';
 import { parseCommand } from '../lib/helpers.js';
 import { tmpdir } from 'os';
@@ -16,9 +16,11 @@ vi.mock('../server/pty.js', async (importOriginal) => ({
   ...(await importOriginal()),
   createSessionFromConfig: vi.fn((cfg) => {
     if (spawnError) return { error: spawnError };
+    const exits = [];
     const session = {
       ...cfg, id: cfg.sessionId, state: 'WORKING', exited: false,
-      pty: { cols: 80, rows: 24, write: () => {}, kill: () => {} },
+      agent: cfg.command.startsWith('codex') ? 'codex' : cfg.command.startsWith('claude') ? 'claude' : null,
+      pty: { cols: 80, rows: 24, write: () => {}, onExit: (cb) => exits.push(cb), kill: () => { session.exited = true; exits.forEach(cb => cb({ exitCode: 0 })); } },
       ringBuffer: { getAll: () => [] },
     };
     spawned.push(session);
@@ -35,10 +37,16 @@ let transcript = { agent: null };
 vi.mock('../server/agent-transcripts.js', async (importOriginal) => ({
   ...(await importOriginal()),
   hasClaudeTranscript: vi.fn(() => transcript.agent === 'claude'),
+  codexSessionIdFor: vi.fn(() => (transcript.agent === 'codex' ? transcript.id : null)),
 }));
+// The handover reads transcripts under these homes, never the developer's own.
+process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(tmpdir(), 'a007-bstart-claude-'));
+process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'a007-bstart-codex-'));
 
-const { server, sessions, startBillion } = await import('../server.js');
+const { server, sessions, startBillion, switchBillion } = await import('../server.js');
 const { config } = await import('../server/state.js');
+const { billionAgentFile } = await import('../server/billion.js');
+const { sendText, pendingMessages } = await import('../server/messages.js');
 
 const freshDir = () => join(mkdtempSync(join(tmpdir(), 'a007-bstart-')), 'billion');
 
@@ -51,8 +59,10 @@ beforeEach(() => {
   config.repos = [];
   process.env.BILLION_DIR = freshDir();
   delete process.env.BILLION;
+  delete process.env.BILLION_AGENT;
+  rmSync(billionAgentFile(), { force: true });
 });
-afterAll(() => { delete process.env.BILLION_DIR; delete process.env.BILLION; });
+afterAll(() => { delete process.env.BILLION_DIR; delete process.env.BILLION; delete process.env.BILLION_AGENT; });
 
 describe('startBillion', () => {
   it('first run: makes its folder, introduces itself, and holds its mail', () => {
@@ -130,6 +140,71 @@ describe('startBillion', () => {
     spawnError = 'claude: command not found';
     expect(startBillion()).toEqual({ error: 'claude: command not found' });
     expect(sessions.size).toBe(0);
+  });
+});
+
+describe('Billion on Codex', () => {
+  it('starts codex with its instructions in AGENTS.md, which git ignores', () => {
+    process.env.BILLION_AGENT = 'codex';
+    const { session } = startBillion();
+    expect(session.command).toMatch(/^codex --dangerously-bypass-approvals-and-sandbox /);
+    expect(session.command).toMatch(/first run/);
+    const dir = process.env.BILLION_DIR;
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8');
+    expect(agents).toContain("# Billion's charter");
+    expect(agents).toContain("## Owner's rules");
+    expect(agents).not.toMatch(/^@CHARTER\.md/m);
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir, encoding: 'utf8' })).toBe('');
+  });
+
+  it('resumes its own Codex session in the folder by id after a restart', () => {
+    process.env.BILLION_AGENT = 'codex';
+    startBillion().session.exited = true;
+    transcript = { agent: 'codex', id: '019a0000-0000-7000-8000-000000000001' };
+    expect(startBillion().session.command).toMatch(/^codex resume 019a0000-0000-7000-8000-000000000001 --dangerously-bypass-approvals-and-sandbox "You were restarted/);
+  });
+
+  it('without codex, its tab says how to install it', () => {
+    process.env.BILLION_AGENT = 'codex';
+    hasClaude = false;
+    const { session, notice } = startBillion();
+    expect(notice).toMatch(/Codex \(codex\) is not installed/);
+    const { file, args } = parseCommand(session.command);
+    expect(execFileSync(file, args, { encoding: 'utf8' })).toMatch(/Billion runs on Codex/);
+  });
+});
+
+describe('switchBillion', () => {
+  it('writes the handover, stops the old one, saves the choice and starts the other fresh, mail and all', async () => {
+    const old = startBillion().session;
+    old.messagesHeld = false;
+    old.state = 'WORKING';   // so the notice waits in its queue
+    sendText(old, '[Job board] a notice');
+    transcript = { agent: 'claude' };
+    const { session, error } = await switchBillion();
+    expect(error).toBeUndefined();
+    expect(old.exited).toBe(true);
+    expect(session.command).toMatch(/^codex --dangerously-bypass-approvals-and-sandbox /);
+    expect(session.command).toMatch(/HANDOVER\.md/);
+    expect(session.command).not.toMatch(/ resume /);
+    expect(existsSync(join(process.env.BILLION_DIR, 'HANDOVER.md'))).toBe(true);
+    expect(JSON.parse(readFileSync(billionAgentFile(), 'utf8')).agent).toBe('codex');
+    expect([...sessions.values()].filter(s => s.isBillion && !s.exited)).toEqual([session]);
+    expect(pendingMessages(session.id)).toBe(1);
+    expect(session.messagesHeld).toBe(true);
+    // The saved choice outlives a restart; back again starts claude fresh.
+    session.exited = true;
+    expect(startBillion().session.command).toMatch(/^codex /);
+    const back = await switchBillion('claude');
+    expect(back.session.command).toMatch(/^claude --dangerously-skip-permissions "You now run on Claude Code/);
+    expect(back.session.command).not.toMatch(/--continue/);
+  });
+
+  it('refuses a switch to the CLI it already runs on, and an unknown one', async () => {
+    startBillion();
+    expect((await switchBillion('claude')).error).toMatch(/already runs on Claude Code/);
+    expect((await switchBillion('gemini')).error).toMatch(/not gemini/);
+    expect(spawned).toHaveLength(1);
   });
 });
 
