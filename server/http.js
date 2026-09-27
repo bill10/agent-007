@@ -20,6 +20,7 @@ import { handleMcpMessage } from './mcp.js';
 import { notifyOwner, tellOwner, resolveQuestion } from './owner.js';
 import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
+import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 
 // --- Origin Check Middleware (B2) ---
 // Rejects cross-origin requests from disallowed origins. localhost is always
@@ -244,6 +245,10 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       },
     }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Attachment missing on disk' }); });
   });
+
+  // The Settings panel's "Agents & accounts": the last scan, or a fresh one on POST (Refresh).
+  app.get('/api/agent-accounts', async (req, res) => res.json(await agentAccounts()));
+  app.post('/api/agent-accounts', async (req, res) => res.json(await refreshAgentAccounts()));
 
   app.get('/api/browse', (req, res) => {
     try {
