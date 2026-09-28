@@ -137,6 +137,14 @@ describe('close_job sending a card back', () => {
     expect(job.detail.startsWith('The actual task.')).toBe(true);
   });
 
+  it('holds a sent-back card out of dispatch so it can be edited first', async () => {
+    const { job } = addJob({ title: 'Hold', repoPath: REPO, postedByAgent: BILLION_NAME, postedByBillion: true }, () => {});
+    Object.assign(job, { state: 'review', agentSessionId: worker.id, branchName: 'hold' });
+    await closeJobForAgent({ session: billion, id: job.id, accept: false, note: 'Reword it.' }, () => {}, { killSession: async () => {} });
+    expect(job.state).toBe('todo');
+    expect(Date.parse(job.holdUntil)).toBeGreaterThan(Date.now());
+  });
+
   it('keeps the whole reason even on a card whose detail is already full', async () => {
     const { job } = addJob({ title: 'Big', detail: 'x'.repeat(20000), repoPath: REPO, postedByAgent: BILLION_NAME, postedByBillion: true }, () => {});
     Object.assign(job, { state: 'review', agentSessionId: worker.id, branchName: 'big' });

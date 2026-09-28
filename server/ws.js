@@ -20,7 +20,7 @@ import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
 import {
-  addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused,
+  addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused, releaseJobHold,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
   orphanResumePlan, findJobForBranch, repoAtCap, boardSettings,
 } from './jobs.js';
@@ -700,6 +700,11 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         }
         case 'job-pause': {
           const result = setJobPaused(msg.jobId, msg.paused, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        case 'job-release-hold': {
+          const result = releaseJobHold(msg.jobId, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }

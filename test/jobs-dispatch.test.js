@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions, orphans, adoptingOrphans } from '../server/state.js';
-import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent, releasePushedOrphans } from '../server/jobs.js';
+import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent, releasePushedOrphans, releaseJobHold } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 import { buildJobCommand as buildCommand, buildJobPrompt, jobRequiresPr, DEFAULT_PERMISSION_MODE } from '../lib/jobs.js';
 
@@ -293,6 +293,40 @@ describe('board mutations', () => {
     expect(job.agentSessionId).toBeNull();
     expect(job.agentName).toBeNull();
     expect(job.startedAt).toBeNull();
+  });
+
+  it('holds a card sent back to todo for a minute, through edits, until it lapses or is dispatched now', async () => {
+    const { job } = addJob({ title: 'redo', repoPath: REPO }, noopBroadcast);
+    expect(job.holdUntil).toBeUndefined();   // a fresh card goes straight out
+    await moveJob(job.id, 'todo', noopBroadcast);   // nor does a To do -> To do no-op hold it
+    expect(job.holdUntil).toBeUndefined();
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    expect(job.state).toBe('in-progress');
+
+    const before = Date.now();
+    await moveJob(job.id, 'todo', noopBroadcast);
+    const until = Date.parse(job.holdUntil);
+    expect(until - before).toBeGreaterThanOrEqual(59_000);
+    expect(until - Date.now()).toBeLessThanOrEqual(60_000);
+    expect(await dispatchOnce(fakeCreateSession([]), noopBroadcast)).toHaveLength(0);
+
+    // Editing is the point of the hold, so it does not lift it.
+    updateJob(job.id, { title: 'redo, better' }, noopBroadcast);
+    expect(job.holdUntil).not.toBeNull();
+    expect(await dispatchOnce(fakeCreateSession([]), noopBroadcast)).toHaveLength(0);
+
+    // Lapsed: dispatched like any card.
+    job.holdUntil = new Date(Date.now() - 1).toISOString();
+    expect(await dispatchOnce(fakeCreateSession([]), noopBroadcast)).toHaveLength(1);
+    expect(job.holdUntil).toBeNull();
+
+    // Dispatch now clears it.
+    await moveJob(job.id, 'todo', noopBroadcast);
+    expect(await dispatchOnce(fakeCreateSession([]), noopBroadcast)).toHaveLength(0);
+    releaseJobHold(job.id, noopBroadcast);
+    expect(job.holdUntil).toBeNull();
+    expect(await dispatchOnce(fakeCreateSession([]), noopBroadcast)).toHaveLength(1);
+    expect(releaseJobHold('nope', noopBroadcast).error).toMatch(/not found/i);
   });
 
   it('rejects an unknown state', async () => {

@@ -27,7 +27,7 @@ import {
   MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
-  BILLION_NAME, envPermissionMode, resolveJobModel,
+  BILLION_NAME, envPermissionMode, resolveJobModel, REQUEUE_HOLD_MS,
 } from '../lib/jobs.js';
 import { availableModels } from './models.js';
 import { nextCronIso } from '../lib/cron.js';
@@ -904,6 +904,16 @@ export function setJobPaused(jobId, paused, broadcast) {
   return { job };
 }
 
+// "Dispatch now" on a held card: lift the requeue hold so the next pass takes it.
+export function releaseJobHold(jobId, broadcast) {
+  const job = allJobs().find(j => j.id === jobId);
+  if (!job) return { error: 'Job not found' };
+  job.holdUntil = null;
+  persist(broadcast);
+  requestDispatch();
+  return { job };
+}
+
 // Deleting a card retires its agent, for the same reason requeueing does:
 // otherwise the agent keeps running with nothing pointing at it, stops counting
 // toward the per-repo cap, and is never cleaned up. removeWorktree still
@@ -1005,6 +1015,12 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
     job.prNumber = null;
     job.reviewAt = null;
     job.resultSummary = null;   // the last attempt's result, not this one's
+    // Coming BACK to To do: held so its text can be edited before re-dispatch.
+    if (fromState !== 'todo') {
+      job.holdUntil = new Date(Date.now() + REQUEUE_HOLD_MS).toISOString();
+      // The interval tick may be minutes away; wake the dispatcher when it lifts.
+      setTimeout(requestDispatch, REQUEUE_HOLD_MS + 100).unref?.();
+    }
   }
   // Restamped when the work comes back from In progress: a run sent back for a
   // follow-up is the newest result again (see supersededRuns).
@@ -1255,6 +1271,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.worktreePath = session.worktreePath;
     job.lastError = null;
     job.lastErrorAt = null;
+    job.holdUntil = null;
 
     dispatched.push({ job, session });
   }

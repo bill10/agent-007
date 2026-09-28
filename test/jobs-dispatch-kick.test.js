@@ -3,6 +3,7 @@ import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { config, sessions } from '../server/state.js';
+import { REQUEUE_HOLD_MS } from '../lib/jobs.js';
 import { addJob, moveJob, boardSettings, allJobs, startDispatcher, stopDispatcher, DISPATCH_DEBOUNCE_MS } from '../server/jobs.js';
 
 // A card posted, requeued or let through by a freed slot goes out within the
@@ -68,7 +69,7 @@ describe('dispatch on events', () => {
     expect(second.state).toBe('in-progress');
   });
 
-  it('dispatches a card moved back to To do', async () => {
+  it('dispatches a card moved back to To do once its hold lifts', async () => {
     const calls = [];
     await start(fakeCreateSession(calls));
     const job = post('Again');
@@ -76,6 +77,8 @@ describe('dispatch on events', () => {
     await moveJob(job.id, 'todo', noop);
     expect(job.state).toBe('todo');
     await vi.advanceTimersByTimeAsync(DISPATCH_DEBOUNCE_MS + 100);
+    expect(calls).toEqual([job.id]);   // held, so it can be edited first
+    await vi.advanceTimersByTimeAsync(REQUEUE_HOLD_MS);
     expect(calls).toEqual([job.id, job.id]);
     expect(job.state).toBe('in-progress');
   });
