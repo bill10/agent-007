@@ -253,7 +253,7 @@ server/
   git.js           Git operations (worktree, file tree, diff)
   jobs.js          Job board dispatcher (scan, spawn, PR watch, schedule firing, attachment files)
   command-path.js  Checks a CLI is installed before a spawn; resolves commands to spawnable files on Windows (PATHEXT)
-  pty.js           PTY lifecycle (spawn, handlers, state detection)
+  pty.js           PTY lifecycle (spawn, handlers, state detection; closing a session kills every process group under it, detached background jobs included)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment downloads, /mcp, origin + auth gates)
   agent-accounts.js  Installed agent CLIs and the accounts each is logged in with (Settings panel; read-only)

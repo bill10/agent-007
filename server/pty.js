@@ -4,6 +4,7 @@ import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
 import { basename } from 'path';
 import { writeSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames, ptyEnv } from '../lib/helpers.js';
 // Re-exported so the handler's tests reach the parser through the module they drive.
 export { trackSyncFrames } from '../lib/helpers.js';
@@ -351,6 +352,65 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   lastSpawnAttempt = { session, command, broadcast };
   setupPtyHandlers(session, sessionId, broadcast);
   return { session };
+}
+
+// The process groups under a PTY's child, and how many processes they hold
+// besides it. The child leads its own group (node-pty setsid()s it), but that
+// group alone misses the usual leak: Claude Code runs each Bash command
+// detached, in a session and group of its own, so a `node srv.mjs &` started
+// there outlives the tab. Walked from parent links, which only reach them
+// while the child still lives: a dead parent's children go to launchd/init.
+// Never the server's own group, whatever the walk turns up.
+function processTree(rootPid) {
+  const rows = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid='], { encoding: 'utf8' })
+    .trim().split('\n').map((line) => line.trim().split(/\s+/).map(Number));
+  const children = new Map();
+  const pgidOf = new Map();
+  for (const [pid, ppid, pgid] of rows) {
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push(pid);
+    pgidOf.set(pid, pgid);
+  }
+  const groups = new Set([rootPid]);
+  let count = 0;
+  const stack = [rootPid];
+  while (stack.length) {
+    for (const pid of children.get(stack.pop()) || []) {
+      count++;
+      groups.add(pgidOf.get(pid));
+      stack.push(pid);
+    }
+  }
+  groups.delete(pgidOf.get(process.pid));
+  for (const g of groups) if (!(g > 1)) groups.delete(g);
+  return { count, groups };
+}
+
+// Ends a session's PTY and everything it started: SIGTERM to every process
+// group under it, SIGKILL to what is left after the grace period. Only groups
+// found under this PTY: nothing by port, name or cwd. On Windows, ConPTY's
+// kill already takes the console's whole tree.
+export function killSessionProcesses(session, { graceMs = 3000 } = {}) {
+  if (process.platform === 'win32' || session.exited) {
+    try { session.pty.kill(); } catch {}
+    return;
+  }
+  let tree = { count: 0, groups: new Set([session.pty.pid]) };
+  try { tree = processTree(session.pty.pid); } catch (err) {
+    console.error(`${session.name}: could not list its processes:`, err.message);
+  }
+  try { session.pty.kill(); } catch {}
+  const signal = (sig) => [...tree.groups].filter((g) => {
+    try { process.kill(-g, sig); return true; } catch { return false; }
+  });
+  signal('SIGTERM');
+  console.log(tree.count
+    ? `${session.name}: stopping ${tree.count} process(es) it started, in ${tree.groups.size} group(s)`
+    : `${session.name}: no processes of its own left to stop`);
+  setTimeout(() => {
+    const stuck = signal('SIGKILL');
+    if (stuck.length) console.log(`${session.name}: SIGKILLed ${stuck.length} group(s) that outlived SIGTERM`);
+  }, graceMs).unref();
 }
 
 // User accounts are read live, so they can appear while Billion runs. It
