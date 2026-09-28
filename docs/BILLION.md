@@ -39,7 +39,8 @@ Decided:
    so no other agent may take it. No cocktail codename.
 7. **Placement:** top of the left panel (above the repo groups, not under
    "(no repo)"), top center of the office on its own desk, and its terminal
-   open by default in the right panel.
+   running from the start, its tab in the right panel hidden until the owner
+   clicks Billion (closing it hides it again).
 8. **One Billion per server.** Messages only flow between agents with the same
    owner; per-user Billions wait until someone runs multi-user.
 
@@ -721,7 +722,7 @@ anywhere but Telegram, and there is no paid transcription.
    command with first-run or resume prompt, projects-folder suggestion),
    started from `server.js` `startup()`; name reserved; rename refused;
    pinned row with a Start button when stopped; own desk top center; tab
-   first and open by default. The charter template is `charter.md` in this
+   first, hidden until the owner clicks Billion. The charter template is `charter.md` in this
    repo (copied in as `CHARTER.md`, with `owner.md` → `CLAUDE.md`) so agents
    working on Agent 007 don't load it. Verified live in an isolated server: repo created and committed,
    introduction as designed.
