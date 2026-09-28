@@ -934,13 +934,17 @@ the same shape as the terminal's upload, and land under
 
 The owner's chat with Billion, in a pinned tab right after Jobs: same
 `.board-tab` shape (muted until active, then `--accent` with the usual
-underline), a bell followed by "Billion". Open questions show as the same
-orange `.board-tab-badge` sitting on the bell's top-right corner like a phone
-notification (`.bell-badge`, ringed in the tab bar's background), "9+" above
-9. With nothing open the bell is dimmed and has no badge. The tab's
+underline), a chat bubble followed by "Billion": it is a conversation, not
+notifications. Open questions show as the same orange `.board-tab-badge`
+sitting on the bubble's top-right corner (`.chat-badge`, ringed in the tab
+bar's background), "9+" above 9. With nothing open the bubble is dimmed and
+has no badge. Like Jobs it has no close control, and it is the tab a page
+opens on (a remembered terminal tab wins on reload). Billion's own terminal
+tab is hidden until the owner clicks Billion in the office or its explorer
+row; closing it hides it again, and Billion keeps running. The tab's
 `aria-label` carries the count ("Talk to Billion, 3 open questions", or "Talk
 to Billion"); the tooltip is "Talk to Billion". On a phone the bottom bar has
-a fourth button, the same bell and badge followed by *Billion*; it opens the
+a fourth button, the same bubble and badge followed by *Billion*; it opens the
 terminal panel on this tab.
 
 - Three parts, top to bottom: a strip of open questions, the thread

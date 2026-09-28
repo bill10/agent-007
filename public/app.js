@@ -658,6 +658,9 @@ async function init() {
   setupVoice();
   setupJobBoard();
   startAnimationLoop();
+  // The page opens on the chat with Billion, unless a remembered tab is
+  // restored once the replay lands (scheduleTabRestore).
+  showWaiting();
   connect(onMessage);
   renderOffice();
 }

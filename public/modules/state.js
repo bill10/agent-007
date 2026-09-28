@@ -45,6 +45,12 @@ export function upsertChatMessage(message) {
 export let waitingActive = false;
 export function setWaitingActive(on) { waitingActive = !!on; }
 
+// Billion's terminal tab is hidden until the owner opens it (switching to
+// Billion: its office character, its explorer row). Closing it hides it again;
+// the session keeps running.
+export let billionTabOpen = false;
+export function setBillionTabOpen(on) { billionTabOpen = !!on; }
+
 // Billion's tab first, then the rest in their own order.
 export function billionFirst(entries) {
   return [...entries].sort(([, a], [, b]) => Number(!!b.isBillion) - Number(!!a.isBillion));

@@ -4,8 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
-import { agents, activeSessionId, setActiveSession, setBoardActive, setSelf } from '../public/modules/state.js';
-import { handleSessionCreated } from '../public/modules/terminal.js';
+import { agents, activeSessionId, setActiveSession, setBoardActive, setSelf, setBillionTabOpen } from '../public/modules/state.js';
+import { handleSessionCreated, updateTabs } from '../public/modules/terminal.js';
 
 beforeEach(() => {
   window.Terminal = class {
@@ -19,15 +19,19 @@ beforeEach(() => {
   setActiveSession(null);
   setBoardActive(false);
   setSelf(null, false);
+  setBillionTabOpen(false);
 });
 
 const created = (sessionId, extra = {}) => handleSessionCreated({ type: 'session-created', sessionId, name: sessionId, state: 'IDLE', ...extra });
 const tabIds = () => [...document.querySelectorAll('.terminal-tab[data-session-id]')].map(t => t.dataset.sessionId);
 
 describe('Billion\'s tab', () => {
-  it('comes first, cannot be dragged, and offers no rename', async () => {
+  it('is hidden until opened, then comes first, cannot be dragged, and offers no rename', async () => {
     await created('w1');
     await created('b1', { isBillion: true, name: 'Billion' });
+    expect(tabIds()).toEqual(['w1']);
+    setBillionTabOpen(true);
+    updateTabs();
     expect(tabIds()).toEqual(['b1', 'w1']);
     const tab = document.querySelector('.terminal-tab[data-session-id="b1"]');
     expect(tab.draggable).toBe(false);

@@ -33,6 +33,8 @@ export function showWaiting() {
   stopVoice();
   document.body.classList.add('billion-chat');
   setWaitingActive(true);
+  // A reload comes back here, not to the terminal that was open before.
+  localStorage.removeItem('agent007-active-tab');
   setView(document.body.dataset.view);
   renderWaiting({ toBottom: true });
   if (window._onBoardVisibilityChanged) window._onBoardVisibilityChanged();
