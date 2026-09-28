@@ -560,7 +560,7 @@ usage limit (below).
   `.git/info/exclude`. `AGENTS.md` is made from two committed files, so it
   would only repeat them. `HANDOVER.md` is raw conversation, which can hold
   whatever the owner typed, and is replaced at every switch.
-- **Across a switch** the inbox, the *Waiting on you* tab, Telegram and the
+- **Across a switch** the inbox, the *Billion* tab, Telegram and the
   board tools keep working: all of them find whichever Billion is running.
   Permission requests waiting on the old Billion go to the owner, as they do
   when Billion stops.
@@ -580,8 +580,8 @@ usage limit (below).
   on a timer, and never twice within 30 minutes: a limit on the new CLI that
   soon, or a target CLI that is not installed or not logged in (`claude auth
   status --json`, `codex login status`), leaves Billion where it is and puts
-  `Billion paused: both Claude Code and Codex are at their limits` under
-  *Waiting on you* and on Telegram, once, until a new Billion starts.
+  `Billion paused: both Claude Code and Codex are at their limits` in the
+  *Billion* tab and on Telegram, once, until a new Billion starts.
   An armed Claude account switch (`server/account-migration.js`; the
   **Claude account** section of the Settings gear, described in
   [FEATURES.md](FEATURES.md)) comes before any of that: at a Claude Billion's

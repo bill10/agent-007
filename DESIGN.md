@@ -930,33 +930,45 @@ the same shape as the terminal's upload, and land under
   stragglers every scan, so a deferred or OS-refused removal is reclaimed
   later instead of leaking. Deleting a card earlier removes its directory too.
 
-## Waiting on you
+## The Billion tab
 
-Billion's `notify_owner` questions, in a pinned tab right after Jobs: same
+The owner's chat with Billion, in a pinned tab right after Jobs: same
 `.board-tab` shape (muted until active, then `--accent` with the usual
-underline), but icon only: a bell with no text label. Open questions show as
-the same orange `.board-tab-badge` sitting on the bell's top-right corner like
-a phone notification (`.bell-badge`, ringed in the tab bar's background), "9+"
-above 9. With nothing open the bell is dimmed and has no badge. Without a
-visible label, the tab's `aria-label` and tooltip carry it: "Waiting on you, 3
-questions", or "Waiting on you". On a phone the bottom bar has a fourth
-button, the same bell and badge followed by *Waiting* (the other buttons are
-text labels); it opens the terminal panel on this tab.
+underline), a bell followed by "Billion". Open questions show as the same
+orange `.board-tab-badge` sitting on the bell's top-right corner like a phone
+notification (`.bell-badge`, ringed in the tab bar's background), "9+" above
+9. With nothing open the bell is dimmed and has no badge. The tab's
+`aria-label` carries the count ("Talk to Billion, 3 open questions", or "Talk
+to Billion"); the tooltip is "Talk to Billion". On a phone the bottom bar has
+a fourth button, the same bell and badge followed by *Billion*; it opens the
+terminal panel on this tab.
 
-- One card per open question, newest first, in the job card's frame
-  (`--bg-dark`, hairline border) with an `--state-message` left stripe: it is
-  something waiting on a person. Head: `Q3` in accent, age in `--text-dim`, ×.
-- Choices are outline buttons; the recommended one has an accent border and a
-  small uppercase "recommended" tag. Under them, always, a one-line reply
-  input with an accent Send button.
-- After a click the card's controls dim until the server answers; a refusal
-  ("Billion is not running") shows under the card in `--state-disconnected`
-  and the card stays open with the draft kept.
-- Answered questions fold into a collapsed `<details>` "Answered (n)", the
-  last 20: `Q3`, the question on one line, then `→ answer · app|Telegram · age`.
-- Empty: "Nothing waiting on you." in `--text-dim`.
+- Three parts, top to bottom: a strip of open questions, the thread
+  (`role="log"`), and the text box, both centred at up to 760px.
+- Bubbles in `--bg-dark` with a hairline border and 8px radius: Billion's on
+  the left, the owner's on the right tinted with `--accent`, the corner nearest
+  the speaker squared off. Time in `--text-dim` under the text; text is never
+  rendered as HTML; Telegram voice notes are marked *(voice)*.
+- An open question's bubble has an `--state-message` left stripe. Head: `Q3`
+  in accent (a bold "!" before it when blocking, dimmed when low). Choices
+  are outline buttons, the recommended one first with an accent border and a
+  small uppercase "recommended" tag, then *Dismiss*. Once answered the
+  buttons collapse to "you answered: ..." in italic `--text-muted`.
+- The strip lists open questions as small outline chips, blocking first, then
+  normal, then low, oldest first within each; tapping one scrolls the thread
+  to it and flashes it (an outline under `prefers-reduced-motion`). Hidden
+  when none are open. "New messages ↓" (an accent pill) appears when a
+  message arrives while scrolled up.
+- The text box: a textarea with an accent Send button. Enter sends,
+  Shift+Enter is a new line. While a question is open a line above it says
+  "Answers Q3: ..." with × to send as a plain message instead.
+- After a send or tap the controls dim until the server answers; a refusal
+  ("Billion is not running") shows in `--state-disconnected` and the text
+  stays in the box.
+- The voice mic is hidden on this tab.
+- Empty: "Nothing here yet. Say something to Billion." in `--text-dim`.
 - Phones: choices, Send and the input are 44px tall; the input is 16px so iOS
-  does not zoom.
+  does not zoom; bubbles go up to 88% wide.
 
 ## Interactive Behaviors
 
