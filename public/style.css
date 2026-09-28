@@ -1236,7 +1236,7 @@ body {
 .mobile-nav { display: none; }
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
-  .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss { min-width: 44px; min-height: 44px; }
+  .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss, .chat-link { min-width: 44px; min-height: 44px; }
   .account-btn, .account-folder { min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
@@ -1503,6 +1503,17 @@ body {
   cursor: pointer;
 }
 .waiting-dismiss:hover { color: var(--text); }
+.chat-link {
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--accent);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .chat-bubble :disabled { opacity: 0.55; cursor: default; }
 .waiting-error { margin: 0; flex-basis: 100%; color: var(--state-disconnected); font-size: 11px; }
 .waiting-error[hidden] { display: none; }

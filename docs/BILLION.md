@@ -604,10 +604,11 @@ the tab, blocking first, then oldest; tap one to jump to it.
 
 Type in the box at the bottom (Enter sends, Shift+Enter is a new line) and it
 is typed into Billion's terminal as `[Owner via app] <text>`, as a turn of its
-own, while mail keeps flowing to it as before. While a question is open, the
-box answers the oldest open blocking question, else the oldest open one (it
-says which, "Answers Q3"; × sends it as a plain message instead). If Billion
-is not running the message is refused and stays in the box.
+own, while mail keeps flowing to it as before, even while questions are
+open: typing never answers a question you did not pick. To answer one by
+typing, tap *Reply* under it (or its chip in the strip): the box then says
+"Answers Q3" (× goes back to a plain message). If Billion is not running the
+message is refused and stays in the box.
 
 `notify_owner` puts each question in the tab and, when a Telegram bot is set
 up, on your phone. Each question gets a short number, Q1, Q2 and so on. When the answer
@@ -623,8 +624,13 @@ When you answer a question somewhere else, say by typing in Billion's
 terminal, Billion closes it with `resolve_question`: it moves to **Answered**
 (marked *in the terminal*) and your phone's copy shows the answer, like any other.
 
+Answered the wrong question? *Undo* sits beside "you answered: ..." for a
+minute: the question opens again and Billion reads `[Owner via app] Q3: undo
+my answer "..."`. After that, tell Billion; it puts the question back with
+`reopen_question` (nothing is sent to Telegram).
+
 Answer in the app: tap a choice under the question (the recommended one
-first), or type in the box. The answer is typed into Billion's terminal as
+first), or tap *Reply* and type in the box. The answer is typed into Billion's terminal as
 `[Owner via app] Q3: <answer> (re: "<start of the question>")`, and the
 buttons collapse to "you answered: <answer>". If Billion is not running the
 question says so and stays open. Answered questions stay in the thread as

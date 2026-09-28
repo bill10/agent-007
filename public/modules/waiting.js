@@ -1,6 +1,7 @@
 // The "Billion" tab: the owner's chat with Billion, the web twin of the
 // Telegram channel. One thread of the owner's messages, Billion's tell_owner
-// replies and its notify_owner questions (answered with a tap or a typed line),
+// replies and its notify_owner questions (answered with a tap, or a typed line
+// once the owner picks the question with Reply),
 // a strip pinning the open questions, and a text box that is typed into
 // Billion's terminal as [Owner via app] (server/owner.js ownerSays). Shares the
 // terminal viewport with the terminals and the job board, like Jobs does.
@@ -9,11 +10,13 @@ import { send } from './ws.js';
 import { hideJobBoard } from './jobs.js';
 import { stopVoice } from './voice.js';
 
-const errors = new Map();   // question id -> why the last tap did not go through
-const pending = new Set();  // question ids tapped, waiting for the server to say so
+const errors = new Map();   // question id -> { error, status }: why the last tap did not go through
+const pending = new Map();  // question id -> its status when tapped, waiting for the server to move it on
 let sending = null;         // the nonce of the text box's message on its way
 let sendError = '';
-let detached = null;        // the question the owner chose not to answer with the box
+let replyTo = null;         // the question the owner picked to answer with the box
+let undoTimer = null;
+let undoSoonest = Infinity;   // ms until the first Undo link on screen goes
 let nonces = 0;
 const SEND_TIMEOUT_MS = 20 * 1000;
 let lastShown = null;       // the newest message when the thread was last drawn
@@ -64,30 +67,55 @@ const RANK = { blocking: 0, low: 2 };
 const byAge = (a, b) => String(a.at).localeCompare(String(b.at));
 const byUrgency = (a, b) => (RANK[a.urgency] ?? 1) - (RANK[b.urgency] ?? 1) || byAge(a, b);
 
-// What the text box answers: the oldest open blocking question, else the
-// oldest open one, unless the owner said this one is not what they are writing about.
+// What the text box answers: only the question the owner picked with Reply,
+// while it is open. Otherwise the box is a plain message to Billion.
 export function answerTarget() {
-  const open = waitingItems.filter(item => item.status === 'open').sort(byAge);
-  const target = open.find(item => item.urgency === 'blocking') || open[0];
-  return target && target.id !== detached ? target : null;
+  return waitingItems.find(item => item.id === replyTo && item.status === 'open') || null;
+}
+
+// Reply on a question, or its chip in the strip: the box answers it.
+export function replyToQuestion(id) {
+  replyTo = id;
+  renderComposer();
+  document.getElementById('chat-input')?.focus();
 }
 
 const billionRunning = () => [...agents.values()].some(a => a.isBillion);
 
 // A tap on a question's choice.
 function answer(q, choice) {
+  request(q, { type: 'waiting-answer', id: q.id, answer: choice });
+}
+
+// Undo on "you answered: ...": the question opens again.
+function undo(q) {
+  request(q, { type: 'waiting-reopen', id: q.id });
+}
+
+function request(q, msg) {
   if (pending.has(q.id)) return;
   errors.delete(q.id);
-  if (send({ type: 'waiting-answer', id: q.id, answer: choice })) pending.add(q.id);
-  else errors.set(q.id, 'Not connected to the server; try again in a moment.');
+  if (send(msg)) pending.set(q.id, q.status);
+  else errors.set(q.id, { error: 'Not connected to the server; try again in a moment.', status: q.status });
   renderWaiting();
 }
 
 export function handleWaitingError(msg) {
   pending.delete(msg.id);
-  errors.set(msg.id, msg.error);
+  const status = waitingItems.find(item => item.id === msg.id)?.status;
+  errors.set(msg.id, { error: msg.error, status });
   renderWaiting();
 }
+
+function errorLine(q) {
+  if (!errors.has(q.id)) return null;
+  const error = el('p', 'waiting-error', errors.get(q.id).error);
+  error.setAttribute('role', 'alert');
+  return error;
+}
+
+const UNDO_MS = 60 * 1000;
+const undoLeft = (q) => (q.answeredVia === 'app' || q.answeredVia === 'telegram') ? Date.parse(q.answeredAt) + UNDO_MS - Date.now() : 0;
 
 function submit() {
   const input = document.getElementById('chat-input');
@@ -155,7 +183,22 @@ const VIA = { telegram: 'on Telegram', terminal: 'in the terminal' };
 // became of it.
 function questionFoot(q) {
   if (q.status === 'answered') {
-    return el('p', 'chat-answered', `you answered: ${q.answer}${VIA[q.answeredVia] ? ` (${VIA[q.answeredVia]})` : ''}`);
+    const line = el('p', 'chat-answered', `you answered: ${q.answer}${VIA[q.answeredVia] ? ` (${VIA[q.answeredVia]})` : ''}`);
+    const left = undoLeft(q);
+    if (left > 0) {
+      const btn = el('button', 'chat-link chat-undo', 'Undo');
+      btn.type = 'button';
+      btn.setAttribute('aria-label', `Undo the answer to Q${q.n}`);
+      btn.disabled = pending.has(q.id);
+      btn.onclick = () => undo(q);
+      line.append(' ', btn);
+      undoSoonest = Math.min(undoSoonest, left);
+    }
+    const error = errorLine(q);
+    if (!error) return line;
+    const foot = el('div', 'chat-q-foot');
+    foot.append(line, error);
+    return foot;
   }
   if (q.status === 'dismissed') return el('p', 'chat-answered', 'dismissed');
   const foot = el('div', 'chat-q-foot');
@@ -175,16 +218,18 @@ function questionFoot(q) {
     }
     foot.appendChild(choices);
   }
+  const reply = el('button', 'chat-link chat-reply', 'Reply');
+  reply.type = 'button';
+  reply.setAttribute('aria-label', `Answer Q${q.n} by typing`);
+  reply.onclick = () => replyToQuestion(q.id);
+  foot.appendChild(reply);
   const dismiss = el('button', 'waiting-dismiss', 'Dismiss');
   dismiss.type = 'button';
   dismiss.setAttribute('aria-label', `Dismiss Q${q.n}`);
   dismiss.onclick = () => send({ type: 'waiting-dismiss', id: q.id });
   foot.appendChild(dismiss);
-  if (errors.has(q.id)) {
-    const error = el('p', 'waiting-error', errors.get(q.id));
-    error.setAttribute('role', 'alert');
-    foot.appendChild(error);
-  }
+  const error = errorLine(q);
+  if (error) foot.appendChild(error);
   return foot;
 }
 
@@ -274,7 +319,7 @@ export function renderComposer() {
     x.type = 'button';
     x.title = 'Send as a message instead';
     x.setAttribute('aria-label', `Don't answer Q${target.n}; send as a message`);
-    x.onclick = () => { detached = target.id; renderComposer(); };
+    x.onclick = () => { replyTo = null; renderComposer(); };
     chip.appendChild(x);
   }
   const running = billionRunning();
@@ -304,6 +349,7 @@ function renderStrip() {
       row.classList.remove('flash');
       void row.offsetWidth;   // restart the animation
       row.classList.add('flash');
+      replyToQuestion(item.id);
     };
     strip.appendChild(btn);
   }
@@ -312,18 +358,27 @@ function renderStrip() {
 // toBottom: the tab was just opened, so start at the newest.
 export function renderWaiting({ toBottom = false } = {}) {
   // Settled: the server moved it on, so it is no longer ours to wait for.
-  for (const id of new Set([...pending, ...errors.keys()])) {
-    if (!waitingItems.some(item => item.id === id && item.status === 'open')) { pending.delete(id); errors.delete(id); }
+  // A pending tap or Undo is settled when the question's status changes; an
+  // error line stays until it does.
+  for (const [id, status] of pending) {
+    if (waitingItems.find(item => item.id === id)?.status !== status) pending.delete(id);
   }
-  if (detached && !waitingItems.some(item => item.id === detached && item.status === 'open')) detached = null;
+  for (const [id, { status }] of errors) {
+    if (waitingItems.find(item => item.id === id)?.status !== status) errors.delete(id);
+  }
+  if (replyTo && !answerTarget()) replyTo = null;
   if (!waitingActive) return;
   const list = shell();
   if (!list) return;
   const follow = toBottom || atBottom(list);
   const keep = list.scrollTop;
   list.innerHTML = '';
+  clearTimeout(undoTimer);
+  undoSoonest = Infinity;
   if (!chatMessages.length) list.appendChild(el('p', 'waiting-empty', 'Nothing here yet. Say something to Billion.'));
   for (const m of chatMessages) list.appendChild(bubble(m));
+  // Drawn again when an Undo link's minute is up, so it goes.
+  if (undoSoonest < Infinity) undoTimer = setTimeout(() => renderWaiting(), Math.min(undoSoonest, UNDO_MS) + 50);
   const jump = document.getElementById('chat-jump');
   if (follow) {
     list.scrollTop = list.scrollHeight;

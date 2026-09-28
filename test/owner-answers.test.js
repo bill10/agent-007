@@ -8,10 +8,10 @@ import { writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, handleUpdate, waitingItems, waitingPayload, dismissWaiting, answerWaiting, checkChoices,
-  pollOnce, NOTIFY_WINDOW_MS, resolveQuestion,
+  pollOnce, NOTIFY_WINDOW_MS, resolveQuestion, reopenQuestion, UNDO_MS, chatMessages,
 } from '../server/owner.js';
 import { handleMcpMessage, NOTIFY_OWNER_TOOL } from '../server/mcp.js';
-import { dropMessages } from '../server/messages.js';
+import { dropMessages, takeMessages } from '../server/messages.js';
 import { mayAnswerOwner } from '../server/ws.js';
 import { USERS_PATH } from '../server/auth.js';
 import { sessions, CONFIG_DIR } from '../server/state.js';
@@ -265,6 +265,63 @@ describe('resolve_question', () => {
     const res = await call({ number: 3, answer: 'yes' }, { session: { isBillion: true }, resolveQuestion: resolve });
     expect(resolve).toHaveBeenCalledWith({ number: 3, id: undefined }, 'yes');
     expect(res.result.content[0].text).toBe('Q3 is marked answered: yes');
+  });
+});
+
+describe('reopen_question and Undo', () => {
+  it('puts an answered question back to open by number, clears the answer, re-broadcasts, sends nothing', async () => {
+    await ask('Ship it?', { choices: ['yes', 'no'] });
+    await answerWaiting(waitingItems()[0].id, 'yes', 'app', { env: ENV });
+    fetchMock.mockClear();
+    b.pty.write.mockClear();
+    const broadcast = vi.fn();
+    const result = await reopenQuestion({ number: 1 }, { broadcast });
+    expect(result.item).toMatchObject({ n: 1, status: 'open' });
+    expect(waitingItems()[0]).not.toHaveProperty('answer');
+    expect(broadcast).toHaveBeenCalledWith(waitingPayload());
+    const bubble = chatMessages().find(m => m.q?.id === result.item.id);
+    expect(bubble.q).toMatchObject({ status: 'open', choices: ['yes', 'no'] });
+    expect(bubble.q).not.toHaveProperty('answer');
+    expect(broadcast).toHaveBeenCalledWith({ type: 'chat-message', message: bubble });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(typed()).toBe('');
+    // And it can be answered again.
+    expect((await answerWaiting(waitingItems()[0].id, 'no', 'app', { env: ENV })).ok).toBe(true);
+  });
+
+  it('refuses an unknown, open or dismissed question', async () => {
+    await ask('One?');
+    await ask('Two?');
+    expect((await reopenQuestion({ number: 9 })).error).toMatch(/no Q9/);
+    expect((await reopenQuestion({ id: 'nope' })).error).toMatch(/no question nope/);
+    expect((await reopenQuestion({ number: 1 })).error).toBe('Q1 is open already.');
+    dismissWaiting(waitingItems()[1].id);
+    expect((await reopenQuestion({ number: 2 })).error).toMatch(/Q2 was dismissed/);
+  });
+
+  it('from the owner: only within the minute, and Billion hears the answer is withdrawn', async () => {
+    await ask('Ship it?');
+    const { id } = waitingItems()[0];
+    await answerWaiting(id, 'yes', 'app', { env: ENV });
+    const at = Date.parse(waitingItems()[0].answeredAt);
+    expect((await reopenQuestion({ id }, { owner: true, now: at + UNDO_MS + 1 })).error).toMatch(/Too late to undo Q1/);
+    expect(waitingItems()[0].status).toBe('answered');
+    expect((await reopenQuestion({ id }, { owner: true, now: at + 1000 })).ok).toBe(true);
+    // Queued behind the answer itself.
+    expect(JSON.stringify(takeMessages(b.id).queue)).toContain('[Owner via app] Q1: undo my answer \\"yes\\"; the question is open again.');
+    expect(waitingItems()[0].status).toBe('open');
+  });
+
+  it('is Billion\'s tool only, over MCP', async () => {
+    const list = (session) => handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { session }).result.tools.map(t => t.name);
+    expect(list({ isBillion: true })).toContain('reopen_question');
+    expect(list({})).not.toContain('reopen_question');
+    const call = (args, ctx) => handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'reopen_question', arguments: args } }, ctx);
+    expect((await call({}, { session: { isBillion: true } })).result.content[0].text).toMatch(/number or id/);
+    const reopen = vi.fn(async () => ({ ok: true, item: { n: 3 } }));
+    const res = await call({ number: 3 }, { session: { isBillion: true }, reopenQuestion: reopen });
+    expect(reopen).toHaveBeenCalledWith({ number: 3, id: undefined });
+    expect(res.result.content[0].text).toBe('Q3 is open again.');
   });
 });
 
