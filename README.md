@@ -110,7 +110,7 @@ Much of it, with enough setup: Claude Code can loop, run subagents in their own 
 [Munder Difflin](https://github.com/chaitanyagiri/munder-difflin) is a great, much bigger desktop app that builds many abilities in: memory, dictation, meetings, Slack, an editor. Agent 007 stays thin. It is a web app you start with one command and can open from any browser, even your phone, and it does only the operations: terminals, a job board, a manager, reviews, and a line to you. What your company can do comes from the agents themselves (Claude Code, Codex, and whatever tools, APIs and MCP servers they can reach), so it gets better every time they do. Free, with no paid tier.
 
 ### Is it safe to let agents merge on their own?
-Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Claude Code workers on Billion's cards ask Billion for permissions before they ask you; Codex workers still ask you directly.
+Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Workers on Billion's cards, Claude Code and Codex alike, ask Billion for permissions before they ask you.
 
 ### Does it cost anything?
 No. It is free and open source, and it runs the CLIs you already have, on your existing subscriptions. Board workers use your subscription's usage like any session you start yourself.
@@ -262,7 +262,7 @@ server/
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
   account-migration.js  The owner's Claude account switch (backup, Keychain or .credentials.json write, ~/.claude.json account block, check, rollback, retire; armed, it runs at Billion's first hard limit)
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
-  permission-hook.js  Claude Code PermissionRequest hook a worker on Billion's cards runs
+  permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)

@@ -11,7 +11,7 @@ export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from './command-path.js';
 import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken, authEnabled } from './auth.js';
-import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook, withBoardWorkerSettings, withCodexWorkerTools } from './agent-mcp.js';
+import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook, withBoardWorkerSettings, withCodexWorkerTools, CODEX_HOOK_CONFIG_ENV } from './agent-mcp.js';
 import { broadcastJobs, requestDispatch } from './jobs.js';
 import { flushMessages, dropMessages } from './messages.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
@@ -248,19 +248,22 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // worker's worktree is trusted.
   const codexTrust = !!(autoTrust || isBillion) && sessionAgentFromCommand(command) === 'codex';
   const ownArgs = codexTrust ? [...codexTrustArgs(cwd), ...args] : args;
-  // Codex has no hook yet, but its worker on Billion's card still gets the
-  // same board tools pre-allowed. Inside withMcpConfig, whose server table
-  // override would otherwise replace them.
+  // A Codex worker on Billion's card gets the same board tools pre-allowed.
+  // Inside withMcpConfig, whose server table override would otherwise replace them.
   const mcpArgs = withMcpConfig(file, approvalsToBillion ? withCodexWorkerTools(file, ownArgs, mcpConfigPath) : ownArgs, mcpConfigPath);
   // A worker on one of Billion's cards asks Billion before it asks a person
-  // (server/approvals.js) — where the CLI can be hooked, which today is
-  // Claude Code only. Recorded as whether the hook actually went in.
+  // (server/approvals.js) — where the CLI can be hooked: Claude Code, and Codex
+  // once its hook's hash was found at start. Recorded as whether the hook
+  // actually went in.
   const hookedArgs = approvalsToBillion ? withApprovalHook(file, mcpArgs, mcpConfigPath) : mcpArgs;
   const hooked = hookedArgs !== mcpArgs;
   // No channel plugins in a board worker (withBoardWorkerSettings). A no-op
   // when the hook's --settings, which carries the same, went in above.
   const boardWorker = spawnedBy === 'board' || origin === 'board';
   const spawnArgs = boardWorker ? withBoardWorkerSettings(file, hookedArgs) : hookedArgs;
+
+  // Codex's hook finds this session's MCP config here (agent-mcp.js).
+  const hookEnv = hooked && sessionAgentFromCommand(command) === 'codex' ? { [CODEX_HOOK_CONFIG_ENV]: mcpConfigPath } : {};
 
   installAsyncSpawnGuard();
   let ptyProcess;
@@ -270,7 +273,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
       cols: 120,
       rows: 30,
       cwd,
-      env: ptyEnv(process.env),
+      env: { ...ptyEnv(process.env), ...hookEnv },
     });
   } catch (err) {
     removeMcpConfig(sessionId);   // nothing will ever read it now

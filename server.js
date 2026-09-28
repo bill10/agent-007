@@ -32,7 +32,7 @@ import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
-import { sweepMcpConfigs } from './server/agent-mcp.js';
+import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
@@ -407,6 +407,9 @@ async function startup() {
   // module-scope sweep would target the default port and wipe the configs of a
   // real server running on 7007 while the suite ran.
   sweepMcpConfigs();
+  // Before anything spawns: a Codex worker on Billion's card is hooked only
+  // once Codex has told us the hook's hash (a second or so, 10 at most; skipped without codex).
+  await startCodexHookLookup();
   loadConfig();
   // Reserved whether or not it runs: no other agent may take the name that
   // send_message delivers to Billion by.

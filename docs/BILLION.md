@@ -1,7 +1,7 @@
 # Billion — the one agent you talk to
 
-Design notes, worked out step by step. Status: **built** (parts 1–4 and the
-charter split; Codex approvals not wired — see "Order of building").
+Design notes, worked out step by step. Status: **built** (parts 1–4, Codex
+approvals included, and the charter split).
 Builds on PR #92 (orchestrator charter template and guide).
 
 ## Idea
@@ -197,17 +197,27 @@ Build rules:
 
 1. Ours is the **only** `PermissionRequest` entry agent-007 passes (position
    is in the key).
-2. The command never changes: script at a fixed path
-   (`~/.agent-007/hooks/permission-request.js`), port via env var.
+2. The command never changes: as built, `"<node>" "<server/permission-hook.js>"`
+   with no argument, fixed for the server's life. The worker's MCP config
+   (board address and token, 0600) reaches the hook as a path in
+   `AGENT007_HOOK_CONFIG`, set on that worker's PTY only; Claude Code's hook
+   still takes it as an argument.
 3. **Get the hash at startup from Codex itself**: run `codex app-server` with
    our `-c` hook and read it from `hooks/list`. Don't hardcode (the path
    includes the home directory) or reimplement the hashing (a Codex update
    could change it). Codex not installed → skip; no Codex workers to hook.
 4. `timeout` above Billion's 2-minute wait; it's in the hash, so pick once.
 
-To check at build time: behaviour when the user also has their own
-`PermissionRequest` hook in `~/.codex/hooks.json` (both run; which decision
-wins?).
+Checked at build time (codex-cli 0.157.0, app-server turns with
+`approvalPolicy: "on-request"` and a read-only sandbox, stub hooks, a scratch
+`CODEX_HOME`): with the user's own `PermissionRequest` hook in
+`~/.codex/hooks.json`, both run, side by side (keys `…/hooks.json:…:0:0` and
+ours, `/<session-flags>/…:0:0`, so ours stays trusted). **A deny from either
+wins**; failing that an allow from either stands; only when neither decides
+does the dialog appear. So a user hook that denies overrides Billion's allow,
+and a user hook that allows lets a request through that Billion left to the
+owner. Our `hooks.state` flag merges into the user's `[hooks.state]`: their
+own trusted hooks stay trusted.
 
 ## Step 3 — first run: introduction
 
@@ -721,7 +731,7 @@ anywhere but Telegram, and there is no paid transcription.
    to end: Billion added a repo, posted a no-PR card, the worker finished,
    the `[Job board]` notice woke Billion, it read the result and accepted
    the card — Done in 41 s.
-4. **Approvals — built for Claude Code.** Workers on Billion's cards get a
+4. **Approvals — built.** Claude Code workers on Billion's cards get a
    `--settings` with a `PermissionRequest` hook (`server/permission-hook.js`)
    that posts the request to `POST /hook/permission` with the worker's own
    agent token, read from its 0600 MCP config (not an env var: every child
@@ -739,10 +749,16 @@ anywhere but Telegram, and there is no paid transcription.
    - Approvals fire only when a worker would show a dialog: in `auto` mode
      the classifier decides most things itself, and a user allow list (yours
      allows all `Bash`) skips the dialog entirely.
-   - **Codex: not wired.** The recipe is known (two `-c` flags: the hook and
-     its trusted hash, read from `codex app-server` `hooks/list` at startup),
-     but Codex isn't installed here to build and test it against. Codex
-     workers keep asking the owner.
+   - **Codex: built** (#98). Two `-c` flags, the hook and its trusted hash
+     (see "Codex hook trust"); the hash comes from `codex app-server`
+     `hooks/list` once at server start, and only if the one session-flags
+     entry it reports is exactly our command, timeout and key. No codex, or
+     any other answer: Codex workers keep asking the owner. Verified live on
+     a scratch server with Billion itself on Codex and the worker in
+     `manual`: Billion answered `owner` (the worker's own dialog appeared),
+     then, briefed, `allow`, and the command ran and the card closed. A
+     Codex upgraded under a running server hashes anew; its workers then
+     hold the hook for review until the server restarts.
 
 Each part is useful without the next.
 
