@@ -143,7 +143,7 @@ server/
   billion.js       Billion's folder, templates and charter refresh (docs/BILLION.md)
   account-migration.js  The owner's Claude account switch: backup, token and account-block write, check, rollback, retire (docs/FEATURES.md)
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
-  permission-hook.js  Claude Code PermissionRequest hook for workers on Billion's cards
+  permission-hook.js  PermissionRequest hook (Claude Code and Codex) for workers on Billion's cards
   agent-mcp.js     Per-session MCP config for spawned Claude Code and Codex agents
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, and the Codex session id to resume, read off its transcripts (re-spawn)

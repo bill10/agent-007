@@ -262,7 +262,7 @@ server/
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
   account-migration.js  The owner's Claude account switch (backup, Keychain or .credentials.json write, ~/.claude.json account block, check, rollback, retire; armed, it runs at Billion's first hard limit)
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
-  permission-hook.js  Claude Code PermissionRequest hook a worker on Billion's cards runs
+  permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
   agent-mcp-bridge.js  Codex stdio bridge to the board's HTTP endpoint
   agent-transcripts.js  Which CLI last ran in a worktree, read off its transcripts (re-spawn fallback)

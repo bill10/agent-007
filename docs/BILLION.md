@@ -731,7 +731,7 @@ anywhere but Telegram, and there is no paid transcription.
    to end: Billion added a repo, posted a no-PR card, the worker finished,
    the `[Job board]` notice woke Billion, it read the result and accepted
    the card — Done in 41 s.
-4. **Approvals — built for Claude Code.** Workers on Billion's cards get a
+4. **Approvals — built.** Claude Code workers on Billion's cards get a
    `--settings` with a `PermissionRequest` hook (`server/permission-hook.js`)
    that posts the request to `POST /hook/permission` with the worker's own
    agent token, read from its 0600 MCP config (not an env var: every child
