@@ -414,8 +414,8 @@ export const TELL_OWNER_TOOL = {
   description:
     'Send the owner a reply or status update that needs no answer ("Got it", '
     + '"Restart looks clean"): it shows in the owner\'s "Billion" chat tab, and on '
-    + 'their phone over Telegram when that is set up. Unlike notify_owner it files '
-    + 'no numbered question. Use it to answer an [Owner via app] or [Owner via '
+    + 'their phone over Telegram when that is set up and their last message did '
+    + 'not come from the tab. Unlike notify_owner it files no numbered question. Use it to answer an [Owner via app] or [Owner via '
     + 'Telegram] message that is not a question. Shares notify_owner\'s limit of a '
     + 'few per minute.',
   inputSchema: {
@@ -758,7 +758,9 @@ const CALLS = {
     const result = ctx.tellOwner ? await ctx.tellOwner(args.text) : { error: 'Only Billion can message the owner.' };
     if (result.error) return toolText(result.error, true);
     return toolText(result.note ? `Shown in the owner's Billion tab. ${result.note}`
-      : result.telegram ? 'Shown in the owner\'s Billion tab and sent on Telegram.' : 'Shown in the owner\'s Billion tab (Telegram is not set up).');
+      : result.telegram ? 'Shown in the owner\'s Billion tab and sent on Telegram.'
+        : result.tabOnly ? 'Shown in the owner\'s Billion tab (their last message came from the tab, so not sent on Telegram).'
+          : 'Shown in the owner\'s Billion tab (Telegram is not set up).');
   },
 
   [RESOLVE_QUESTION_TOOL.name]: async (args, ctx) => {

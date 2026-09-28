@@ -8,6 +8,7 @@ import { join } from 'path';
 import {
   notifyOwner, tellOwner, sendTelegram, handleUpdate, pollOnce, startTelegram, stopTelegram,
   waitingItems, dismissWaiting, redact, NOTIFY_LIMIT, NOTIFY_WINDOW_MS, chatMessages,
+  ownerSays, setOwnerChannel, lastOwnerChannel,
 } from '../server/owner.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { dropMessages } from '../server/messages.js';
@@ -32,6 +33,7 @@ beforeEach(() => {
   fetchMock = vi.fn(async () => reply(true));
   vi.stubGlobal('fetch', fetchMock);
   rmSync(join(CONFIG_DIR, 'waiting.json'), { force: true });
+  setOwnerChannel(null);
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -41,12 +43,12 @@ afterEach(() => {
 });
 
 describe('notify_owner', () => {
-  it('sends "Billion: <text>" to the owner\'s chat and pins it', async () => {
+  it('sends "Q<n>: <text>", no "Billion" prefix, to the owner\'s chat and pins it', async () => {
     const broadcast = vi.fn();
     expect(await notifyOwner('Spend $20 on a domain? I recommend yes.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, n: 1 });
     const [c] = calls();
     expect(c.url).toBe(`https://api.telegram.org/bot${TOKEN}/sendMessage`);
-    expect(c.body).toEqual({ chat_id: '42', text: 'Billion (Q1): Spend $20 on a domain? I recommend yes.' });
+    expect(c.body).toEqual({ chat_id: '42', text: 'Q1: Spend $20 on a domain? I recommend yes.' });
     expect(waitingItems().map(i => i.text)).toEqual(['Spend $20 on a domain? I recommend yes.']);
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'waiting-list' }));
   });
@@ -83,6 +85,43 @@ describe('notify_owner', () => {
     expect((await notifyOwner('  ', { env: ENV, now: now() })).error).toMatch(/empty/);
   });
 
+  describe('follows the channel of the owner\'s last message', () => {
+    const texts = () => calls().filter(c => c.url.endsWith('/sendMessage')).map(c => c.body.text);
+    beforeEach(() => { const b = billion(); sessions.set(b.id, b); });
+
+    it('reaches the phone before any owner message this run', async () => {
+      expect(lastOwnerChannel()).toBe(null);
+      expect(await tellOwner('Morning status', { env: ENV, now: now() })).toEqual({ ok: true, telegram: true });
+      expect(texts()).toEqual(['Morning status']);
+    });
+
+    it('stays in the tab after a message from the app', async () => {
+      expect(await ownerSays('how is the build?', { env: ENV })).toEqual({ ok: true });
+      expect(await tellOwner('Green.', { env: ENV, now: now() })).toEqual({ ok: true, telegram: false, tabOnly: true });
+      expect(texts()).toEqual([]);
+      expect(chatMessages().at(-1)).toMatchObject({ from: 'billion', text: 'Green.' });
+    });
+
+    it('goes to the phone again once the owner writes on Telegram', async () => {
+      await ownerSays('from the tab', { env: ENV });
+      expect(await handleUpdate({ update_id: 1, message: { chat: { id: 42 }, text: 'from the phone' } }, { env: ENV })).toBe('delivered');
+      expect(await tellOwner('Got it.', { env: ENV, now: now() })).toEqual({ ok: true, telegram: true });
+      expect(texts()).toEqual(['Got it.']);
+    });
+
+    it('never holds back a notify_owner question', async () => {
+      await ownerSays('from the tab', { env: ENV });
+      expect((await notifyOwner('Merge #12?', { urgency: 'blocking', env: ENV, now: now() })).ok).toBe(true);
+      expect(texts()).toEqual([expect.stringMatching(/^! Q\d+: Merge #12\?$/)]);
+    });
+
+    it('says in the tool result that it stayed in the tab', async () => {
+      const call = handleMcpMessage({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'tell_owner', arguments: { text: 'hi' } } },
+        { session: { isBillion: true }, tellOwner: async () => ({ ok: true, telegram: false, tabOnly: true }) });
+      expect((await call).result.content[0].text).toMatch(/Billion tab \(their last message came from the tab, so not sent on Telegram\)/);
+    });
+  });
+
   it('is Billion\'s tool only, over MCP', async () => {
     const list = (session) => handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { session }).result.tools.map(t => t.name);
     expect(list({ isBillion: true })).toContain('notify_owner');
@@ -94,10 +133,10 @@ describe('notify_owner', () => {
 });
 
 describe('tell_owner', () => {
-  it('sends "Billion: <text>", shows a bubble in the Billion tab and files no Waiting item', async () => {
+  it('sends the text alone, shows a bubble in the Billion tab and files no Waiting item', async () => {
     const broadcast = vi.fn();
     expect(await tellOwner('Got it, restart looks clean.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, telegram: true });
-    expect(calls()).toEqual([{ url: `https://api.telegram.org/bot${TOKEN}/sendMessage`, body: { chat_id: '42', text: 'Billion: Got it, restart looks clean.' } }]);
+    expect(calls()).toEqual([{ url: `https://api.telegram.org/bot${TOKEN}/sendMessage`, body: { chat_id: '42', text: 'Got it, restart looks clean.' } }]);
     expect(waitingItems()).toEqual([]);
     expect(broadcast.mock.calls.map(c => c[0].type)).toEqual(['chat-message']);
     expect(chatMessages().at(-1)).toMatchObject({ from: 'billion', text: 'Got it, restart looks clean.' });

@@ -269,8 +269,10 @@ transcription errors, and ask back if something is ambiguous and risky. A
 `notify_owner` is for questions and decisions only: every call files a
 numbered item the owner has to clear. For replies and status updates that
 need no answer ("Got it, restart looks clean"), use `tell_owner`: it shows in
-the *Billion* tab and reaches the owner's phone the same way, but files
-nothing. Answer an `[Owner via app]` or `[Owner via Telegram]` message that
+the *Billion* tab and files nothing. It reaches the owner's phone only when
+their last message came over Telegram (or they have sent none since the
+server started): when they are talking to you in the tab, it stays there.
+Its result says which. Answer an `[Owner via app]` or `[Owner via Telegram]` message that
 isn't a question with `tell_owner`, not only in your terminal: the owner is
 reading the tab or their phone, not your terminal.
 
@@ -295,7 +297,7 @@ The `agent-007-board` MCP tools:
 - `add_repo`: puts a repository on the board so cards can be posted in it.
 - `notify_owner`: puts a question in front of the owner (see **Escalate**).
 - `tell_owner`: a reply or status update to the owner (their *Billion* tab,
-  and their phone) that needs no answer; files no question (see **Escalate**).
+  and their phone unless they last wrote from the tab) that needs no answer; files no question (see **Escalate**).
 - `resolve_question`: marks a *Billion* tab question answered when the
   owner answered it elsewhere, like in your terminal (see **Escalate**).
 - `answer_permission`: your answer to a worker's permission request (see

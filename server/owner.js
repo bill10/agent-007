@@ -322,7 +322,13 @@ export function answerLine(prefix, item, answer) {
 
 // What the owner's Telegram shows for a question; "! " marks a blocking one.
 const urgentMark = (urgency) => (urgency === 'blocking' ? '! ' : '');
-const questionText = (item) => `${urgentMark(item.urgency)}Billion (Q${item.n}): ${item.text}`;
+const questionText = (item) => `${urgentMark(item.urgency)}Q${item.n}: ${item.text}`;
+
+// Where the owner's last message came from this server run: 'app', 'telegram',
+// or null before any. tell_owner follows it to the phone only when it is not 'app'.
+let ownerChannel = null;
+export const lastOwnerChannel = () => ownerChannel;
+export function setOwnerChannel(via) { ownerChannel = via; }
 
 // An answer from the app or Telegram (via 'app' or 'telegram'): into Billion's
 // terminal, then the item is answered everywhere. typed: the owner wrote it
@@ -340,6 +346,7 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   if (!sendText(billion, answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body))) {
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
+  setOwnerChannel(via);
   const done = await markAnswered(id, body, via, { broadcast, env });
   if (typed) addChat({ from: 'owner', via, text: body, re: item.n }, broadcast, env);
   return { ok: true, item: done };
@@ -357,6 +364,7 @@ export async function ownerSays(text, { answers, broadcast, env = process.env } 
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running; start it, then send again.' };
   if (!sendText(billion, `${APP_PREFIX} ${body}`)) return { error: 'Billion has too much waiting for it; try again in a while.' };
+  setOwnerChannel('app');
   addChat({ from: 'owner', via: 'app', text: body }, broadcast, env);
   return { ok: true };
 }
@@ -427,7 +435,7 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
   const keyboard = item?.choices && {
     reply_markup: { inline_keyboard: item.choices.map((c, i) => [{ text: c === item.recommended ? `${c} (recommended)` : c, callback_data: `${item.id}:${i}` }]) },
   };
-  const result = await sendToOwner(item ? questionText(item) : `${urgentMark(urgency)}Billion: ${body}`, { env, platform, extra: keyboard || undefined });
+  const result = await sendToOwner(item ? questionText(item) : `${urgentMark(urgency)}${body}`, { env, platform, extra: keyboard || undefined });
   if (result.error) return { pinned: true, n: item?.n, error: `Put in the owner's Billion tab${n}, but the Telegram send failed: ${result.error}` };
   // Kept so a reply to this message, or a tap on its buttons, finds the question.
   if (item && result.messageId) {
@@ -440,7 +448,9 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
 }
 
 // --- tell_owner: a reply or status update, no Waiting item, no badge ---
-// Always a bubble in the Billion tab; on the phone too when Telegram is set up.
+// Always a bubble in the Billion tab; on the phone too when Telegram is set up
+// and the owner's last message did not come from the tab (none yet counts as
+// the phone, so a status update still reaches someone away from the browser).
 // { ok, telegram } (telegram: sent there too), { ok, note } when only the
 // Telegram send failed, or { error }.
 
@@ -457,7 +467,8 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
   addChat({ from: 'billion', text: body }, broadcast, env);
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) return { ok: true, telegram: false };
-  const result = await sendToOwner(`Billion: ${body}`, { env, platform });
+  if (ownerChannel === 'app') return { ok: true, telegram: false, tabOnly: true };
+  const result = await sendToOwner(body, { env, platform });
   if (result.error) return { ok: true, note: `The Telegram send failed: ${result.error}` };
   return { ok: true, telegram: true };
 }
@@ -489,6 +500,7 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   const typed = typeof msg.text === 'string' && msg.text.trim() ? msg.text : null;
   if (!note && !typed) return 'ignored';
   saveOwnerMode(note ? 'voice' : 'text');
+  setOwnerChannel('telegram');
   // A typed reply to one of Billion's questions answers that question.
   const repliedTo = typed && msg.reply_to_message?.message_id;
   const question = repliedTo && waitingItems().find(i => i.tgMessageId === repliedTo && i.status === 'open');
