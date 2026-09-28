@@ -956,16 +956,18 @@ terminal panel on this tab.
 - An open question's bubble has an `--state-message` left stripe. Head: `Q3`
   in accent (a bold "!" before it when blocking, dimmed when low). Choices
   are outline buttons, the recommended one first with an accent border and a
-  small uppercase "recommended" tag, then *Dismiss*. Once answered the
-  buttons collapse to "you answered: ..." in italic `--text-muted`.
+  small uppercase "recommended" tag, then *Reply* (an underlined accent
+  link) and *Dismiss*. Once answered the buttons collapse to "you answered:
+  ..." in italic `--text-muted`, with an *Undo* link for a minute.
 - The strip lists open questions as small outline chips, blocking first, then
   normal, then low, oldest first within each; tapping one scrolls the thread
-  to it and flashes it (an outline under `prefers-reduced-motion`). Hidden
+  to it, flashes it and points the box at it (an outline under `prefers-reduced-motion`). Hidden
   when none are open. "New messages ↓" (an accent pill) appears when a
   message arrives while scrolled up.
 - The text box: a textarea with an accent Send button. Enter sends,
-  Shift+Enter is a new line. While a question is open a line above it says
-  "Answers Q3: ..." with × to send as a plain message instead.
+  Shift+Enter is a new line. It sends a plain message unless the owner
+  tapped *Reply* on a question: then a line above it says "Answers Q3: ..."
+  with × to send as a plain message instead.
 - After a send or tap the controls dim until the server answers; a refusal
   ("Billion is not running") shows in `--state-disconnected` and the text
   stays in the box.

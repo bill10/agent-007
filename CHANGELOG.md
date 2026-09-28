@@ -5,6 +5,16 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.25.0.0] - 2026-09-28
+
+### Fixed
+
+- **Typing in the Billion chat never answers a question you did not pick.** With questions open, a typed line used to be filed as the answer to the oldest one, so ordinary messages closed questions they had nothing to do with. Now it is always a plain message to Billion, like on Telegram; to answer by typing, tap *Reply* under the question (or its chip in the strip) and the box says "Answers Q3". Choice buttons still answer with one tap.
+
+### Added
+
+- **Undo an answer, and `reopen_question`.** *Undo* sits beside "you answered: ..." for a minute: the question opens again and Billion is told the answer no longer stands. After that, Billion puts a wrongly answered question back with its new `reopen_question` board tool (by number or id; nothing is sent to Telegram).
+
 ## [0.24.0.0] - 2026-09-28
 
 ### Added
