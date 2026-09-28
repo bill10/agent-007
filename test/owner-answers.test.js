@@ -83,7 +83,7 @@ describe('choices and recommended', () => {
     const [item] = waitingItems();
     expect(item).toMatchObject({ n: 1, status: 'open', choices: ['yes', 'no'], recommended: 'yes', tgMessageId: 900 });
     const { body } = calls()[0];
-    expect(body.text).toBe('Billion (Q1): Buy the domain?');
+    expect(body.text).toBe('Q1: Buy the domain?');
     const buttons = body.reply_markup.inline_keyboard.flat();
     expect(buttons.map(x => x.text)).toEqual(['yes (recommended)', 'no']);
     expect(buttons.map(x => x.callback_data)).toEqual([`${item.id}:0`, `${item.id}:1`]);
@@ -103,7 +103,7 @@ describe('answering in the app', () => {
     expect(waitingItems()[1]).toMatchObject({ status: 'answered', answer: 'yes', answeredVia: 'app' });
     expect(broadcast).toHaveBeenCalledWith(waitingPayload());
     // The phone's copy says so and loses its buttons.
-    expect(calls()).toEqual([{ method: 'editMessageText', body: { chat_id: '42', message_id: 900, text: `Billion (Q2): ${item.text}\n\nAnswered in app: yes` } }]);
+    expect(calls()).toEqual([{ method: 'editMessageText', body: { chat_id: '42', message_id: 900, text: `Q2: ${item.text}\n\nAnswered in app: yes` } }]);
   });
 
   it('edits the phone\'s copy even when the app answered before the send came back', async () => {
@@ -114,7 +114,7 @@ describe('answering in the app', () => {
     expect((await answerWaiting(waitingItems()[0].id, 'yes', 'app', { env: ENV })).ok).toBe(true);
     finish();
     await asked;
-    expect(calls().at(-1)).toEqual({ method: 'editMessageText', body: { chat_id: '42', message_id: 901, text: 'Billion (Q1): Ship it?\n\nAnswered in app: yes' } });
+    expect(calls().at(-1)).toEqual({ method: 'editMessageText', body: { chat_id: '42', message_id: 901, text: 'Q1: Ship it?\n\nAnswered in app: yes' } });
   });
 
   it('keeps the card open when Billion is not running, and refuses a second answer', async () => {
@@ -145,7 +145,7 @@ describe('answering on Telegram', () => {
     expect(typed()).toContain('[Owner via Telegram] Q1: no (re: "Buy it?")');
     expect(waitingItems()[0]).toMatchObject({ status: 'answered', answer: 'no', answeredVia: 'telegram' });
     const sent = calls();
-    expect(sent.find(c => c.method === 'editMessageText').body.text).toBe('Billion (Q1): Buy it?\n\nAnswered: no');
+    expect(sent.find(c => c.method === 'editMessageText').body.text).toBe('Q1: Buy it?\n\nAnswered: no');
     expect(sent.find(c => c.method === 'answerCallbackQuery').body).toEqual({ callback_query_id: 'cq1', text: 'Sent: no' });
     // A second tap only hears that it was answered.
     expect(await handleUpdate(tap(42, `${item.id}:0`, 'cq2'), { env: ENV })).toBe('stale');
@@ -232,7 +232,7 @@ describe('resolve_question', () => {
     expect(result.item).toMatchObject({ n: 1, status: 'answered', answer: 'yes, ship', answeredVia: 'terminal' });
     expect(openCount()).toBe(1);
     expect(broadcast).toHaveBeenCalledWith(waitingPayload());
-    expect(calls()).toEqual([{ method: 'editMessageText', body: { chat_id: '42', message_id: 900, text: 'Billion (Q1): Ship it?\n\nAnswered in terminal: yes, ship' } }]);
+    expect(calls()).toEqual([{ method: 'editMessageText', body: { chat_id: '42', message_id: 900, text: 'Q1: Ship it?\n\nAnswered in terminal: yes, ship' } }]);
     expect(typed()).toBe('');
   });
 
@@ -350,7 +350,7 @@ describe('urgency', () => {
     await ask('Merge #12?', { urgency: 'blocking' });
     await ask('Name?', { urgency: 'normal' });
     await ask('Rename later?', { urgency: 'low' });
-    expect(calls().map(c => c.body.text)).toEqual(['! Billion (Q1): Merge #12?', 'Billion (Q2): Name?', 'Billion (Q3): Rename later?']);
+    expect(calls().map(c => c.body.text)).toEqual(['! Q1: Merge #12?', 'Q2: Name?', 'Q3: Rename later?']);
   });
 
   it('reads as normal on items saved before it existed', () => {

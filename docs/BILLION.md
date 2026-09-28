@@ -577,7 +577,8 @@ usage limit (below).
   and commit now, in case you're switched.` At a hard limit, once Billion has
   printed nothing for 5 seconds, it switches to the other CLI as the button
   does, saves the reason in `billion-agent.json`, logs one line and tells the
-  owner on Telegram (the browser's notice without it). It never switches back
+  owner through `tell_owner`'s rule below (a browser notice when it does not
+  reach the phone). It never switches back
   on a timer, and never twice within 30 minutes: a limit on the new CLI that
   soon, or a target CLI that is not installed or not logged in (`claude auth
   status --json`, `codex login status`), leaves Billion where it is and puts
@@ -617,9 +618,18 @@ is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
 it `recommended`.
 
 Replies and status updates that need no answer ("Got it, restart looks
-clean") go through `tell_owner` instead: same Telegram send, voice rule and
-per-minute limit, but no numbered item and no badge. It always shows in the
-Billion tab, with or without Telegram.
+clean") go through `tell_owner` instead: no numbered item, no badge, the same
+per-minute limit. It always shows in the Billion tab, but reaches Telegram
+only when your last message came from there, so a conversation in the tab
+does not buzz the phone. The server remembers the channel of your latest
+message (`[Owner via app]` or `[Owner via Telegram]`, answers included) until
+it restarts; before your first message a `tell_owner` goes to the phone too,
+so a status update still finds you away from the browser. Server notices
+(account-switch results, a Billion switched at its limit) follow the same
+rule. `notify_owner` questions always go to both.
+
+On Telegram the bot is Billion's own, so messages carry no name: a question
+reads `Q3: <text>` (`! Q3: <text>` when blocking), a reply is its text alone.
 
 When you answer a question somewhere else, say by typing in Billion's
 terminal, Billion closes it with `resolve_question`: it moves to **Answered**
