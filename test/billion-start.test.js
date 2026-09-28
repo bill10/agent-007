@@ -208,7 +208,7 @@ describe('switchBillion', () => {
   });
 });
 
-describe('the Start button (billion-start)', { repeats: 50 }, () => {
+describe('the Start button (billion-start)', () => {
   let url;
   beforeAll(async () => {
     server.listen(0, '127.0.0.1');
@@ -240,11 +240,8 @@ describe('the Start button (billion-start)', { repeats: 50 }, () => {
 
   it('starts Billion and focuses it in the window that asked', async () => {
     const { ws, next } = await open();
-    const t0 = performance.now();
     ws.send(JSON.stringify({ type: 'billion-start' }));
-    const m = await next('session-created');
-    console.log('BSTART_MS', Math.round(performance.now() - t0));
-    expect(m).toMatchObject({ isBillion: true, focus: true, name: 'Billion' });
+    expect(await next('session-created')).toMatchObject({ isBillion: true, focus: true, name: 'Billion' });
   });
 
   it('shows the error when Billion cannot start', async () => {
