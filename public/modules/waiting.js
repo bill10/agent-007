@@ -15,6 +15,7 @@ let sending = null;         // the nonce of the text box's message on its way
 let sendError = '';
 let detached = null;        // the question the owner chose not to answer with the box
 let nonces = 0;
+const SEND_TIMEOUT_MS = 20 * 1000;
 let lastShown = null;       // the newest message when the thread was last drawn
 
 export const openCount = () => waitingItems.filter(item => item.status === 'open').length;
@@ -99,6 +100,13 @@ function submit() {
   } else {
     sending = nonce;
     sendError = '';
+    // The socket dropped before the server answered: free the box, text kept.
+    setTimeout(() => {
+      if (sending !== nonce) return;
+      sending = null;
+      sendError = 'No answer from the server. Check the thread before sending again.';
+      renderComposer();
+    }, SEND_TIMEOUT_MS);
   }
   renderComposer();
 }

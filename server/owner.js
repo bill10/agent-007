@@ -221,15 +221,23 @@ export function chatMessages() {
   } catch (err) {
     // No thread yet (the first start with the Billion tab): it opens on the
     // questions already asked, so the open ones have a bubble to answer.
-    if (err.code !== 'ENOENT') return [];
+    if (err.code !== 'ENOENT') {
+      // Kept aside, not overwritten by the next message.
+      try { renameSync(chatPath(), `${chatPath()}.bad`); } catch {}
+      console.error('The Billion chat could not be read; moved it to chat.json.bad and started a new one:', err.message);
+      return [];
+    }
     return waitingItems().filter(item => item.status !== 'dismissed')
       .map(item => ({ id: `q-${item.id}`, at: item.at, from: 'billion', text: item.text, q: questionState(item) }));
   }
 }
 
 function saveChat(messages) {
+  // The oldest go first, except open questions: their bubble is where they are answered.
+  let over = messages.length - CHAT_CAP;
+  const kept = messages.filter(m => !(over > 0 && m.q?.status !== 'open' && over--));
   try {
-    writeFileSync(`${chatPath()}.tmp`, JSON.stringify(messages.slice(-CHAT_CAP)));
+    writeFileSync(`${chatPath()}.tmp`, JSON.stringify(kept));
     renameSync(`${chatPath()}.tmp`, chatPath());
   } catch (err) {
     console.error('Could not save the Billion chat:', err.message);
@@ -275,13 +283,14 @@ export function checkChoices(choices, recommended) {
 
 export const URGENCIES = ['blocking', 'normal', 'low'];
 
-export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal' } = {}) {
+export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal', env = process.env } = {}) {
   const items = waitingItems();
+  text = redact(text, env);   // shown in every browser, like the thread
   const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency };
   if (choices) item.choices = choices.map(c => c.trim());
   if (recommended) item.recommended = recommended.trim();
   // The thread first: one not written yet starts from the list as it stands.
-  addChat({ from: 'billion', text, q: questionState(item) }, broadcast);
+  addChat({ from: 'billion', text, q: questionState(item) }, broadcast, env);
   saveWaiting([...items, item]);
   broadcast?.(waitingPayload());
   return item;
@@ -406,7 +415,7 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
   }
   sent.push(now);
   let item;
-  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency }); } catch (err) {
+  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency, env }); } catch (err) {
     console.error('Could not save the Waiting list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';

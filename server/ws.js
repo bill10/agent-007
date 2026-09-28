@@ -31,6 +31,12 @@ export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Conti
 const clients = new Set();
 
 export function broadcast(message) {
+  // The owner's chat with Billion (server/owner.js) is theirs alone: their
+  // browser, and nobody's while user accounts are on.
+  if (message.type === 'chat-message') {
+    if (mayAnswerOwner()) broadcastToBrowsers(message);
+    return;
+  }
   const data = JSON.stringify(message);
   for (const ws of clients) {
     if (ws.readyState === 1) ws.send(data);
@@ -386,13 +392,14 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
     ws.send(JSON.stringify(waitingPayload()));
-    ws.send(JSON.stringify(chatPayload()));
     // The page this server serves: an Origin that is allowed and is this
     // server's own host. A plain socket from a shell sends none, and a page
     // on another local port has another; both are refused the account switch.
     ws.fromBrowser = fromBrowser(req);
     // The owner's Claude account state, only where the owner may act on it.
     if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
+    // So is their chat with Billion.
+    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(chatPayload()));
 
     broadcastPresence();
 

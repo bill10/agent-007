@@ -4,7 +4,7 @@
 // Telegram messages in the same thread, the cap, and the token redacted.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { rmSync, writeFileSync } from 'fs';
+import { rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
   ownerSays, chatMessages, chatPayload, notifyOwner, tellOwner, handleUpdate, dismissWaiting, waitingItems,
@@ -103,10 +103,29 @@ describe('Billion\'s side of the thread', () => {
     expect(chatMessages()).toEqual([expect.objectContaining({ from: 'billion', text: 'Asked before the chat', q: expect.objectContaining({ n: 1, status: 'open' }) })]);
   });
 
-  it('reads a missing or broken file as an empty thread', () => {
+  it('keeps an open question past the cap: its bubble is where it is answered', async () => {
+    const openQ = { id: 'oq', at: new Date(0).toISOString(), from: 'billion', text: 'still open?', q: { id: 'x', n: 1, status: 'open' } };
+    const old = Array.from({ length: CHAT_CAP - 1 }, (_, i) => ({ id: `m${i}`, at: new Date(i + 1).toISOString(), from: 'billion', text: `m${i}` }));
+    writeFileSync(join(CONFIG_DIR, 'chat.json'), JSON.stringify([openQ, ...old]));
+    await tellOwner('newest', { env: {}, now: now() });
+    const kept = chatMessages();
+    expect(kept).toHaveLength(CHAT_CAP);
+    expect(kept.map(m => m.id).slice(0, 2)).toEqual(['oq', 'm1']);
+  });
+
+  it('reads a missing file as an empty thread, and moves a broken one aside rather than overwrite it', async () => {
     expect(chatMessages()).toEqual([]);
     writeFileSync(join(CONFIG_DIR, 'chat.json'), '{nope');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(chatMessages()).toEqual([]);
+    expect(readFileSync(join(CONFIG_DIR, 'chat.json.bad'), 'utf8')).toBe('{nope');
+    error.mockRestore();
+  });
+
+  it('redacts the token from a question too, in the Waiting list the strip shows', async () => {
+    await notifyOwner(`use ${TOKEN}?`, { env: ENV, now: now() });
+    expect(waitingItems()[0].text).toBe('use <token>?');
+    expect(chatMessages()[0].text).toBe('use <token>?');
   });
 });
 
