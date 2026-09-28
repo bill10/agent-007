@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.21.0.0] - 2026-09-28
+
+### Added
+
+- **A card sent back to To do waits a minute before it is dispatched again.** Moving a card back from In progress or Review, or Billion sending one back with `close_job`, used to hand it to a new worker within two seconds, before anyone could fix the text that sent it back. Now the card is held for 60 seconds and says "held · dispatching in Ns"; `edit_job` and the board's Edit work during the hold without lifting it, and **Dispatch now** on the card sends it at once. A freshly posted card still goes out straight away.
+
 ## [0.20.0.0] - 2026-09-27
 
 ### Added
