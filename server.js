@@ -26,7 +26,7 @@ import {
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
-import { createSessionFromConfig } from './server/pty.js';
+import { createSessionFromConfig, killSessionProcesses } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
@@ -153,7 +153,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
   if (!session) return;
   clearInterval(session.stateCheckInterval);
   clearTimeout(session.scanTimer);
-  try { session.pty.kill(); } catch {}
+  killSessionProcesses(session);
 
   removeActiveSession(session.worktreePath, broadcast);
   const { orphaned, reason } = await removeWorktree(session, { discardChanges });
