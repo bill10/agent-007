@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { waitingPayload, dismissWaiting, answerWaiting, chatPayload, ownerSays } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
@@ -517,6 +517,15 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           if (typeof msg.id !== 'string') break;
           const result = mayAnswerOwner()
             ? await answerWaiting(msg.id, msg.answer, 'app', { broadcast })
+            : { error: 'Only the owner answers Billion, and with user accounts on nobody does.' };
+          if (result.error) ws.send(JSON.stringify({ type: 'waiting-error', id: msg.id, error: result.error }));
+          break;
+        }
+        // Undo on "you answered: ...", for a minute after.
+        case 'waiting-reopen': {
+          if (typeof msg.id !== 'string') break;
+          const result = mayAnswerOwner()
+            ? await reopenQuestion({ id: msg.id }, { broadcast, owner: true })
             : { error: 'Only the owner answers Billion, and with user accounts on nobody does.' };
           if (result.error) ws.send(JSON.stringify({ type: 'waiting-error', id: msg.id, error: result.error }));
           break;

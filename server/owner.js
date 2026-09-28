@@ -256,7 +256,7 @@ export function addChat(message, broadcast, env = process.env) {
 const questionState = (item) => ({
   id: item.id, n: item.n, urgency: item.urgency, status: item.status,
   ...(item.choices ? { choices: item.choices, recommended: item.recommended } : {}),
-  ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia } : {}),
+  ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt } : {}),
 });
 
 // A question's bubble follows it: answered, dismissed.
@@ -384,6 +384,33 @@ export async function resolveQuestion({ number, id } = {}, answer, { broadcast, 
   if (item.status === 'dismissed') return { error: `Q${item.n} was dismissed.` };
   if (item.status === 'answered') return { error: `Q${item.n} was answered already: ${item.answer}` };
   return { ok: true, item: await markAnswered(item.id, body, 'terminal', { broadcast, env }) };
+}
+
+// How long the owner's Undo stays under "you answered: ...".
+export const UNDO_MS = 60 * 1000;
+
+// An answer taken back: the question is open again, in every browser. From
+// Billion (reopen_question) nothing more is said anywhere: it knows. From the
+// owner's Undo (owner: true, within UNDO_MS), Billion hears that the answer it
+// was given no longer stands. Telegram is left as it is. { ok, item } or { error }.
+export async function reopenQuestion({ number, id } = {}, { broadcast, owner = false, now = Date.now() } = {}) {
+  const item = waitingItems().find(i => (id ? i.id === id : i.n === number));
+  const name = id ? `question ${id}` : `Q${number}`;
+  if (!item) return { error: `There is no ${name}.` };
+  if (item.status === 'open') return { error: `Q${item.n} is open already.` };
+  if (item.status === 'dismissed') return { error: `Q${item.n} was dismissed.` };
+  if (owner) {
+    if (!(now - Date.parse(item.answeredAt) <= UNDO_MS)) return { error: `Too late to undo Q${item.n}; tell Billion instead.` };
+    const billion = liveBillion();
+    if (!billion) return { error: 'Billion is not running' };
+    if (!sendText(billion, `${APP_PREFIX} Q${item.n}: undo my answer "${item.answer}"; the question is open again.`)) {
+      return { error: 'Billion has too much waiting for it; try again in a while.' };
+    }
+  }
+  const done = updateWaiting(item.id, { status: 'open', answer: undefined, answeredAt: undefined, answeredVia: undefined });
+  syncQuestion(done, broadcast);
+  broadcast?.(waitingPayload());
+  return { ok: true, item: done };
 }
 
 // The phone's copy of an answered question shows the answer, and loses its buttons.

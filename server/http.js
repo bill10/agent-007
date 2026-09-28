@@ -17,7 +17,7 @@ import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
-import { notifyOwner, tellOwner, resolveQuestion } from './owner.js';
+import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion } from './owner.js';
 import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
 import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
@@ -147,6 +147,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         resolveQuestion: (ref, answer) => (req.agentSession.isBillion
           ? resolveQuestion(ref, answer, { broadcast })
           : { error: 'Only Billion can resolve the owner\'s questions.' }),
+        reopenQuestion: (ref) => (req.agentSession.isBillion
+          ? reopenQuestion(ref, { broadcast })
+          : { error: 'Only Billion can reopen the owner\'s questions.' }),
         // Never logged: a screen can hold a secret that scrolled by.
         readAgentScreen: ({ name, lines }) => readAgentScreen({
           from: req.agentSession, name, lines, sessions,
