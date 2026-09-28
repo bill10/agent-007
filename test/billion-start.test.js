@@ -208,7 +208,7 @@ describe('switchBillion', () => {
   });
 });
 
-describe('the Start button (billion-start)', () => {
+describe('the Start button (billion-start)', { repeats: 50 }, () => {
   let url;
   beforeAll(async () => {
     server.listen(0, '127.0.0.1');
