@@ -150,6 +150,8 @@ describe('the hook in the worker\'s command line', () => {
     expect(pickCodexHookHash(list(ours, { ...ours, key: 'second' }))).toBe(null);
     expect(pickCodexHookHash(list(user))).toBe(null);
     expect(pickCodexHookHash(undefined)).toBe(null);
+    expect(pickCodexHookHash({ data: 'oops' })).toBe(null);
+    expect(pickCodexHookHash({ data: [{ hooks: {} }, null] })).toBe(null);
   });
 
   it('finds no hash, so hooks no Codex worker, without codex on the PATH', async () => {

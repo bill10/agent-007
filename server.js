@@ -408,7 +408,7 @@ async function startup() {
   // real server running on 7007 while the suite ran.
   sweepMcpConfigs();
   // Before anything spawns: a Codex worker on Billion's card is hooked only
-  // once Codex has told us the hook's hash (a second or so; skipped without codex).
+  // once Codex has told us the hook's hash (a second or so, 10 at most; skipped without codex).
   await startCodexHookLookup();
   loadConfig();
   // Reserved whether or not it runs: no other agent may take the name that

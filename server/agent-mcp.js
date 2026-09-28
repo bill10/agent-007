@@ -170,7 +170,8 @@ let codexHookHash = null;
 export const setCodexHookHash = (hash) => { codexHookHash = hash; };
 
 export function pickCodexHookHash(listResult) {
-  const hooks = (listResult?.data ?? []).flatMap(entry => entry?.hooks ?? []);
+  const list = (a) => (Array.isArray(a) ? a : []);
+  const hooks = list(listResult?.data).flatMap(entry => list(entry?.hooks));
   const ours = hooks.filter(h => h?.source === 'sessionFlags' && h.eventName === 'permissionRequest');
   const [hook] = ours;
   if (ours.length !== 1 || hook.key !== CODEX_HOOK_KEY || hook.command !== codexHookCommand()
@@ -178,7 +179,7 @@ export function pickCodexHookHash(listResult) {
   return /^sha256:[0-9a-f]{64}$/.test(hook.currentHash) ? hook.currentHash : null;
 }
 
-export function lookupCodexHookHash({ env = process.env, timeoutMs = 20_000 } = {}) {
+export function lookupCodexHookHash({ env = process.env, timeoutMs = 10_000 } = {}) {
   return new Promise((resolve) => {
     if (!commandExists('codex', env)) return resolve(null);
     let child;
