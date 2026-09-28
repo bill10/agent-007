@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, writeFileSync } from 'fs';
+import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, mkdirSync, existsSync, writeFileSync, rmSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { removeWorktree, createWorktree } from '../server/git.js';
+import { removeWorktree, createWorktree, discardWorktree, pruneWorktrees, scanForOrphanedWorktrees } from '../server/git.js';
+import { orphans } from '../server/state.js';
 
 // Real git against a real bare remote: this logic is entirely about what git
 // reports, so a stubbed test would only be testing the stub. These are the
@@ -243,5 +244,45 @@ describe('removeWorktree when the branch was pushed to a URL', () => {
     expect(existsSync(wt)).toBe(true);
     const remote = execFileSync('git', ['-C', repo, 'config', 'branch.bill10/url-offline.remote'], { encoding: 'utf8' }).trim();
     expect(remote).toBe('origin');
+  });
+});
+
+describe('discardWorktree', () => {
+  it('never deletes a folder that is neither a worktree nor under WORKTREE_DIR', async () => {
+    const { root, repo } = repoWithRemote();
+    const stray = join(root, 'not-a-worktree');
+    mkdirSync(stray);
+    expect(await discardWorktree(repo, stray)).toBe(false);
+    expect(await discardWorktree(repo, repo)).toBe(false);
+    expect(existsSync(stray)).toBe(true);
+    expect(existsSync(join(repo, 'README.md'))).toBe(true);
+  });
+
+  it('deletes in place when the folder cannot be moved to the trash', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/no-trash');
+    // A file where the trash folder should be makes the move impossible, as a
+    // worktree on another disk (EXDEV) would.
+    const trash = join(process.env.AGENT007_WORKTREE_DIR, '.trash');
+    // Earlier tests' trash is still being emptied in the background.
+    await vi.waitFor(() => expect(existsSync(trash) && readdirSync(trash).length).toBeFalsy());
+    rmSync(trash, { recursive: true, force: true });
+    writeFileSync(trash, '');
+    try {
+      expect(await discardWorktree(repo, wt)).toBe(true);
+    } finally { rmSync(trash); }
+    expect(existsSync(wt)).toBe(false);
+    expect(execFileSync('git', ['-C', repo, 'worktree', 'list'], { encoding: 'utf8' })).not.toContain('no-trash');
+  });
+
+  it('keeps the trash out of the orphan scan and empties it at startup', async () => {
+    // Still a valid worktree, as a trashed one is until the prune runs.
+    const { repo } = repoWithRemote();
+    const leftover = join(process.env.AGENT007_WORKTREE_DIR, '.trash', 'Old-123');
+    execFileSync('git', ['-C', repo, 'worktree', 'add', '-q', leftover, '-b', 'old']);
+    await scanForOrphanedWorktrees(() => {});
+    expect([...orphans.values()].some(o => o.worktreePath.includes('.trash'))).toBe(false);
+    await pruneWorktrees();
+    await vi.waitFor(() => expect(existsSync(leftover)).toBe(false));
   });
 });

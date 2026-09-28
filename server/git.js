@@ -1,9 +1,10 @@
 // Git operations — exec, worktree management, file tree scanning, diffs
 
 import { execFile as execFileCb } from 'child_process';
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, renameSync, statSync } from 'fs';
+import { rm } from 'fs/promises';
 import { mkdirSync } from 'fs';
-import { basename, isAbsolute, join, sep } from 'path';
+import { basename, isAbsolute, join, resolve, sep } from 'path';
 import { realpathSync } from 'fs';
 import { createHash } from 'crypto';
 import {
@@ -13,6 +14,9 @@ import {
 } from './state.js';
 import { saveConfig, syncOrphansToConfig } from './config.js';
 import { parseGitStatus, buildFileTree, repoDirName } from '../lib/helpers.js';
+
+// Deleted worktrees wait here, under WORKTREE_DIR, until emptyTrash removes them.
+const TRASH_DIR = '.trash';
 
 // --- Git Exec ---
 export function gitExec(args, opts = {}) {
@@ -365,22 +369,73 @@ export async function removeWorktree(session, { discardChanges = false } = {}) {
       }
     }
     if (reason) return { orphaned: true, reason };
-    // Deleting a worktree with node_modules in it can outlast the auto timeout;
-    // a SIGTERM mid-rm leaves a half-deleted directory and a cleanup-failed
-    // orphan, which is worse than waiting.
-    const slow = { timeout: GIT_USER_TIMEOUT };
-    try { await gitExec(['-C', session.repoPath, 'worktree', 'remove', session.worktreePath], slow); } catch {
-      try { await gitExec(['-C', session.repoPath, 'worktree', 'remove', '--force', session.worktreePath], slow); } catch (err) {
-        console.error('Force worktree remove failed:', err.message);
-        return { orphaned: true, reason: 'cleanup-failed' };
-      }
-    }
+    if (!await discardWorktree(session.repoPath, session.worktreePath)) return { orphaned: true, reason: 'cleanup-failed' };
     await deleteBranch(session.repoPath, session.branchName);
     return { orphaned: false };
   } catch (err) {
     console.error('Worktree cleanup error:', err.message);
     return { orphaned: true, reason: 'cleanup-failed' };
   }
+}
+
+// Delete a worktree the caller has already decided to throw away, and drop
+// git's record of it. `git worktree remove` deletes every file before it
+// returns, which for a node_modules-sized tree can take a minute on macOS; a
+// timeout that fires mid-delete leaves the folder half gone and still
+// registered (#137). So the folder is renamed into WORKTREE_DIR/.trash (instant
+// on the same disk), `worktree prune` drops the now-missing registration, and
+// the trash is emptied in the background. A folder that is already gone just
+// gets pruned, so a retry after any earlier failure finishes the job.
+// Only a registered worktree, or a folder under WORKTREE_DIR, is ever deleted.
+export async function discardWorktree(repoPath, worktreePath) {
+  if (!worktreePath) return true;
+  if (!repoPath) return !existsSync(worktreePath);
+  if (existsSync(worktreePath)) {
+    // .native expands Windows 8.3 names (RUNNER~1) and git's forward slashes
+    // into the same long form; Windows paths also compare case-insensitively.
+    const real = p => {
+      let r;
+      try { r = realpathSync.native(p); } catch { r = resolve(p); }
+      return process.platform === 'win32' ? r.toLowerCase() : r;
+    };
+    const target = real(worktreePath);
+    let registered = false;
+    try {
+      const list = await gitExec(['-C', repoPath, 'worktree', 'list', '--porcelain']);
+      // The first entry is the main checkout, which is never ours to delete.
+      registered = list.split('\n').filter(l => l.startsWith('worktree ')).slice(1)
+        .some(l => real(l.slice('worktree '.length)) === target);
+    } catch {}
+    if (!registered && !target.startsWith(real(WORKTREE_DIR) + sep)) {
+      console.error(`Refusing to delete ${worktreePath}: not a worktree of ${repoPath}`);
+      return false;
+    }
+    const trash = join(WORKTREE_DIR, TRASH_DIR, `${basename(worktreePath)}-${Date.now()}`);
+    try {
+      mkdirSync(join(WORKTREE_DIR, TRASH_DIR), { recursive: true });
+      renameSync(worktreePath, trash);
+      emptyTrash(trash);
+    } catch (err) {
+      // Another filesystem (EXDEV) or a rename refused: delete in place, with
+      // no timeout to cut it off halfway.
+      try { await rm(worktreePath, { recursive: true, force: true }); } catch (e) {
+        console.error(`Failed to delete worktree ${worktreePath}:`, e.message);
+        return false;
+      }
+    }
+  }
+  try { await gitExec(['-C', repoPath, 'worktree', 'prune']); } catch (err) {
+    console.error(`Worktree prune failed for ${repoPath}:`, err.message);
+    return false;
+  }
+  return true;
+}
+
+// Not awaited by anyone: the git record is already gone, so a slow delete only
+// costs disk space until it finishes (or until the next startup retries it).
+function emptyTrash(path = join(WORKTREE_DIR, TRASH_DIR)) {
+  return rm(path, { recursive: true, force: true })
+    .catch(err => console.error(`Failed to empty ${path}:`, err.message));
 }
 
 // HEAD equals the branch's ref on its configured remote (origin if none).
@@ -426,6 +481,7 @@ export async function deleteBranch(repoPath, branchName) {
 }
 
 export async function pruneWorktrees() {
+  emptyTrash();
   for (const repo of config.repos) {
     if (!existsSync(repo.path)) continue;
     try { await gitExec(['-C', repo.path, 'worktree', 'prune']); } catch (err) {
@@ -442,6 +498,7 @@ export async function scanForOrphanedWorktrees(broadcast) {
       let stat;
       try { stat = statSync(repoWorktreePath); } catch { continue; }
       if (!stat.isDirectory()) continue;
+      if (repoDir.startsWith('.')) continue; // .trash: deleted worktrees on their way out
       for (const agentDir of readdirSync(repoWorktreePath)) {
         const worktreePath = join(repoWorktreePath, agentDir);
         try { if (!statSync(worktreePath).isDirectory()) continue; } catch { continue; }
