@@ -328,6 +328,19 @@ function renderCard(job) {
   meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
 
+  // Sent back to To do: held a minute so it can be edited before re-dispatch.
+  if (isHeld(job)) {
+    const held = document.createElement('div');
+    held.className = 'job-card-held';
+    const tick = () => {
+      const secs = Math.ceil((Date.parse(job.holdUntil) - Date.now()) / 1000);
+      held.textContent = secs > 0 ? `held · dispatching in ${secs}s` : 'dispatching';
+      if (secs > 0) setTimeout(() => { if (held.isConnected) tick(); }, 1000);
+    };
+    tick();
+    card.appendChild(held);
+  }
+
   if (isScheduled(job)) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
@@ -530,6 +543,10 @@ function renderCard(job) {
   return card;
 }
 
+function isHeld(job) {
+  return job.state === 'todo' && job.holdUntil && Date.parse(job.holdUntil) > Date.now();
+}
+
 function renderCardActions(job) {
   const actions = document.createElement('div');
   actions.className = 'job-card-actions';
@@ -548,6 +565,10 @@ function renderCardActions(job) {
   // always keeps the final say over where a card sits.
   if (job.state === 'todo') {
     actions.appendChild(mk('Edit', 'Edit this job', () => openForm(job.id)));
+    if (isHeld(job)) {
+      actions.appendChild(mk('Dispatch now', 'Skip the wait and hand this card to a new agent now',
+        () => send({ type: 'job-release-hold', jobId: job.id })));
+    }
   }
   // Pause holds the schedule's next firing; a run already posted is its own
   // card and is left alone.
