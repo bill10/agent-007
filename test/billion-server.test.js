@@ -200,3 +200,39 @@ describe('the Claude account switch over the socket', () => {
     }
   });
 });
+
+// The Billion tab's text box over the socket (server/ws.js 'chat-send').
+describe('the Billion tab over the socket', () => {
+  const browser = () => ({ headers: { origin: `http://127.0.0.1:${new URL(wsUrl).port}` } });
+  const say = async ({ ws, seen }, text) => {
+    const nonce = `n${Math.random()}`;
+    ws.send(JSON.stringify({ type: 'chat-send', nonce, text }));
+    return waitFor(seen, m => m.type === 'chat-sent' && m.nonce === nonce);
+  };
+
+  it('sends the thread on connect, and a browser\'s message is taken for Billion and shown to every window', async () => {
+    const billion = spawn({ isBillion: true, name: BILLION_NAME });
+    const other = await connect(browser());
+    const owner = await connect(browser());
+    try {
+      expect(await waitFor(owner.seen, m => m.type === 'chat-list')).toBeTruthy();
+      expect(await say(owner, 'hello from the tab')).not.toHaveProperty('error');
+      expect(await waitFor(other.seen, m => m.type === 'chat-message' && m.message.text === 'hello from the tab')).toMatchObject({ message: { from: 'owner', via: 'app' } });
+    } finally {
+      owner.ws.close(); other.ws.close();
+      await killSession(billion.id);
+    }
+  });
+
+  it('refuses a socket that is not this server\'s page, and never shows it the thread', async () => {
+    const plain = await connect();
+    const owner = await connect(browser());
+    try {
+      expect((await say(plain, 'hi')).error).toMatch(/browser only/);
+      broadcast({ type: 'chat-message', message: { id: 'x', from: 'billion', text: 'private' } });
+      expect(await waitFor(owner.seen, m => m.type === 'chat-message' && m.message.id === 'x')).toBeTruthy();
+      await new Promise(r => setTimeout(r, 100));
+      expect(plain.seen.filter(m => m.type === 'chat-list' || m.type === 'chat-message')).toEqual([]);
+    } finally { plain.ws.close(); owner.ws.close(); }
+  });
+});

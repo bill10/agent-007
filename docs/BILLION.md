@@ -560,7 +560,7 @@ usage limit (below).
   `.git/info/exclude`. `AGENTS.md` is made from two committed files, so it
   would only repeat them. `HANDOVER.md` is raw conversation, which can hold
   whatever the owner typed, and is replaced at every switch.
-- **Across a switch** the inbox, the *Waiting on you* tab, Telegram and the
+- **Across a switch** the inbox, the *Billion* tab, Telegram and the
   board tools keep working: all of them find whichever Billion is running.
   Permission requests waiting on the old Billion go to the owner, as they do
   when Billion stops.
@@ -580,8 +580,8 @@ usage limit (below).
   on a timer, and never twice within 30 minutes: a limit on the new CLI that
   soon, or a target CLI that is not installed or not logged in (`claude auth
   status --json`, `codex login status`), leaves Billion where it is and puts
-  `Billion paused: both Claude Code and Codex are at their limits` under
-  *Waiting on you* and on Telegram, once, until a new Billion starts.
+  `Billion paused: both Claude Code and Codex are at their limits` in the
+  *Billion* tab and on Telegram, once, until a new Billion starts.
   An armed Claude account switch (`server/account-migration.js`; the
   **Claude account** section of the Settings gear, described in
   [FEATURES.md](FEATURES.md)) comes before any of that: at a Claude Billion's
@@ -591,29 +591,44 @@ usage limit (below).
 
 ## Telegram
 
-Billion's questions scroll out of sight in a busy terminal, so its
-`notify_owner` tool puts each one in two places: the **Waiting on you** tab
-next to Jobs (a bell alone, badged with the count of open questions; on a
-phone, the *Waiting* button in the bottom bar), and, when a Telegram bot is set up, your
-phone. Each question gets a short number, Q1, Q2 and so on. When the answer
+Billion's terminal is its work log: board notices, worker messages and cycle
+prompts are typed in there all day, and a conversation with the owner gets
+buried. So the owner talks to Billion in the **Billion** tab next to Jobs (a
+bell and "Billion", badged with the count of open questions; on a phone, the
+*Billion* button in the bottom bar): a chat thread, the web twin of the
+Telegram channel. Billion's `notify_owner` questions, its `tell_owner`
+replies and your messages, from the tab and from Telegram, are one
+conversation there, newest at the bottom; the last 500 messages are kept in
+`~/.agent-007/chat.json`. Open questions also pin to a strip at the top of
+the tab, blocking first, then oldest; tap one to jump to it.
+
+Type in the box at the bottom (Enter sends, Shift+Enter is a new line) and it
+is typed into Billion's terminal as `[Owner via app] <text>`, as a turn of its
+own, while mail keeps flowing to it as before. While a question is open, the
+box answers the oldest open blocking question, else the oldest open one (it
+says which, "Answers Q3"; × sends it as a plain message instead). If Billion
+is not running the message is refused and stays in the box.
+
+`notify_owner` puts each question in the tab and, when a Telegram bot is set
+up, on your phone. Each question gets a short number, Q1, Q2 and so on. When the answer
 is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
 it `recommended`.
 
 Replies and status updates that need no answer ("Got it, restart looks
 clean") go through `tell_owner` instead: same Telegram send, voice rule and
-per-minute limit, but no numbered item and no badge. Without Telegram it
-tells Billion to say it in its terminal.
+per-minute limit, but no numbered item and no badge. It always shows in the
+Billion tab, with or without Telegram.
 
 When you answer a question somewhere else, say by typing in Billion's
 terminal, Billion closes it with `resolve_question`: it moves to **Answered**
-(marked *terminal*) and your phone's copy shows the answer, like any other.
+(marked *in the terminal*) and your phone's copy shows the answer, like any other.
 
-Answer in the app: click a choice, or type in the reply line under it (Enter
-or Send); the line is there even when there are choices. The answer is typed
-into Billion's terminal as `[Owner via app] Q3: <answer> (re: "<start of the
-question>")`. If Billion is not running the card says so and stays open.
-Answered questions move to a collapsed **Answered** section (the last 20); ×
-dismisses one. With user accounts on (`users.json`) Billion does not run, and
+Answer in the app: tap a choice under the question (the recommended one
+first), or type in the box. The answer is typed into Billion's terminal as
+`[Owner via app] Q3: <answer> (re: "<start of the question>")`, and the
+buttons collapse to "you answered: <answer>". If Billion is not running the
+question says so and stays open. Answered questions stay in the thread as
+history; *Dismiss* closes one unanswered. With user accounts on (`users.json`) Billion does not run, and
 nobody answers or dismisses for the owner. The list lives in
 `~/.agent-007/waiting.json`; one written before answers existed still loads,
 its items open and numbered in order.

@@ -33,7 +33,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
   commandExists: (file) => tools.available.has(file),
 }));
 
-const { notifyOwner, sendToOwner, handleUpdate, lastOwnerMode, OWNER_VOICE_PREFIX, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
+const { notifyOwner, sendToOwner, handleUpdate, lastOwnerMode, OWNER_VOICE_PREFIX, NOTIFY_WINDOW_MS, chatMessages } = await import('../server/owner.js');
 const { chooseMode, textOnlyReason, whisperSetup, MAX_NOTE_SECONDS, MAX_NOTE_BYTES } = await import('../server/voice.js');
 const { sessions, CONFIG_DIR } = await import('../server/state.js');
 const { dropMessages } = await import('../server/messages.js');
@@ -145,6 +145,8 @@ describe('when the owner speaks', () => {
     sessions.set(b.id, b);
     expect(await handleUpdate(voiceUpdate(42), { env: ENV })).toBe('delivered');
     expect(typedInto(b)).toContain(`${OWNER_VOICE_PREFIX} Yes, buy the domain.`);
+    // The Billion tab shows the transcript, marked as voice.
+    expect(chatMessages().at(-1)).toMatchObject({ from: 'owner', via: 'telegram', voice: true, text: 'Yes, buy the domain.' });
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       `https://api.telegram.org/bot${TOKEN}/getFile`,
       `https://api.telegram.org/file/bot${TOKEN}/voice/file_1.oga`,

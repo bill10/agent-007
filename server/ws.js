@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { waitingPayload, dismissWaiting, answerWaiting } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting, chatPayload, ownerSays } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
@@ -31,6 +31,12 @@ export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Conti
 const clients = new Set();
 
 export function broadcast(message) {
+  // The owner's chat with Billion (server/owner.js) is theirs alone: their
+  // browser, and nobody's while user accounts are on.
+  if (message.type === 'chat-message') {
+    if (mayAnswerOwner()) broadcastToBrowsers(message);
+    return;
+  }
   const data = JSON.stringify(message);
   for (const ws of clients) {
     if (ws.readyState === 1) ws.send(data);
@@ -392,6 +398,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.fromBrowser = fromBrowser(req);
     // The owner's Claude account state, only where the owner may act on it.
     if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
+    // So is their chat with Billion.
+    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(chatPayload()));
 
     broadcastPresence();
 
@@ -511,6 +519,15 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             ? await answerWaiting(msg.id, msg.answer, 'app', { broadcast })
             : { error: 'Only the owner answers Billion, and with user accounts on nobody does.' };
           if (result.error) ws.send(JSON.stringify({ type: 'waiting-error', id: msg.id, error: result.error }));
+          break;
+        }
+        // The Billion tab's text box: typed into Billion's terminal as
+        // [Owner via app], from the owner's browser only.
+        case 'chat-send': {
+          const result = !mayAnswerOwner() ? { error: 'Only the owner talks to Billion here, and with user accounts on nobody does.' }
+            : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
+            : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, broadcast });
+          ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
           break;
         }
         case 'kill': {

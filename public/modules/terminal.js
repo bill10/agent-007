@@ -5,7 +5,7 @@ import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
 import { stopVoice } from './voice.js';
 import { showJobBoard, hideJobBoard } from './jobs.js';
-import { showWaiting, hideWaiting, openCount } from './waiting.js';
+import { showWaiting, hideWaiting, openCount, renderComposer } from './waiting.js';
 // Circular with office.js (it imports switchToSession), which is fine: both
 // sides only call the other's functions at event time, never during load.
 import { noteAgentDeparture } from './office.js';
@@ -377,7 +377,7 @@ function bellBadge(badge, open) {
   badge.hidden = open === 0;
 }
 
-const waitingLabel = (open) => open > 0 ? `Waiting on you, ${open} question${open === 1 ? '' : 's'}` : 'Waiting on you';
+const waitingLabel = (open) => open > 0 ? `Talk to Billion, ${open} open question${open === 1 ? '' : 's'}` : 'Talk to Billion';
 
 // The phone's bottom bar carries the same bell and badge.
 function updateNavBadge(open) {
@@ -387,7 +387,7 @@ function updateNavBadge(open) {
   const btn = badge.closest('button');
   btn.classList.toggle('empty', open === 0);
   btn.setAttribute('aria-label', waitingLabel(open));
-  btn.title = waitingLabel(open);
+  btn.title = 'Talk to Billion';
 }
 
 export function updateTabs() {
@@ -416,16 +416,15 @@ export function updateTabs() {
   boardTab.onclick = () => { showJobBoard(); updateTabs(); };
   container.appendChild(boardTab);
 
-  // Pinned next to it: Billion's questions to the owner, counted like Jobs.
+  // Pinned next to it: the chat with Billion, its bell counting open questions.
   const waitingTab = document.createElement('div');
   waitingTab.className = `terminal-tab board-tab waiting-tab${waitingActive ? ' active' : ''}`;
   const open = openCount();
-  // Icon only: the label lives in aria-label and the tooltip.
   waitingTab.classList.toggle('empty', open === 0);
   waitingTab.setAttribute('role', 'button');
   waitingTab.tabIndex = 0;
   waitingTab.setAttribute('aria-label', waitingLabel(open));
-  waitingTab.title = waitingLabel(open);
+  waitingTab.title = 'Talk to Billion';
   const bell = document.createElement('span');
   bell.className = 'bell';
   bell.innerHTML = BELL_ICON;
@@ -433,11 +432,13 @@ export function updateTabs() {
   badge.className = 'board-tab-badge bell-badge';
   bellBadge(badge, open);
   bell.appendChild(badge);
-  waitingTab.appendChild(bell);
+  waitingTab.append(bell, document.createTextNode('Billion'));
   waitingTab.onclick = () => { showWaiting(); updateTabs(); };
   waitingTab.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); waitingTab.onclick(); } };
   container.appendChild(waitingTab);
   updateNavBadge(open);
+  // Whether Billion is running shows in the text box.
+  renderComposer();
 
   for (const [sessionId, agent] of billionFirst(agents)) {
     const tab = document.createElement('div');
