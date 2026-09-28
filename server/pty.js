@@ -279,6 +279,15 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     removeMcpConfig(sessionId);   // nothing will ever read it now
     return { error: `Failed to start "${command}". Is the command installed?` };
   }
+  // On Windows node-pty writes input through a socket on the console's input
+  // pipe and listens for none of its errors, so a write that fails later
+  // ("write EAGAIN" when the pipe is full or its console is going away) is an
+  // uncaught exception: the guard above exits on it, taking the office down
+  // (and, under Vitest, the test worker). The try/catch around pty.write
+  // cannot see it; the write already returned. Lose the keystrokes instead.
+  ptyProcess._agent?.inSocket?.on('error', (err) => {
+    console.error(`Input to "${name}" was dropped: ${err.message}`);
+  });
 
   const session = {
     id: sessionId,

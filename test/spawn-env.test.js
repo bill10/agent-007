@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
+import { EventEmitter } from 'events';
 
 const spawn = vi.fn(() => ({ pid: 1, onData() {}, onExit() {}, write() {}, resize() {}, kill() {} }));
 vi.mock('node-pty', () => ({ spawn }));
@@ -93,5 +94,19 @@ describe('channel plugins', () => {
     expect(settingsOf(spawnWith(PATHS['the + Agent form']).args)).toBeNull();
     expect(settingsOf(spawnWith(PATHS['Billion (and a Billion switch)']).args)).toBeNull();
     expect(spawnWith({ ...PATHS['a board dispatch'], command: 'codex' }).args).not.toContain('--settings');
+  });
+});
+
+describe('input to a Windows terminal', () => {
+  it('drops a failed write instead of throwing it at the process', () => {
+    // node-pty on Windows writes input through this socket and never listens
+    // for its errors; an unheard 'error' emit throws, as the real one would.
+    const inSocket = new EventEmitter();
+    spawn.mockReturnValueOnce({ pid: 1, onData() {}, onExit() {}, write() {}, resize() {}, kill() {}, _agent: { inSocket } });
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    spawnWith({});
+    expect(() => inSocket.emit('error', Object.assign(new Error('write EAGAIN'), { code: 'EAGAIN' }))).not.toThrow();
+    expect(quiet).toHaveBeenCalledWith('Input to "Falcon" was dropped: write EAGAIN');
+    quiet.mockRestore();
   });
 });
