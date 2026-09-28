@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.21.2.0] - 2026-09-28
+
+### Fixed
+
+- **Deleting an orphan with a big `node_modules` no longer fails and leaves the worktree half deleted.** The worktree folder is now moved to a trash folder (instant), git's record is pruned, and the files are deleted in the background, so no git timeout can cut the delete off halfway. Deleting an orphan whose folder is already partly or fully gone now finishes the job instead of failing. Closing an agent and releasing a job's worktree use the same path. (#137)
+
 ## [0.21.1.0] - 2026-09-28
 
 ### Fixed
