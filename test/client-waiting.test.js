@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The "Billion" tab (public/modules/waiting.js): the bell's badge, the chat
+// The "Billion" tab (public/modules/waiting.js): the chat bubble's badge, the chat
 // thread with question bubbles whose choices collapse on answer, the text box
 // and which question it answers, and the pinned strip of open questions.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -7,8 +7,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { send } from '../public/modules/ws.js';
-import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage } from '../public/modules/state.js';
-import { updateTabs } from '../public/modules/terminal.js';
+import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive } from '../public/modules/state.js';
+import { updateTabs, switchToSession, removeSession } from '../public/modules/terminal.js';
+import { readFileSync } from 'node:fs';
 import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, leaveWaiting, answerTarget } from '../public/modules/waiting.js';
 
 const open = (n, extra = {}) => ({ id: `w${n}`, n, text: `Question ${n}?`, at: new Date().toISOString(), status: 'open', ...extra });
@@ -25,6 +26,7 @@ const type = (text, opts = {}) => {
   input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...opts }));
 };
 
+const CHAT_BUBBLE_PATH = 'M2 2h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5.5L3 11V9H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z';
 const hideWaitingState = () => document.body.classList.remove('billion-chat');
 
 beforeEach(() => {
@@ -35,6 +37,7 @@ beforeEach(() => {
   setActiveSession(null);
   setBoardActive(false);
   setWaitingActive(false);
+  setBillionTabOpen(false);
   setWaitingItems([]);
   setChatMessages([]);
   hideWaitingState();
@@ -42,14 +45,14 @@ beforeEach(() => {
 });
 
 describe('the Billion tab', () => {
-  it('sits next to Jobs as a bell and "Billion", badged with open questions only, here and in the phone bar', () => {
+  it('sits next to Jobs as a chat bubble and "Billion", badged with open questions only, here and in the phone bar', () => {
     setWaitingItems([open(1), open(2), { ...open(3), status: 'answered', answer: 'yes' }]);
     updateTabs();
     const tabs = [...document.querySelectorAll('.terminal-tab')];
     expect(tabs.map(t => t.textContent.replace(/\d/g, ''))).toEqual(['Jobs', 'Billion']);
     const tab = tabs[1];
-    expect(tab.querySelector('.bell svg')).not.toBeNull();
-    expect(tab.querySelector('.bell .board-tab-badge').textContent).toBe('2');
+    expect(tab.querySelector('.chat-icon svg path').getAttribute('d')).toBe(CHAT_BUBBLE_PATH);
+    expect(tab.querySelector('.chat-icon .board-tab-badge').textContent).toBe('2');
     expect(tab.getAttribute('aria-label')).toBe('Talk to Billion, 2 open questions');
     expect(tab.title).toBe('Talk to Billion');
     const nav = document.getElementById('mobile-nav-waiting-count');
@@ -88,6 +91,76 @@ describe('the Billion tab', () => {
     expect(document.getElementById('waiting-board').style.display).toBe('none');
     expect(document.getElementById('terminal-empty').style.display).toBe('flex');
     expect(document.querySelector('.mobile-nav [data-view="terminal"]').getAttribute('aria-current')).toBe('true');
+  });
+});
+
+describe("the chat tab and Billion's terminal tab", () => {
+  // Enough of an agent for the tab strip and switchToSession.
+  const fakeAgent = (name, extra = {}) => {
+    const termEl = document.createElement('div');
+    termEl.style.display = 'none';
+    return { name, state: 'IDLE', termEl, term: { dispose: vi.fn(), focus() {}, scrollToBottom() {} }, ...extra };
+  };
+  const tabNames = () => [...document.querySelectorAll('.terminal-tab')].map(t => t.textContent.replace(/[\d\u00d7]/g, ''));
+
+  it('is where the page opens: init shows the chat before the replay arrives', () => {
+    const app = readFileSync('public/app.js', 'utf8');
+    const init = app.slice(app.indexOf('async function init()'));
+    expect(init.indexOf('showWaiting();')).toBeGreaterThan(-1);
+    expect(init.indexOf('showWaiting();')).toBeLessThan(init.indexOf('connect(onMessage)'));
+    // and a reload with the chat last open comes back to it
+    localStorage.setItem('agent007-active-tab', 's1');
+    showWaiting();
+    expect(localStorage.getItem('agent007-active-tab')).toBeNull();
+  });
+
+  it('has no close control, and orders Jobs, Billion chat, then agents with Billion first when open', () => {
+    agents.set('w1', fakeAgent('viper'));
+    agents.set('b1', fakeAgent('Billion', { isBillion: true }));
+    showWaiting();
+    updateTabs();
+    expect(tabNames()).toEqual(['Jobs', 'Billion', 'viper']);
+    expect(document.querySelector('.waiting-tab').classList.contains('active')).toBe(true);
+    expect(document.querySelector('.waiting-tab .close-btn')).toBeNull();
+
+    // What the office click on Billion (and its explorer row) calls.
+    switchToSession('b1');
+    expect(tabNames()).toEqual(['Jobs', 'Billion', 'Billion', 'viper']);
+    const billionTab = document.querySelector('.terminal-tab[data-session-id="b1"]');
+    expect(billionTab.classList.contains('active')).toBe(true);
+    expect(document.querySelector('.waiting-tab .close-btn')).toBeNull();
+    // Back on the chat, only the chat tab is lit.
+    showWaiting();
+    updateTabs();
+    expect(document.querySelectorAll('.terminal-tab.active').length).toBe(1);
+    switchToSession('b1');
+
+    // Its close hides the tab and goes back to the chat; the session stays.
+    billionTab.querySelector('.close-btn').click();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'kill' }));
+    expect(agents.has('b1')).toBe(true);
+    expect(tabNames()).toEqual(['Jobs', 'Billion', 'viper']);
+    expect([activeSessionId, waitingActive]).toEqual([null, true]);
+    expect(agents.get('b1').termEl.style.display).toBe('none');
+  });
+
+  it("closing Billion's tab under the job board leaves the board up", () => {
+    agents.set('b1', fakeAgent('Billion', { isBillion: true }));
+    switchToSession('b1');
+    setBoardActive(true);
+    document.querySelector('.terminal-tab[data-session-id="b1"] .close-btn').click();
+    expect([activeSessionId, waitingActive, agents.has('b1')]).toEqual([null, false, true]);
+    expect(tabNames()).toEqual(['Jobs', 'Billion']);
+  });
+
+  it("lands on the chat, not a hidden Billion, when the last shown terminal closes", () => {
+    agents.set('b1', fakeAgent('Billion', { isBillion: true }));
+    agents.set('w1', fakeAgent('viper', { state: 'DISCONNECTED' }));
+    document.body.insertAdjacentHTML('beforeend', '<div id="status-bar"></div><div id="office-empty"></div>');
+    switchToSession('w1');
+    removeSession('w1');
+    expect([activeSessionId, waitingActive]).toEqual([null, true]);
+    expect(tabNames()).toEqual(['Jobs', 'Billion']);
   });
 });
 

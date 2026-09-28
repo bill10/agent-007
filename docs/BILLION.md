@@ -594,7 +594,7 @@ usage limit (below).
 Billion's terminal is its work log: board notices, worker messages and cycle
 prompts are typed in there all day, and a conversation with the owner gets
 buried. So the owner talks to Billion in the **Billion** tab next to Jobs (a
-bell and "Billion", badged with the count of open questions; on a phone, the
+chat bubble and "Billion", the tab a page opens on, badged with the count of open questions; on a phone, the
 *Billion* button in the bottom bar): a chat thread, the web twin of the
 Telegram channel. Billion's `notify_owner` questions, its `tell_owner`
 replies and your messages, from the tab and from Telegram, are one
