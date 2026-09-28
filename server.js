@@ -299,7 +299,7 @@ const RECHECK_MS = 40_000;
 const accountStatePayload = () => ({ type: 'account-state', ...accountState() });
 const announceAccount = () => { if (mayAnswerOwner()) broadcastToBrowsers(accountStatePayload()); };
 async function tellOwnerOrShow(text, level, { show = true } = {}) {
-  const { error } = await tellOwner(text);
+  const { error } = await tellOwner(text, { broadcast });
   if (error && show && mayAnswerOwner()) broadcastToBrowsers({ type: 'notification', level, message: text });
 }
 const workersOnClaude = () => [...sessions.values()].filter(s => !s.isBillion && !s.exited && s.agent === 'claude').length;

@@ -381,7 +381,7 @@ export const NOTIFY_OWNER_TOOL = {
   name: 'notify_owner',
   description:
     'Put a question or a decision in front of the owner when they may be away '
-    + 'from the terminal: it goes in the "Waiting on you" tab of the owner\'s '
+    + 'from the terminal: it goes in the "Billion" chat tab of the owner\'s '
     + 'browser, numbered (Q3), and to their phone over Telegram when that is set '
     + 'up. One short message: the question, why, and what you recommend. When the '
     + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the '
@@ -413,9 +413,11 @@ export const TELL_OWNER_TOOL = {
   name: 'tell_owner',
   description:
     'Send the owner a reply or status update that needs no answer ("Got it", '
-    + '"Restart looks clean") over Telegram. Unlike notify_owner it files nothing '
-    + 'under "Waiting on you". Use it to answer an [Owner via Telegram] message '
-    + 'that is not a question. Shares notify_owner\'s limit of a few per minute.',
+    + '"Restart looks clean"): it shows in the owner\'s "Billion" chat tab, and on '
+    + 'their phone over Telegram when that is set up. Unlike notify_owner it files '
+    + 'no numbered question. Use it to answer an [Owner via app] or [Owner via '
+    + 'Telegram] message that is not a question. Shares notify_owner\'s limit of a '
+    + 'few per minute.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -429,7 +431,7 @@ export const TELL_OWNER_TOOL = {
 export const RESOLVE_QUESTION_TOOL = {
   name: 'resolve_question',
   description:
-    'Close a "Waiting on you" question the owner answered somewhere else, such as '
+    'Close a question in the Billion tab that the owner answered somewhere else, such as '
     + 'typing in this terminal, so the tab and their phone do not hold it open. '
     + 'Marks it answered with your summary of their answer; nothing comes back '
     + 'here. Name it by number (3 for Q3) or id.',
@@ -749,13 +751,14 @@ const CALLS = {
       ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency })
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
-    return toolText(`Sent to the owner on Telegram and put under "Waiting on you" as Q${result.n}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
+    return toolText(`Put in the owner's Billion tab as Q${result.n} and sent on Telegram. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
   },
 
   [TELL_OWNER_TOOL.name]: async (args, ctx) => {
     const result = ctx.tellOwner ? await ctx.tellOwner(args.text) : { error: 'Only Billion can message the owner.' };
     if (result.error) return toolText(result.error, true);
-    return toolText('Sent to the owner on Telegram.');
+    return toolText(result.note ? `Shown in the owner's Billion tab. ${result.note}`
+      : result.telegram ? 'Shown in the owner\'s Billion tab and sent on Telegram.' : 'Shown in the owner\'s Billion tab (Telegram is not set up).');
   },
 
   [RESOLVE_QUESTION_TOOL.name]: async (args, ctx) => {

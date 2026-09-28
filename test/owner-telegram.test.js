@@ -7,7 +7,7 @@ import { readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, tellOwner, sendTelegram, handleUpdate, pollOnce, startTelegram, stopTelegram,
-  waitingItems, dismissWaiting, redact, NOTIFY_LIMIT, NOTIFY_WINDOW_MS,
+  waitingItems, dismissWaiting, redact, NOTIFY_LIMIT, NOTIFY_WINDOW_MS, chatMessages,
 } from '../server/owner.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { dropMessages } from '../server/messages.js';
@@ -94,24 +94,33 @@ describe('notify_owner', () => {
 });
 
 describe('tell_owner', () => {
-  it('sends "Billion: <text>" and files no Waiting item or badge change', async () => {
+  it('sends "Billion: <text>", shows a bubble in the Billion tab and files no Waiting item', async () => {
     const broadcast = vi.fn();
-    expect(await tellOwner('Got it, restart looks clean.', { env: ENV, now: now() })).toEqual({ ok: true });
+    expect(await tellOwner('Got it, restart looks clean.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, telegram: true });
     expect(calls()).toEqual([{ url: `https://api.telegram.org/bot${TOKEN}/sendMessage`, body: { chat_id: '42', text: 'Billion: Got it, restart looks clean.' } }]);
     expect(waitingItems()).toEqual([]);
-    expect(broadcast).not.toHaveBeenCalled();
+    expect(broadcast.mock.calls.map(c => c[0].type)).toEqual(['chat-message']);
+    expect(chatMessages().at(-1)).toMatchObject({ from: 'billion', text: 'Got it, restart looks clean.' });
   });
 
-  it('errors clearly without Telegram and does nothing else', async () => {
-    expect(await tellOwner('hi', { env: {}, now: now() })).toEqual({ error: 'Telegram is not set up; say it in your terminal.' });
+  it('still shows in the tab without Telegram, and says so', async () => {
+    expect(await tellOwner('hi', { env: {}, now: now() })).toEqual({ ok: true, telegram: false });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(waitingItems()).toEqual([]);
+    expect(chatMessages().at(-1)).toMatchObject({ from: 'billion', text: 'hi' });
+  });
+
+  it('keeps the bubble and notes a failed Telegram send', async () => {
+    fetchMock.mockImplementation(async () => ({ ok: false, json: async () => ({ ok: false, error_code: 500, description: `boom ${TOKEN}` }) }));
+    const result = await tellOwner('status', { env: ENV, now: now() });
+    expect(result).toEqual({ ok: true, note: 'The Telegram send failed: boom <token>' });
+    expect(chatMessages().at(-1).text).toBe('status');
   });
 
   it('shares notify_owner\'s rate limit', async () => {
     const t = now();
     for (let i = 0; i < NOTIFY_LIMIT - 1; i++) expect((await notifyOwner(`q${i}`, { env: ENV, now: t + i })).ok).toBe(true);
-    expect(await tellOwner('ok', { env: ENV, now: t + 5 })).toEqual({ ok: true });
+    expect(await tellOwner('ok', { env: ENV, now: t + 5 })).toEqual({ ok: true, telegram: true });
     expect((await tellOwner('again', { env: ENV, now: t + 6 })).error).toMatch(/last minute/);
     expect((await notifyOwner('more', { env: ENV, now: t + 7 })).error).toMatch(/last minute/);
     expect(fetchMock).toHaveBeenCalledTimes(NOTIFY_LIMIT);
@@ -128,7 +137,7 @@ describe('tell_owner', () => {
     expect(list({})).not.toContain('tell_owner');
     const call = (ctx) => handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'tell_owner', arguments: { text: 'hi' } } }, ctx);
     expect((await call({ session: {} })).error).toBeTruthy();
-    expect((await call({ session: { isBillion: true }, tellOwner: async () => ({ ok: true }) })).result.content[0].text).toBe('Sent to the owner on Telegram.');
+    expect((await call({ session: { isBillion: true }, tellOwner: async () => ({ ok: true, telegram: true }) })).result.content[0].text).toBe('Shown in the owner\'s Billion tab and sent on Telegram.');
   });
 });
 

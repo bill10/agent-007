@@ -1,6 +1,6 @@
 // Reaching the owner when they are away from the terminal: Billion's
-// notify_owner tool (questions) and tell_owner (replies that need no answer), the "Waiting on you" tab it fills in the browser (where
-// the owner can answer too), and a Telegram bot that carries both ways (docs/BILLION.md, "Telegram").
+// notify_owner tool (questions) and tell_owner (replies that need no answer), the "Billion" chat tab they fill in the browser (where
+// the owner answers and talks to Billion too), and a Telegram bot that carries both ways (docs/BILLION.md, "Telegram").
 //
 // Telegram is optional: with TELEGRAM_BOT_TOKEN unset nothing here talks to
 // the network and the list still works. Plain fetch against the Bot API, no
@@ -31,6 +31,8 @@ export const APP_PREFIX = '[Owner via app]';
 export const MAX_CHOICES = 5;
 export const MAX_CHOICE_CHARS = 40;
 export const MAX_ANSWER_CHARS = 2000;
+export const MAX_OWNER_CHARS = 4096;   // what one Telegram message can carry
+export const CHAT_CAP = 500;
 const CLOSED_KEPT = 30;   // answered and dismissed items kept; open ones always are
 
 export function telegramSettings(env = process.env) {
@@ -201,6 +203,64 @@ function saveWaiting(items) {
 
 export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems().filter(item => item.status !== 'dismissed') });
 
+// --- The Billion chat: the thread the Billion tab shows, beside waiting.json ---
+//
+// A message: { id, at, from: 'owner' | 'billion', text, via?, voice?, re?, q? }.
+// via is app or telegram (the owner's side). re is the question number a typed
+// answer went to. q is a notify_owner question, copied here with its state so
+// the thread keeps it after the Waiting list lets it go: { id, n, urgency,
+// choices?, recommended?, status, answer?, answeredVia? }. The newest CHAT_CAP
+// are kept. Everything in it reaches a browser, so the bot token is redacted.
+
+const chatPath = () => join(CONFIG_DIR, 'chat.json');
+
+export function chatMessages() {
+  try {
+    const messages = JSON.parse(readFileSync(chatPath(), 'utf8'));
+    return Array.isArray(messages) ? messages : [];
+  } catch (err) {
+    // No thread yet (the first start with the Billion tab): it opens on the
+    // questions already asked, so the open ones have a bubble to answer.
+    if (err.code !== 'ENOENT') return [];
+    return waitingItems().filter(item => item.status !== 'dismissed')
+      .map(item => ({ id: `q-${item.id}`, at: item.at, from: 'billion', text: item.text, q: questionState(item) }));
+  }
+}
+
+function saveChat(messages) {
+  try {
+    writeFileSync(`${chatPath()}.tmp`, JSON.stringify(messages.slice(-CHAT_CAP)));
+    renameSync(`${chatPath()}.tmp`, chatPath());
+  } catch (err) {
+    console.error('Could not save the Billion chat:', err.message);
+  }
+}
+
+export const chatPayload = () => ({ type: 'chat-list', messages: chatMessages() });
+
+export function addChat(message, broadcast, env = process.env) {
+  const added = { id: randomUUID(), at: new Date().toISOString(), ...message, text: redact(message.text, env) };
+  saveChat([...chatMessages(), added]);
+  broadcast?.({ type: 'chat-message', message: added });
+  return added;
+}
+
+const questionState = (item) => ({
+  id: item.id, n: item.n, urgency: item.urgency, status: item.status,
+  ...(item.choices ? { choices: item.choices, recommended: item.recommended } : {}),
+  ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia } : {}),
+});
+
+// A question's bubble follows it: answered, dismissed.
+function syncQuestion(item, broadcast) {
+  const messages = chatMessages();
+  const message = messages.find(m => m.q?.id === item.id);
+  if (!message) return;
+  message.q = questionState(item);
+  saveChat(messages);
+  broadcast?.({ type: 'chat-message', message });
+}
+
 // choices: 2-5 short distinct strings, or absent; recommended: one of them.
 export function checkChoices(choices, recommended) {
   if (choices === undefined || choices === null) {
@@ -220,6 +280,8 @@ export function addWaiting(text, broadcast, now = Date.now(), { choices, recomme
   const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency };
   if (choices) item.choices = choices.map(c => c.trim());
   if (recommended) item.recommended = recommended.trim();
+  // The thread first: one not written yet starts from the list as it stands.
+  addChat({ from: 'billion', text, q: questionState(item) }, broadcast);
   saveWaiting([...items, item]);
   broadcast?.(waitingPayload());
   return item;
@@ -236,7 +298,7 @@ function updateWaiting(id, change) {
 
 export function dismissWaiting(id, broadcast) {
   if (!waitingItems().some(item => item.id === id && item.status !== 'dismissed')) return false;
-  updateWaiting(id, { status: 'dismissed' });
+  syncQuestion(updateWaiting(id, { status: 'dismissed' }), broadcast);
   broadcast?.(waitingPayload());
   return true;
 }
@@ -254,9 +316,10 @@ const urgentMark = (urgency) => (urgency === 'blocking' ? '! ' : '');
 const questionText = (item) => `${urgentMark(item.urgency)}Billion (Q${item.n}): ${item.text}`;
 
 // An answer from the app or Telegram (via 'app' or 'telegram'): into Billion's
-// terminal, then the item is answered everywhere. { ok, item } or { error };
-// on an error the item stays open.
-export async function answerWaiting(id, answer, via, { broadcast, env = process.env } = {}) {
+// terminal, then the item is answered everywhere. typed: the owner wrote it
+// rather than tapped a choice, so it shows in the thread as their message too.
+// { ok, item } or { error }; on an error the item stays open.
+export async function answerWaiting(id, answer, via, { broadcast, env = process.env, typed = false } = {}) {
   const body = typeof answer === 'string' ? answer.replace(/\s+/g, ' ').trim() : '';
   if (!body) return { error: 'The answer is empty.' };
   if (body.length > MAX_ANSWER_CHARS) return { error: `Keep the answer under ${MAX_ANSWER_CHARS} characters.` };
@@ -268,13 +331,32 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   if (!sendText(billion, answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body))) {
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
-  return { ok: true, item: await markAnswered(id, body, via, { broadcast, env }) };
+  const done = await markAnswered(id, body, via, { broadcast, env });
+  if (typed) addChat({ from: 'owner', via, text: body, re: item.n }, broadcast, env);
+  return { ok: true, item: done };
+}
+
+// What the owner types in the Billion tab. With answers (a question's id) it
+// answers that question; otherwise it goes into Billion's terminal as a turn
+// of its own, like a Telegram message. Refused, never queued, while Billion is
+// not running: the browser keeps the text in the box. { ok } or { error }.
+export async function ownerSays(text, { answers, broadcast, env = process.env } = {}) {
+  const body = typeof text === 'string' ? text.trim() : '';
+  if (!body) return { error: 'The message is empty.' };
+  if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true });
+  if (body.length > MAX_OWNER_CHARS) return { error: `Keep it under ${MAX_OWNER_CHARS} characters.` };
+  const billion = liveBillion();
+  if (!billion) return { error: 'Billion is not running; start it, then send again.' };
+  if (!sendText(billion, `${APP_PREFIX} ${body}`)) return { error: 'Billion has too much waiting for it; try again in a while.' };
+  addChat({ from: 'owner', via: 'app', text: body }, broadcast, env);
+  return { ok: true };
 }
 
 // Answered everywhere: the item moves to Answered in every browser, and the
 // phone's copy shows the answer.
 async function markAnswered(id, answer, via, { broadcast, env }) {
   const done = updateWaiting(id, { status: 'answered', answer, answeredAt: new Date().toISOString(), answeredVia: via });
+  syncQuestion(done, broadcast);
   broadcast?.(waitingPayload());
   if (done.tgMessageId) await showAnswerOnPhone(done, env);
   return done;
@@ -325,19 +407,19 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
   sent.push(now);
   let item;
   try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency }); } catch (err) {
-    console.error('Could not save the Waiting on you list:', err.message);
+    console.error('Could not save the Waiting list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) {
-    return { pinned: true, n: item?.n, error: `Pinned under "Waiting on you" in the owner's browser${n}, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.` };
+    return { pinned: true, n: item?.n, error: `Put in the owner's Billion tab${n}, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.` };
   }
   // A button per choice; callback_data is "<id>:<index>", 38 bytes of Telegram's 64.
   const keyboard = item?.choices && {
     reply_markup: { inline_keyboard: item.choices.map((c, i) => [{ text: c === item.recommended ? `${c} (recommended)` : c, callback_data: `${item.id}:${i}` }]) },
   };
   const result = await sendToOwner(item ? questionText(item) : `${urgentMark(urgency)}Billion: ${body}`, { env, platform, extra: keyboard || undefined });
-  if (result.error) return { pinned: true, n: item?.n, error: `Pinned under "Waiting on you" in the owner's browser${n}, but the Telegram send failed: ${result.error}` };
+  if (result.error) return { pinned: true, n: item?.n, error: `Put in the owner's Billion tab${n}, but the Telegram send failed: ${result.error}` };
   // Kept so a reply to this message, or a tap on its buttons, finds the question.
   if (item && result.messageId) {
     let saved;
@@ -349,22 +431,26 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
 }
 
 // --- tell_owner: a reply or status update, no Waiting item, no badge ---
+// Always a bubble in the Billion tab; on the phone too when Telegram is set up.
+// { ok, telegram } (telegram: sent there too), { ok, note } when only the
+// Telegram send failed, or { error }.
 
-export async function tellOwner(text, { env = process.env, now = Date.now(), platform = process.platform } = {}) {
+export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
-  const { token, chatId } = telegramSettings(env);
-  if (!token || !chatId) return { error: 'Telegram is not set up; say it in your terminal.' };
   // Shares notify_owner's limit: both land on the same phone.
   sent = sent.filter(t => now - t < NOTIFY_WINDOW_MS);
   if (sent.length >= NOTIFY_LIMIT) {
     return { error: `Not sent: you have messaged the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later.` };
   }
   sent.push(now);
+  addChat({ from: 'billion', text: body }, broadcast, env);
+  const { token, chatId } = telegramSettings(env);
+  if (!token || !chatId) return { ok: true, telegram: false };
   const result = await sendToOwner(`Billion: ${body}`, { env, platform });
-  if (result.error) return { error: `The Telegram send failed: ${result.error}` };
-  return { ok: true };
+  if (result.error) return { ok: true, note: `The Telegram send failed: ${result.error}` };
+  return { ok: true, telegram: true };
 }
 
 // --- Replies: long-polling getUpdates ---
@@ -398,7 +484,7 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   const repliedTo = typed && msg.reply_to_message?.message_id;
   const question = repliedTo && waitingItems().find(i => i.tgMessageId === repliedTo && i.status === 'open');
   if (question) {
-    const result = await answerWaiting(question.id, typed, 'telegram', { broadcast, env });
+    const result = await answerWaiting(question.id, typed, 'telegram', { broadcast, env, typed: true });
     if (result.error) {
       await sendTelegram(result.error, { env });
       return result.error === 'Billion is not running' ? 'not-running' : 'full';
@@ -411,6 +497,7 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     return 'not-running';
   }
   let line = `${OWNER_PREFIX} ${typed}`;
+  let said = { from: 'owner', via: 'telegram', text: typed };
   if (note) {
     const heard = await transcribeNote(note, env);
     if (heard.reply) {
@@ -419,11 +506,13 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     }
     const caption = typeof msg.caption === 'string' && msg.caption.trim() ? ` (caption: ${msg.caption.trim()})` : '';
     line = `${OWNER_VOICE_PREFIX} ${heard.transcript}${caption}`;
+    said = { from: 'owner', via: 'telegram', voice: true, text: `${heard.transcript}${caption}` };
   }
   if (!sendText(billion, line)) {
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
     return 'full';
   }
+  addChat(said, broadcast, env);
   return 'delivered';
 }
 

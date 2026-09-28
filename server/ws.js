@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { waitingPayload, dismissWaiting, answerWaiting } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting, chatPayload, ownerSays } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
@@ -386,6 +386,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.send(JSON.stringify({ type: 'orphans-list', orphans: [...orphans.values()] }));
     ws.send(JSON.stringify(jobsPayload()));
     ws.send(JSON.stringify(waitingPayload()));
+    ws.send(JSON.stringify(chatPayload()));
     // The page this server serves: an Origin that is allowed and is this
     // server's own host. A plain socket from a shell sends none, and a page
     // on another local port has another; both are refused the account switch.
@@ -511,6 +512,15 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             ? await answerWaiting(msg.id, msg.answer, 'app', { broadcast })
             : { error: 'Only the owner answers Billion, and with user accounts on nobody does.' };
           if (result.error) ws.send(JSON.stringify({ type: 'waiting-error', id: msg.id, error: result.error }));
+          break;
+        }
+        // The Billion tab's text box: typed into Billion's terminal as
+        // [Owner via app], from the owner's browser only.
+        case 'chat-send': {
+          const result = !mayAnswerOwner() ? { error: 'Only the owner talks to Billion here, and with user accounts on nobody does.' }
+            : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
+            : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, broadcast });
+          ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
           break;
         }
         case 'kill': {

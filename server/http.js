@@ -142,7 +142,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           ? notifyOwner(text, { choices, recommended, urgency, broadcast })
           : { error: 'Only Billion can notify the owner.' }),
         tellOwner: (text) => (req.agentSession.isBillion
-          ? tellOwner(text)
+          ? tellOwner(text, { broadcast })
           : { error: 'Only Billion can message the owner.' }),
         resolveQuestion: (ref, answer) => (req.agentSession.isBillion
           ? resolveQuestion(ref, answer, { broadcast })

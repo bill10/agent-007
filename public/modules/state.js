@@ -29,10 +29,19 @@ export let billionEnabled = false;
 export function setBillionEnabled(on) { billionEnabled = !!on; }
 
 // Billion's notify_owner questions, open and answered, not dismissed
-// (server/owner.js). The "Waiting on you" tab shows them in the terminal
-// viewport, like the job board, and activeSessionId stays put meanwhile too.
+// (server/owner.js), and the chat thread they sit in. The "Billion" tab shows
+// them in the terminal viewport, like the job board, and activeSessionId stays
+// put meanwhile too.
 export let waitingItems = [];
 export function setWaitingItems(items) { waitingItems = Array.isArray(items) ? items : []; }
+export let chatMessages = [];
+export function setChatMessages(messages) { chatMessages = Array.isArray(messages) ? messages : []; }
+// A new message goes at the end; a known one (a question answered) in place.
+export function upsertChatMessage(message) {
+  const at = chatMessages.findIndex(m => m.id === message.id);
+  if (at === -1) chatMessages.push(message);
+  else chatMessages[at] = message;
+}
 export let waitingActive = false;
 export function setWaitingActive(on) { waitingActive = !!on; }
 

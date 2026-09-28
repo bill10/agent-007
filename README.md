@@ -57,7 +57,7 @@ Uncomment what you want, then restart. The ones people change:
 | Setting | What it does |
 |---------|--------------|
 | `BILLION=0` | Turns off Billion, the always-on agent |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Billion's questions reach your phone as well as the Waiting on you tab, and you answer from either, with a tap when it is a pick ([setup](docs/BILLION.md#telegram)) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Billion's questions and replies reach your phone as well as the Billion tab, and you answer from either, with a tap when it is a pick ([setup](docs/BILLION.md#telegram)) |
 | `HOST=0.0.0.0` + `ALLOWED_ORIGINS=<tailnet name>` | Reach it from your phone or another machine (behind Tailscale only, see [docs/REMOTE.md](docs/REMOTE.md)) |
 | `CLAUDE_PERMISSION_MODE` | Mode Claude Code agents start in, e.g. `bypassPermissions` |
 | `CODEX_PERMISSION_MODE` | The same for Codex |
@@ -95,7 +95,7 @@ The job board reuses that same machinery: a dispatched job is an ordinary agent,
 ┌─────────────┬──────────────┬────────────────────┐
 │  Explorer   │  Pixel       │  Jobs + Terminals   │
 │  (repos,    │  Office      │  (job board and     │
-│   files,    │  (canvas,    │   Waiting on you    │
+│   files,    │  (canvas,    │   Billion chat      │
 │   diffs)    │   agents)    │   tabs, xterm.js,   │
 │             │              │   one tab per agent)│
 └─────────────┴──────────────┴────────────────────┘
@@ -110,7 +110,7 @@ Much of it, with enough setup: Claude Code can loop, run subagents in their own 
 [Munder Difflin](https://github.com/chaitanyagiri/munder-difflin) is a great, much bigger desktop app that builds many abilities in: memory, dictation, meetings, Slack, an editor. Agent 007 stays thin. It is a web app you start with one command and can open from any browser, even your phone, and it does only the operations: terminals, a job board, a manager, reviews, and a line to you. What your company can do comes from the agents themselves (Claude Code, Codex, and whatever tools, APIs and MCP servers they can reach), so it gets better every time they do. Free, with no paid tier.
 
 ### Is it safe to let agents merge on their own?
-Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Workers on Billion's cards, Claude Code and Codex alike, ask Billion for permissions before they ask you.
+Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Billion tab (your chat with Billion) or on your phone. Workers on Billion's cards, Claude Code and Codex alike, ask Billion for permissions before they ask you.
 
 ### Does it cost anything?
 No. It is free and open source, and it runs the CLIs you already have, on your existing subscriptions. Board workers use your subscription's usage like any session you start yourself.
@@ -280,7 +280,7 @@ public/
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
-    waiting.js     The Waiting on you tab (Billion's questions, blocking first, answered by a click or a typed line)
+    waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts
