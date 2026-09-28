@@ -110,7 +110,7 @@ Much of it, with enough setup: Claude Code can loop, run subagents in their own 
 [Munder Difflin](https://github.com/chaitanyagiri/munder-difflin) is a great, much bigger desktop app that builds many abilities in: memory, dictation, meetings, Slack, an editor. Agent 007 stays thin. It is a web app you start with one command and can open from any browser, even your phone, and it does only the operations: terminals, a job board, a manager, reviews, and a line to you. What your company can do comes from the agents themselves (Claude Code, Codex, and whatever tools, APIs and MCP servers they can reach), so it gets better every time they do. Free, with no paid tier.
 
 ### Is it safe to let agents merge on their own?
-Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Claude Code workers on Billion's cards ask Billion for permissions before they ask you; Codex workers still ask you directly.
+Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Waiting tab or on your phone. Workers on Billion's cards, Claude Code and Codex alike, ask Billion for permissions before they ask you.
 
 ### Does it cost anything?
 No. It is free and open source, and it runs the CLIs you already have, on your existing subscriptions. Board workers use your subscription's usage like any session you start yourself.

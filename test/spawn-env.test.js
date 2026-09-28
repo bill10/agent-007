@@ -13,6 +13,7 @@ vi.mock('../server/command-path.js', async (orig) => ({
 }));
 
 const { createSessionFromConfig } = await import('../server/pty.js');
+const { setCodexHookHash, mcpConfigPath } = await import('../server/agent-mcp.js');
 
 const SECRETS = { TELEGRAM_BOT_TOKEN: '123:fake', TELEGRAM_CHAT_ID: '42', WHISPER_MODEL: '/m.bin', SAY_VOICE: 'Ava' };
 const KEPT = { CODEX_HOME: '/tmp/codex-home', CLAUDE_CONFIG_DIR: '/tmp/claude-config' };
@@ -56,7 +57,25 @@ describe('the environment a spawned agent gets', () => {
     expect(users).toEqual(['pty.js']);
     const calls = readFileSync('server/pty.js', 'utf8').match(/spawnPty\([^]*?\}\);/g);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain('env: ptyEnv(process.env)');
+    expect(calls[0]).toContain('env: { ...ptyEnv(process.env), ...hookEnv }');
+  });
+});
+
+describe('a Codex worker on Billion\'s card', () => {
+  const fields = { spawnedBy: 'board', jobId: 'j1', approvalsToBillion: true, command: 'codex' };
+  afterEach(() => setCodexHookHash(null));
+
+  it('names its own MCP config to the hook, and gets the hook, once the hash is known', () => {
+    setCodexHookHash(`sha256:${'d'.repeat(64)}`);
+    const { args, env } = spawnWith(fields);
+    expect(args.some(a => a.startsWith('hooks.PermissionRequest='))).toBe(true);
+    expect(env.AGENT007_HOOK_CONFIG).toBe(mcpConfigPath(`env-${n}`));
+  });
+
+  it('gets neither without it, and asks the owner', () => {
+    const { args, env } = spawnWith(fields);
+    expect(args.some(a => a.startsWith('hooks.'))).toBe(false);
+    expect(env).not.toHaveProperty('AGENT007_HOOK_CONFIG');
   });
 });
 

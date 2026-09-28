@@ -16,7 +16,7 @@ const { config, sessions } = await import('../server/state.js');
 const { setupRoutes } = await import('../server/http.js');
 const { requestApproval, answerApproval, clearApprovals, APPROVAL_WAIT_MS } = await import('../server/approvals.js');
 const { dropMessages } = await import('../server/messages.js');
-const { withApprovalHook, withCodexWorkerTools, withMcpConfig } = await import('../server/agent-mcp.js');
+const { withApprovalHook, withCodexWorkerTools, withMcpConfig, setCodexHookHash, pickCodexHookHash, lookupCodexHookHash, codexHookCommand, CODEX_HOOK_KEY, HOOK_TIMEOUT_S } = await import('../server/agent-mcp.js');
 const { mintAgentToken } = await import('../server/auth.js');
 const { addJob, dispatchOnce, boardSettings } = await import('../server/jobs.js');
 const { BILLION_NAME } = await import('../lib/jobs.js');
@@ -106,12 +106,54 @@ describe('the hook in the worker\'s command line', () => {
     expect(args.slice(2)).toEqual(['--permission-mode', 'auto', 'do it']);
   });
 
-  it('stays out of Codex, and out of a command with its own --settings', () => {
+  it('stays out of Codex until its hash is known, and out of a command with its own --settings', () => {
     // The same array, not a copy: pty.js records "hooked" by identity.
+    setCodexHookHash(null);
     const codex = ['x'];
     expect(withApprovalHook('codex', codex, '/cfg/s1.json')).toBe(codex);
     const own = ['--settings', '{}'];
     expect(withApprovalHook('claude', own, '/cfg/s1.json')).toBe(own);
+  });
+
+  it('goes into a Codex worker as the hook and its trusted hash, the same for every worker', () => {
+    const hash = `sha256:${'a'.repeat(64)}`;
+    setCodexHookHash(hash);
+    try {
+      const args = withApprovalHook('codex.exe', ['x'], '/cfg/s1.json');
+      expect(args).toEqual([
+        '-c', `hooks.PermissionRequest=[{matcher="*",hooks=[{type="command",command=${JSON.stringify(codexHookCommand())},timeout=${HOOK_TIMEOUT_S}}]}]`,
+        '-c', `hooks.state={"${CODEX_HOOK_KEY}"={trusted_hash="${hash}"}}`,
+        'x',
+      ]);
+      // No per-session path in the hashed command: the MCP config goes by env (pty.js).
+      expect(withApprovalHook('codex', [], '/cfg/s2.json')).toEqual(args.slice(0, 4));
+      expect(codexHookCommand()).not.toContain('s1.json');
+      expect(HOOK_TIMEOUT_S * 1000).toBeGreaterThan(APPROVAL_WAIT_MS);
+      expect(withApprovalHook('codex', [], null)).toEqual([]);
+    } finally {
+      setCodexHookHash(null);
+    }
+  });
+
+  it('takes the hash from hooks/list only when the one session-flags entry is exactly ours', () => {
+    const hash = `sha256:${'b'.repeat(64)}`;
+    const ours = {
+      key: CODEX_HOOK_KEY, eventName: 'permissionRequest', source: 'sessionFlags', command: codexHookCommand(),
+      timeoutSec: HOOK_TIMEOUT_S, statusMessage: null, currentHash: hash, trustStatus: 'untrusted',
+    };
+    const user = { ...ours, key: '/h/.codex/hooks.json:permission_request:0:0', source: 'user', command: 'mine', currentHash: `sha256:${'c'.repeat(64)}` };
+    const list = (...hooks) => ({ data: [{ cwd: '/h', hooks, warnings: [], errors: [] }] });
+    expect(pickCodexHookHash(list(user, ours))).toBe(hash);
+    for (const bad of [{ command: 'other' }, { timeoutSec: 60 }, { statusMessage: 'x' }, { key: `${CODEX_HOOK_KEY.slice(0, -1)}1` }, { currentHash: 'md5:x' }]) {
+      expect(pickCodexHookHash(list({ ...ours, ...bad }))).toBe(null);
+    }
+    expect(pickCodexHookHash(list(ours, { ...ours, key: 'second' }))).toBe(null);
+    expect(pickCodexHookHash(list(user))).toBe(null);
+    expect(pickCodexHookHash(undefined)).toBe(null);
+  });
+
+  it('finds no hash, so hooks no Codex worker, without codex on the PATH', async () => {
+    expect(await lookupCodexHookHash({ env: { PATH: mkdtempSync(join(tmpdir(), 'a007-ap-nopath-')) } })).toBe(null);
   });
 
   it('pre-allows the same board tools for a Codex worker, one -c per tool', () => {
@@ -195,6 +237,19 @@ describe('the hook script', () => {
       expect(await run(cfg, JSON.stringify(request))).toBe('');
     }
     expect(await run('/no/such/config.json', JSON.stringify(request))).toBe('');
+  });
+
+  it('reads a Codex worker\'s MCP config from the environment when given no argument', async () => {
+    reply = { body: { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'deny', message: 'no' } } } };
+    const out = await new Promise((resolve) => {
+      const child = spawn(process.execPath, [HOOK], { env: { ...process.env, AGENT007_HOOK_CONFIG: cfg } });
+      let o = '';
+      child.stdout.on('data', d => { o += d; });
+      child.on('close', () => resolve(o));
+      child.stdin.end(JSON.stringify(request));
+    });
+    expect(seen.auth).toBe('Bearer tok');
+    expect(JSON.parse(out).hookSpecificOutput.decision).toEqual({ behavior: 'deny', message: 'no' });
   });
 });
 

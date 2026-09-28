@@ -304,8 +304,9 @@ Limits today:
 - `respawn_agent` reaches only the orphans of your own cards, never an agent
   the owner started by hand, and never makes a new worktree. Workers on your
   In-progress cards come back by themselves after a restart.
-- Workers running Codex still ask the owner, not you: only Claude Code
-  workers route their permission requests to you.
+- A Codex worker asks you only when the server could read its hook's hash
+  from Codex at start; if not, it asks the owner. A worker whose owner has a
+  permission hook of their own may be answered by it as well: any deny wins.
 
 ## Safety
 

@@ -4,11 +4,13 @@
 // and the flags that connect Claude Code and Codex to it. Separate from pty.js so it can be
 // tested without importing node-pty.
 
+import { spawn } from 'child_process';
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { basename, join } from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
+import { commandExists, resolveExecutable } from './command-path.js';
 
 // Alongside config.json and users.json rather than in the worktree: a config
 // file dropped into the repo the agent is working in would show up in
@@ -94,8 +96,8 @@ export function writeMcpConfig(sessionId, agentToken) {
 
 // The --settings that routes a Claude Code worker's permission dialogs to
 // Billion (server/approvals.js): a PermissionRequest hook running
-// server/permission-hook.js with this session's MCP config. Claude Code only;
-// Codex takes its hook differently and is not wired yet (docs/BILLION.md).
+// server/permission-hook.js with this session's MCP config. Codex gets the
+// same hook as two -c flags (codexApprovalArgs below).
 const PERMISSION_HOOK = fileURLToPath(new URL('./permission-hook.js', import.meta.url));
 // The two board tools the job prompt tells a worker on Billion's card to use:
 // finishing its card, and asking Billion. Asking permission for those would
@@ -126,6 +128,7 @@ export function withBoardWorkerSettings(file, args) {
 }
 
 export function withApprovalHook(file, args, configPath) {
+  if (configPath && agentName(file) === 'codex') return codexHookHash ? [...codexApprovalArgs(codexHookHash), ...args] : args;
   if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
   const settings = {
     enabledPlugins: noChannelPlugins(),
@@ -138,6 +141,75 @@ export function withApprovalHook(file, args, configPath) {
     },
   };
   return ['--settings', JSON.stringify(settings), ...args];
+}
+
+// Codex's side of the hook (docs/BILLION.md, "Codex hook trust"). Codex runs a
+// hook only once its hash is trusted, and both the hook and its trust entry go
+// in as -c flags, so nothing is written to ~/.codex/config.toml. The hash covers
+// the command, timeout and statusMessage, so the command is the same for every
+// worker: this session's MCP config reaches the hook through
+// CODEX_HOOK_CONFIG_ENV (pty.js) instead of as an argument. The key holds the
+// entry's position, so this must stay the only PermissionRequest hook we pass.
+export const CODEX_HOOK_KEY = '/<session-flags>/config.toml:permission_request:0:0';
+export const CODEX_HOOK_CONFIG_ENV = 'AGENT007_HOOK_CONFIG';
+export const codexHookCommand = () => [process.execPath, PERMISSION_HOOK].map(p => shellQuote(hookPath(p))).join(' ');
+const codexHookFlag = () => `hooks.PermissionRequest=[{matcher="*",hooks=[{type="command",command=${JSON.stringify(codexHookCommand())},timeout=${HOOK_TIMEOUT_S}}]}]`;
+export const codexApprovalArgs = (hash) => [
+  '-c', codexHookFlag(),
+  '-c', `hooks.state={${JSON.stringify(CODEX_HOOK_KEY)}={trusted_hash=${JSON.stringify(hash)}}}`,
+];
+
+// The hook's hash, as Codex itself computes it: `codex app-server` with the
+// hook passed, asked for hooks/list. Looked up once at server start and never
+// hardcoded or recomputed here, since the command holds absolute paths and a
+// Codex update could hash differently. Null (no Codex worker hooked; they ask
+// the owner) when codex is missing or the answer is not exactly our hook.
+// ponytail: looked up once; a Codex upgraded under a running server hashes
+// anew, and its workers then hold the hook for review until a restart.
+let codexHookHash = null;
+export const setCodexHookHash = (hash) => { codexHookHash = hash; };
+
+export function pickCodexHookHash(listResult) {
+  const hooks = (listResult?.data ?? []).flatMap(entry => entry?.hooks ?? []);
+  const ours = hooks.filter(h => h?.source === 'sessionFlags' && h.eventName === 'permissionRequest');
+  const [hook] = ours;
+  if (ours.length !== 1 || hook.key !== CODEX_HOOK_KEY || hook.command !== codexHookCommand()
+    || hook.timeoutSec !== HOOK_TIMEOUT_S || hook.statusMessage != null) return null;
+  return /^sha256:[0-9a-f]{64}$/.test(hook.currentHash) ? hook.currentHash : null;
+}
+
+export function lookupCodexHookHash({ env = process.env, timeoutMs = 20_000 } = {}) {
+  return new Promise((resolve) => {
+    if (!commandExists('codex', env)) return resolve(null);
+    let child;
+    try {
+      child = spawn(resolveExecutable('codex', env) ?? 'codex', ['app-server', '-c', codexHookFlag()], { env, stdio: ['pipe', 'pipe', 'ignore'], windowsHide: true });
+    } catch { return resolve(null); }
+    const done = (hash) => { clearTimeout(timer); child.kill(); resolve(hash); };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    child.on('error', () => done(null));
+    child.on('exit', () => done(null));
+    let buf = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (d) => {
+      buf += d;
+      for (let i; (i = buf.indexOf('\n')) !== -1; buf = buf.slice(i + 1)) {
+        let msg;
+        try { msg = JSON.parse(buf.slice(0, i)); } catch { continue; }
+        if (msg.id === 2) return done(pickCodexHookHash(msg.result));
+      }
+    });
+    const send = (m) => child.stdin.write(`${JSON.stringify(m)}\n`);
+    child.stdin.on('error', () => done(null));
+    send({ id: 1, method: 'initialize', params: { clientInfo: { name: 'agent-007', version: '0' } } });
+    send({ method: 'initialized' });
+    send({ id: 2, method: 'hooks/list', params: { cwds: [homedir()] } });
+  });
+}
+
+export async function startCodexHookLookup(opts) {
+  codexHookHash = await lookupCodexHookHash(opts);
+  console.log(`  Codex approvals: ${codexHookHash ? 'workers on Billion\'s cards ask Billion first' : 'not hooked, Codex workers ask the owner'}`);
 }
 
 // The Codex side of the same pre-allow: per-run -c overrides, one separate argv
