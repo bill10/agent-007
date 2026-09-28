@@ -1418,6 +1418,8 @@ body {
 }
 .waiting-card-head { display: flex; align-items: center; gap: 8px; }
 .waiting-card-n { color: var(--accent); font-size: 11px; font-weight: 700; flex-shrink: 0; }
+.waiting-card-n.low { color: var(--text-dim); font-weight: 400; }
+.waiting-urgent { font-size: 13px; font-weight: 900; }
 .waiting-card-time { color: var(--text-dim); font-size: 10px; flex: 1; }
 .waiting-card-text {
   margin: 0;

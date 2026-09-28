@@ -398,6 +398,11 @@ export const NOTIFY_OWNER_TOOL = {
         description: `2 to ${MAX_CHOICES} short answers the owner can tap. The owner can still type something else.`,
       },
       recommended: { type: 'string', description: 'The choice you recommend; must be one of choices.' },
+      urgency: {
+        type: 'string', enum: ['blocking', 'normal', 'low'],
+        description: 'blocking: a worker or a merge is stopped until the owner answers. '
+          + 'normal (the default): a decision you work around meanwhile. low: optional.',
+      },
     },
     required: ['text'],
     additionalProperties: false,
@@ -741,7 +746,7 @@ const CALLS = {
 
   [NOTIFY_OWNER_TOOL.name]: async (args, ctx) => {
     const result = ctx.notifyOwner
-      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended })
+      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency })
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
     return toolText(`Sent to the owner on Telegram and put under "Waiting on you" as Q${result.n}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);

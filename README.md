@@ -280,7 +280,7 @@ public/
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
-    waiting.js     The Waiting on you tab (Billion's questions, answered by a click or a typed line)
+    waiting.js     The Waiting on you tab (Billion's questions, blocking first, answered by a click or a typed line)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts

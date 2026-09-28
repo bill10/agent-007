@@ -130,3 +130,35 @@ describe('a question card', () => {
     expect(answered.querySelector('.waiting-answered-answer').textContent).toMatch(/^→ no · Telegram/);
   });
 });
+
+describe('urgency', () => {
+  beforeEach(() => showWaiting());
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600e3).toISOString();
+
+  it('lists blocking, then normal, then low, oldest first within each; answered keep their order', () => {
+    setWaitingItems([
+      open(1, { urgency: 'low', at: at(9) }),
+      open(2, { at: at(8) }),                         // saved before urgency: normal
+      open(3, { urgency: 'blocking', at: at(1) }),
+      open(4, { urgency: 'normal', at: at(10) }),
+      open(5, { urgency: 'blocking', at: at(5) }),
+      open(6, { urgency: 'low', at: at(20) }),
+      { ...open(7), status: 'answered', answer: 'a', answeredAt: at(2) },
+      { ...open(8), status: 'answered', answer: 'b', answeredAt: at(1) },
+    ]);
+    renderWaiting();
+    expect([...document.querySelectorAll('.waiting-card')].map(c => c.dataset.id)).toEqual(['w5', 'w3', 'w4', 'w2', 'w6', 'w1']);
+    expect([...document.querySelectorAll('.waiting-answered-item .waiting-card-n')].map(n => n.textContent)).toEqual(['Q8', 'Q7']);
+  });
+
+  it('marks blocking with a bold "!", leaves normal plain, and dims low', () => {
+    setWaitingItems([open(1, { urgency: 'blocking' }), open(2, { urgency: 'normal' }), open(3, { urgency: 'low' })]);
+    renderWaiting();
+    const n = (id) => card(id).querySelector('.waiting-card-n');
+    expect(n('w1').textContent).toBe('! Q1');
+    expect(n('w1').querySelector('b.waiting-urgent').textContent).toBe('!');
+    expect(n('w1').title).toBe('blocking: a worker or merge is waiting');
+    expect([n('w2').textContent, n('w2').title, n('w2').className]).toEqual(['Q2', '', 'waiting-card-n']);
+    expect([n('w3').textContent, n('w3').title, n('w3').classList.contains('low')]).toEqual(['Q3', 'optional', true]);
+  });
+});

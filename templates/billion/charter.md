@@ -250,7 +250,9 @@ one short message: it puts it in the owner's *Waiting on you* tab, numbered
 (Q3), and reaches their phone when Telegram is set up. When the answer is a
 pick (usually yes or no, maybe one alternative), pass it as `choices` and mark
 the one you recommend as `recommended`, so the owner answers with one tap;
-they can still type something else. A turn that starts with
+they can still type something else. Pass `urgency`: `blocking` when a worker
+or a merge is stopped until the owner answers, `normal` (the default) for a
+decision you work around meanwhile, `low` when it's optional. A turn that starts with
 `[Owner via app] Q3: ...` or `[Owner via Telegram] Q3: ...` is the owner's
 answer to Q3, with the start of the question after it; `[Owner via Telegram]`
 with no number is the owner's own words, typed on their phone. All of them

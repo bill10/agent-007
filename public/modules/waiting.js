@@ -76,7 +76,15 @@ function openCard(item) {
   const card = el('article', 'waiting-card');
   card.dataset.id = item.id;
   const head = el('div', 'waiting-card-head');
-  head.append(el('span', 'waiting-card-n', `Q${item.n}`), el('span', 'waiting-card-time', ago(item.at)));
+  const n = el('span', 'waiting-card-n', `Q${item.n}`);
+  if (item.urgency === 'blocking') {
+    n.prepend(el('b', 'waiting-urgent', '!'), ' ');
+    n.title = 'blocking: a worker or merge is waiting';
+  } else if (item.urgency === 'low') {
+    n.classList.add('low');
+    n.title = 'optional';
+  }
+  head.append(n, el('span', 'waiting-card-time', ago(item.at)));
   const dismiss = el('button', 'explorer-icon-btn waiting-dismiss', '×');
   dismiss.title = 'Dismiss';
   dismiss.setAttribute('aria-label', `Dismiss Q${item.n}`);
@@ -133,6 +141,11 @@ function answeredRow(item) {
   return li;
 }
 
+// Blocking, then normal, then low; oldest first within each, since a question
+// left waiting grows more urgent. Items without urgency read as normal.
+const RANK = { blocking: 0, low: 2 };
+const byUrgency = (a, b) => (RANK[a.urgency] ?? 1) - (RANK[b.urgency] ?? 1) || String(a.at).localeCompare(String(b.at));
+
 export function renderWaiting() {
   const list = document.getElementById('waiting-list');
   if (!list) return;
@@ -143,7 +156,7 @@ export function renderWaiting() {
   if (!waitingActive) return;
   const focused = document.activeElement?.closest?.('.waiting-card')?.dataset.id;
   list.innerHTML = '';
-  const open = waitingItems.filter(item => item.status === 'open').reverse();
+  const open = waitingItems.filter(item => item.status === 'open').sort(byUrgency);
   if (!open.length) list.appendChild(el('p', 'waiting-empty', 'Nothing waiting on you.'));
   for (const item of open) list.appendChild(openCard(item));
 
