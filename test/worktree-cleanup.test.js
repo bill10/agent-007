@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, existsSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, existsSync, writeFileSync, rmSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -256,6 +256,23 @@ describe('discardWorktree', () => {
     expect(await discardWorktree(repo, repo)).toBe(false);
     expect(existsSync(stray)).toBe(true);
     expect(existsSync(join(repo, 'README.md'))).toBe(true);
+  });
+
+  it('deletes in place when the folder cannot be moved to the trash', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/no-trash');
+    // A file where the trash folder should be makes the move impossible, as a
+    // worktree on another disk (EXDEV) would.
+    const trash = join(process.env.AGENT007_WORKTREE_DIR, '.trash');
+    // Earlier tests' trash is still being emptied in the background.
+    await vi.waitFor(() => expect(existsSync(trash) && readdirSync(trash).length).toBeFalsy());
+    rmSync(trash, { recursive: true, force: true });
+    writeFileSync(trash, '');
+    try {
+      expect(await discardWorktree(repo, wt)).toBe(true);
+    } finally { rmSync(trash); }
+    expect(existsSync(wt)).toBe(false);
+    expect(execFileSync('git', ['-C', repo, 'worktree', 'list'], { encoding: 'utf8' })).not.toContain('no-trash');
   });
 
   it('keeps the trash out of the orphan scan and empties it at startup', async () => {
