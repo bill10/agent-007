@@ -1236,7 +1236,7 @@ body {
 .mobile-nav { display: none; }
 @media (max-width: 700px) {
   .divider, .explorer-reopen-btn, #btn-toggle-explorer { display: none !important; }
-  .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss { min-width: 44px; min-height: 44px; }
+  .explorer-billion-start, .explorer-billion-cli, .waiting-dismiss, .chat-link { min-width: 44px; min-height: 44px; }
   .account-btn, .account-folder { min-height: 44px; }
   #explorer-panel, #office-panel, #terminal-panel {
     display: none; width: 100% !important; min-width: 0; max-width: none; flex: 1;
@@ -1362,11 +1362,11 @@ body {
   text-align: center;
 }
 
-/* The Billion tab and phone button: a bell and "Billion", with a phone-style
-   count badge on the bell's top-right corner; dimmed when nothing is open. */
+/* The Billion tab and phone button: a chat bubble and "Billion", with a phone-style
+   count badge on the bubble's top-right corner; dimmed when nothing is open. */
 .terminal-tab.waiting-tab { padding: 0 14px; gap: 12px; }
-.bell { position: relative; display: inline-flex; flex-shrink: 0; }
-.bell-badge {
+.chat-icon { position: relative; display: inline-flex; flex-shrink: 0; }
+.chat-badge {
   position: absolute;
   top: -7px;
   left: 8px;
@@ -1376,15 +1376,15 @@ body {
   letter-spacing: 0;
   box-shadow: 0 0 0 2px var(--bg-tabs);
 }
-.terminal-tab.waiting-tab.active .bell-badge { box-shadow: 0 0 0 2px var(--bg-terminal); }
-.mobile-nav .bell-badge { box-shadow: 0 0 0 2px var(--bg-dark); }
+.terminal-tab.waiting-tab.active .chat-badge { box-shadow: 0 0 0 2px var(--bg-terminal); }
+.mobile-nav .chat-badge { box-shadow: 0 0 0 2px var(--bg-dark); }
 .terminal-tab.waiting-tab.empty:not(.active) .board-tab-icon,
 .mobile-nav-waiting.empty:not([aria-current="true"]) svg { opacity: 0.45; }
 
 /* ============================================================
    The Billion tab
    The owner's chat with Billion. A pinned tab next to Jobs, same
-   viewport; the bell's badge counts open questions. Open questions
+   viewport; the bubble's badge counts open questions. Open questions
    pin to a strip on top, the thread scrolls, the text box stays at
    the bottom.
    ============================================================ */
@@ -1503,6 +1503,17 @@ body {
   cursor: pointer;
 }
 .waiting-dismiss:hover { color: var(--text); }
+.chat-link {
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 11px;
+  font-style: normal;
+  color: var(--accent);
+  background: none;
+  border: none;
+  text-decoration: underline;
+  cursor: pointer;
+}
 .chat-bubble :disabled { opacity: 0.55; cursor: default; }
 .waiting-error { margin: 0; flex-basis: 100%; color: var(--state-disconnected); font-size: 11px; }
 .waiting-error[hidden] { display: none; }

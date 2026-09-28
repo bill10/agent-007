@@ -1,5 +1,5 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
-import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, waitingActive, jobs, billionFirst } from './state.js';
+import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, waitingActive, jobs, billionFirst, billionTabOpen, setBillionTabOpen } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
@@ -291,9 +291,11 @@ function disposeAgent(sessionId) {
   agents.delete(sessionId);
   if (activeSessionId === sessionId) {
     setActiveSession(null);
-    const remaining = [...agents.keys()];
+    const remaining = shownTabs();
     if (remaining.length > 0) {
       switchToSession(remaining[remaining.length - 1]);
+    } else if (agents.size) {
+      showWaiting();
     } else {
       // Nothing left to show. The board is the sensible landing spot: it is
       // what dispatched this agent and it explains where the work went. The
@@ -321,6 +323,7 @@ export function switchToSession(sessionId) {
   setActiveSession(sessionId);
   const agent = agents.get(sessionId);
   if (!agent) return;
+  if (agent.isBillion) setBillionTabOpen(true);
   agent.termEl.style.display = 'block';
   localStorage.setItem('agent007-active-tab', sessionId);
   document.getElementById('terminal-empty').style.display = 'none';
@@ -332,6 +335,26 @@ export function switchToSession(sessionId) {
       agent.term.focus();
     });
   });
+  updateTabs();
+  updateTopbarAgent();
+  if (onSessionChanged) onSessionChanged();
+}
+
+// The sessions with a tab showing: all but a hidden Billion.
+const shownTabs = () => [...agents].filter(([, a]) => !a.isBillion || billionTabOpen).map(([id]) => id);
+
+// Closing Billion's tab only hides it: Billion is never killed from here.
+function closeBillionTab() {
+  setBillionTabOpen(false);
+  const billion = agents.get(activeSessionId);
+  if (billion?.isBillion) {
+    billion.termEl.style.display = 'none';
+    setActiveSession(null);
+    localStorage.removeItem('agent007-active-tab');
+    // The board keeps activeSessionId while it shows; leave the owner there.
+    if (!boardActive) showWaiting();
+    fitActiveTerminal();
+  }
   updateTabs();
   updateTopbarAgent();
   if (onSessionChanged) onSessionChanged();
@@ -356,12 +379,12 @@ export function removeSession(sessionId) {
   agents.delete(sessionId);
   if (activeSessionId === sessionId) {
     setActiveSession(null);
-    const remaining = [...agents.keys()];
+    const remaining = shownTabs();
     if (remaining.length > 0) {
       switchToSession(remaining[remaining.length - 1]);
     } else {
-      document.getElementById('terminal-empty').style.display = 'flex';
-      document.getElementById('office-empty').style.display = 'flex';
+      if (!agents.size) document.getElementById('office-empty').style.display = 'flex';
+      showWaiting();
     }
   }
   updateTabs();
@@ -369,21 +392,21 @@ export function removeSession(sessionId) {
   if (onSessionChanged) onSessionChanged();
 }
 
-export const BELL_ICON = '<svg class="board-tab-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M3 8.5V5.5a3 3 0 0 1 6 0v3l1 1H2z"/><path d="M5 11h2"/></svg>';
+export const CHAT_ICON = '<svg class="board-tab-icon" aria-hidden="true" width="14" height="14" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M2 2h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5.5L3 11V9H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/></svg>';
 
-// The bell's notification badge: the open count, "9+" above 9, none at zero.
-function bellBadge(badge, open) {
+// The chat bubble's badge: the open question count, "9+" above 9, none at zero.
+function chatBadge(badge, open) {
   badge.textContent = open > 9 ? '9+' : open > 0 ? String(open) : '';
   badge.hidden = open === 0;
 }
 
 const waitingLabel = (open) => open > 0 ? `Talk to Billion, ${open} open question${open === 1 ? '' : 's'}` : 'Talk to Billion';
 
-// The phone's bottom bar carries the same bell and badge.
+// The phone's bottom bar carries the same bubble and badge.
 function updateNavBadge(open) {
   const badge = document.getElementById('mobile-nav-waiting-count');
   if (!badge) return;
-  bellBadge(badge, open);
+  chatBadge(badge, open);
   const btn = badge.closest('button');
   btn.classList.toggle('empty', open === 0);
   btn.setAttribute('aria-label', waitingLabel(open));
@@ -416,7 +439,8 @@ export function updateTabs() {
   boardTab.onclick = () => { showJobBoard(); updateTabs(); };
   container.appendChild(boardTab);
 
-  // Pinned next to it: the chat with Billion, its bell counting open questions.
+  // Pinned next to it, and what a page opens on: the chat with Billion, its
+  // bubble counting open questions. Like Jobs, it never closes.
   const waitingTab = document.createElement('div');
   waitingTab.className = `terminal-tab board-tab waiting-tab${waitingActive ? ' active' : ''}`;
   const open = openCount();
@@ -425,14 +449,14 @@ export function updateTabs() {
   waitingTab.tabIndex = 0;
   waitingTab.setAttribute('aria-label', waitingLabel(open));
   waitingTab.title = 'Talk to Billion';
-  const bell = document.createElement('span');
-  bell.className = 'bell';
-  bell.innerHTML = BELL_ICON;
+  const icon = document.createElement('span');
+  icon.className = 'chat-icon';
+  icon.innerHTML = CHAT_ICON;
   const badge = document.createElement('span');
-  badge.className = 'board-tab-badge bell-badge';
-  bellBadge(badge, open);
-  bell.appendChild(badge);
-  waitingTab.append(bell, document.createTextNode('Billion'));
+  badge.className = 'board-tab-badge chat-badge';
+  chatBadge(badge, open);
+  icon.appendChild(badge);
+  waitingTab.append(icon, document.createTextNode('Billion'));
   waitingTab.onclick = () => { showWaiting(); updateTabs(); };
   waitingTab.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); waitingTab.onclick(); } };
   container.appendChild(waitingTab);
@@ -441,8 +465,9 @@ export function updateTabs() {
   renderComposer();
 
   for (const [sessionId, agent] of billionFirst(agents)) {
+    if (agent.isBillion && !billionTabOpen) continue;
     const tab = document.createElement('div');
-    tab.className = `terminal-tab${sessionId === activeSessionId ? ' active' : ''}`;
+    tab.className = `terminal-tab${sessionId === activeSessionId && !boardActive && !waitingActive ? ' active' : ''}`;
     // Billion's tab stays first, and its name is fixed.
     tab.draggable = !agent.isBillion;
     tab.dataset.sessionId = sessionId;
@@ -499,7 +524,7 @@ export function updateTabs() {
     close.className = 'close-btn';
     close.title = 'Close';
     close.textContent = '\u00d7';
-    close.onclick = (e) => { e.stopPropagation(); removeSession(sessionId); };
+    close.onclick = (e) => { e.stopPropagation(); if (agent.isBillion) closeBillionTab(); else removeSession(sessionId); };
     tab.appendChild(close);
     container.appendChild(tab);
   }

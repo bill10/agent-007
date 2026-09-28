@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The "Billion" tab (public/modules/waiting.js): the bell's badge, the chat
+// The "Billion" tab (public/modules/waiting.js): the chat bubble's badge, the chat
 // thread with question bubbles whose choices collapse on answer, the text box
 // and which question it answers, and the pinned strip of open questions.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -7,8 +7,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { send } from '../public/modules/ws.js';
-import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage } from '../public/modules/state.js';
-import { updateTabs } from '../public/modules/terminal.js';
+import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive } from '../public/modules/state.js';
+import { updateTabs, switchToSession, removeSession } from '../public/modules/terminal.js';
+import { readFileSync } from 'node:fs';
 import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, leaveWaiting, answerTarget } from '../public/modules/waiting.js';
 
 const open = (n, extra = {}) => ({ id: `w${n}`, n, text: `Question ${n}?`, at: new Date().toISOString(), status: 'open', ...extra });
@@ -16,7 +17,7 @@ const bubbleOf = (qid) => document.querySelector(`.chat-msg[data-q="${qid}"]`);
 // A question's bubble in the thread, carrying the same state as its item.
 const qMsg = (item) => ({
   id: `m-${item.id}`, at: item.at, from: 'billion', text: item.text,
-  q: { id: item.id, n: item.n, urgency: item.urgency || 'normal', status: item.status, choices: item.choices, recommended: item.recommended, answer: item.answer, answeredVia: item.answeredVia },
+  q: { id: item.id, n: item.n, urgency: item.urgency || 'normal', status: item.status, choices: item.choices, recommended: item.recommended, answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt },
 });
 const questions = (...items) => { setWaitingItems(items); setChatMessages(items.map(qMsg)); renderWaiting(); };
 const input = () => document.getElementById('chat-input');
@@ -25,6 +26,7 @@ const type = (text, opts = {}) => {
   input().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...opts }));
 };
 
+const CHAT_BUBBLE_PATH = 'M2 2h8a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H5.5L3 11V9H2a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z';
 const hideWaitingState = () => document.body.classList.remove('billion-chat');
 
 beforeEach(() => {
@@ -35,6 +37,7 @@ beforeEach(() => {
   setActiveSession(null);
   setBoardActive(false);
   setWaitingActive(false);
+  setBillionTabOpen(false);
   setWaitingItems([]);
   setChatMessages([]);
   hideWaitingState();
@@ -42,14 +45,14 @@ beforeEach(() => {
 });
 
 describe('the Billion tab', () => {
-  it('sits next to Jobs as a bell and "Billion", badged with open questions only, here and in the phone bar', () => {
+  it('sits next to Jobs as a chat bubble and "Billion", badged with open questions only, here and in the phone bar', () => {
     setWaitingItems([open(1), open(2), { ...open(3), status: 'answered', answer: 'yes' }]);
     updateTabs();
     const tabs = [...document.querySelectorAll('.terminal-tab')];
     expect(tabs.map(t => t.textContent.replace(/\d/g, ''))).toEqual(['Jobs', 'Billion']);
     const tab = tabs[1];
-    expect(tab.querySelector('.bell svg')).not.toBeNull();
-    expect(tab.querySelector('.bell .board-tab-badge').textContent).toBe('2');
+    expect(tab.querySelector('.chat-icon svg path').getAttribute('d')).toBe(CHAT_BUBBLE_PATH);
+    expect(tab.querySelector('.chat-icon .board-tab-badge').textContent).toBe('2');
     expect(tab.getAttribute('aria-label')).toBe('Talk to Billion, 2 open questions');
     expect(tab.title).toBe('Talk to Billion');
     const nav = document.getElementById('mobile-nav-waiting-count');
@@ -88,6 +91,76 @@ describe('the Billion tab', () => {
     expect(document.getElementById('waiting-board').style.display).toBe('none');
     expect(document.getElementById('terminal-empty').style.display).toBe('flex');
     expect(document.querySelector('.mobile-nav [data-view="terminal"]').getAttribute('aria-current')).toBe('true');
+  });
+});
+
+describe("the chat tab and Billion's terminal tab", () => {
+  // Enough of an agent for the tab strip and switchToSession.
+  const fakeAgent = (name, extra = {}) => {
+    const termEl = document.createElement('div');
+    termEl.style.display = 'none';
+    return { name, state: 'IDLE', termEl, term: { dispose: vi.fn(), focus() {}, scrollToBottom() {} }, ...extra };
+  };
+  const tabNames = () => [...document.querySelectorAll('.terminal-tab')].map(t => t.textContent.replace(/[\d\u00d7]/g, ''));
+
+  it('is where the page opens: init shows the chat before the replay arrives', () => {
+    const app = readFileSync('public/app.js', 'utf8');
+    const init = app.slice(app.indexOf('async function init()'));
+    expect(init.indexOf('showWaiting();')).toBeGreaterThan(-1);
+    expect(init.indexOf('showWaiting();')).toBeLessThan(init.indexOf('connect(onMessage)'));
+    // and a reload with the chat last open comes back to it
+    localStorage.setItem('agent007-active-tab', 's1');
+    showWaiting();
+    expect(localStorage.getItem('agent007-active-tab')).toBeNull();
+  });
+
+  it('has no close control, and orders Jobs, Billion chat, then agents with Billion first when open', () => {
+    agents.set('w1', fakeAgent('viper'));
+    agents.set('b1', fakeAgent('Billion', { isBillion: true }));
+    showWaiting();
+    updateTabs();
+    expect(tabNames()).toEqual(['Jobs', 'Billion', 'viper']);
+    expect(document.querySelector('.waiting-tab').classList.contains('active')).toBe(true);
+    expect(document.querySelector('.waiting-tab .close-btn')).toBeNull();
+
+    // What the office click on Billion (and its explorer row) calls.
+    switchToSession('b1');
+    expect(tabNames()).toEqual(['Jobs', 'Billion', 'Billion', 'viper']);
+    const billionTab = document.querySelector('.terminal-tab[data-session-id="b1"]');
+    expect(billionTab.classList.contains('active')).toBe(true);
+    expect(document.querySelector('.waiting-tab .close-btn')).toBeNull();
+    // Back on the chat, only the chat tab is lit.
+    showWaiting();
+    updateTabs();
+    expect(document.querySelectorAll('.terminal-tab.active').length).toBe(1);
+    switchToSession('b1');
+
+    // Its close hides the tab and goes back to the chat; the session stays.
+    billionTab.querySelector('.close-btn').click();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'kill' }));
+    expect(agents.has('b1')).toBe(true);
+    expect(tabNames()).toEqual(['Jobs', 'Billion', 'viper']);
+    expect([activeSessionId, waitingActive]).toEqual([null, true]);
+    expect(agents.get('b1').termEl.style.display).toBe('none');
+  });
+
+  it("closing Billion's tab under the job board leaves the board up", () => {
+    agents.set('b1', fakeAgent('Billion', { isBillion: true }));
+    switchToSession('b1');
+    setBoardActive(true);
+    document.querySelector('.terminal-tab[data-session-id="b1"] .close-btn').click();
+    expect([activeSessionId, waitingActive, agents.has('b1')]).toEqual([null, false, true]);
+    expect(tabNames()).toEqual(['Jobs', 'Billion']);
+  });
+
+  it("lands on the chat, not a hidden Billion, when the last shown terminal closes", () => {
+    agents.set('b1', fakeAgent('Billion', { isBillion: true }));
+    agents.set('w1', fakeAgent('viper', { state: 'DISCONNECTED' }));
+    document.body.insertAdjacentHTML('beforeend', '<div id="status-bar"></div><div id="office-empty"></div>');
+    switchToSession('w1');
+    removeSession('w1');
+    expect([activeSessionId, waitingActive]).toEqual([null, true]);
+    expect(tabNames()).toEqual(['Jobs', 'Billion']);
   });
 });
 
@@ -176,22 +249,69 @@ describe('the text box', () => {
     agents.delete('b');
   });
 
-  it('answers the oldest open blocking question, else the oldest open one, and × sends a plain message instead', () => {
-    const at = (h) => new Date(Date.now() - h * 3600e3).toISOString();
-    questions(open(1, { at: at(9) }), open(2, { urgency: 'blocking', at: at(2) }), open(3, { urgency: 'blocking', at: at(5) }),
-      { ...open(4, { at: at(20) }), status: 'answered', answer: 'x' });
-    expect(answerTarget().id).toBe('w3');
-    expect(document.getElementById('chat-target').textContent).toMatch(/^Answers Q3: /);
-    type('go ahead');
-    expect(send).toHaveBeenLastCalledWith({ type: 'chat-send', nonce: expect.any(String), text: 'go ahead', answers: 'w3' });
+  it('sends a plain message with questions open; only Reply makes it an answer, and × leaves it', () => {
+    questions(open(1), open(2, { urgency: 'blocking', choices: ['yes', 'no'] }));
+    expect(answerTarget()).toBeNull();
+    expect(document.getElementById('chat-target').hidden).toBe(true);
+    expect(input().placeholder).toBe('Billion is not running; start it to send');
+    type('not about Q2');
+    expect(send).toHaveBeenLastCalledWith({ type: 'chat-send', nonce: expect.any(String), text: 'not about Q2' });
     handleChatSent({ nonce: send.mock.calls.at(-1)[0].nonce });
 
-    questions(open(1, { at: at(9) }), open(7, { at: at(3) }));
+    // Reply sits beside the choices, and alone on a question without them.
+    expect([...bubbleOf('w1').querySelector('.chat-q-foot').children].map(c => c.textContent)).toEqual(['Reply', 'Dismiss']);
+    bubbleOf('w2').querySelector('.chat-reply').click();
+    expect(answerTarget().id).toBe('w2');
+    expect(document.getElementById('chat-target').textContent).toMatch(/^Answers Q2: /);
+    type('go ahead');
+    expect(send).toHaveBeenLastCalledWith({ type: 'chat-send', nonce: expect.any(String), text: 'go ahead', answers: 'w2' });
+    handleChatSent({ nonce: send.mock.calls.at(-1)[0].nonce });
+
+    bubbleOf('w1').querySelector('.chat-reply').click();
     expect(answerTarget().id).toBe('w1');
     document.querySelector('.chat-target-x').click();
     expect(document.getElementById('chat-target').hidden).toBe(true);
     type('just chatting');
     expect(send).toHaveBeenLastCalledWith({ type: 'chat-send', nonce: expect.any(String), text: 'just chatting' });
+  });
+
+  it('drops the Reply once its question is answered elsewhere', () => {
+    questions(open(1));
+    bubbleOf('w1').querySelector('.chat-reply').click();
+    questions({ ...open(1), status: 'answered', answer: 'yes', answeredVia: 'telegram', answeredAt: new Date().toISOString() });
+    expect(answerTarget()).toBeNull();
+    expect(document.getElementById('chat-target').hidden).toBe(true);
+  });
+});
+
+describe('Undo', () => {
+  beforeEach(() => showWaiting());
+  const answered = (n, msAgo, via = 'app') => ({ ...open(n), status: 'answered', answer: 'yes', answeredVia: via, answeredAt: new Date(Date.now() - msAgo).toISOString() });
+
+  it('shows for a minute after answering and reopens the question', () => {
+    questions(answered(1, 10e3), answered(2, 61e3), answered(3, 5e3, 'terminal'));
+    expect(bubbleOf('w2').querySelector('.chat-undo')).toBeNull();
+    expect(bubbleOf('w3').querySelector('.chat-undo')).toBeNull();
+    bubbleOf('w1').querySelector('.chat-undo').click();
+    expect(send).toHaveBeenLastCalledWith({ type: 'waiting-reopen', id: 'w1' });
+    expect(bubbleOf('w1').querySelector('.chat-undo').disabled).toBe(true);
+    handleWaitingError({ id: 'w1', error: 'Billion is not running' });
+    expect(bubbleOf('w1').querySelector('.waiting-error').textContent).toBe('Billion is not running');
+    expect(bubbleOf('w1').querySelector('.chat-undo').disabled).toBe(false);
+    // Reopened by the server: open again, with its Reply.
+    questions(open(1));
+    expect(bubbleOf('w1').querySelector('.waiting-error')).toBeNull();
+    expect(bubbleOf('w1').querySelector('.chat-reply')).not.toBeNull();
+  });
+
+  it('goes when its minute is up', () => {
+    vi.useFakeTimers();
+    try {
+      questions(answered(1, 0));
+      expect(bubbleOf('w1').querySelector('.chat-undo')).not.toBeNull();
+      vi.advanceTimersByTime(61e3);
+      expect(bubbleOf('w1').querySelector('.chat-undo')).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -217,13 +337,16 @@ describe('the pinned strip', () => {
     expect(strip.children.length).toBe(0);
   });
 
-  it('scrolls the thread to the question tapped', () => {
+  it('scrolls the thread to the question tapped and arms the box for it', () => {
     questions(open(1), open(2));
     const target = bubbleOf('w2');
     target.scrollIntoView = vi.fn();
     document.querySelectorAll('.chat-strip-item')[1].click();
     expect(target.scrollIntoView).toHaveBeenCalled();
     expect(target.classList.contains('flash')).toBe(true);
+    // And the box answers it.
+    expect(answerTarget().id).toBe('w2');
+    expect(document.getElementById('chat-target').textContent).toMatch(/^Answers Q2: /);
   });
 
   it('marks blocking with a bold "!", leaves normal plain, and dims low', () => {
