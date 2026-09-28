@@ -175,7 +175,8 @@ async function transcribeNote(note, env) {
 // --- The "Waiting on you" list, in the config dir so it survives restarts ---
 //
 // An item: { id, n, text, at, choices?, recommended?, status, answer?,
-// answeredAt?, answeredVia?, tgMessageId?, tgVoice? }. answeredVia is app,
+// answeredAt?, answeredVia?, tgMessageId?, tgVoice?, urgency }. urgency is
+// blocking, normal or low; items written before it read as normal. answeredVia is app,
 // telegram or terminal (resolve_question). n is the short number the owner sees (Q3). status is open, answered or dismissed. Items written
 // before v0.10 have neither n nor status: they read as open, numbered in order.
 
@@ -185,7 +186,7 @@ export function waitingItems() {
   let items;
   try { items = JSON.parse(readFileSync(waitingPath(), 'utf8')); } catch { return []; }
   if (!Array.isArray(items)) return [];
-  return items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open' }));
+  return items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal' }));
 }
 
 function saveWaiting(items) {
@@ -212,9 +213,11 @@ export function checkChoices(choices, recommended) {
   return null;
 }
 
-export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended } = {}) {
+export const URGENCIES = ['blocking', 'normal', 'low'];
+
+export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal' } = {}) {
   const items = waitingItems();
-  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open' };
+  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency };
   if (choices) item.choices = choices.map(c => c.trim());
   if (recommended) item.recommended = recommended.trim();
   saveWaiting([...items, item]);
@@ -246,8 +249,9 @@ export function answerLine(prefix, item, answer) {
   return `${prefix} Q${item.n}: ${answer} (re: "${context}")`;
 }
 
-// What the owner's Telegram shows for a question.
-const questionText = (item) => `Billion (Q${item.n}): ${item.text}`;
+// What the owner's Telegram shows for a question; "! " marks a blocking one.
+const urgentMark = (urgency) => (urgency === 'blocking' ? '! ' : '');
+const questionText = (item) => `${urgentMark(item.urgency)}Billion (Q${item.n}): ${item.text}`;
 
 // An answer from the app or Telegram (via 'app' or 'telegram'): into Billion's
 // terminal, then the item is answered everywhere. { ok, item } or { error };
@@ -306,19 +310,21 @@ async function showAnswerOnPhone(item, env) {
 
 let sent = [];   // times of recent notify_owner calls
 
-export async function notifyOwner(text, { choices, recommended, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+export async function notifyOwner(text, { choices, recommended, urgency = 'normal', broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
   const bad = checkChoices(choices, recommended);
   if (bad) return { error: bad };
+  urgency ??= 'normal';
+  if (!URGENCIES.includes(urgency)) return { error: `urgency must be "blocking", "normal" or "low", not ${JSON.stringify(urgency)}.` };
   sent = sent.filter(t => now - t < NOTIFY_WINDOW_MS);
   if (sent.length >= NOTIFY_LIMIT) {
     return { error: `Not sent: you have notified the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later, or under Waiting on you in STATE.md.` };
   }
   sent.push(now);
   let item;
-  try { item = addWaiting(body, broadcast, now, { choices, recommended }); } catch (err) {
+  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency }); } catch (err) {
     console.error('Could not save the Waiting on you list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';
@@ -330,7 +336,7 @@ export async function notifyOwner(text, { choices, recommended, broadcast, env =
   const keyboard = item?.choices && {
     reply_markup: { inline_keyboard: item.choices.map((c, i) => [{ text: c === item.recommended ? `${c} (recommended)` : c, callback_data: `${item.id}:${i}` }]) },
   };
-  const result = await sendToOwner(item ? questionText(item) : `Billion: ${body}`, { env, platform, extra: keyboard || undefined });
+  const result = await sendToOwner(item ? questionText(item) : `${urgentMark(urgency)}Billion: ${body}`, { env, platform, extra: keyboard || undefined });
   if (result.error) return { pinned: true, n: item?.n, error: `Pinned under "Waiting on you" in the owner's browser${n}, but the Telegram send failed: ${result.error}` };
   // Kept so a reply to this message, or a tap on its buttons, finds the question.
   if (item && result.messageId) {

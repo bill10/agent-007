@@ -74,7 +74,7 @@ describe('choices and recommended', () => {
     const notify = vi.fn(async () => ({ ok: true, n: 4 }));
     const res = await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'Buy?', choices: ['yes', 'no'], recommended: 'yes' } } },
       { session: { isBillion: true }, notifyOwner: notify });
-    expect(notify).toHaveBeenCalledWith('Buy?', { choices: ['yes', 'no'], recommended: 'yes' });
+    expect(notify).toHaveBeenCalledWith('Buy?', { choices: ['yes', 'no'], recommended: 'yes', urgency: undefined });
     expect(res.result.content[0].text).toContain('[Owner via app] Q4:');
   });
 
@@ -265,5 +265,39 @@ describe('resolve_question', () => {
     const res = await call({ number: 3, answer: 'yes' }, { session: { isBillion: true }, resolveQuestion: resolve });
     expect(resolve).toHaveBeenCalledWith({ number: 3, id: undefined }, 'yes');
     expect(res.result.content[0].text).toBe('Q3 is marked answered: yes');
+  });
+});
+
+describe('urgency', () => {
+  it('is in the MCP schema and reaches notifyOwner', async () => {
+    expect(NOTIFY_OWNER_TOOL.inputSchema.properties.urgency.enum).toEqual(['blocking', 'normal', 'low']);
+    const notify = vi.fn(async () => ({ ok: true, n: 1 }));
+    await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'Merge?', urgency: 'blocking' } } },
+      { session: { isBillion: true }, notifyOwner: notify });
+    expect(notify).toHaveBeenCalledWith('Merge?', expect.objectContaining({ urgency: 'blocking' }));
+  });
+
+  it('defaults to normal, is kept on the item, and refuses an unknown level before pinning or sending', async () => {
+    await ask('Name?');
+    await ask('Merge #12?', { urgency: 'blocking' });
+    await ask('Rename later?', { urgency: 'low' });
+    expect(waitingItems().map(i => i.urgency)).toEqual(['normal', 'blocking', 'low']);
+    expect(waitingPayload().items.map(i => i.urgency)).toEqual(['normal', 'blocking', 'low']);
+    fetchMock.mockClear();
+    expect((await ask('Now?', { urgency: 'urgent' })).error).toBe('urgency must be "blocking", "normal" or "low", not "urgent".');
+    expect(waitingItems()).toHaveLength(3);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('puts "! " before blocking questions on Telegram only', async () => {
+    await ask('Merge #12?', { urgency: 'blocking' });
+    await ask('Name?', { urgency: 'normal' });
+    await ask('Rename later?', { urgency: 'low' });
+    expect(calls().map(c => c.body.text)).toEqual(['! Billion (Q1): Merge #12?', 'Billion (Q2): Name?', 'Billion (Q3): Rename later?']);
+  });
+
+  it('reads as normal on items saved before it existed', () => {
+    writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify([{ id: 'old', n: 1, text: 'Old?', at: '2026-01-01T00:00:00Z', status: 'open' }]));
+    expect(waitingItems()[0].urgency).toBe('normal');
   });
 });
