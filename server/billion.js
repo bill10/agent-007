@@ -219,6 +219,53 @@ export function changedBoardTools(file, tools) {
   return tools.filter(t => before.get(t.name) !== JSON.stringify(t)).map(t => t.name);
 }
 
+// A resumed conversation also carries its old habits: hundreds of turns of
+// doing it the last charter's way outweigh a re-read CHARTER.md. So the
+// restart prompt quotes what changed. This saves the charter to file and
+// returns the notice: the paragraphs not in the last saved copy, or, past
+// CHARTER_NOTICE_LINES, only their sections' headings. Empty when nothing
+// changed. With no saved copy (the first start on this code) it quotes the
+// paragraphs on answering the owner outside the terminal, the change a
+// resumed Billion is likeliest to have missed.
+const CHARTER_NOTICE_LINES = 40;
+const paragraphs = (text) => {
+  let section = '';
+  return text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean).flatMap(p => {
+    const heading = p.match(/^#+\s+(.*)/);
+    if (heading) section = heading[1];
+    const body = heading ? p.split('\n').slice(1).join('\n').trim() : p;
+    return body ? [{ section, text: body }] : [];
+  });
+};
+export function charterChanges(file, charter) {
+  let saved = null;
+  try { saved = readFileSync(file, 'utf8'); } catch {}
+  writeFileSync(file, charter);
+  if (saved === charter) return '';
+  const now = paragraphs(charter);
+  let changed;
+  if (saved === null) {
+    changed = now.filter(p => p.section === 'Escalate' && /only in your terminal/.test(p.text));
+  } else {
+    const before = new Set(paragraphs(saved).map(p => p.text));
+    changed = now.filter(p => !before.has(p.text));
+  }
+  if (!changed.length) return '';
+  const lead = 'Your charter changed; these rules replace what you did before.';
+  const lines = changed.reduce((n, p) => n + p.text.split('\n').length + 1, 0);
+  if (lines > CHARTER_NOTICE_LINES) {
+    const sections = [...new Set(changed.map(p => p.section || 'the top'))];
+    return `${lead} Read CHARTER.md sections ${sections.map(s => `"${s}"`).join(', ')} now, and follow them over your habits in this conversation.`;
+  }
+  let section = null;
+  const body = changed.map(p => {
+    const head = p.section !== section ? `From "${p.section || 'the top'}":\n` : '';
+    section = p.section;
+    return head + p.text;
+  }).join('\n\n');
+  return `${lead}\n\n${body}`;
+}
+
 // Everything Billion must do lives in its charter; the prompt only says which
 // part applies. A fresh repo gets the introduction. Any later start says both,
 // because a restart can land mid-introduction: the charter tells it to finish
@@ -227,7 +274,7 @@ export function changedBoardTools(file, tools) {
 // HANDOVER.md first. Otherwise its own last conversation resumes when there is
 // one: Claude Code's --continue, Codex's session in this folder by id
 // (`codexSessionId`, never --last, which could reach another folder's).
-export function billionCommand({ agent = 'claude', created, hasConversation, codexSessionId, handover, dir, projectsHint, changedTools = [], toolsFile }) {
+export function billionCommand({ agent = 'claude', created, hasConversation, codexSessionId, handover, dir, projectsHint, changedTools = [], toolsFile, charterNotice = '' }) {
   const where = `Your folder is ${dir}.`;
   const hint = projectsHint
     ? `Suggest ${projectsHint} as the projects folder: most of the owner's repos are there.`
@@ -238,15 +285,16 @@ export function billionCommand({ agent = 'claude', created, hasConversation, cod
     : handover
       ? `You now run on ${CLI_NAMES[agent]}, moved over from your previous CLI, and this is a new conversation. Read STATE.md and then ${HANDOVER_FILE} (the end of your last conversation) first. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`
       : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`;
+  const changes = charterNotice ? `\n\n${charterNotice}` : '';
   if (agent === 'codex') {
     const resume = !created && !handover && isCodexSessionId(codexSessionId) ? `resume ${codexSessionId} ` : '';
-    return `codex ${resume}--dangerously-bypass-approvals-and-sandbox ${quote(prompt)}`;
+    return `codex ${resume}--dangerously-bypass-approvals-and-sandbox ${quote(prompt + (resume ? changes : ''))}`;
   }
   const resumed = !created && !handover && hasConversation;
   const stale = resumed && changedTools.length && toolsFile
     ? ` Agent 007 changed these board tools since you last started: ${changedTools.join(', ')}. This conversation keeps the definitions it first loaded, so yours are out of date, and loading them again does not help. Read the current ones in ${toolsFile} and call those tools by it: the board accepts the new fields even where your copy does not list them.`
     : '';
-  return `claude --dangerously-skip-permissions${resumed ? ' --continue' : ''} ${quote(prompt + stale)}`;
+  return `claude --dangerously-skip-permissions${resumed ? ' --continue' : ''} ${quote(prompt + stale + (resumed ? changes : ''))}`;
 }
 
 // Without its CLI, Billion's tab runs this instead: one line saying what to
