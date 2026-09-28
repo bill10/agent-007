@@ -25,7 +25,7 @@ import {
   codenamePool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
-import { addRepo, createWorktree, removeWorktree, pruneWorktrees, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, gitExec, deleteBranch } from './server/git.js';
+import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktree, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, deleteBranch } from './server/git.js';
 import { createSessionFromConfig, killSessionProcesses } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
@@ -127,11 +127,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     // Spawn failed after the worktree was created — remove it and its branch
     // so a bad command doesn't leak a worktree + branch on disk.
     if (worktreePath && resolvedRepoPath) {
-      try {
-        await gitExec(['-C', resolvedRepoPath, 'worktree', 'remove', '--force', worktreePath]);
-      } catch (e) {
-        console.error(`Failed to remove worktree ${worktreePath}:`, e.message);
-      }
+      await discardWorktree(resolvedRepoPath, worktreePath);
       await deleteBranch(resolvedRepoPath, branchName);
     }
     return { error: result.error };

@@ -9,6 +9,7 @@ import WebSocket from 'ws';
 import { tmpdir } from 'os';
 import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync } from 'fs';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 
 const PORT = 17007; // Use non-default port to avoid conflicts
 let baseUrl;
@@ -1173,5 +1174,69 @@ describe('ownership is inert when auth is disabled', () => {
       rmSync(worktreePath, { recursive: true, force: true });
       w.close();
     }
+  }, 20000);
+});
+
+// #137: `git worktree remove` under a 5 s timeout was killed mid-delete on a
+// node_modules-sized tree, leaving the orphan listed and its folder half gone.
+describe('delete-orphan', () => {
+  const open = () => new Promise((res, rej) => {
+    const s = new WebSocket(wsUrl); s.on('open', () => res(s)); s.on('error', rej);
+  });
+  const next = (ws, pred, ms = 8000) => new Promise((res) => {
+    const to = setTimeout(() => { ws.off('message', h); res(null); }, ms);
+    const h = (d) => { const m = JSON.parse(d); if (pred(m)) { clearTimeout(to); ws.off('message', h); res(m); } };
+    ws.on('message', h);
+  });
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
+  function orphanWorktree(name) {
+    const repo = mkdtempSync(join(tmpdir(), 'a007-del-orphan-'));
+    git('init', '-q', repo);
+    git('-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base');
+    const worktreePath = join(process.env.AGENT007_WORKTREE_DIR, 'del-orphan', name);
+    git('-C', repo, 'worktree', 'add', '-q', worktreePath, '-b', `bill10/${name}`);
+    const id = `orphan-${name}`;
+    orphans.set(id, { id, name, repoPath: repo, worktreePath, branchName: `bill10/${name}` });
+    return { id, repo, worktreePath };
+  }
+  async function deleteOrphan(id) {
+    const w = await open();
+    const done = next(w, (m) => m.type === 'notification' && /orphan/i.test(m.message || ''));
+    w.send(JSON.stringify({ type: 'delete-orphan', orphanId: id }));
+    const note = await done;
+    w.close();
+    return note;
+  }
+
+  it('removes a worktree full of ignored files completely', async () => {
+    const { id, repo, worktreePath } = orphanWorktree('del-heavy');
+    writeFileSync(join(worktreePath, '.gitignore'), 'node_modules\n');
+    for (let d = 0; d < 20; d++) {
+      mkdirSync(join(worktreePath, 'node_modules', `p${d}`), { recursive: true });
+      for (let f = 0; f < 100; f++) writeFileSync(join(worktreePath, 'node_modules', `p${d}`, `f${f}.js`), 'x');
+    }
+    expect((await deleteOrphan(id)).level).toBe('info');
+    expect(orphans.has(id)).toBe(false);
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(git('-C', repo, 'worktree', 'list')).not.toContain('del-heavy');
+    expect(git('-C', repo, 'branch', '--list')).not.toContain('del-heavy');
+  }, 20000);
+
+  it('finishes a worktree whose folder is already gone', async () => {
+    const { id, repo, worktreePath } = orphanWorktree('del-half');
+    rmSync(worktreePath, { recursive: true, force: true });
+    expect((await deleteOrphan(id)).level).toBe('info');
+    expect(orphans.has(id)).toBe(false);
+    expect(git('-C', repo, 'worktree', 'list')).not.toContain('del-half');
+    expect(git('-C', repo, 'branch', '--list')).not.toContain('del-half');
+  }, 20000);
+
+  it('finishes a worktree that is partly deleted but still on disk', async () => {
+    const { id, repo, worktreePath } = orphanWorktree('del-partial');
+    rmSync(join(worktreePath, '.git'));
+    expect((await deleteOrphan(id)).level).toBe('info');
+    expect(orphans.has(id)).toBe(false);
+    expect(existsSync(worktreePath)).toBe(false);
+    expect(git('-C', repo, 'worktree', 'list')).not.toContain('del-partial');
   }, 20000);
 });

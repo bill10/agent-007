@@ -9,7 +9,7 @@ import {
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
-import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch } from './git.js';
+import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch, discardWorktree } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
@@ -614,13 +614,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           const orphan = orphans.get(msg.orphanId);
           if (!orphan) break;
           if (!owns(ws, orphan.ownerId)) { denyControl(ws, orphan.name, orphan.ownerId); break; }
-          let worktreeRemoved = true;
-          if (existsSync(orphan.worktreePath)) {
-            try { await gitExec(['-C', orphan.repoPath, 'worktree', 'remove', '--force', orphan.worktreePath]); } catch (err) {
-              console.error('Failed to remove orphan worktree:', err.message);
-              worktreeRemoved = false;
-            }
-          }
+          const worktreeRemoved = await discardWorktree(orphan.repoPath, orphan.worktreePath);
           if (!worktreeRemoved) {
             broadcast({ type: 'notification', level: 'error', message: `Failed to delete orphan ${orphan.name} — worktree removal failed` });
             break;
