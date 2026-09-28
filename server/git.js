@@ -4,7 +4,7 @@ import { execFile as execFileCb } from 'child_process';
 import { existsSync, readdirSync, readFileSync, renameSync, statSync } from 'fs';
 import { rm } from 'fs/promises';
 import { mkdirSync } from 'fs';
-import { basename, isAbsolute, join, sep } from 'path';
+import { basename, isAbsolute, join, resolve, sep } from 'path';
 import { realpathSync } from 'fs';
 import { createHash } from 'crypto';
 import {
@@ -391,7 +391,13 @@ export async function discardWorktree(repoPath, worktreePath) {
   if (!worktreePath) return true;
   if (!repoPath) return !existsSync(worktreePath);
   if (existsSync(worktreePath)) {
-    const real = p => { try { return realpathSync(p); } catch { return p; } };
+    // .native expands Windows 8.3 names (RUNNER~1) and git's forward slashes
+    // into the same long form; Windows paths also compare case-insensitively.
+    const real = p => {
+      let r;
+      try { r = realpathSync.native(p); } catch { r = resolve(p); }
+      return process.platform === 'win32' ? r.toLowerCase() : r;
+    };
     const target = real(worktreePath);
     let registered = false;
     try {
