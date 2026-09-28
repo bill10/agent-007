@@ -32,7 +32,12 @@ Decided:
    A resumed conversation keeps the board tool definitions it first loaded
    (Claude Code pins them in the transcript), so each start saves the current
    ones to `billion-tools.json` in the config folder, and the restart prompt
-   names any that changed since the last start and points there.
+   names any that changed since the last start and points there. Its habits
+   outlast a re-read charter too, so each start also saves the charter to
+   `billion-charter.md` in the config folder, and a resumed conversation's
+   prompt quotes the paragraphs that changed (past 40 lines, only their
+   sections' names). With no saved copy yet, it quotes the charter's
+   paragraphs on answering the owner in the tab rather than the terminal.
 5. **No auto-restart** if it exits or crashes: show it stopped, with a Start button;
    start it again on the next server start.
 6. **Fixed name "Billion"**, reserved. `send_message` addresses agents by name,

@@ -18,7 +18,7 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { isDirectRun } from './server/direct-run.js';
 import { dirname, join, basename } from 'path';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
 
 import {
   PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
@@ -34,7 +34,7 @@ import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick } from './server/billion-limit.js';
@@ -225,6 +225,14 @@ function startBillion({ handover = false, carried = null } = {}) {
       console.error(`Billion: could not save the board tool definitions to ${toolsFile}:`, err.message);
     }
   }
+  // Only when the CLI starts, like the tools, so a start without it does not
+  // use up the notice. Best effort: a Billion without it still starts.
+  let charterNotice = '';
+  if (hasCli) {
+    try { charterNotice = charterChanges(join(CONFIG_DIR, 'billion-charter.md'), readFileSync(join(dir, 'CHARTER.md'), 'utf8')); } catch (err) {
+      console.error('Billion: could not compare the charter with the last one:', err.message);
+    }
+  }
   const command = hasCli ? billionCommand({
     agent,
     created,
@@ -235,6 +243,7 @@ function startBillion({ handover = false, carried = null } = {}) {
     projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
     changedTools,
     toolsFile,
+    charterNotice,
   }) : noAgentCommand(agent);
   const result = createSessionFromConfig({
     sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,

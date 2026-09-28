@@ -5,7 +5,7 @@ import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import {
   billionEnabled, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, trustDialogKey,
-  changedBoardTools,
+  changedBoardTools, charterChanges,
 } from '../server/billion.js';
 import { CONFIG_DIR } from '../server/state.js';
 import { parseCommand } from '../lib/helpers.js';
@@ -178,6 +178,52 @@ describe('changedBoardTools', () => {
     const file = join(mkdtempSync(join(tmpdir(), 'a007-tools-')), 'billion-tools.json');
     writeFileSync(file, '{not json');
     expect(changedBoardTools(file, [tool('a', 'x')])).toEqual(['a']);
+  });
+});
+
+describe('charterChanges', () => {
+  const file = () => join(mkdtempSync(join(tmpdir(), 'a007-charter-')), 'billion-charter.md');
+  const charter = readFileSync(new URL('../templates/billion/charter.md', import.meta.url), 'utf8');
+
+  it('quotes the paragraphs that changed, under their sections, then nothing once seen', () => {
+    const f = file();
+    writeFileSync(f, charter.replace('How to ask: say it in your terminal', 'How to ask: say it in your terminal only'));
+    const notice = charterChanges(f, charter);
+    expect(notice).toMatch(/^Your charter changed; these rules replace what you did before\./);
+    expect(notice).toContain('From "Escalate":\nHow to ask: say it in your terminal, and put it');
+    expect(notice).not.toContain('Every question to the owner');
+    expect(readFileSync(f, 'utf8')).toBe(charter);
+    expect(charterChanges(f, charter)).toBe('');
+  });
+
+  it('names the changed sections instead of quoting a long change', () => {
+    const f = file();
+    writeFileSync(f, '# Old\n\nNothing alike.\n');
+    const notice = charterChanges(f, charter);
+    expect(notice).toMatch(/^Your charter changed/);
+    expect(notice).toContain('Read CHARTER.md sections "Billion\'s charter", "Your files", "First run"');
+    expect(notice).toContain('"Escalate"');
+    expect(notice).not.toContain('Every question to the owner');
+    expect(notice.split('\n')).toHaveLength(1);
+  });
+
+  it('on the first start with no saved copy, quotes how to answer the owner outside the terminal', () => {
+    const notice = charterChanges(file(), charter);
+    expect(notice).toMatch(/^Your charter changed/);
+    expect(notice).toContain('the *Billion* tab');
+    expect(notice).toMatch(/Answer an `\[Owner via app\]` or `\[Owner via Telegram\]` message[\s\S]*with `tell_owner`, not only in your terminal/);
+    expect(notice.split('\n').length).toBeLessThanOrEqual(45);
+  });
+
+  it('reaches a resumed conversation only', () => {
+    const dir = '/b';
+    const promptOf = (cmd) => parseCommand(cmd).args.at(-1);
+    const charterNotice = 'Your charter changed; these rules replace what you did before.\n\nFrom "Escalate":\nUse tell_owner.';
+    expect(promptOf(billionCommand({ dir, created: false, hasConversation: true, charterNotice }))).toContain('\n\nFrom "Escalate":\nUse tell_owner.');
+    expect(promptOf(billionCommand({ dir, created: false, hasConversation: false, charterNotice }))).not.toContain('charter changed');
+    expect(promptOf(billionCommand({ dir, created: true, hasConversation: true, charterNotice }))).not.toContain('charter changed');
+    expect(promptOf(billionCommand({ dir, agent: 'codex', created: false, codexSessionId: '0199a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b', charterNotice }))).toContain('Use tell_owner.');
+    expect(promptOf(billionCommand({ dir, created: false, hasConversation: true }))).not.toContain('charter changed');
   });
 });
 
