@@ -2,7 +2,7 @@
 // createSessionFromConfig is replaced so no real Claude Code ever starts: what
 // is under test is the folder, the command, and which session survives.
 
-import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import WebSocket from 'ws';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join, resolve } from 'path';
@@ -215,55 +215,58 @@ describe('the Start button (billion-start)', () => {
     await new Promise(r => server.once('listening', r));
     url = `ws://127.0.0.1:${server.address().port}`;
   });
+  // A socket a failed test left open would hold server.close for the whole
+  // hook timeout, so every socket goes here and is cut after each test.
+  const sockets = [];
+  afterEach(() => { sockets.splice(0).forEach(ws => ws.terminate()); });
   afterAll(() => new Promise(r => server.close(r)));
 
   const open = () => new Promise((resolve, reject) => {
     const ws = new WebSocket(url);
+    sockets.push(ws);
     const seen = [];
     ws.on('message', (d) => seen.push(JSON.parse(d)));
-    ws.on('open', () => resolve({ ws, seen }));
+    // The first message of that type, however long it takes: startBillion runs
+    // git synchronously, over vi.waitFor's 1 s on a slow Windows runner.
+    const next = (type) => new Promise(r => {
+      const check = () => { const m = seen.find(m => m.type === type); if (m) { ws.off('message', check); r(m); } };
+      ws.on('message', check);
+      check();
+    });
+    ws.on('open', () => resolve({ ws, seen, next }));
     ws.on('error', reject);
   });
   const settle = () => new Promise(r => setTimeout(r, 200));
 
   it('starts Billion and focuses it in the window that asked', async () => {
-    const { ws, seen } = await open();
+    const { ws, next } = await open();
     ws.send(JSON.stringify({ type: 'billion-start' }));
-    await vi.waitFor(() => expect(seen.find(m => m.type === 'session-created')).toBeTruthy());
-    const created = seen.find(m => m.type === 'session-created');
-    expect(created).toMatchObject({ isBillion: true, focus: true, name: 'Billion' });
-    ws.close();
+    expect(await next('session-created')).toMatchObject({ isBillion: true, focus: true, name: 'Billion' });
   });
 
   it('shows the error when Billion cannot start', async () => {
     spawnError = 'claude: command not found';
-    const { ws, seen } = await open();
+    const { ws, next } = await open();
     ws.send(JSON.stringify({ type: 'billion-start' }));
-    await vi.waitFor(() => expect(seen.find(m => m.type === 'spawn-error')).toBeTruthy());
-    expect(seen.find(m => m.type === 'spawn-error').error).toBe('claude: command not found');
-    ws.close();
+    expect((await next('spawn-error')).error).toBe('claude: command not found');
   });
 
   it('announces Billion once, however often Start is pressed', async () => {
-    const { ws, seen } = await open();
+    const { ws, seen, next } = await open();
     ws.send(JSON.stringify({ type: 'billion-start' }));
-    await vi.waitFor(() => expect(seen.find(m => m.type === 'session-created')).toBeTruthy());
+    await next('session-created');
     ws.send(JSON.stringify({ type: 'billion-start' }));
     await settle();
     expect(seen.filter(m => m.type === 'session-created' && m.isBillion)).toHaveLength(1);
-    ws.close();
   });
 
   it('says why when Billion is turned off, and starts nothing', async () => {
     process.env.BILLION = '0';
-    const { ws, seen } = await open();
-    await vi.waitFor(() => expect(seen.find(m => m.type === 'welcome')).toBeTruthy());
-    expect(seen.find(m => m.type === 'welcome').billionEnabled).toBe(false);
+    const { ws, seen, next } = await open();
+    expect((await next('welcome')).billionEnabled).toBe(false);
     ws.send(JSON.stringify({ type: 'billion-start' }));
-    await settle();
+    expect((await next('spawn-error')).error).toMatch(/Billion is off/);
     expect(spawned).toHaveLength(0);
     expect(seen.some(m => m.type === 'session-created')).toBe(false);
-    expect(seen.find(m => m.type === 'spawn-error').error).toMatch(/Billion is off/);
-    ws.close();
   });
 });
