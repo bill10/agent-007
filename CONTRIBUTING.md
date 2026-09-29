@@ -151,6 +151,7 @@ server/
 bin/agent-007.js   The agent-007 command (npx @bill10/agent-007, npm start): flags, init, settings, start
 bin/adduser.js     Create a login user (npm run adduser)
 scripts/release.js changelog.d/ fragments -> VERSION, package.json, CHANGELOG (run by release.yml)
+scripts/demo/      Re-records the README demo GIF, video and screenshot with stub claude/gh (usage atop record.mjs)
 lib/               Pure functions, tested (helpers.js, jobs.js job logic, cron.js parser)
 public/            Frontend (vanilla JS, no build)
 templates/billion/ Billion's starting files (charter, owner rules, STATE.md, COMPANY.md)
