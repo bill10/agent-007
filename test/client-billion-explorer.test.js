@@ -73,7 +73,7 @@ describe('Billion in the explorer', () => {
   it('still says "No repos yet" when Billion is the only agent', () => {
     agents.set('b', { name: 'Billion', isBillion: true, state: 'WAITING' });
     renderExplorer();
-    expect(document.querySelector('.explorer-empty').textContent).toBe('No repos yet');
+    expect(document.querySelector('.explorer-empty').textContent).toBe('No repos yet. Add one with + above.');
   });
 
   it('has no row on a server without Billion', () => {

@@ -134,6 +134,7 @@ const INSTALL_HINTS = {
   claude: 'Install Claude Code: https://docs.anthropic.com/en/docs/claude-code/setup',
   codex: 'Install Codex: npm install -g @openai/codex',
   gemini: 'Install Gemini CLI: npm install -g @google/gemini-cli',
+  gh: 'Install GitHub CLI: https://cli.github.com, then run gh auth login',
 };
 
 // The one line a person sees when `file` is not there.

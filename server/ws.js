@@ -75,6 +75,7 @@ export function sessionPayload(session) {
     jobId: session.jobId || null,
     isBillion: !!session.isBillion,
     agent: session.agent || null,
+    notice: session.notice || null,   // Billion's: why it cannot talk yet
     // So a client builds its xterm at the pty's size before the scrollback
     // replay lands, instead of reflowing it into xterm's default 80x24.
     cols: session.pty.cols,

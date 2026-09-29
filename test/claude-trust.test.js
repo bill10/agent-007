@@ -165,3 +165,14 @@ describe.skipIf(process.platform === 'win32')('a Codex spawn', () => {
     } finally { done(r); }
   });
 });
+
+describe('trustClaudeFolder on a fresh install', () => {
+  it('says nothing when Claude Code has no ~/.claude.json yet', () => {
+    const errors = [];
+    const saved = console.error;
+    console.error = (...a) => errors.push(a.join(' '));
+    try { expect(trustClaudeFolder(wt, { home, env: {} })).toBe(false); } finally { console.error = saved; }
+    expect(errors).toEqual([]);
+    expect(existsSync(file)).toBe(false);
+  });
+});

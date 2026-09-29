@@ -20,6 +20,7 @@ import { handleMcpMessage } from './mcp.js';
 import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion } from './owner.js';
 import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
+import { setBillionNotice } from './billion.js';
 import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 
 // --- Origin Check Middleware (B2) ---
@@ -165,6 +166,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };
           session.messagesHeld = false;
+          setBillionNotice(session, null, broadcast);
           flushMessages(session);
           return { waiting: pendingMessages(session.id) };
         },
