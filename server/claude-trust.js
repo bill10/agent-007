@@ -72,7 +72,8 @@ export function trustClaudeFolder(folder, { home = homedir(), env = process.env 
     return true;
   } catch (err) {
     if (tmp) rmSync(tmp, { force: true });
-    console.error(`Could not pre-trust ${folder} in ${file}: ${err.message}`);
+    // No file yet: Claude Code has never run here, and the PTY answer covers it.
+    if (err.code !== 'ENOENT') console.error(`Could not pre-trust ${folder} in ${file}: ${err.message}`);
     return false;
   }
 }

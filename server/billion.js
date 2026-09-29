@@ -307,6 +307,19 @@ export function noClaudeCommand(node = process.execPath, notice = NO_CLAUDE_NOTI
   return `${quote(node)} -e ${quote(`console.log(${JSON.stringify(notice)}); setTimeout(() => {}, 1000)`)}`;
 }
 export const noAgentCommand = (agent, node = process.execPath) => noClaudeCommand(node, agent === 'codex' ? NO_CODEX_NOTICE : NO_CLAUDE_NOTICE);
+export const noAgentNotice = (agent) => (agent === 'codex' ? NO_CODEX_NOTICE : NO_CLAUDE_NOTICE);
+
+// Installed but logged out, the CLI opens on its own sign-in in Billion's
+// terminal, and mail waits for billion_ready, which never comes until then.
+export const notLoggedInNotice = (agent) => `${CLI_NAMES[agent]} says it is not logged in, so Billion is waiting at its sign-in. Open Billion's terminal and sign in there; your messages reach Billion once it is ready.`;
+
+// Why Billion cannot talk yet, for its chat tab (public/modules/waiting.js):
+// set when its CLI is missing or logged out, cleared by billion_ready.
+export function setBillionNotice(session, notice, broadcast) {
+  if ((session.notice || null) === (notice || null)) return;
+  session.notice = notice || null;
+  broadcast({ type: 'billion-notice', sessionId: session.id, notice: session.notice });
+}
 
 // Moving Billion to the other CLI (or `to`): the handover first, then the
 // choice saved, then the running one stopped, then the new one started fresh.

@@ -8,7 +8,8 @@
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
 // each, and "Read new messages aloud" in the header), and the box has its own
 // mic (voice.js with the CHAT_VOICE target), all in the browser and free.
-import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage } from './state.js';
+import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled } from './state.js';
+import { switchToSession } from './terminal.js';
 import { send } from './ws.js';
 import { hideJobBoard } from './jobs.js';
 import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
@@ -99,7 +100,36 @@ export function replyToQuestion(id) {
   document.getElementById('chat-input')?.focus();
 }
 
-const billionRunning = () => [...agents.values()].some(a => a.isBillion);
+const billionEntry = () => [...agents.entries()].find(([, a]) => a.isBillion) || [];
+// A stopped Billion keeps its row (and its entry here) so it can be started.
+const billionRunning = () => { const [, a] = billionEntry(); return !!a && a.state !== 'DISCONNECTED'; };
+
+// Why Billion cannot talk yet, by session (server/billion.js setBillionNotice):
+// its CLI is missing, or logged out and waiting at its sign-in.
+const notices = new Map();
+export function setBillionNotice(sessionId, notice) {
+  if (notice) notices.set(sessionId, notice);
+  else notices.delete(sessionId);
+  renderComposer();
+}
+
+// The bar above the text box: what stands between the owner and Billion, and
+// the button that gets past it. The explorer, with Billion's own Start, starts
+// out collapsed on a first run, so this is the one a new owner sees.
+function renderNotice() {
+  const bar = document.getElementById('chat-notice');
+  if (!bar) return;
+  const [id] = billionEntry();
+  const running = billionRunning();
+  const text = (id && notices.get(id)) || (!running && billionEnabled ? 'Billion is not running.' : '');
+  bar.hidden = !text;
+  bar.innerHTML = '';
+  if (!text) return;
+  const btn = el('button', 'chat-notice-btn', running ? "Open Billion's terminal" : 'Start Billion');
+  btn.type = 'button';
+  btn.onclick = running ? () => { switchToSession(id); setView('terminal'); } : () => send({ type: 'billion-start' });
+  bar.append(el('span', 'chat-notice-text', text), btn);
+}
 
 // A tap on a question's choice.
 function answer(q, choice) {
@@ -473,13 +503,17 @@ function shell() {
     const btn = el('button', 'waiting-send', 'Send');
     btn.id = 'chat-send';
     btn.type = 'submit';
+    const notice = el('div', 'chat-notice');
+    notice.id = 'chat-notice';
+    notice.setAttribute('role', 'status');
+    notice.hidden = true;
     const error = el('p', 'waiting-error');
     error.id = 'chat-error';
     error.setAttribute('role', 'alert');
     error.hidden = true;
     form.onsubmit = (e) => { e.preventDefault(); submit(); };
     row.append(input, mic, btn);
-    form.append(target, voice, row, error);
+    form.append(notice, target, voice, row, error);
     board.append(jump, form);
   }
   return list;
@@ -511,6 +545,7 @@ export function renderComposer() {
   const error = document.getElementById('chat-error');
   error.textContent = sendError;
   error.hidden = !sendError;
+  renderNotice();
 }
 
 function renderStrip() {

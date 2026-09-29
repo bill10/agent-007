@@ -7,8 +7,20 @@ import { authHeaders, showLogin, escapeHtml } from './auth.js';
 
 const tilde = (p, home) => (home && /^[\\/]/.test(p.slice(home.length)) && p.startsWith(home) ? `~${p.slice(home.length)}` : p);
 
+// The two Billion and the board run on: named even when missing, with where
+// to get them (server/command-path.js has the same hints).
+const WANTED = {
+  claude: 'Install Claude Code: https://docs.anthropic.com/en/docs/claude-code/setup',
+  codex: 'Install Codex: npm install -g @openai/codex',
+};
+
 export function renderAgents(agents) {
-  if (!agents.length) return '<p class="settings-empty">No agent CLIs found on the PATH.</p>';
+  const missing = Object.entries(WANTED).filter(([cli]) => !agents.some(a => a.cli === cli)).map(([cli, hint]) => `
+    <div class="settings-agent">
+      <div class="settings-agent-line"><span class="settings-agent-name">${cli}</span> <span class="settings-status out">not installed</span></div>
+      <div class="settings-path">${escapeHtml(hint)}, then restart Agent 007</div>
+    </div>`).join('');
+  if (!agents.length) return `<p class="settings-empty">No agent CLIs found on the PATH.</p>${missing}`;
   // The home dir, guessed from the default folders, only to shorten paths.
   const home = agents.flatMap(a => a.accounts).map(a => a.folder.match(/^(.*)[\\/]\.(claude|codex|gemini)$/)?.[1]).find(Boolean);
   return agents.map(a => `
@@ -23,7 +35,8 @@ export function renderAgents(agents) {
           ${acc.org ? `<span class="settings-dim">${escapeHtml(acc.org)}</span>` : ''}
           ${acc.loggedIn === null ? '' : `<span class="settings-status ${acc.loggedIn ? 'in' : 'out'}">${acc.loggedIn ? 'logged in' : 'logged out'}</span>`}
         </div>`).join('')}
-    </div>`).join('');
+      ${!a.accounts.length && WANTED[a.cli] ? '<div class="settings-account"><span class="settings-status out">no login found</span></div>' : ''}
+    </div>`).join('') + missing;
 }
 
 export function setupSettings() {

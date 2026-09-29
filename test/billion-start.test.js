@@ -33,6 +33,12 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
   ...(await importOriginal()),
   commandExists: vi.fn(() => hasClaude),
 }));
+// Whether the CLI says it is logged in, decided here too: never a real `claude auth status`.
+let loggedIn = true;
+vi.mock('../server/billion-limit.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  cliReady: vi.fn(async () => loggedIn),
+}));
 let transcript = { agent: null };
 vi.mock('../server/agent-transcripts.js', async (importOriginal) => ({
   ...(await importOriginal()),
@@ -55,6 +61,7 @@ beforeEach(() => {
   spawned.length = 0;
   spawnError = null;
   hasClaude = true;
+  loggedIn = true;
   transcript = { agent: null };
   config.repos = [];
   process.env.BILLION_DIR = freshDir();
@@ -130,6 +137,8 @@ describe('startBillion', () => {
     const out = execFileSync(file, args, { encoding: 'utf8' });
     expect(out).toMatch(/Install it from https:\/\/docs\.anthropic\.com/);
     expect(out).toMatch(/BILLION=0/);
+    // Its chat tab says so too: the terminal is gone a second later.
+    expect(session.notice).toMatch(/Billion runs on Claude Code, which is not installed/);
     // Start checks again: once claude is there, the real Billion starts.
     session.exited = true;
     hasClaude = true;
@@ -171,6 +180,29 @@ describe('Billion on Codex', () => {
     expect(notice).toMatch(/Codex \(codex\) is not installed/);
     const { file, args } = parseCommand(session.command);
     expect(execFileSync(file, args, { encoding: 'utf8' })).toMatch(/Billion runs on Codex/);
+  });
+});
+
+describe('a logged-out CLI', () => {
+  it('puts a notice on Billion saying to sign in in its terminal; clearing it tells the browsers once', async () => {
+    loggedIn = false;
+    const { session, notice } = startBillion();
+    expect(notice).toBeUndefined();
+    await vi.waitFor(() => expect(session.notice).toMatch(/Claude Code says it is not logged in.*Open Billion's terminal/));
+    const { setBillionNotice } = await import('../server/billion.js');
+    const sent = [];
+    setBillionNotice(session, null, (m) => sent.push(m));
+    expect(session.notice).toBeNull();
+    expect(sent).toEqual([{ type: 'billion-notice', sessionId: session.id, notice: null }]);
+    // Unchanged: nothing sent.
+    setBillionNotice(session, null, (m) => sent.push(m));
+    expect(sent).toHaveLength(1);
+  });
+
+  it('leaves a logged-in one alone', async () => {
+    const { session } = startBillion();
+    await new Promise(r => setTimeout(r, 10));
+    expect(session.notice).toBeUndefined();
   });
 });
 

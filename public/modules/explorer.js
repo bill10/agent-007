@@ -148,7 +148,7 @@ export function renderExplorer() {
   if (repos.size === 0 && otherAgents === 0 && orphans.size === 0) {
     const empty = document.createElement('div');
     empty.className = 'explorer-empty';
-    empty.textContent = 'No repos yet';
+    empty.textContent = 'No repos yet. Add one with + above.';
     content.appendChild(empty);
   }
 

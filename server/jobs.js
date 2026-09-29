@@ -31,6 +31,7 @@ import {
 } from '../lib/jobs.js';
 import { availableModels } from './models.js';
 import { nextCronIso } from '../lib/cron.js';
+import { missingCommandMessage } from './command-path.js';
 
 // --- Board settings ---
 
@@ -1471,8 +1472,12 @@ const ghTokenCached = (login) => ghCached(`token:${login}`, () => ghToken(login)
 // what was actually run rather than leaving the reader to guess.
 const GH_PR_LIST = 'gh pr list';
 
+// No gh at all: said as such, not as spawn gh ENOENT.
+const GH_MISSING = missingCommandMessage('gh');
+
 // First line only: gh errors are one useful line plus usage noise.
 function ghErrorDetail(err) {
+  if (err.code === 'ENOENT') return GH_MISSING;
   return String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
 }
 
@@ -1583,7 +1588,8 @@ async function walkGhAccounts(repoPath, query, { listAccounts = ghAccountsCached
   const plural = tried.length === 1 ? '' : 's';
   return {
     ok: false,
-    error: `${failures[0] || `${label} failed`} (tried ${tried.length} account${plural}: ${tried.join(', ')})`,
+    // Which accounts were tried means nothing when gh itself is missing.
+    error: failures[0] === GH_MISSING ? GH_MISSING : `${failures[0] || `${label} failed`} (tried ${tried.length} account${plural}: ${tried.join(', ')})`,
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync } from 'fs';
+import { mkdtempSync, symlinkSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -220,5 +220,20 @@ describe('findClosedPrForBranch', () => {
     });
     expect(result.pr).toEqual({ url: 'u', number: 7 });
     expect(asked).toEqual([7]);
+  });
+});
+
+// A new install often has git but no gh: the card says that, not spawn gh ENOENT.
+describe('without gh', () => {
+  it.skipIf(process.platform === 'win32')('says gh is not installed and where to get it', async () => {
+    const bin = mkdtempSync(join(tmpdir(), 'a007-nogh-'));
+    symlinkSync(execFileSync('which', ['git'], { encoding: 'utf8' }).trim(), join(bin, 'git'));
+    const path = process.env.PATH;
+    process.env.PATH = bin;
+    try {
+      const { pr, error } = await findPrForBranch(REPO, 'main', { listAccounts: async () => [], tokenFor: async () => null });
+      expect(pr).toBeNull();
+      expect(error).toBe('"gh" is not installed, or not on the PATH Agent 007 was started with. Install GitHub CLI: https://cli.github.com, then run gh auth login');
+    } finally { process.env.PATH = path; }
   });
 });
