@@ -7,9 +7,9 @@
 
 Agent 007 is the operations layer for Claude Code, Codex and other coding agents: it starts them, hands out the work, keeps them running, reviews what they ship, and calls you only when it matters. One command, in your browser.
 
-![Billion is given a mission, posts two jobs to the board, two agents pick them up and finish the work, and Billion reviews the diffs and merges them: shipped](docs/billion-demo.gif)
+![In the Billion chat tab the owner types "Ship dark mode and fix the login bug"; Billion replies, two cards appear on the job board and two agents walk to their desks and work in their terminals; Billion merges the first pull request and the card files away, asks one question with Skip recommended, the owner taps Skip, and the chat ends on what shipped with the board empty](docs/billion-demo.gif)
 
-*Recorded from the running app -- [full 41s video](https://github.com/bill10/agent-007/releases/download/v0.6.4.0/billion-demo.mp4). If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
+*Recorded from the running app, with stand-in agents so the run is repeatable (`scripts/demo/record.mjs`) -- [full 43s video](https://github.com/bill10/agent-007/releases/download/v0.29.0.0/billion-demo.mp4). If the capture does not load, there is a [still screenshot](docs/screenshot.png).*
 
 From web terminals for your coding agents to a self-running agent company. Use it as far along as you need:
 
