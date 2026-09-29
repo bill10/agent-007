@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+// Stand-in `claude` for the README demo (scripts/demo/record.mjs). Started as
+// Billion (--dangerously-skip-permissions) it answers the owner's goal, posts
+// two cards, merges each as it reaches Review and asks one question; started
+// as a board worker it prints a few lines of work, opens a PR with the stub gh
+// and calls finish_job. Every step goes through the board's real MCP tools.
+import { readFileSync } from 'fs';
+import { execFileSync } from 'child_process';
+
+const argv = process.argv.slice(2);
+const mcp = JSON.parse(readFileSync(argv[argv.indexOf('--mcp-config') + 1], 'utf8')).mcpServers['agent-007-board'];
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const dim = (s) => `\x1b[2m${s}\x1b[22m`;
+const say = (s = '') => process.stdout.write(`${s.replace(/\n/g, '\r\n')}\r\n`);
+const prompt = () => process.stdout.write(`\r\n${dim('─'.repeat(60))}\r\n❯ `);
+
+let rpc = 0;
+async function call(name, args = {}) {
+  say(`\x1b[32m●\x1b[39m agent-007-board - ${name} ${dim(`(${Object.values(args).filter(v => typeof v === 'string').map(v => v.split('\n')[0]).join(', ').slice(0, 60)})`)}`);
+  const res = await fetch(mcp.url, {
+    method: 'POST', headers: { ...mcp.headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpc, method: 'tools/call', params: { name, arguments: args } }),
+  });
+  const text = (await res.json()).result?.content?.[0]?.text || '';
+  say(`  ${dim(`⎿  ${text.split('\n')[0].slice(0, 70)}`)}`);
+  return text;
+}
+async function step(tool, detail, result, ms = 900) {
+  say(`\x1b[32m●\x1b[39m ${tool}(${detail})`);
+  await sleep(ms);
+  say(`  ${dim(`⎿  ${result}`)}`);
+  await sleep(ms / 2);
+}
+
+const banner = (who) => say(`\x1b[38;5;208m✻\x1b[39m Welcome to Claude Code ${dim(`· ${who}`)}\r\n`);
+
+if (argv.includes('--dangerously-skip-permissions')) {
+  banner('Billion');
+  say('Charter and memory read. The board is empty; waiting for the owner.');
+  await call('billion_ready');
+  prompt();
+  const merged = [];
+  const handle = async (line) => {
+    say(line);
+    say();
+    if (/^\[Owner via app\] Q\d+:/.test(line)) {
+      await call('tell_owner', { text: 'Skipping it. The free tier holds until launch; I will ask again before then.' });
+    } else if (line.startsWith('[Owner via app]')) {
+      await call('tell_owner', { text: 'On it. Two jobs on the board: dark mode, and the login bug. I will review and merge each one as it lands.' });
+      await call('post_job', { title: 'Add dark mode', repo: 'shop', detail: 'A dark theme that follows the system setting, with a toggle in Settings. Tests for the toggle.' });
+      await call('post_job', { title: 'Fix the login bug', repo: 'shop', detail: 'Login fails when the email has capital letters. Compare case-insensitively; add a test.' });
+    } else {
+      const card = line.match(/\(card ([^,\s]+),/)?.[1];
+      if (card && /is in Review/.test(line)) {
+        const pr = (await call('read_job', { id: card })).match(/pull\/(\d+)/)?.[1];
+        await step('Bash', `gh pr diff ${pr}`, 'Diff reads clean, tests pass', 1200);
+        say(`\x1b[32m●\x1b[39m Bash(gh pr merge ${pr} --squash)`);
+        say(`  ${dim(`⎿  ${execFileSync('gh', ['pr', 'merge', pr, '--squash'], { encoding: 'utf8' }).trim()}`)}`);
+        merged.push(pr);
+        if (merged.length === 1) {
+          await call('tell_owner', { text: `Dark mode is merged (#${pr}).` });
+          await sleep(1500);
+          await call('notify_owner', {
+            text: 'The deploy needs a $12/mo plan. Buy it? I recommend skipping: the free tier holds until launch.',
+            choices: ['Buy it', 'Skip'], recommended: 'Skip',
+          });
+        } else {
+          await sleep(4000);
+          await call('tell_owner', { text: `Shipped: dark mode (#${merged[0]}) and the login fix (#${pr}). Both merged; the board is clear.` });
+        }
+      }
+    }
+    prompt();
+  };
+  // What the server types: a bracketed paste, then Enter.
+  let buf = '';
+  let queue = Promise.resolve();
+  process.stdin.setRawMode?.(true);
+  process.stdin.on('data', (d) => {
+    buf += d.toString().replace(/\x1b\[20[01]~/g, '');
+    let i;
+    while ((i = buf.search(/[\r\n]/)) !== -1) {
+      const line = buf.slice(0, i).trim();
+      buf = buf.slice(i + 1);
+      if (line) queue = queue.then(() => handle(line));
+    }
+  });
+} else {
+  const title = argv.find(a => a.includes('\n---\n'))?.split('\n')[0] || 'the job';
+  const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+  banner(branch);
+  say(`> ${title}\r\n`);
+  const plans = {
+    'Add dark mode': [
+      ['Read', 'src/styles/theme.css', 'Read 84 lines'],
+      ['Update', 'src/styles/theme.css', 'Added 31 lines: dark palette under prefers-color-scheme'],
+      ['Write', 'src/settings/ThemeToggle.jsx', 'Wrote 42 lines'],
+      ['Bash', 'npm test', '118 passed'],
+    ],
+    'Fix the login bug': [
+      ['Grep', '"email ===" src/auth', 'Found 2 matches'],
+      ['Read', 'src/auth/login.js', 'Read 57 lines'],
+      ['Update', 'src/auth/login.js', 'Compare emails case-insensitively'],
+      ['Write', 'test/login-case.test.js', 'Wrote 24 lines'],
+      ['Bash', 'npm test', '119 passed'],
+      ['Bash', 'npm run lint', 'No problems'],
+    ],
+  };
+  const pace = Number(process.env[`DEMO_PACE_${title.includes('login') ? 'LOGIN' : 'DARK'}`] || 1400);
+  await sleep(1500);
+  for (const [tool, detail, result] of plans[title] || plans['Add dark mode']) await step(tool, detail, result, pace);
+  say(`\x1b[32m●\x1b[39m /ship`);
+  await sleep(pace);
+  const url = execFileSync('gh', ['pr', 'create', '--head', branch], { encoding: 'utf8' }).trim();
+  say(`  ${dim(`⎿  Opened ${url}`)}`);
+  await call('finish_job', { pr_url: url });
+  prompt();
+  process.stdin.resume();
+}

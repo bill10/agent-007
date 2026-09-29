@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stand-in `codex` for the README demo: not installed, so the scratch server never runs the real one.
+exit 127
