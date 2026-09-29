@@ -14,6 +14,19 @@ beforeEach(() => {
   handleAccountError({ message: null });
 });
 describe('account rotation settings', () => {
+  it('keeps the folder available to correct after an error and emphasizes recovery errors', () => {
+    const rotation = { enabled: false, accounts: [{ ...account('a', 'a@x'), error: 'Sign in again' }] };
+    show(rotation);
+    const input = document.querySelector('.account-folder');
+    input.value = '/incorrect/folder'; input.dispatchEvent(new Event('input'));
+    handleAccountError({ message: 'Folder not found' });
+    expect(document.querySelector('.account-folder').value).toBe('/incorrect/folder');
+    expect([...document.querySelectorAll('.account-error')].some(el => el.textContent === 'Sign in again')).toBe(true);
+    show({ pending: true, accounts: [] });
+    expect(document.querySelector('.account-error').textContent).toContain('switch was interrupted');
+    show(rotation); document.querySelector('.account-folder').value = ''; document.querySelector('.account-folder').dispatchEvent(new Event('input'));
+  });
+
   it('restores controls and reports a disconnected socket so the owner can retry', () => {
     show({ enabled: false, accounts: [] });
     send.mockReturnValue(false);

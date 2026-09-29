@@ -5,6 +5,7 @@ import { authEnabled, billionEnabled } from './state.js';
 let state = {};
 let draft = { enabled: false, fallback: true, accounts: [] };
 let lastError = null;
+let folderDraft = '';
 export function handleAccountState(msg) {
   state = msg;
   draft = structuredClone(msg.rotation || { enabled: false, fallback: true, accounts: [] });
@@ -39,7 +40,7 @@ export function renderAccount() {
   text(draft.pending ? 'A switch was interrupted. Restore the previous login before continuing.'
     : draft.enabled ? 'Automatic rotation is on. Claude conversations and settings stay in place.'
     : draft.defaultSettings ? 'Automatic rotation starts when at least two accounts are added.'
-    : 'Automatic rotation is off. Choose accounts and enable it to rotate at usage limits.');
+    : 'Automatic rotation is off. Choose accounts and enable it to rotate at usage limits.', draft.pending ? 'account-error' : 'account-status');
   if (draft.error) text(draft.error, 'account-error');
   if (lastError) text(lastError, 'account-error');
   if (draft.pending) {
@@ -54,7 +55,7 @@ export function renderAccount() {
     checkbox(row, a.email, a.enabled, on => { a.enabled = on; });
     const status = document.createElement('span'); status.className = 'settings-dim';
     status.textContent = a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''); row.append(status);
-    if (a.error) { const error = document.createElement('span'); error.textContent = a.error; row.append(error); }
+    if (a.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; row.append(error); }
     const controls = document.createElement('div'); controls.className = 'account-actions'; row.append(controls);
     const up = button(controls, 'Move up', 'rotation-up', () => {
       [draft.accounts[index - 1], draft.accounts[index]] = [draft.accounts[index], draft.accounts[index - 1]]; renderAccount();
@@ -68,7 +69,7 @@ export function renderAccount() {
   });
   const discover = document.createElement('div'); discover.className = 'account-actions'; body.append(discover);
   button(discover, 'Find logged-in accounts', 'rotation-discover', () => transmit('rotation-discover'));
-  const input = document.createElement('input'); input.className = 'account-folder'; input.placeholder = '~/.claude-work'; input.setAttribute('aria-label', 'Claude account config folder'); discover.append(input);
+  const input = document.createElement('input'); input.className = 'account-folder'; input.value = folderDraft; input.oninput = () => { folderDraft = input.value; }; input.placeholder = '~/.claude-work'; input.setAttribute('aria-label', 'Claude account config folder'); discover.append(input);
   button(discover, 'Add folder', 'rotation-add', () => { if (input.value.trim()) transmit('rotation-add', { folder: input.value.trim() }); });
   if (draft.accounts.length) {
     text('Accounts are used in the order above. Source folders supply logins; Claude keeps using its current settings and history. Avoid running the same login from a source folder while rotation is enabled.', 'settings-dim');
