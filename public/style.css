@@ -1584,6 +1584,135 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 }
 .waiting-send:disabled { opacity: 0.55; cursor: default; }
 
+/* Read aloud and dictation (readaloud.js, voice.js's chat target). The
+   header sits above the question strip, in the flow, so nothing overlaps. */
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 2px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-dark);
+  flex-shrink: 0;
+}
+.chat-autoread, .chat-resume, .chat-stop-reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.chat-switch {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border-radius: 7px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.chat-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: left 0.15s;
+}
+.chat-autoread.on { color: var(--accent); }
+.chat-autoread.on .chat-switch { background: var(--accent); }
+.chat-autoread.on .chat-switch::after { left: 14px; background: var(--accent-contrast); }
+@media (prefers-reduced-motion: reduce) { .chat-switch::after { transition: none; } }
+.chat-autoread:hover, .chat-stop-reading:hover { color: var(--text); }
+.chat-resume {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-radius: 3px;
+  font-weight: 700;
+}
+.chat-resume[hidden], .chat-stop-reading[hidden], .chat-voice-pick[hidden] { display: none; }
+.chat-voice-pick {
+  margin-left: auto;
+  max-width: 220px;
+  min-height: 32px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.chat-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-speak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: -10px 0 -10px -10px;
+  padding: 0;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.chat-speak:hover { color: var(--accent); }
+.chat-speak.speaking { color: var(--accent); }
+.chat-mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 40px;
+  align-self: stretch;
+  padding: 0;
+  color: var(--text-muted);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.chat-mic:hover { color: var(--accent); border-color: var(--accent); }
+.chat-mic.listening {
+  color: var(--state-recording);
+  border-color: var(--state-recording);
+  animation: mic-pulse 1.6s ease-in-out infinite;
+}
+/* The mic's live line: what is being heard, greyed until it is final text. */
+.chat-voice {
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-style: italic;
+}
+.chat-voice.error { color: var(--state-disconnected); font-style: normal; }
+.chat-voice.notice { font-style: normal; }
+.chat-voice.error .voice-indicator-dot,
+.chat-voice.notice .voice-indicator-dot { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-mic.listening, .chat-voice .voice-indicator-dot { animation: none; }
+}
+@media (max-width: 700px) {
+  .chat-mic { width: 44px; min-height: 44px; }
+  .chat-autoread, .chat-resume, .chat-stop-reading { min-height: 44px; padding: 0 6px; }
+  .chat-head { flex-wrap: nowrap; padding: 0 6px; }
+  .chat-voice-pick { min-width: 0; max-width: 38%; flex: 0 1 auto; }
+}
+
 /* An agent the board created, not you. Subtle — it is still an ordinary agent
    you can type into; the marker only explains where it came from. */
 .terminal-tab.board-spawned .dot {

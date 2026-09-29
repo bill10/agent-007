@@ -10,7 +10,9 @@ import { send } from '../public/modules/ws.js';
 import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive } from '../public/modules/state.js';
 import { updateTabs, switchToSession, removeSession } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
-import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, leaveWaiting, answerTarget } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion } from '../public/modules/waiting.js';
+import { voiceTarget, stopVoice } from '../public/modules/voice.js';
+import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
 const open = (n, extra = {}) => ({ id: `w${n}`, n, text: `Question ${n}?`, at: new Date().toISOString(), status: 'open', ...extra });
 const bubbleOf = (qid) => document.querySelector(`.chat-msg[data-q="${qid}"]`);
@@ -273,6 +275,7 @@ describe('the text box', () => {
     expect(document.getElementById('chat-target').hidden).toBe(true);
     type('just chatting');
     expect(send).toHaveBeenLastCalledWith({ type: 'chat-send', nonce: expect.any(String), text: 'just chatting' });
+    handleChatSent({ nonce: send.mock.calls.at(-1)[0].nonce });
   });
 
   it('drops the Reply once its question is answered elsewhere', () => {
@@ -357,5 +360,123 @@ describe('the pinned strip', () => {
     expect(n('w1').title).toBe('blocking: a worker or merge is waiting');
     expect([n('w2').textContent, n('w2').title, n('w2').className]).toEqual(['Q2', '', 'waiting-card-n']);
     expect([n('w3').textContent, n('w3').title, n('w3').classList.contains('low')]).toEqual(['Q3', 'optional', true]);
+  });
+});
+
+describe('read aloud and dictation in the tab', () => {
+  let spoken;
+  let recs;
+  const flush = () => new Promise(r => setTimeout(r, 0));
+  const result = (transcript, isFinal) => ({ resultIndex: 0, results: [{ isFinal, 0: { transcript } }] });
+
+  beforeEach(() => {
+    spoken = [];
+    recs = [];
+    localStorage.clear();
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    window.speechSynthesis = { speak: vi.fn(u => spoken.push(u)), cancel: vi.fn(), resume: vi.fn(), getVoices: () => [] };
+    window.SpeechRecognition = class { start() { recs.push(this); } abort() {} stop() {} };
+    Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
+    Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia: vi.fn(async () => ({ getTracks: () => [] })) }, configurable: true });
+    _resetReadAloud();
+    // The composer is built on the first render; rebuild it with the stubs in place.
+    document.body.innerHTML += '<span id="voice-status"></span>';
+    showWaiting();
+  });
+
+  const billion = (id, text) => ({ id, at: new Date().toISOString(), from: 'billion', text });
+
+  it('puts a speaker on Billion\'s messages only, which reads it and turns into Stop', () => {
+    setChatMessages([billion('m1', 'Merged **PR 3**: https://x.y/3'), { id: 'm2', at: new Date().toISOString(), from: 'owner', via: 'app', text: 'ok' }]);
+    renderWaiting();
+    const speakers = document.querySelectorAll('.chat-speak');
+    expect(speakers.length).toBe(1);
+    const btn = speakers[0];
+    expect([btn.getAttribute('aria-label'), btn.getAttribute('aria-pressed')]).toEqual(['Read aloud', 'false']);
+    btn.click();
+    expect(spoken.map(u => u.text)).toEqual(['Merged PR 3: link.']);
+    expect([btn.getAttribute('aria-label'), btn.getAttribute('aria-pressed'), btn.classList.contains('speaking')]).toEqual(['Stop reading', 'true', true]);
+    btn.click();
+    expect(speakingMessage()).toBeNull();
+    expect(btn.getAttribute('aria-label')).toBe('Read aloud');
+  });
+
+  it('reads a question with its choices', () => {
+    questions(open(51, { choices: ['Not yet', 'Done'], recommended: 'Done', text: 'Is Q50 done?' }));
+    bubbleOf('w51').querySelector('.chat-speak').click();
+    expect(spoken[0].text).toBe('Question 51. Is question 50 done? Choices: Not yet, Done; recommended: Done.');
+  });
+
+  it('reads new Billion messages aloud only with the header toggle on, and remembers it', () => {
+    const toggle = document.getElementById('chat-autoread');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    handleChatMessage(billion('m1', 'First.'));
+    expect(spoken).toEqual([]);
+    toggle.click();
+    expect([toggle.getAttribute('aria-pressed'), localStorage.getItem('agent007-read-aloud')]).toEqual(['true', '1']);
+    spoken.at(-1).onend();                          // the "Reading new messages aloud" confirmation
+    handleChatMessage(billion('m2', 'Second.'));
+    handleChatMessage({ id: 'm3', at: new Date().toISOString(), from: 'owner', via: 'app', text: 'mine' });
+    handleChatMessage(billion('m2', 'Second, edited.'));   // not new
+    expect(spoken.map(u => u.text)).toEqual(['Reading new messages aloud.', 'Second.']);
+  });
+
+  it('after a reload, shows Resume reading instead of failing silently', () => {
+    localStorage.setItem('agent007-read-aloud', '1');
+    renderWaiting();
+    handleChatMessage(billion('m1', 'First.'));
+    const resume = document.getElementById('chat-resume');
+    expect([resume.hidden, resume.textContent]).toEqual([false, 'Resume reading (1 new)']);
+    expect(spoken).toEqual([]);
+    resume.click();
+    expect(spoken.map(u => u.text)).toEqual(['First.']);
+    expect(resume.hidden).toBe(true);
+  });
+
+  it('leaving the tab stops reading', () => {
+    setChatMessages([billion('m1', 'Long.')]);
+    renderWaiting();
+    document.querySelector('.chat-speak').click();
+    leaveWaiting();
+    expect(speakingMessage()).toBeNull();
+    stopReading();
+  });
+
+  it('the mic beside the box dictates into it: interim greyed, final appended, nothing sent', async () => {
+    const mic = document.getElementById('chat-mic');
+    expect(mic.getAttribute('aria-label')).toBe('Dictate a reply');
+    input().value = 'Done';
+    mic.click();
+    await flush();
+    expect(voiceTarget()).toBe('chat');
+    expect([mic.getAttribute('aria-pressed'), mic.classList.contains('listening')]).toEqual(['true', true]);
+    const live = document.getElementById('chat-voice');
+    recs[0].onresult(result('and merge it', false));
+    expect([live.style.display, live.textContent, input().value]).toEqual(['flex', 'and merge it', 'Done']);
+    recs[0].onresult(result('and merge it', true));
+    expect(input().value).toBe('Done and merge it ');
+    expect(send).not.toHaveBeenCalled();
+    mic.click();
+    expect([voiceTarget(), mic.getAttribute('aria-pressed'), live.style.display]).toEqual([null, 'false', 'none']);
+  });
+
+  it('dictated text answers the question the box is set to, like typed text', async () => {
+    questions(open(3));
+    replyToQuestion('w3');
+    document.getElementById('chat-mic').click();
+    await flush();
+    recs[0].onresult(result('not yet', true));
+    stopVoice();
+    type(input().value);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'chat-send', text: 'not yet', answers: 'w3' }));
+  });
+
+  it('the terminal\'s stops leave the box\'s mic alone; leaving the tab stops it', async () => {
+    document.getElementById('chat-mic').click();
+    await flush();
+    stopVoice({ only: 'terminal', notice: 'switched agents' });
+    expect(voiceTarget()).toBe('chat');
+    leaveWaiting();
+    expect(voiceTarget()).toBeNull();
   });
 });

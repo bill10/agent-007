@@ -260,7 +260,7 @@ export function handleSessionEnded(msg) {
   if (!agent) return;
   // The server drops input to an exited session — keeping the mic hot here
   // would transcribe speech into a dead pty forever.
-  if (msg.sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent ended' });
+  if (msg.sessionId === activeSessionId) stopVoice({ only: 'terminal', notice: 'Voice input stopped — agent ended' });
   agent.state = 'DISCONNECTED';
   // The server's word at exit wins: a re-spawned agent relinked to its card,
   // or one the board retired, is a board worker even if it opened as a user's.
@@ -314,7 +314,7 @@ function disposeAgent(sessionId) {
 export function switchToSession(sessionId) {
   // Dictation targets the active session — don't let speech begun for one
   // agent land in another's shell after a tab switch (or auto-switch on kill).
-  if (sessionId !== activeSessionId) stopVoice({ notice: 'Voice input stopped — switched agents' });
+  if (sessionId !== activeSessionId) stopVoice({ only: 'terminal', notice: 'Voice input stopped — switched agents' });
   hideJobBoard();
   hideWaiting();
   if (activeSessionId && agents.has(activeSessionId)) {
@@ -369,7 +369,7 @@ export function removeSession(sessionId) {
   }
   // Closing the last session never reaches switchToSession, so its stopVoice
   // guard would be bypassed and the mic would stay hot over the empty state.
-  if (sessionId === activeSessionId) stopVoice({ notice: 'Voice input stopped — agent closed' });
+  if (sessionId === activeSessionId) stopVoice({ only: 'terminal', notice: 'Voice input stopped — agent closed' });
   if (agent.state !== 'DISCONNECTED') {
     noteAgentDeparture(sessionId); // walk out before the tile disappears
     send({ type: 'kill', sessionId });
