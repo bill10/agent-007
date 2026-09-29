@@ -261,9 +261,12 @@ function startBillion({ handover = false, carried = null } = {}) {
   const cli = agent === 'codex' ? 'Codex (codex)' : 'Claude Code (claude)';
   if (!hasCli) session.notice = noAgentNotice(agent);
   else cliReady(agent).then((ok) => {
-    if (ok || session.exited || !session.messagesHeld) return;
+    // Only a definite no: a slow or failed check says nothing either way.
+    if (ok !== false || session.exited || !session.messagesHeld) return;
     console.log(`  Billion: ${cli} is not logged in; its tab is at the sign-in`);
     setBillionNotice(session, notLoggedInNotice(agent), broadcast);
+    // Its sign-in goes with it; a stopped Billion's bar says Start instead.
+    session.pty.onExit(() => setBillionNotice(session, null, broadcast));
   });
   return { session: result.session, ...(hasCli ? {} : { notice: `${cli} is not installed; its tab says how to fix that` }) };
 }

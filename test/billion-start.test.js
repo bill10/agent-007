@@ -34,7 +34,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
   commandExists: vi.fn(() => hasClaude),
 }));
 // Whether the CLI says it is logged in, decided here too: never a real `claude auth status`.
-let loggedIn = true;
+let loggedIn = true;   // true, false, or null for a check that did not answer
 vi.mock('../server/billion-limit.js', async (importOriginal) => ({
   ...(await importOriginal()),
   cliReady: vi.fn(async () => loggedIn),
@@ -199,10 +199,34 @@ describe('a logged-out CLI', () => {
     expect(sent).toHaveLength(1);
   });
 
-  it('leaves a logged-in one alone', async () => {
-    const { session } = startBillion();
+  it('leaves a logged-in one alone, and one whose check did not answer', async () => {
+    for (const answer of [true, null]) {
+      loggedIn = answer;
+      sessions.clear();
+      const { session } = startBillion();
+      await new Promise(r => setTimeout(r, 10));
+      expect(session.notice).toBeUndefined();
+    }
+  });
+
+  it('says nothing when the answer comes after Billion is ready or gone', async () => {
+    loggedIn = false;
+    const ready = startBillion().session;
+    ready.messagesHeld = false;
+    sessions.clear();
+    const gone = startBillion().session;
+    gone.exited = true;
     await new Promise(r => setTimeout(r, 10));
-    expect(session.notice).toBeUndefined();
+    expect(ready.notice).toBeUndefined();
+    expect(gone.notice).toBeUndefined();
+  });
+
+  it('drops the sign-in notice when that Billion exits', async () => {
+    loggedIn = false;
+    const { session } = startBillion();
+    await vi.waitFor(() => expect(session.notice).toMatch(/not logged in/));
+    session.pty.kill();
+    expect(session.notice).toBeNull();
   });
 });
 

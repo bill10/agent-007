@@ -166,7 +166,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           const session = req.agentSession;
           if (!session.isBillion) return { error: 'Only Billion has an inbox to open.' };
           session.messagesHeld = false;
-          if (broadcast) setBillionNotice(session, null, broadcast);
+          setBillionNotice(session, null, broadcast);
           flushMessages(session);
           return { waiting: pendingMessages(session.id) };
         },

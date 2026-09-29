@@ -318,7 +318,7 @@ export const notLoggedInNotice = (agent) => `${CLI_NAMES[agent]} says it is not 
 export function setBillionNotice(session, notice, broadcast) {
   if ((session.notice || null) === (notice || null)) return;
   session.notice = notice || null;
-  broadcast({ type: 'billion-notice', sessionId: session.id, notice: session.notice });
+  broadcast?.({ type: 'billion-notice', sessionId: session.id, notice: session.notice });
 }
 
 // Moving Billion to the other CLI (or `to`): the handover first, then the

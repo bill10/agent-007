@@ -19,7 +19,7 @@
 import { execFile } from 'child_process';
 import { screenTail, sendText } from './messages.js';
 import { CLI_NAMES } from './billion-handover.js';
-import { commandExists, resolveExecutable } from './command-path.js';
+import { commandExists, commandPath } from './command-path.js';
 import { envSwitchOn } from '../lib/helpers.js';
 
 export const WARN_AT = [75, 90];            // used %: one nudge per threshold crossed
@@ -79,17 +79,23 @@ export function matchLimit(text) {
 
 // Whether `agent` can take over: installed, and logged in by its own quick
 // non-interactive check (`claude auth status --json`, `codex login status`,
-// which exits non-zero when logged out). Never a model call.
+// which exits non-zero when logged out). Never a model call. false is a
+// definite no; null means the check itself failed (timed out, no answer),
+// which is falsy too, so a switch still waits for a definite yes.
 export function cliReady(agent, { env = process.env, platform = process.platform } = {}) {
   if (!commandExists(agent, env, platform)) return Promise.resolve(false);
-  const file = resolveExecutable(agent, env, platform) || agent;
+  const file = commandPath(agent, env, platform) || agent;   // the one commandExists found
   const args = agent === 'codex' ? ['login', 'status'] : ['auth', 'status', '--json'];
   return new Promise((resolve) => {
     // A .cmd shim on Windows runs only through a shell; the arguments are fixed.
     execFile(file, args, { timeout: AUTH_TIMEOUT_MS, shell: platform === 'win32', windowsHide: true }, (err, stdout) => {
-      if (err) return resolve(false);
-      if (agent === 'codex') return resolve(true);
-      try { resolve(JSON.parse(stdout).loggedIn === true); } catch { resolve(false); }
+      // A number is the CLI's own exit status; anything else is it not answering.
+      const answered = !err || (typeof err.code === 'number' && !err.killed);
+      if (agent === 'codex') return resolve(!answered ? null : !err);
+      // claude prints its JSON either way, and exits 1 when logged out.
+      let loggedIn;
+      try { ({ loggedIn } = JSON.parse(stdout)); } catch {}
+      resolve(answered && typeof loggedIn === 'boolean' ? loggedIn : null);
     });
   });
 }

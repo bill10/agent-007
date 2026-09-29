@@ -31,7 +31,7 @@ import {
 } from '../lib/jobs.js';
 import { availableModels } from './models.js';
 import { nextCronIso } from '../lib/cron.js';
-import { missingCommandMessage } from './command-path.js';
+import { commandExists, missingCommandMessage } from './command-path.js';
 
 // --- Board settings ---
 
@@ -1477,7 +1477,8 @@ const GH_MISSING = missingCommandMessage('gh');
 
 // First line only: gh errors are one useful line plus usage noise.
 function ghErrorDetail(err) {
-  if (err.code === 'ENOENT') return GH_MISSING;
+  // ENOENT is also a missing cwd, so only when gh is nowhere on the PATH.
+  if (err.code === 'ENOENT' && !commandExists('gh')) return GH_MISSING;
   return String(err.stderr || err.message || '').trim().split('\n')[0].slice(0, 200);
 }
 
