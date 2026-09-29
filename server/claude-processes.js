@@ -33,6 +33,8 @@ export async function assertClaudeProcessesManaged(sessions, { platform = proces
       : output.trim().split('\n').flatMap(line => { const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line); return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] }] : []; });
   } catch { throw new Error('Could not check for other Claude processes. Account switching was cancelled.'); }
   if (externalClaudePids(rows, new Set(sessions.filter(s => !s.exited && s.agent === 'claude').map(s => s.pty.pid))).length) {
-    throw new Error('Another Claude process is running outside this app. Stop it before switching accounts so it cannot overwrite the login.');
+    const error = new Error('Another Claude process is running outside this app. Stop it before switching accounts so it cannot overwrite the login.');
+    error.busy = true; // Includes short-lived auth checks; retry without a quota cooldown.
+    throw error;
   }
 }

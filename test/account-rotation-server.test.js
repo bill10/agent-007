@@ -12,7 +12,7 @@ vi.mock('../server/account-migration.js', async original => {
   return {
     ...actual,
     captureLogin: async folder => structuredClone(folder ? { email: 'b@example.com', folder, secret: 'fake-b', fields: { oauthAccount: { accountUuid: 'b', emailAddress: 'b@example.com' } } } : auth.current),
-    activateLogin: async snapshot => { auth.activation?.(); auth.current = structuredClone(snapshot); },
+    activateLogin: async snapshot => { await auth.activation?.(); auth.current = structuredClone(snapshot); },
   };
 });
 vi.mock('../server/claude-processes.js', () => ({ assertClaudeProcessesManaged: async () => {} }));
@@ -136,5 +136,46 @@ describe('rotation through the owner socket', () => {
       expect(result.session).toBeUndefined();
     } finally { writeFileSync(path, original); }
   });
+
+  it('keeps an open Billion inbox, held worker inbox and scheduled wake across rotation', async () => {
+    const ws = new WebSocket(url, { headers: { origin: url.replace('ws:', 'http:') } }), seen = [];
+    ws.on('message', data => seen.push(JSON.parse(data)));
+    await new Promise(r => ws.once('open', r));
+    const previous = [...sessions.values()].filter(s => !s.exited);
+    const billion = previous.find(s => s.isBillion), worker = previous.find(s => !s.isBillion);
+    billion.messagesHeld = false; worker.messagesHeld = true;
+    billion.wakeAt = Date.now() + 600_000; billion.lastWakeAt = Date.now() - 60_000;
+    const state = JSON.parse(readFileSync(join(CONFIG_DIR, 'account-rotation.json'), 'utf8'));
+    const target = state.accounts.find(a => a.id !== state.active);
+    try {
+      ws.send(JSON.stringify({ type: 'account', action: 'rotation-switch', id: target.id }));
+      await wait(() => previous.every(s => sessions.get(s.id) !== s));
+      expect(sessions.get(billion.id).messagesHeld).toBe(false);
+      expect(sessions.get(worker.id).messagesHeld).toBe(true);
+      expect(sessions.get(billion.id).wakeAt).toBe(billion.wakeAt);
+      expect(sessions.get(billion.id).lastWakeAt).toBe(billion.lastWakeAt);
+      await wait(() => seen.find(m => m.type === 'account-state' && m.rotation?.active === target.id));
+    } finally { ws.close(); }
+  }, 20000);
+
+  it('honors a stop requested during activation after the replacement session starts', async () => {
+    const ws = new WebSocket(url, { headers: { origin: url.replace('ws:', 'http:') } }), seen = [];
+    ws.on('message', data => seen.push(JSON.parse(data)));
+    await new Promise(r => ws.once('open', r));
+    const worker = [...sessions.values()].find(s => !s.exited && !s.isBillion);
+    const state = JSON.parse(readFileSync(join(CONFIG_DIR, 'account-rotation.json'), 'utf8'));
+    const target = state.accounts.find(a => a.id !== state.active);
+    try {
+      auth.activation = async () => {
+        ws.send(JSON.stringify({ type: 'kill', sessionId: worker.id }));
+        // Let the real WebSocket handler receive stop while activation remains pending.
+        await new Promise(r => setTimeout(r, 100));
+      };
+      ws.send(JSON.stringify({ type: 'account', action: 'rotation-switch', id: target.id }));
+      await wait(() => seen.find(m => m.type === 'account-state' && m.rotation?.active === target.id));
+      await wait(() => !sessions.has(worker.id));
+      expect(sessions.has(worker.id)).toBe(false);
+    } finally { auth.activation = null; ws.close(); }
+  }, 20000);
 
 });

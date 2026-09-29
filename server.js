@@ -42,7 +42,7 @@ import { migrate as migrateAccount, rollback as rollbackAccount, retire as retir
 import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation } from './server/account-rotation.js';
 import { assertClaudeProcessesManaged } from './server/claude-processes.js';
 import { withClaudeSessionsStopped } from './server/claude-rotation-sessions.js';
-import { takeMessages, restoreMessages, screenTail } from './server/messages.js';
+import { takeMessages, restoreMessages, dropMessages, screenTail } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
@@ -148,8 +148,14 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
 }
 
 async function killSession(sessionId, { discardChanges = false } = {}) {
+  // Board retirement must complete after rotation, not report a silent success
+  // while the same worker is about to resume under its original session id.
+  if (sessions.get(sessionId)?.accountRotating && switching) {
+    try { await switching; } catch { /* Retirement still owns the stopped session. */ }
+  }
   const session = sessions.get(sessionId);
-  if (!session || session.accountRotating) return;
+  if (!session) return;
+  if (session.rotationResume) { session.accountRotating = false; session.rotationResume = false; dropMessages(sessionId); }
   clearInterval(session.stateCheckInterval);
   clearTimeout(session.scanTimer);
   killSessionProcesses(session);
@@ -353,6 +359,7 @@ async function aroundClaude(fn) {
       if (session.exited && session.rotationResume) return takeMessages(session.id);
       session.accountRotating = true;
       const held = session.messagesHeld;
+      if (!session.rotationResume) session.rotationMessagesHeld = held;
       session.messagesHeld = true;
       try {
         await new Promise((resolve, reject) => {
@@ -363,7 +370,11 @@ async function aroundClaude(fn) {
         // killSessionProcesses also terminates detached tool children after 3s.
         await new Promise(resolve => setTimeout(resolve, 3100));
         return takeMessages(session.id);
-      } catch (err) { session.accountRotating = false; session.messagesHeld = held; throw err; }
+      } catch (err) {
+        // A late exit must retain mail and remain eligible for an exact retry.
+        session.rotationResume = true;
+        throw err;
+      }
     },
     start: ({ session, command, carried }) => {
       clearTimeout(session.scanTimer);
@@ -374,7 +385,9 @@ async function aroundClaude(fn) {
       if (result.error) return result;
       result.session.rotationResume = false;
       result.session.accountRotating = false;
-      result.session.messagesHeld = !!session.isBillion;
+      result.session.messagesHeld = !!session.rotationMessagesHeld;
+      result.session.lastWakeAt = session.lastWakeAt;
+      result.session.wakeAt = session.wakeAt;
       sessions.set(session.id, result.session);
       if (session.worktreePath) { saveActiveSession(result.session, broadcast); startTreeScanLoop(result.session, broadcast); }
       broadcast(sessionPayload(result.session));
@@ -383,14 +396,14 @@ async function aroundClaude(fn) {
     failed: (session, error) => tellOwnerOrShow(`${session.name} could not resume after the account switch: ${error}`, 'error'),
   }));
   try { return await switching; }
-  catch (err) { return { error: err.message, blocked: true }; }
+  catch (err) { return { error: err.message, blocked: true, busy: !!err.busy }; }
   finally { switching = null; blockClaudeSpawns(false); requestDispatch(); }
 }
 async function rotateClaude(options = {}) {
   const result = await rotateAccount({ ...options, around: aroundClaude });
   if (result.error === BUSY_ERROR || result.error === BILLION_SWITCHING) result.busy = true;
   announceAccount();
-  if (result.ok) await tellOwnerOrShow(`Claude account switched from ${result.oldEmail} to ${result.newEmail}. Claude conversations resumed.`, 'info');
+  if (result.ok && !result.unchanged) await tellOwnerOrShow(`Claude account switched from ${result.oldEmail} to ${result.newEmail}. Claude conversations resumed.`, 'info');
   return result;
 }
 async function discoverRotationAccounts() {
@@ -507,7 +520,7 @@ function startBillionWakes() {
       rotation: mayAnswerOwner() && rotationState().enabled ? {
         run: (hit, { limited }) => rotateClaude({ limited, line: hit.line, allowCurrent: !limited }),
         fallback: () => rotationState().fallback,
-        prepare: () => rotateClaude({ allowCurrent: true }),
+        prepare: () => rotateClaude({ allowCurrent: true, preferCurrent: true }),
       } : null,
       migration: {
         armed: () => mayAnswerOwner() && !rotationState().accounts.length && !rotationState().damaged && accountArmed(),

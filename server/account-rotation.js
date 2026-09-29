@@ -125,12 +125,18 @@ export function nextRotationAccount(s, now = Date.now()) {
 
 // around(fn) stops/resumes managed Claude processes and holds their spawn gate.
 // The cross-process auth lock also covers this lifecycle and the journal.
-export function rotateAccount({ limited = false, line = '', id = null, allowCurrent = false, around = fn => fn() } = {}, deps = {}) {
+export function rotateAccount({ limited = false, line = '', id = null, allowCurrent = false, preferCurrent = false, around = fn => fn() } = {}, deps = {}) {
   const dir = deps.dir ?? CONFIG_DIR;
   return withAccountLock(async () => {
     const s = rotationState(dir), now = clock(deps);
     if (blocked(s)) return { error: blocked(s), blocked: true };
     if (!s.accounts.length) return { error: 'Add Claude accounts first.' };
+    if (preferCurrent && !limited && !id && s.accounts.some(a => a.id === s.active && a.enabled && !a.error && !(a.limitedUntil > now))) {
+      try {
+        if (key(await capture(null, deps)) !== s.active) return { error: 'The default Claude login changed outside the app. Refresh accounts before rotating.', blocked: true };
+      } catch { return { error: 'Could not verify the current Claude login.', blocked: true }; }
+      return { ok: true, unchanged: true };
+    }
     if (limited) {
       const a = s.accounts.find(a => a.id === s.active);
       if (a && !(a.limitedUntil > now)) a.limitedUntil = retryAt(line, now);

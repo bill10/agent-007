@@ -98,6 +98,17 @@ describe('account rotation', () => {
     expect(await rotateAccount({ allowCurrent: true }, deps)).toMatchObject({ ok: true, newEmail: 'b@example.com' });
   });
 
+  it('prepares a healthy current login without stopping sessions or activating another account', async () => {
+    await add();
+    const before = rotationState(dir).active;
+    let stopped = false;
+    const result = await rotateAccount({ allowCurrent: true, preferCurrent: true, around: async fn => { stopped = true; return fn(); } }, deps);
+    expect(result).toMatchObject({ ok: true });
+    expect(stopped).toBe(false);
+    expect(actions).toEqual([]);
+    expect(rotationState(dir).active).toBe(before);
+  });
+
   it('applies explicit inclusion and ordering and adds new discoveries disabled while running', async () => {
     await add();
     const [a, b, c] = publicRotationState(dir).accounts;
