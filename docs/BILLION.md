@@ -607,7 +607,12 @@ Telegram channel. Billion's `notify_owner` questions, its `tell_owner`
 replies and your messages, from the tab and from Telegram, are one
 conversation there, newest at the bottom; the last 500 messages are kept in
 `~/.agent-007/chat.json`. Open questions also pin to a strip at the top of
-the tab, blocking first, then oldest; tap one to jump to it.
+the tab, blocking first, then oldest; tap one to jump to it. When Billion
+cannot talk yet, a bar above the text box says why, with the button past it:
+its CLI is missing (Start), Billion is stopped (Start), or `claude auth status`
+/ `codex login status` said it is logged out, so it sits at the CLI's own
+sign-in (open its terminal). The server clears that last one at `billion_ready`
+or when that Billion exits.
 
 Type in the box at the bottom (Enter sends, Shift+Enter is a new line) and it
 is typed into Billion's terminal as `[Owner via app] <text>`, as a turn of its
