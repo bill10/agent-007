@@ -84,9 +84,11 @@ let onSessionChanged = null;
 export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
+  // Before the wait, so a billion-notice sent after this message is not
+  // overwritten by it. A re-emit on reconnect clears one this window missed.
+  if (msg.isBillion) setBillionNotice(msg.sessionId, msg.notice);
   await waitForXterm();
   const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus, isBillion, agent } = msg;
-  if (isBillion && msg.notice) setBillionNotice(sessionId, msg.notice);
 
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
