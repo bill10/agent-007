@@ -1,0 +1,38 @@
+#!/usr/bin/env node
+// Stand-in `gh` for the README demo (scripts/demo/record.mjs): pull requests
+// live in $HOME/demo-prs.json, so the board's real PR lookups and merge sweep
+// run against them and nothing reaches GitHub.
+import { readFileSync, writeFileSync } from 'fs';
+import { join } from 'path';
+
+const file = join(process.env.HOME, 'demo-prs.json');
+const load = () => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return []; } };
+const save = (prs) => writeFileSync(file, JSON.stringify(prs, null, 2));
+const args = process.argv.slice(2);
+const flag = (name) => { const i = args.indexOf(name); return i === -1 ? null : args[i + 1]; };
+const out = (v) => process.stdout.write(typeof v === 'string' ? `${v}\n` : JSON.stringify(v));
+const [cmd, sub] = args;
+
+if (cmd === 'auth' && sub === 'status') out({ hosts: { 'github.com': [{ state: 'success', login: 'demo', active: true }] } });
+else if (cmd === 'auth' && sub === 'token') out('demo-token');
+else if (cmd === 'pr' && sub === 'create') {
+  const prs = load();
+  const number = 41 + prs.length;
+  prs.push({ number, url: `https://github.com/acme/shop/pull/${number}`, head: flag('--head'), state: 'OPEN', mergedAt: null, isDraft: false, isCrossRepository: false });
+  save(prs);
+  out(prs.at(-1).url);
+} else if (cmd === 'pr' && sub === 'merge') {
+  const prs = load();
+  const pr = prs.find(p => p.number === Number(args[2]));
+  if (!pr) { console.error('no such pull request'); process.exit(1); }
+  Object.assign(pr, { state: 'MERGED', mergedAt: new Date().toISOString() });
+  save(prs);
+  out(`✓ Squashed and merged pull request #${pr.number}`);
+} else if (cmd === 'pr' && sub === 'list') {
+  const state = (flag('--state') || 'open').toUpperCase();
+  out(load().filter(p => p.head === flag('--head') && p.state === state));
+} else if (cmd === 'pr' && sub === 'view') {
+  const pr = load().find(p => p.number === Number(args[2]));
+  if (!pr) { console.error('no such pull request'); process.exit(1); }
+  out({ ...pr, headRefOid: 'd3m0', statusCheckRollup: [] });
+} else { console.error(`demo gh: ${args.join(' ')} is not scripted`); process.exit(1); }
