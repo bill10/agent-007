@@ -8,7 +8,7 @@ import { rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
   ownerSays, chatMessages, chatPayload, notifyOwner, tellOwner, handleUpdate, dismissWaiting, waitingItems,
-  APP_PREFIX, OWNER_PREFIX, CHAT_CAP, NOTIFY_WINDOW_MS,
+  APP_PREFIX, OWNER_PREFIX, CHAT_CAP, NOTIFY_WINDOW_MS, MAX_OWNER_CHARS,
 } from '../server/owner.js';
 import { dropMessages } from '../server/messages.js';
 import { sessions, CONFIG_DIR } from '../server/state.js';
@@ -53,10 +53,29 @@ describe('the owner typing in the Billion tab', () => {
     expect(chatMessages()).toEqual([]);
   });
 
-  it('refuses empty and oversized text', async () => {
+  it('refuses empty text and text past the technical ceiling', async () => {
     expect((await ownerSays('  ')).error).toMatch(/empty/);
-    expect((await ownerSays('x'.repeat(5000))).error).toMatch(/under 4096/);
+    expect((await ownerSays('x'.repeat(MAX_OWNER_CHARS + 1))).error).toMatch(/send it in parts/);
     expect(b.pty.write).not.toHaveBeenCalled();
+  });
+
+  it('delivers a long pasted message whole, newlines kept, and keeps it whole in the thread', async () => {
+    const listing = Array.from({ length: 60 }, (_, i) => `Item ${i}: a product with a long description`.padEnd(150, '.')).join('\n');
+    expect(listing.length).toBeGreaterThan(4096);
+    expect(await ownerSays(listing)).toEqual({ ok: true });
+    // Typed in small bracketed pastes, one after another, then one Enter: one turn.
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} ${listing}\r`), { timeout: 20000 });
+    expect(chatMessages()[0].text).toBe(listing);
+    expect(readFileSync(join(CONFIG_DIR, 'chat.json'), 'utf8')).toContain(JSON.stringify(listing));
+  });
+
+  it('delivers a long answer whole with its line breaks', async () => {
+    await notifyOwner('Which listing?', { env: {}, now: now() });
+    const [q] = waitingItems();
+    const listing = Array.from({ length: 60 }, (_, i) => `Line ${i} of the pasted listing`).join('\n');
+    expect(await ownerSays(listing, { answers: q.id })).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} Q1: ${listing} (re: "Which listing?")\r`), { timeout: 20000 });
+    expect(chatMessages().at(-1).text).toBe(listing);
   });
 
   it('answers the question it names, as a typed answer: the question collapses and the words show as the owner\'s', async () => {

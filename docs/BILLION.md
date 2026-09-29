@@ -617,6 +617,15 @@ typing, tap *Reply* under it (or its chip in the strip): the box then says
 "Answers Q3" (× goes back to a plain message). If Billion is not running the
 message is refused and stays in the box.
 
+There is no practical length limit on what you type or paste, in a message or
+an answer: it reaches Billion whole, line breaks kept, as one turn (only a
+paste over 200,000 characters is refused, with the text left in the box), and
+the thread shows it whole in a scrollable bubble. Telegram itself caps a
+message at 4,096 characters and a caption at 1,024, so Billion's longer
+messages to your phone go as consecutive messages instead of being cut, and a
+question's answered copy that no longer fits gets the rest as a follow-up
+message.
+
 `notify_owner` puts each question in the tab and, when a Telegram bot is set
 up, on your phone. Each question gets a short number, Q1, Q2 and so on. When the answer
 is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one

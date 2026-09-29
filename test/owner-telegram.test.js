@@ -8,7 +8,7 @@ import { join } from 'path';
 import {
   notifyOwner, tellOwner, sendTelegram, handleUpdate, pollOnce, startTelegram, stopTelegram,
   waitingItems, dismissWaiting, redact, NOTIFY_LIMIT, NOTIFY_WINDOW_MS, chatMessages,
-  ownerSays, setOwnerChannel, lastOwnerChannel,
+  ownerSays, setOwnerChannel, lastOwnerChannel, splitForTelegram,
 } from '../server/owner.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { dropMessages } from '../server/messages.js';
@@ -330,5 +330,49 @@ describe('the poll loop logs going offline and coming back, not every retry', ()
       'Telegram: offline (no network), retrying quietly',
       'Telegram: getUpdates failed (Unauthorized): the bot token is wrong or revoked; retrying quietly',
     ]);
+  });
+});
+
+describe('long text to Telegram is split, never cut', () => {
+  it('splitForTelegram joins back to the text, each piece within the limit, cutting at newlines first', () => {
+    expect(splitForTelegram('short')).toEqual(['short']);
+    const text = Array.from({ length: 300 }, (_, i) => `line ${i} of a long listing`).join('\n');
+    const parts = splitForTelegram(text, 4096);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join('')).toBe(text);
+    expect(parts.every(p => p.length <= 4096)).toBe(true);
+    expect(parts.slice(0, -1).every(p => p.endsWith('\n'))).toBe(true);
+    const solid = '😀'.repeat(5000);
+    expect(splitForTelegram(solid, 4096).join('')).toBe(solid);
+    expect(splitForTelegram(solid, 4096).map(p => Array.from(p).length)).toEqual([4096, 904]);
+  });
+
+  it('sendTelegram sends consecutive messages, the buttons on the last', async () => {
+    fetchMock.mockImplementation(async () => reply({ message_id: 5 }));
+    const text = 'word '.repeat(2000);
+    const markup = { inline_keyboard: [[{ text: 'yes', callback_data: 'a' }]] };
+    expect((await sendTelegram(text, { env: ENV, extra: { reply_markup: markup } })).ok).toBe(true);
+    const sent = calls().map(c => c.body);
+    expect(sent.length).toBe(3);
+    expect(sent.map(b => b.text).join('')).toBe(text);
+    expect(sent.every(b => b.text.length <= 4096)).toBe(true);
+    expect(sent.map(b => 'reply_markup' in b)).toEqual([false, false, true]);
+  });
+
+  it('a long answer edits the question to what fits and sends the rest as a follow-up message', async () => {
+    const b = billion();
+    sessions.set(b.id, b);
+    fetchMock.mockImplementation(async () => reply({ message_id: 900 }));
+    await notifyOwner('Which listing?', { env: ENV, now: now(), choices: ['a', 'b'] });
+    const long = 'answer text '.repeat(600);
+    const { answerWaiting } = await import('../server/owner.js');
+    fetchMock.mockClear();
+    expect((await answerWaiting(waitingItems()[0].id, long, 'app', { env: ENV })).ok).toBe(true);
+    const sent = calls();
+    expect(sent[0].url).toMatch(/editMessageText$/);
+    expect(sent[0].body.text.length).toBeLessThanOrEqual(4096);
+    const joined = [sent[0].body.text, ...sent.slice(1).map(c => c.body.text)].join('');
+    expect(joined).toBe(`Q1: Which listing?\n\nAnswered in app: ${long.trim()}`);
+    dropMessages(b.id);
   });
 });
