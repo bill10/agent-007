@@ -30,8 +30,13 @@ export const OWNER_VOICE_PREFIX = '[Owner via Telegram, voice]';
 export const APP_PREFIX = '[Owner via app]';
 export const MAX_CHOICES = 5;
 export const MAX_CHOICE_CHARS = 40;
-export const MAX_ANSWER_CHARS = 2000;
-export const MAX_OWNER_CHARS = 4096;   // what one Telegram message can carry
+// No practical limit on what the owner types or pastes in the Billion tab: these
+// are a ceiling against a runaway paste, far above anything typed. Telegram's
+// own 4096 (message) and 1024 (caption) are met by splitting (splitForTelegram).
+export const MAX_ANSWER_CHARS = 200000;
+export const MAX_OWNER_CHARS = 200000;
+export const TG_MESSAGE_CHARS = 4096;
+export const TG_CAPTION_CHARS = 1024;
 export const CHAT_CAP = 500;
 const CLOSED_KEPT = 30;   // answered and dismissed items kept; open ones always are
 
@@ -75,12 +80,37 @@ async function call(method, params, { env = process.env, signal } = {}) {
   return body.result;
 }
 
-// extra: more sendMessage fields (reply_markup). Returns { ok, messageId } or { error }.
+// Consecutive pieces of at most `limit` characters (code points) that join back
+// into `text`, cut at a newline, else a space, else mid-word, so nothing is lost.
+export function splitForTelegram(text, limit = TG_MESSAGE_CHARS) {
+  const chars = Array.from(String(text ?? ''));
+  if (chars.length <= limit) return [chars.join('')];
+  const out = [];
+  let at = 0;
+  while (chars.length - at > limit) {
+    const window = chars.slice(at, at + limit);
+    let cut = window.lastIndexOf('\n') + 1;
+    if (cut < limit / 2) cut = window.lastIndexOf(' ') + 1;
+    if (cut < limit / 2) cut = limit;
+    out.push(chars.slice(at, at + cut).join(''));
+    at += cut;
+  }
+  out.push(chars.slice(at).join(''));
+  return out;
+}
+
+// extra: more sendMessage fields (reply_markup). Text over Telegram's 4096 goes
+// as consecutive messages, the buttons on the last. messageId is the one
+// carrying the buttons. Returns { ok, messageId } or { error }.
 export async function sendTelegram(text, { env = process.env, extra } = {}) {
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) return { error: 'Telegram is not configured' };
   try {
-    const sent = await call('sendMessage', { chat_id: chatId, text, ...extra }, { env });
+    const parts = splitForTelegram(text);
+    let sent;
+    for (const [i, part] of parts.entries()) {
+      sent = await call('sendMessage', { chat_id: chatId, text: part, ...(i === parts.length - 1 ? extra : {}) }, { env });
+    }
     return { ok: true, messageId: sent?.message_id };
   } catch (err) {
     return { error: err.message };
@@ -115,10 +145,17 @@ export async function sendVoice(text, { env = process.env, extra } = {}) {
     const ogg = await synthesize(text, env);
     const form = new FormData();
     form.append('chat_id', chatId);
-    form.append('caption', text);   // under Telegram's 1024: voice is for texts of 900 or fewer
+    // Voice is for texts of 900 or fewer; any more than a caption holds follows as text.
+    const [caption, ...rest] = splitForTelegram(text, TG_CAPTION_CHARS);
+    form.append('caption', caption);
     form.append('voice', new Blob([ogg], { type: 'audio/ogg' }), 'billion.ogg');
-    if (extra?.reply_markup) form.append('reply_markup', JSON.stringify(extra.reply_markup));
+    if (extra?.reply_markup && !rest.length) form.append('reply_markup', JSON.stringify(extra.reply_markup));
     const sent = await call('sendVoice', form, { env });
+    if (rest.length) {
+      const more = await sendTelegram(rest.join(''), { env, extra });
+      if (more.error) throw new Error(more.error);
+      return { ok: true, messageId: more.messageId };
+    }
     return { ok: true, messageId: sent?.message_id, voice: true };
   } catch (err) {
     return { error: redact(err.message, env) };
@@ -334,10 +371,15 @@ export function setOwnerChannel(via) { ownerChannel = via; }
 // terminal, then the item is answered everywhere. typed: the owner wrote it
 // rather than tapped a choice, so it shows in the thread as their message too.
 // { ok, item } or { error }; on an error the item stays open.
+// Runs of spaces collapse, but a pasted answer keeps its line breaks.
+const tidyAnswer = (answer) => (typeof answer === 'string'
+  ? answer.replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+  : '');
+
 export async function answerWaiting(id, answer, via, { broadcast, env = process.env, typed = false } = {}) {
-  const body = typeof answer === 'string' ? answer.replace(/\s+/g, ' ').trim() : '';
+  const body = tidyAnswer(answer);
   if (!body) return { error: 'The answer is empty.' };
-  if (body.length > MAX_ANSWER_CHARS) return { error: `Keep the answer under ${MAX_ANSWER_CHARS} characters.` };
+  if (body.length > MAX_ANSWER_CHARS) return { error: `The answer is over ${MAX_ANSWER_CHARS} characters; send it in parts.` };
   const item = waitingItems().find(i => i.id === id);
   if (!item || item.status === 'dismissed') return { error: 'That question is gone.' };
   if (item.status === 'answered') return { error: `Q${item.n} was answered already: ${item.answer}` };
@@ -360,7 +402,7 @@ export async function ownerSays(text, { answers, broadcast, env = process.env } 
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true });
-  if (body.length > MAX_OWNER_CHARS) return { error: `Keep it under ${MAX_OWNER_CHARS} characters.` };
+  if (body.length > MAX_OWNER_CHARS) return { error: `The message is over ${MAX_OWNER_CHARS} characters; send it in parts.` };
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running; start it, then send again.' };
   if (!sendText(billion, `${APP_PREFIX} ${body}`)) return { error: 'Billion has too much waiting for it; try again in a while.' };
@@ -383,9 +425,9 @@ async function markAnswered(id, answer, via, { broadcast, env }) {
 // terminal), so Billion closes the item itself. Nothing goes back into Billion's
 // terminal: it already has the answer. { ok, item } or { error }.
 export async function resolveQuestion({ number, id } = {}, answer, { broadcast, env = process.env } = {}) {
-  const body = typeof answer === 'string' ? answer.replace(/\s+/g, ' ').trim() : '';
+  const body = tidyAnswer(answer);
   if (!body) return { error: 'The answer is empty.' };
-  if (body.length > MAX_ANSWER_CHARS) return { error: `Keep the answer under ${MAX_ANSWER_CHARS} characters.` };
+  if (body.length > MAX_ANSWER_CHARS) return { error: `The answer is over ${MAX_ANSWER_CHARS} characters; send it in parts.` };
   const item = waitingItems().find(i => (id ? i.id === id : i.n === number));
   const name = id ? `question ${id}` : `Q${number}`;
   if (!item) return { error: `There is no ${name}.` };
@@ -426,9 +468,12 @@ async function showAnswerOnPhone(item, env) {
   const { chatId } = telegramSettings(env);
   const where = { app: ' in app', terminal: ' in terminal' }[item.answeredVia] || '';
   const shown = `${questionText(item)}\n\nAnswered${where}: ${item.answer}`;
-  const edit = item.tgVoice
-    ? call('editMessageCaption', { chat_id: chatId, message_id: item.tgMessageId, caption: shown.slice(0, 1024) }, { env })
-    : call('editMessageText', { chat_id: chatId, message_id: item.tgMessageId, text: shown.slice(0, 4096) }, { env });
+  // The message is edited with what fits; the rest follows as messages of its own.
+  const [first, ...rest] = splitForTelegram(shown, item.tgVoice ? TG_CAPTION_CHARS : TG_MESSAGE_CHARS);
+  const edit = (item.tgVoice
+    ? call('editMessageCaption', { chat_id: chatId, message_id: item.tgMessageId, caption: first }, { env })
+    : call('editMessageText', { chat_id: chatId, message_id: item.tgMessageId, text: first }, { env })
+  ).then(() => rest.length && sendTelegram(rest.join(''), { env }));
   await edit.catch(err => console.error('Telegram: could not mark a question answered:', redact(err.message, env)));
 }
 
