@@ -556,10 +556,12 @@ usage limit (below).
 - **The handover.** A switch writes `HANDOVER.md` in Billion's folder, stops
   the running Billion (its waiting mail moves to the new one), and starts the
   other CLI in a new conversation whose first prompt says to read `STATE.md`
-  and `HANDOVER.md` first. `HANDOVER.md` is the last 20 messages of the old
+  and `HANDOVER.md` first. `HANDOVER.md` includes up to 80 recent dialogue and tool entries of the old
   CLI's newest conversation in that folder as plain text (from
   `~/.claude/projects/<folder>/*.jsonl` or `~/.codex/sessions/...`), with no
-  model involved, plus pointers to `STATE.md` and `git log -10`.
+  model involved, plus pointers to `STATE.md`, `git log -10`, and the original
+  transcript. Entries are bounded to about 8,000 characters each and 96,000
+  total; truncation is explicit. A failed handover write cancels the switch.
   `agent-007 handover` writes one on demand. The new CLI starts fresh rather
   than resuming its own older conversation, which would be out of date.
 - **Not committed.** `AGENTS.md` and `HANDOVER.md` are listed in the repo's
@@ -589,12 +591,18 @@ usage limit (below).
   status --json`, `codex login status`), leaves Billion where it is and puts
   `Billion paused: both Claude Code and Codex are at their limits` in the
   *Billion* tab and on Telegram, once, until a new Billion starts.
-  An armed Claude account switch (`server/account-migration.js`; the
-  **Claude account** section of the Settings gear, described in
-  [FEATURES.md](FEATURES.md)) comes before any of that: at a Claude Billion's
-  first hard limit it moves the default login to the new account, restarts
-  Billion there and disarms, with or without `BILLION_AUTO_SWITCH`. Only if
-  that fails does the next tick switch to Codex as above.
+  **Claude account rotation** (`server/account-rotation.js`) comes first when
+  enabled in Settings (on by default once two accounts are added; saved off
+  settings stay off). Limits on Billion or managed Claude workers mark the
+  shared login limited, and the app selects the next included account. It
+  stops and resumes its Claude sessions on their exact conversation IDs,
+  changing only authentication. Account order, cooldowns, active identity,
+  refreshed credentials and recovery state persist across server restarts.
+  With every selected account unavailable, workers wait; Billion can fall
+  back to Codex if enabled. Without fallback it retries after the earliest
+  known reset or a 30-minute backoff. Returning from Codex first selects an
+  eligible Claude login and then uses the normal conversation handover.
+  Billion's repository and state files stay in the same place throughout.
 
 ## Telegram
 
