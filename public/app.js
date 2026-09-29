@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive, setChatMessages, upsertChatMessage } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive, setChatMessages } from './modules/state.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
@@ -23,7 +23,7 @@ import { setupSettings } from './modules/settings.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
-import { renderWaiting, handleWaitingError, handleChatSent, showWaiting, leaveWaiting } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat } from './modules/waiting.js';
 import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
@@ -467,7 +467,9 @@ function setupResize() {
     const view = e.target.closest('button')?.dataset.view;
     if (!view) return;
     // The mic's only "recording" cue lives in the terminal panel.
-    if (view !== 'terminal') stopVoice({ notice: 'Voice input stopped — left the terminal' });
+    if (view !== 'terminal') stopVoice({ only: 'terminal', notice: 'Voice input stopped — left the terminal' });
+    // The Billion tab's mic and reading: their buttons are in its view.
+    if (view !== 'waiting') leftChat();
     // Waiting is the terminal panel showing the Waiting tab.
     if (view === 'waiting') { showWaiting(); updateTabs(); }
     else if (view === 'terminal' && waitingActive) { leaveWaiting(); updateTabs(); }
@@ -543,7 +545,7 @@ function onMessage(msg) {
     case 'waiting-list': setWaitingItems(msg.items); renderWaiting(); updateTabs(); break;
     case 'waiting-error': handleWaitingError(msg); break;
     case 'chat-list': setChatMessages(msg.messages); renderWaiting(); break;
-    case 'chat-message': upsertChatMessage(msg.message); renderWaiting(); break;
+    case 'chat-message': handleChatMessage(msg.message); break;
     case 'chat-sent': handleChatSent(msg); break;
     case 'account-state': handleAccountState(msg); break;
     case 'account-error': handleAccountError(msg); break;

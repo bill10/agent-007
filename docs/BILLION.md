@@ -679,6 +679,48 @@ without a reply, so don't add the bot to a group. The token is never logged or s
 you at most five times a minute. No library: the server long-polls
 `getUpdates` with Node's own `fetch`.
 
+### Read aloud and dictation in the tab
+
+For the car, or anywhere reading a wall of text is not an option. All of it
+runs in the browser (`speechSynthesis` and the Web Speech API's
+`SpeechRecognition`): free, no server work, no API key.
+
+- **Read aloud**: every message from Billion in the thread (questions,
+  `tell_owner` replies, server notices) has a speaker button. Tap it to hear
+  the message; while it speaks the button is a stop square, and a second tap
+  stops it. It reads plain words: markdown is dropped, links are read as
+  "link", `Q51` as "question 51", `#160` as "number 160", a code block as
+  "code block", and an open question ends with its choices ("Choices: Done,
+  Not yet; recommended: Done"). Long messages are spoken sentence by sentence,
+  so Chrome's cut-off after about 15 seconds of one utterance never truncates
+  them. The voice is the best English one the browser lists (en-US first,
+  Premium, Enhanced, Siri or Google voices before the rest); the picker at the
+  top of the tab changes it and the browser remembers the choice.
+- **Read new messages aloud**: the switch at the top of the tab (off by
+  default, remembered by the browser). While it is on and the tab is showing,
+  each new message from Billion is spoken as it arrives, one after another,
+  never over each other. Browsers let a page speak only after a tap on it: the
+  switch's own tap counts, but after a reload the tab shows **Resume reading**
+  (with how many messages are waiting) until you tap it once. Leaving the
+  Billion tab (or the phone's Billion view) stops reading.
+- **On a phone**: reading goes on while the screen is on and the Billion view
+  is showing. With the screen locked or the browser in the background, mobile
+  browsers pause or drop page speech, so it is not reliable there; for that,
+  use Telegram voice notes ([Voice](#voice)), which play like any audio
+  message.
+- **Dictate a reply**: the mic beside the text box. Tap it, allow the
+  microphone the first time, and speak: the words being heard show greyed
+  above the box, and each finished phrase is added to the box as text. Nothing
+  is sent until you tap Send, so you can check or fix it first. If the box says
+  "Answers Q3", the dictated text answers Q3 exactly like typed text. The mic
+  has the terminal mic's limits: it stops after about a minute with no speech,
+  always after 5 minutes, when the page is hidden and when you leave the tab;
+  a red dot and the pulsing mic show while it listens. `Cmd+D` in the Billion
+  tab toggles this mic. It needs HTTPS or localhost (see
+  [REMOTE.md](REMOTE.md)), and most browsers do the recognition on their
+  vendor's servers (Chrome and Edge: Google and Microsoft; Safari may do it on
+  the device), so don't dictate secrets. The terminal's own mic is unchanged.
+
 ### Voice
 
 A poor man's audio chat, free and on your own machine: nothing is sent

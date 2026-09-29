@@ -1,6 +1,9 @@
 // Voice input — dictate into the active terminal via the Web Speech API.
 // Finalized speech is sent as pty-input (exactly like typing); nothing is
-// auto-submitted — the user still presses Enter to send the prompt. Note that
+// auto-submitted — the user still presses Enter to send the prompt. The same
+// mic, with the same limits, can dictate into another target instead: the
+// Billion tab's text box passes its own (see waiting.js), and one mic runs at
+// a time, whichever target it serves. Note that
 // transcripts are keystrokes: a raw-mode program at the prompt (a pager, a
 // y/n confirmation) reacts to them like typing, so the mic is deliberately
 // bounded — it stops on silence, on session switch or end, on a hidden tab,
@@ -42,6 +45,9 @@ let micPrimed = false;
 // "Voice input stopped" announcement so a cancelled permission phase doesn't
 // announce a stop for a session that never started.
 let signalsOn = false;
+// Where the mic's speech goes: TERMINAL, or a target another module passed
+// to toggleVoice. Kept after a stop so its last notice can still be shown.
+let target = null;
 
 function recognitionCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -52,6 +58,14 @@ function recognitionCtor() {
 export function normalizeTranscript(text) {
   const t = String(text).replace(/\s+/g, ' ').trim();
   return t ? t + ' ' : '';
+}
+
+// Append a finalized transcript chunk to text already in a box, with one
+// space between them. Exported for tests.
+export function appendTranscript(current, text) {
+  const before = String(current ?? '');
+  if (!text) return before;
+  return before && !/\s$/.test(before) ? `${before} ${text}` : before + text;
 }
 
 // --- Pure recognition-event logic, exported for tests. The Speech API event
@@ -110,7 +124,7 @@ export function mediaErrorMessage(name) {
   return 'Microphone access denied — allow it in your browser settings, then click the mic again';
 }
 
-function micBtn() { return document.getElementById('btn-voice'); }
+function micBtn() { return target ? target.button() : null; }
 
 // Screen-reader announcements go to an always-rendered visually-hidden live
 // region — the visual pill toggles display:none, which most screen readers
@@ -125,18 +139,16 @@ function announce(text) {
 // updates skip redundant style/layout work. kind: 'live' shows the recording
 // dot; 'notice' and 'error' hide it (the mic is off — a pulsing red dot would
 // be an inverted privacy signal).
-let indicatorEl = null;
 let indicatorLast = null;
 
-function indicator() {
-  if (!indicatorEl) indicatorEl = document.getElementById('voice-indicator');
-  return indicatorEl;
+function indicator(t = target) {
+  return t ? t.indicator() : null;
 }
 
 function showIndicator(text, kind = 'live') {
   const el = indicator();
   if (!el) return;
-  const key = `${kind}:${text}`;
+  const key = `${target.name}:${kind}:${text}`;
   if (key === indicatorLast) return;
   indicatorLast = key;
   el.querySelector('.voice-indicator-text').textContent = text;
@@ -145,8 +157,8 @@ function showIndicator(text, kind = 'live') {
   el.style.display = 'flex';
 }
 
-function hideIndicator() {
-  const el = indicator();
+function hideIndicator(t = target) {
+  const el = indicator(t);
   if (!el) return;
   indicatorLast = null;
   el.style.display = 'none';
@@ -157,7 +169,8 @@ function flashIndicator(text, kind) {
   showIndicator(text, kind);
   announce(text);
   clearTimeout(flashTimer);
-  flashTimer = setTimeout(() => { if (!listening) hideIndicator(); }, FLASH_HIDE_MS);
+  const t = target;
+  flashTimer = setTimeout(() => { if (!listening || target !== t) hideIndicator(t); }, FLASH_HIDE_MS);
 }
 
 function showError(text) { flashIndicator(text, 'error'); }
@@ -172,6 +185,31 @@ export function deliverToActivePty(text) {
   const agent = agents.get(activeSessionId);
   if (!agent || agent.state === 'DISCONNECTED' || !canControlAgent(agent)) return false;
   return send({ type: 'pty-input', sessionId: activeSessionId, data: text });
+}
+
+// The terminal: the mic's original target. Other targets have the same shape:
+// name, button(), indicator() (a pill holding .voice-indicator-text),
+// unavailable() (why the mic can't start, or null), deliver(text) (false when
+// the speech can't land), refocus() and the notice for a failed delivery.
+const TERMINAL = {
+  name: 'terminal',
+  button: () => document.getElementById('btn-voice'),
+  indicator: () => document.getElementById('voice-indicator'),
+  unavailable() {
+    const agent = activeSessionId ? agents.get(activeSessionId) : null;
+    if (!agent || agent.state === 'DISCONNECTED') return 'No running agent selected — open an agent first';
+    if (!canControlAgent(agent)) return 'This agent is view-only';
+    return null;
+  },
+  deliver: (text) => deliverToActivePty(text),
+  refocus: () => refocusTerminal(),
+  undelivered: 'Voice input stopped — transcript could not be delivered',
+};
+
+// Which target the mic serves now ('terminal' or another target's name), or
+// null when it is off. Exported for tests.
+export function voiceTarget() {
+  return listening && target ? target.name : null;
 }
 
 function sessionExpired() {
@@ -199,10 +237,11 @@ function startRecognition() {
     }
     const { finals, interim } = collectResults(event.results, event.resultIndex);
     for (const text of finals) {
-      if (!deliverToActivePty(text)) {
-        console.warn('[voice] transcript could not be delivered to the active pty');
+      if (!target.deliver(text)) {
+        console.warn(`[voice] transcript could not be delivered to the ${target.name}`);
+        const why = target.undelivered;
         stopVoice();
-        showError('Voice input stopped — transcript could not be delivered');
+        showError(why);
         return;
       }
       // Only *delivered* speech refills the silence budget: interim-only
@@ -253,29 +292,35 @@ function startRecognition() {
   rec.start();
 }
 
-export function toggleVoice() {
-  if (listening) { stopVoice(); refocusTerminal(); return; }
+// Toggle the mic for a target (the terminal by default). Pressing another
+// target's mic while this one listens moves the mic over.
+export function toggleVoice(to = TERMINAL) {
+  if (listening && target === to) { stopVoice(); to.refocus(); return; }
+  if (listening) stopVoice();
+  // A notice still showing on the other target's pill goes with the switch.
+  if (target && target !== to) hideIndicator(target);
+  const previous = target;
+  target = to;
 
+  // Refused before listening: the error shows on this target, but the mic
+  // stays with the one it served, so that target's own stops still apply.
+  const refuse = (text) => { showError(text); target = previous || to; };
   if (!recognitionCtor()) {
-    showError('Voice input is not supported in this browser (try Chrome, Edge, or Safari)');
+    refuse('Voice input is not supported in this browser (try Chrome, Edge, or Safari)');
     return;
   }
   if (!window.isSecureContext) {
-    showError('Voice input needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve)');
+    refuse('Voice input needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve)');
     return;
   }
-  const agent = activeSessionId ? agents.get(activeSessionId) : null;
-  if (!agent || agent.state === 'DISCONNECTED') {
-    showError('No running agent selected — open an agent first');
-    return;
-  }
-  if (!canControlAgent(agent)) {
-    showError('This agent is view-only');
+  const why = to.unavailable();
+  if (why) {
+    refuse(why);
     return;
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('Could not start voice input — no microphone API in this browser');
+    refuse('Could not start voice input — no microphone API in this browser');
     return;
   }
 
@@ -291,7 +336,7 @@ export function toggleVoice() {
 
   if (micPrimed) {
     beginListening();
-    refocusTerminal();
+    to.refocus();
     return;
   }
 
@@ -321,7 +366,7 @@ export function toggleVoice() {
     stopVoice();
     showError(mediaErrorMessage(err && err.name));
   });
-  refocusTerminal();
+  to.refocus();
 }
 
 // The mic is granted and recognition is about to run — only now do the
@@ -352,8 +397,11 @@ function refocusTerminal() {
 
 // Stop dictation. opts.notice flashes an explanation when the stop wasn't
 // user-initiated (session switch, agent ended, silence cap) — without it,
-// in-flight speech would vanish with no cue.
+// in-flight speech would vanish with no cue. opts.only: stop only if the mic
+// serves that target ('terminal' for the terminal's own stops, so switching
+// agents behind the Billion tab leaves its mic alone).
 export function stopVoice(opts = {}) {
+  if (opts.only && target?.name !== opts.only) return;
   const wasListening = listening;
   const wasSignalling = signalsOn;
   listening = false;
@@ -380,7 +428,7 @@ export function stopVoice(opts = {}) {
 }
 
 export function setupVoice() {
-  const btn = micBtn();
+  const btn = TERMINAL.button();
   if (!btn) return;
   // Leave the button visible even when unsupported: clicking explains why
   // (missing API vs. insecure context) instead of silently hiding the feature.

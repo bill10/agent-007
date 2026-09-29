@@ -5,10 +5,18 @@
 // a strip pinning the open questions, and a text box that is typed into
 // Billion's terminal as [Owner via app] (server/owner.js ownerSays). Shares the
 // terminal viewport with the terminals and the job board, like Jobs does.
-import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView } from './state.js';
+// Billion's messages can be read aloud (readaloud.js: a speaker button on
+// each, and "Read new messages aloud" in the header), and the box has its own
+// mic (voice.js with the CHAT_VOICE target), all in the browser and free.
+import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage } from './state.js';
 import { send } from './ws.js';
 import { hideJobBoard } from './jobs.js';
-import { stopVoice } from './voice.js';
+import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
+import {
+  readAloudSupported, speakableText, toggleSpeak, readNew, speakingMessage, stopReading,
+  autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
+  englishVoices, pickVoice, savedVoiceURI, setVoiceURI,
+} from './readaloud.js';
 
 const errors = new Map();   // question id -> { error, status }: why the last tap did not go through
 const pending = new Map();  // question id -> its status when tapped, waiting for the server to move it on
@@ -29,8 +37,9 @@ export function showWaiting() {
   if (agent) agent.termEl.style.display = 'none';
   document.getElementById('terminal-empty').style.display = 'none';
   document.getElementById('waiting-board').style.display = 'flex';
-  // The mic types into a terminal, and its button would sit on Send.
-  stopVoice();
+  // The terminal's mic types into a terminal, and its button would sit on
+  // Send; the box has a mic of its own.
+  stopVoice({ only: 'terminal' });
   document.body.classList.add('billion-chat');
   setWaitingActive(true);
   // A reload comes back here, not to the terminal that was open before.
@@ -49,11 +58,19 @@ export function leaveWaiting() {
 }
 
 export function hideWaiting() {
+  leftChat();
   const board = document.getElementById('waiting-board');
   if (board) board.style.display = 'none';
   document.body.classList.remove('billion-chat');
   setWaitingActive(false);
   setView(document.body.dataset.view);
+}
+
+// Leaving the Billion view (another tab, or the phone's other panels): the
+// box's mic and any reading stop, since their buttons are out of sight.
+export function leftChat() {
+  stopVoice({ only: 'chat', notice: 'Voice input stopped — left the Billion tab' });
+  if (speakingMessage() !== null || queuedCount()) stopReading();
 }
 
 const el = (tag, className, text) => {
@@ -248,10 +265,158 @@ function bubble(m) {
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
   box.appendChild(el('p', 'chat-text', m.text));
   const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && 'Telegram', time(m.at)].filter(Boolean);
-  box.appendChild(el('span', 'chat-meta', meta.join(' · ')));
+  const metaLine = el('span', 'chat-meta', meta.join(' · '));
+  if (!mine && readAloudSupported()) {
+    const foot = el('div', 'chat-meta-row');
+    foot.append(speakButton(m), metaLine);
+    box.appendChild(foot);
+  } else box.appendChild(metaLine);
   if (m.q) box.appendChild(questionFoot(m.q));
   row.appendChild(box);
   return row;
+}
+
+const SPEAKER_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3h-2.5z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5"/><path d="M12.8 3.5a6 6 0 0 1 0 9"/></svg>';
+const STOP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>';
+const MIC_SVG = '<svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/></svg>';
+
+// A Billion message's speaker: reads it aloud, and while it does, stops it.
+function speakButton(m) {
+  const btn = el('button', 'chat-speak');
+  btn.type = 'button';
+  btn.dataset.id = m.id;
+  btn.onclick = () => {
+    const now = chatMessages.find(x => x.id === m.id) || m;
+    toggleSpeak(m.id, speakableText(now));
+  };
+  paintSpeakButton(btn);
+  return btn;
+}
+
+function paintSpeakButton(btn) {
+  const speaking = btn.dataset.id === speakingMessage();
+  const label = speaking ? 'Stop reading' : 'Read aloud';
+  if (btn.dataset.state === label) return;
+  btn.dataset.state = label;
+  btn.classList.toggle('speaking', speaking);
+  btn.setAttribute('aria-pressed', String(speaking));
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+  btn.innerHTML = speaking ? STOP_SVG : SPEAKER_SVG;
+}
+
+// The header: "Read new messages aloud", the one-tap "Resume reading" after
+// a reload, and the voice picker.
+function renderReadHead() {
+  const head = document.getElementById('chat-head');
+  if (!head) return;
+  const toggle = document.getElementById('chat-autoread');
+  const on = autoReadOn();
+  toggle.setAttribute('aria-pressed', String(on));
+  toggle.classList.toggle('on', on);
+  const resume = document.getElementById('chat-resume');
+  const waiting = needsResume();
+  resume.hidden = !waiting;
+  const queued = queuedCount();
+  resume.textContent = queued ? `Resume reading (${queued} new)` : 'Resume reading';
+  const stop = document.getElementById('chat-stop-reading');
+  stop.hidden = speakingMessage() === null && !queued || waiting;
+  renderVoicePick();
+}
+
+function renderVoicePick() {
+  const pick = document.getElementById('chat-voice-pick');
+  if (!pick) return;
+  const voices = englishVoices(window.speechSynthesis?.getVoices?.() || []);
+  pick.hidden = voices.length < 2;
+  const saved = savedVoiceURI();
+  const auto = pickVoice(voices, null);
+  const key = voices.map(v => v.voiceURI).join('|') + `#${saved}`;
+  if (pick.dataset.key === key) return;
+  pick.dataset.key = key;
+  pick.innerHTML = '';
+  const first = el('option', null, auto ? `Voice: auto (${auto.name})` : 'Voice: auto');
+  first.value = '';
+  pick.appendChild(first);
+  for (const v of voices) {
+    const opt = el('option', null, v.name);
+    opt.value = v.voiceURI;
+    pick.appendChild(opt);
+  }
+  pick.value = voices.some(v => v.voiceURI === saved) ? saved : '';
+}
+
+function paintReadAloud() {
+  for (const btn of document.querySelectorAll('.chat-speak')) paintSpeakButton(btn);
+  renderReadHead();
+}
+onReadAloudChange(paintReadAloud);
+
+// A message arrived over the socket. A new one from Billion is read aloud
+// when "Read new messages aloud" is on and the tab is showing.
+export function handleChatMessage(message) {
+  const isNew = !chatMessages.some(m => m.id === message.id);
+  upsertChatMessage(message);
+  renderWaiting();
+  if (isNew && message.from !== 'owner' && waitingActive) readNew(message.id, speakableText(message));
+}
+
+// The box's mic: the terminal mic's logic and limits (voice.js), with speech
+// appended to the box as text. Nothing is sent: the owner taps Send. In
+// "Answers Q3" mode the dictated text answers Q3, like typed text.
+export const CHAT_VOICE = {
+  name: 'chat',
+  button: () => document.getElementById('chat-mic'),
+  indicator: () => document.getElementById('chat-voice'),
+  unavailable: () => (waitingActive && document.getElementById('chat-input') ? null : 'Open the Billion tab to dictate'),
+  deliver(text) {
+    const input = document.getElementById('chat-input');
+    if (!input || !waitingActive) return false;
+    input.value = appendTranscript(input.value, text);
+    fitInput(input);
+    return true;
+  },
+  // A keyboard, not a phone's: the box takes focus so Enter sends. On a
+  // phone that would pop the keyboard over the thread.
+  refocus() {
+    if (window.matchMedia?.('(pointer: coarse)').matches) return;
+    document.getElementById('chat-input')?.focus();
+  },
+  undelivered: 'Voice input stopped — the text box is gone',
+};
+
+export const toggleChatVoice = () => toggleVoice(CHAT_VOICE);
+
+function readHead() {
+  const head = el('div', 'chat-head');
+  head.id = 'chat-head';
+  const toggle = el('button', 'chat-autoread');
+  toggle.id = 'chat-autoread';
+  toggle.type = 'button';
+  toggle.innerHTML = SPEAKER_SVG;
+  toggle.append(el('span', null, 'Read new messages aloud'), el('span', 'chat-switch'));
+  toggle.title = 'Speak each new message from Billion as it arrives, while this tab is open';
+  toggle.onclick = () => setAutoRead(!autoReadOn());
+  const resume = el('button', 'chat-resume', 'Resume reading');
+  resume.id = 'chat-resume';
+  resume.type = 'button';
+  resume.title = 'The browser lets a page speak only after a tap: tap to go on reading new messages aloud';
+  resume.hidden = true;
+  resume.onclick = () => resumeReading();
+  const stop = el('button', 'chat-stop-reading', 'Stop');
+  stop.id = 'chat-stop-reading';
+  stop.type = 'button';
+  stop.setAttribute('aria-label', 'Stop reading aloud');
+  stop.hidden = true;
+  stop.onclick = () => stopReading();
+  const pick = el('select', 'chat-voice-pick');
+  pick.id = 'chat-voice-pick';
+  pick.setAttribute('aria-label', 'Reading voice');
+  pick.hidden = true;
+  pick.onchange = () => { setVoiceURI(pick.value); renderVoicePick(); };
+  head.append(toggle, resume, stop, pick);
+  window.speechSynthesis?.addEventListener?.('voiceschanged', renderVoicePick);
+  return head;
 }
 
 // The strip, the thread's scroller, the jump and the text box, built once:
@@ -266,6 +431,7 @@ function shell() {
     strip.setAttribute('aria-label', 'Open questions');
     strip.hidden = true;
     board.insertBefore(strip, list);
+    if (readAloudSupported()) board.insertBefore(readHead(), strip);
 
     const jump = el('button', 'chat-jump', 'New messages ↓');
     jump.id = 'chat-jump';
@@ -291,6 +457,19 @@ function shell() {
         submit();
       }
     };
+    const mic = el('button', 'chat-mic');
+    mic.id = 'chat-mic';
+    mic.type = 'button';
+    mic.innerHTML = MIC_SVG;
+    mic.title = 'Dictate a reply (it is not sent until you tap Send)';
+    mic.setAttribute('aria-label', 'Dictate a reply');
+    mic.setAttribute('aria-pressed', 'false');
+    mic.onclick = () => toggleChatVoice();
+    const voice = el('div', 'chat-voice');
+    voice.id = 'chat-voice';
+    voice.style.display = 'none';
+    voice.setAttribute('aria-hidden', 'true');
+    voice.append(el('span', 'voice-indicator-dot'), el('span', 'voice-indicator-text'));
     const btn = el('button', 'waiting-send', 'Send');
     btn.id = 'chat-send';
     btn.type = 'submit';
@@ -299,8 +478,8 @@ function shell() {
     error.setAttribute('role', 'alert');
     error.hidden = true;
     form.onsubmit = (e) => { e.preventDefault(); submit(); };
-    row.append(input, btn);
-    form.append(target, row, error);
+    row.append(input, mic, btn);
+    form.append(target, voice, row, error);
     board.append(jump, form);
   }
   return list;
@@ -394,4 +573,5 @@ export function renderWaiting({ toBottom = false } = {}) {
   lastShown = chatMessages.at(-1)?.id ?? null;
   renderStrip();
   renderComposer();
+  renderReadHead();
 }

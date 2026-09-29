@@ -1,8 +1,9 @@
 // Keyboard shortcuts
-import { agents } from './state.js';
+import { agents, waitingActive } from './state.js';
 import { switchToSession } from './terminal.js';
 import { toggleExplorer } from './explorer.js';
 import { toggleVoice } from './voice.js';
+import { toggleChatVoice } from './waiting.js';
 
 // Single source of truth for Cmd+<key> global shortcuts. terminal.js uses the
 // same predicate so xterm passes exactly the chords the document handler acts
@@ -44,10 +45,11 @@ export function setupShortcuts() {
       return;
     }
 
-    // Cmd+D: toggle voice input
+    // Cmd+D: toggle voice input (into the Billion tab's box while it shows)
     if (e.key === 'd') {
       e.preventDefault();
-      toggleVoice();
+      if (waitingActive) toggleChatVoice();
+      else toggleVoice();
       return;
     }
   });

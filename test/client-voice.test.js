@@ -7,7 +7,7 @@ import { agents, setActiveSession, setSelf } from '../public/modules/state.js';
 import {
   normalizeTranscript, deliverToActivePty,
   collectResults, interimTail, recognitionErrorMessage, onEndAction,
-  mediaErrorMessage,
+  mediaErrorMessage, appendTranscript, stopVoice, voiceTarget,
 } from '../public/modules/voice.js';
 
 describe('normalizeTranscript (voice input)', () => {
@@ -170,5 +170,31 @@ describe('deliverToActivePty (voice → pty wiring)', () => {
     send.mockReturnValue(false);
     expect(deliverToActivePty('hello ')).toBe(false);
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('appendTranscript (dictation into a text box)', () => {
+  it('appends to an empty box as is', () => {
+    expect(appendTranscript('', 'yes ship it ')).toBe('yes ship it ');
+  });
+
+  it('puts one space between typed text and the dictated chunk', () => {
+    expect(appendTranscript('Done', 'and merge ')).toBe('Done and merge ');
+    expect(appendTranscript('Done ', 'and merge ')).toBe('Done and merge ');
+    expect(appendTranscript('Done\n', 'and merge ')).toBe('Done\nand merge ');
+  });
+
+  it('leaves the box alone for an empty chunk', () => {
+    expect(appendTranscript('Done', '')).toBe('Done');
+    expect(appendTranscript(undefined, 'hi ')).toBe('hi ');
+  });
+});
+
+describe('stopVoice({ only }) (one mic, several targets)', () => {
+  it('is a no-op when the mic is off, whatever the target', () => {
+    expect(voiceTarget()).toBeNull();
+    expect(() => stopVoice({ only: 'terminal' })).not.toThrow();
+    expect(() => stopVoice({ only: 'chat' })).not.toThrow();
+    expect(voiceTarget()).toBeNull();
   });
 });

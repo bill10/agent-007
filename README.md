@@ -77,7 +77,7 @@ The details and caveats of every feature -- phone layout, voice input, themes an
 | `Cmd+N` | Spawn a new agent |
 | `Cmd+1..9` | Switch to agent by tab position |
 | `Cmd+E` | Toggle the file explorer panel |
-| `Cmd+D` | Toggle voice input (dictation) |
+| `Cmd+D` | Toggle voice input (dictation): the terminal mic, or the text box mic while the Billion tab shows |
 
 ## How It Works
 
@@ -280,11 +280,12 @@ public/
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
-    waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box)
+    waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box, its mic)
+    readaloud.js   Read aloud in the Billion tab (speechSynthesis: a speaker button per message, read new messages aloud)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts
-    voice.js       Voice input (Web Speech API dictation)
+    voice.js       Voice input (Web Speech API dictation into the terminal or the Billion tab's text box)
     auth.js        Login tokens, presence, HTML escaping
     settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Claude account)
     account.js     The Claude account section of the Settings panel (Check folder, Switch now, Arm, Roll back, Retire the new folder)
