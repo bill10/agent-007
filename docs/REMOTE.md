@@ -61,8 +61,8 @@ the browser's `Origin` is the tailnet hostname you may still need
 extra port is open and traffic is encrypted end to end.
 
 > **Voice input needs this HTTPS setup.** Browsers only grant microphone access
-> in a secure context (HTTPS or localhost), so the in-app voice input (mic
-> button / `Cmd+D`) works over `tailscale serve` but not over the plain
+> in a secure context (HTTPS or localhost), so the in-app voice input (the
+> terminal's mic button, the Billion tab's mic, `Cmd+D`) works over `tailscale serve` but not over the plain
 > `http://...:7007` bind above. One boundary caveat: Web Speech recognition in
 > Chrome/Edge streams the microphone audio to Google/Microsoft servers for
 > transcription (Safari may process on-device), so dictated content leaves the

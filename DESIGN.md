@@ -971,7 +971,20 @@ terminal panel on this tab.
 - After a send or tap the controls dim until the server answers; a refusal
   ("Billion is not running") shows in `--state-disconnected` and the text
   stays in the box.
-- The voice mic is hidden on this tab.
+- The terminal's floating voice mic is hidden on this tab. The tab has its
+  own: `.chat-mic`, a 40px outline button beside the textarea (44px on
+  phones) that pulses `--state-recording` red while listening (`mic-pulse`).
+  What is being heard shows greyed and italic in a line above the box
+  (`.chat-voice`), with the same red dot; notices and errors drop the dot.
+- A header row above the question strip (`.chat-head`, `--bg-dark`, hairline
+  bottom border) holds *Read new messages aloud* (a small switch, accent when
+  on), *Resume reading (N new)* as an accent pill after a reload, *Stop*
+  while reading, and the voice picker pushed to the right.
+- Each message from Billion has a speaker button (`.chat-speak`, 40px hit
+  area, `--text-dim`) in its time row; it turns accent and becomes a stop
+  square while that message is spoken.
+- `prefers-reduced-motion: reduce` stops the mic pulse, the dot and the
+  switch's slide.
 - Empty: "Nothing here yet. Say something to Billion." in `--text-dim`.
 - Phones: choices, Send and the input are 44px tall; the input is 16px so iOS
   does not zoom; bubbles go up to 88% wide.
