@@ -150,6 +150,7 @@ describe('commandExists', () => {
   it('says how to install the CLIs it knows', () => {
     expect(missingCommandMessage('claude')).toMatch(/"claude" is not installed.*Install Claude Code/);
     expect(missingCommandMessage('codex')).toMatch(/npm install -g @openai\/codex/);
+    expect(missingCommandMessage('gh')).toMatch(/https:\/\/cli\.github\.com/);
     expect(missingCommandMessage('aider')).toBe('"aider" is not installed, or not on the PATH Agent 007 was started with.');
   });
 });

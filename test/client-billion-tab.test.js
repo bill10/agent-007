@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
-import { agents, activeSessionId, setActiveSession, setBoardActive, setSelf, setBillionTabOpen } from '../public/modules/state.js';
+import { agents, activeSessionId, setActiveSession, setBoardActive, setSelf, setBillionTabOpen, setWaitingActive } from '../public/modules/state.js';
 import { handleSessionCreated, updateTabs } from '../public/modules/terminal.js';
 
 beforeEach(() => {
@@ -46,6 +46,17 @@ describe('Billion\'s tab', () => {
     expect(agents.has('b1')).toBe(false);
     expect(activeSessionId).toBe('b2');
     expect(tabIds()).toEqual(['b2']);
+  });
+
+  it('takes Billion\'s notice from session-created, and a re-emit without one clears it', async () => {
+    document.body.innerHTML += '<div id="waiting-board"><div id="waiting-list"></div></div>';
+    const { showWaiting } = await import('../public/modules/waiting.js');
+    showWaiting();
+    await created('b1', { isBillion: true, notice: 'Claude Code says it is not logged in.' });
+    expect(document.getElementById('chat-notice').textContent).toMatch(/^Claude Code says it is not logged in\./);
+    await created('b1', { isBillion: true, notice: null });
+    expect(document.getElementById('chat-notice').hidden).toBe(true);
+    setWaitingActive(false);
   });
 
   it('a restart does not steal focus from another tab', async () => {

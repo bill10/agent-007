@@ -114,4 +114,16 @@ describe('renderAgents (Settings panel)', () => {
     expect(html.match(/logged in/g)).toHaveLength(1);
     expect(html).not.toContain('logged out');
   });
+
+  it('names claude and codex when missing, with where to get them, and an installed one with no login', async () => {
+    const { renderAgents } = await import('../public/modules/settings.js');
+    const none = renderAgents([]);
+    expect(none).toContain('No agent CLIs found on the PATH.');
+    expect(none).toMatch(/claude<\/span> <span class="settings-status out">not installed/);
+    expect(none).toContain('Install Codex: npm install -g @openai/codex, then restart Agent 007');
+    const some = renderAgents([{ cli: 'claude', version: '1.0', path: '/h/bin/claude', accounts: [] }]);
+    expect(some).toContain('no login found');
+    expect(some).not.toMatch(/claude<\/span> <span class="settings-status out">not installed/);
+    expect(some).toMatch(/codex<\/span> <span class="settings-status out">not installed/);
+  });
 });

@@ -23,7 +23,7 @@ import { setupSettings } from './modules/settings.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
-import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice } from './modules/waiting.js';
 import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
@@ -124,6 +124,9 @@ function setupSpawnForm() {
     advancedSection.style.display = 'none';
     advancedToggle.innerHTML = 'Advanced &#x25B6;';
     clearSpawnError();
+    // A blank repo starts the agent in the home folder, so with one repo
+    // there is nothing to choose.
+    if (!repoInput.value.trim() && repos.size === 1) repoInput.value = [...repos.keys()][0];
     updateRepoDropdown();
     repoInput.focus();
   };
@@ -498,6 +501,7 @@ function onMessage(msg) {
       scheduleTabRestore();
       break;
     case 'pty-output': handlePtyOutput(msg); break;
+    case 'billion-notice': setBillionNotice(msg.sessionId, msg.notice); break;
     case 'pty-size': handlePtySize(msg); break;
     case 'state-change':
       // A process exit broadcasts DISCONNECTED here BEFORE session-ended, so
@@ -661,8 +665,10 @@ async function init() {
   setupJobBoard();
   startAnimationLoop();
   // The page opens on the chat with Billion, unless a remembered tab is
-  // restored once the replay lands (scheduleTabRestore).
+  // restored once the replay lands (scheduleTabRestore). A phone too: its
+  // panel is the terminal one, lit as Billion.
   showWaiting();
+  setView('terminal');
   connect(onMessage);
   renderOffice();
 }

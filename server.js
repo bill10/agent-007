@@ -34,10 +34,10 @@ import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
-import { limitTick } from './server/billion-limit.js';
+import { limitTick, cliReady } from './server/billion-limit.js';
 import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate, checkSwitch, recheck as recheckAccount, BUSY_ERROR } from './server/account-migration.js';
 import { takeMessages, restoreMessages } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
@@ -255,7 +255,19 @@ function startBillion({ handover = false, carried = null } = {}) {
   result.session.messagesHeld = true;
   restoreMessages(result.session.id, carried);
   sessions.set(result.session.id, result.session);
+  // Why it cannot talk yet, for its chat tab. Logged out, the CLI sits at its
+  // own sign-in and never calls billion_ready, so mail would wait unexplained.
+  const session = result.session;
   const cli = agent === 'codex' ? 'Codex (codex)' : 'Claude Code (claude)';
+  if (!hasCli) session.notice = noAgentNotice(agent);
+  else cliReady(agent).then((ok) => {
+    // Only a definite no: a slow or failed check says nothing either way.
+    if (ok !== false || session.exited || !session.messagesHeld) return;
+    console.log(`  Billion: ${cli} is not logged in; its tab is at the sign-in`);
+    setBillionNotice(session, notLoggedInNotice(agent), broadcast);
+    // Its sign-in goes with it; a stopped Billion's bar says Start instead.
+    session.pty.onExit(() => setBillionNotice(session, null, broadcast));
+  });
   return { session: result.session, ...(hasCli ? {} : { notice: `${cli} is not installed; its tab says how to fix that` }) };
 }
 

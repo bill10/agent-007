@@ -300,17 +300,23 @@ describe('PTY lifecycle', () => {
     // Spawn a simple echo command (no repo needed)
     ws.send(JSON.stringify({ type: 'spawn', command: 'echo hello-agent-007' }));
 
-    // Collect messages for up to 5 seconds
+    // Collect until session-ended itself: ConPTY on a slow Windows runner can
+    // take longer than any fixed wait to report echo's exit. The bound is only
+    // there so a real hang fails here, inside the test's own timeout.
     const messages = [];
-    await new Promise(resolve => {
-      const timer = setTimeout(resolve, 5000);
-      ws.on('message', (data) => {
-        const msg = JSON.parse(data.toString());
-        messages.push(msg);
-        // Stop collecting after we get session-ended
-        if (msg.type === 'session-ended') { clearTimeout(timer); resolve(); }
+    try {
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, 25000);
+        ws.on('message', (data) => {
+          const msg = JSON.parse(data.toString());
+          messages.push(msg);
+          if (msg.type === 'session-ended') { clearTimeout(timer); resolve(); }
+        });
       });
-    });
+    } finally {
+      // An open socket would hold server.close() in afterAll past its timeout.
+      ws.close();
+    }
 
     const types = messages.map(m => m.type);
     expect(types).toContain('session-created');
@@ -331,9 +337,7 @@ describe('PTY lifecycle', () => {
     expect(created.sessionId).toBeTruthy();
     expect(created.name).toBeTruthy();
     expect(created.color).toBeTruthy();
-
-    ws.close();
-  }, 10000);
+  }, 30000);
 
   // On macOS and Linux node-pty "starts" a missing command, leaving a dead,
   // empty tab. It must come back as a spawn error that says what is missing.

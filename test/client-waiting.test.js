@@ -7,10 +7,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { send } from '../public/modules/ws.js';
-import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive } from '../public/modules/state.js';
+import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive, setBillionEnabled, setView } from '../public/modules/state.js';
 import { updateTabs, switchToSession, removeSession } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
-import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice } from '../public/modules/waiting.js';
 import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
 import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
@@ -114,6 +114,21 @@ describe("the chat tab and Billion's terminal tab", () => {
     localStorage.setItem('agent007-active-tab', 's1');
     showWaiting();
     expect(localStorage.getItem('agent007-active-tab')).toBeNull();
+  });
+
+  it('is where a phone opens too, lit as Billion in the bottom bar', () => {
+    const app = readFileSync('public/app.js', 'utf8');
+    expect(app.slice(app.indexOf('async function init()'))).toMatch(/showWaiting\(\);\s*setView\('terminal'\);/);
+    document.body.dataset.view = 'office';
+    showWaiting();
+    setView('terminal');
+    expect(document.body.dataset.view).toBe('terminal');
+    expect(document.querySelector('.mobile-nav [data-view="waiting"]').getAttribute('aria-current')).toBe('true');
+  });
+
+  it('+ Agent starts on the only repo there is, rather than the home folder', () => {
+    const app = readFileSync('public/app.js', 'utf8');
+    expect(app).toContain("if (!repoInput.value.trim() && repos.size === 1) repoInput.value = [...repos.keys()][0];");
   });
 
   it('has no close control, and orders Jobs, Billion chat, then agents with Billion first when open', () => {
@@ -249,6 +264,41 @@ describe('the text box', () => {
     renderWaiting();
     expect(input().placeholder).toBe('Message Billion');
     agents.delete('b');
+  });
+
+  it('counts a stopped Billion as not running', () => {
+    agents.set('b', { isBillion: true, state: 'DISCONNECTED' });
+    renderWaiting();
+    expect(input().placeholder).toBe('Billion is not running; start it to send');
+    agents.delete('b');
+  });
+
+  it('says above the box why Billion cannot talk, with the button past it', () => {
+    const bar = () => document.getElementById('chat-notice');
+    setBillionEnabled(true);
+    renderWaiting();
+    // Never started: Start.
+    expect(bar().hidden).toBe(false);
+    expect(bar().textContent).toBe('Billion is not running.Start Billion');
+    bar().querySelector('button').click();
+    expect(send).toHaveBeenLastCalledWith({ type: 'billion-start' });
+    // Its CLI missing: the reason, and still Start.
+    agents.set('b', { isBillion: true, state: 'DISCONNECTED' });
+    setBillionNotice('b', 'Billion runs on Claude Code, which is not installed.');
+    expect(bar().textContent).toBe('Billion runs on Claude Code, which is not installed.Start Billion');
+    // Running but logged out: its terminal, where the sign-in is.
+    agents.set('b', { isBillion: true, state: 'IDLE', termEl: document.createElement('div'), term: { scrollToBottom() {}, focus() {} } });
+    setBillionNotice('b', 'Claude Code says it is not logged in.');
+    expect(bar().querySelector('button').textContent).toBe("Open Billion's terminal");
+    bar().querySelector('button').click();
+    expect(activeSessionId).toBe('b');
+    expect(document.body.dataset.view).toBe('terminal');
+    // Ready: gone.
+    showWaiting();
+    setBillionNotice('b', null);
+    expect(bar().hidden).toBe(true);
+    agents.delete('b');
+    setBillionEnabled(false);
   });
 
   it('sends a plain message with questions open; only Reply makes it an answer, and × leaves it', () => {

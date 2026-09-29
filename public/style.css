@@ -1557,6 +1557,23 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 .chat-target-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
 .chat-target-x { padding: 0 6px; font: inherit; font-size: 14px; color: var(--text-dim); background: none; border: none; cursor: pointer; }
 .chat-target-x:hover { color: var(--text); }
+/* Why Billion cannot talk yet, and the button past it (waiting.js renderNotice). */
+.chat-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+.chat-notice[hidden] { display: none; }
+.chat-notice-text { flex: 1 1 240px; min-width: 0; }
+.chat-notice-btn { padding: 6px 14px; font: inherit; font-size: 11px; color: var(--accent-contrast); background: var(--accent); border: none; border-radius: 3px; cursor: pointer; }
 .chat-compose-row { display: flex; gap: 6px; align-items: flex-end; }
 #chat-input {
   flex: 1;

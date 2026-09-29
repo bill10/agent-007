@@ -5,7 +5,7 @@ import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
 import { stopVoice } from './voice.js';
 import { showJobBoard, hideJobBoard } from './jobs.js';
-import { showWaiting, hideWaiting, openCount, renderComposer } from './waiting.js';
+import { showWaiting, hideWaiting, openCount, renderComposer, setBillionNotice } from './waiting.js';
 // Circular with office.js (it imports switchToSession), which is fine: both
 // sides only call the other's functions at event time, never during load.
 import { noteAgentDeparture } from './office.js';
@@ -84,6 +84,9 @@ let onSessionChanged = null;
 export function setOnSessionChanged(fn) { onSessionChanged = fn; }
 
 export async function handleSessionCreated(msg) {
+  // Before the wait, so a billion-notice sent after this message is not
+  // overwritten by it. A re-emit on reconnect clears one this window missed.
+  if (msg.isBillion) setBillionNotice(msg.sessionId, msg.notice);
   await waitForXterm();
   const { sessionId, name, color, command, state, repoPath, repoSlug, branchName, changedCount, additions, removals, ownerId, ownerName, ownerColor, spawnedBy, jobId, cols, rows, focus, isBillion, agent } = msg;
 

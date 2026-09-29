@@ -166,3 +166,27 @@ describe('saveBillionAgent', async () => {
     expect(JSON.parse(readFileSync(file, 'utf8')).reason).toBeUndefined();
   });
 });
+
+// cliReady against stand-in CLIs: a definite no is false, a check that does not
+// answer is null, so the logged-out notice (server.js) only follows a real no.
+describe('cliReady', () => {
+  it.skipIf(process.platform === 'win32')('tells logged in, logged out and no answer apart', async () => {
+    const { mkdtempSync, writeFileSync, chmodSync } = await import('fs');
+    const { join } = await import('path');
+    const { tmpdir } = await import('os');
+    const { cliReady } = await import('../server/billion-limit.js');
+    const stub = (name, body) => {
+      const bin = mkdtempSync(join(tmpdir(), 'a007-cliready-'));
+      writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+      chmodSync(join(bin, name), 0o755);
+      return { PATH: `${bin}:/usr/bin:/bin` };
+    };
+    expect(await cliReady('claude', { env: stub('claude', `echo '{"loggedIn":true}'`) })).toBe(true);
+    expect(await cliReady('claude', { env: stub('claude', `echo '{"loggedIn":false}'; exit 1`) })).toBe(false);
+    expect(await cliReady('claude', { env: stub('claude', 'echo not json') })).toBeNull();
+    expect(await cliReady('claude', { env: stub('claude', 'exit 3') })).toBeNull();
+    expect(await cliReady('codex', { env: stub('codex', 'exit 0') })).toBe(true);
+    expect(await cliReady('codex', { env: stub('codex', 'exit 1') })).toBe(false);
+    expect(await cliReady('claude', { env: { PATH: '/nonexistent' } })).toBe(false);
+  });
+});
