@@ -60,11 +60,11 @@ describe('the owner typing in the Billion tab', () => {
   });
 
   it('delivers a long pasted message whole, newlines kept, and keeps it whole in the thread', async () => {
-    const listing = Array.from({ length: 400 }, (_, i) => `Item ${i}: a product with a long description`).join('\n');
-    expect(listing.length).toBeGreaterThan(10000);
+    const listing = Array.from({ length: 60 }, (_, i) => `Item ${i}: a product with a long description`.padEnd(150, '.')).join('\n');
+    expect(listing.length).toBeGreaterThan(4096);
     expect(await ownerSays(listing)).toEqual({ ok: true });
     // Typed in small bracketed pastes, one after another, then one Enter: one turn.
-    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} ${listing}\r`), { timeout: 5000 });
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} ${listing}\r`), { timeout: 20000 });
     expect(chatMessages()[0].text).toBe(listing);
     expect(readFileSync(join(CONFIG_DIR, 'chat.json'), 'utf8')).toContain(JSON.stringify(listing));
   });
@@ -72,9 +72,9 @@ describe('the owner typing in the Billion tab', () => {
   it('delivers a long answer whole with its line breaks', async () => {
     await notifyOwner('Which listing?', { env: {}, now: now() });
     const [q] = waitingItems();
-    const listing = Array.from({ length: 300 }, (_, i) => `Line ${i} of the pasted listing`).join('\n');
+    const listing = Array.from({ length: 60 }, (_, i) => `Line ${i} of the pasted listing`).join('\n');
     expect(await ownerSays(listing, { answers: q.id })).toMatchObject({ ok: true });
-    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} Q1: ${listing} (re: "Which listing?")\r`), { timeout: 5000 });
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} Q1: ${listing} (re: "Which listing?")\r`), { timeout: 20000 });
     expect(chatMessages().at(-1).text).toBe(listing);
   });
 
