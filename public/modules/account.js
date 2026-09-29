@@ -1,116 +1,89 @@
-// The owner's Claude account switch (server/account-migration.js): the
-// "Claude account" section of the Settings panel (the gear in the terminal
-// header, public/modules/settings.js). Every action goes to the server as
-// { type: 'account', action }, and every one but the folder check asks first.
-// Off by default: with nothing set up the section only offers the folder.
+// Owner-controlled Claude account rotation. No credential is sent to the UI.
 import { send } from './ws.js';
 import { authEnabled, billionEnabled } from './state.js';
 
-let state = { status: 'not set up' };
-let lastError = null;   // the server's answer to the last click, until the next state
-const PROGRESS = { setup: 'Checking…', arm: 'Arming…', disarm: 'Disarming…', migrate: 'Switching…', rollback: 'Rolling back…', retire: 'Retiring…' };
-
-const CONFIRM = {
-  arm: (s) => `Arm the switch to ${s.newEmail}?\n\nThe first time Claude Code tells Billion it has hit a usage limit, the default Claude Code login (${s.oldEmail}) is replaced by ${s.newEmail}, in place, and Billion restarts on it. This is for a permanent move, not for getting past a limit.`,
-  disarm: () => 'Disarm? Nothing switches until you arm it again.',
-  migrate: (s) => `Switch the default Claude Code login from ${s.oldEmail} to ${s.newEmail} now?\n\nThe current login is backed up first and put back by itself if the switch does not verify. Billion restarts; running workers keep going.`,
-  rollback: (s) => `Roll back to ${s.oldEmail}?\n\nThe backed-up login goes back into the default Claude Code folder, and Billion restarts.`,
-  retire: (s) => `Retire ${s.folder}?\n\nIt is renamed to ${s.folder}.retired-<date>, never deleted. Do this only once you have checked that Claude Code works with ${s.newEmail}.`,
-};
-
+let state = {};
+let draft = { enabled: false, fallback: true, accounts: [] };
+let lastError = null;
 export function handleAccountState(msg) {
-  state = { ...msg };
-  delete state.type;
-  lastError = null;
+  state = msg;
+  draft = structuredClone(msg.rotation || { enabled: false, fallback: true, accounts: [] });
   renderAccount();
 }
+export function handleAccountError(msg) { lastError = msg.message; renderAccount(); }
 
-// A refused or failed action, shown under the buttons (server/ws.js).
-export function handleAccountError(msg) {
-  lastError = msg.message;
-  renderAccount();
-}
-
-// The panel: a state line, then the folder or the buttons the state allows.
 export function renderAccount() {
   const panel = document.getElementById('account-panel');
   if (!panel) return;
-  // Billion's owner alone: with user accounts on nobody may (server/ws.js).
   panel.hidden = authEnabled || !billionEnabled;
   const body = panel.querySelector('.account-body');
-  const s = state;
-  const lastAttempt = s.error ? ` Last attempt: ${s.error}` : '';
-  const line = {
-    'not set up': 'Not set up. Log the new account in once in a folder of its own (CLAUDE_CONFIG_DIR=~/.claude-new claude, then /login) and give that folder here.',
-    ready: `Ready: ${s.oldEmail} now, ${s.newEmail} in ${s.folder}. Nothing armed.${lastAttempt}`,
-    armed: `Armed: switches ${s.oldEmail} → ${s.newEmail} at Billion's next usage limit.`,
-    switching: `A switch to ${s.newEmail} started on ${(s.at || '').slice(0, 10)} and did not finish. Roll back to ${s.oldEmail}, then check the folder again.`,
-    migrated: `Switched to ${s.newEmail} on ${(s.at || '').slice(0, 10)} (was ${s.oldEmail}).${s.retiredTo ? ` Folder retired as ${s.retiredTo}.` : ` Do not run anything with CLAUDE_CONFIG_DIR=${s.folder}; retire it once checked.`}${lastAttempt}`,
-    'rolled back': `Rolled back to ${s.oldEmail}.${lastAttempt}`,
-    'rollback failed': `The switch to ${s.newEmail} failed and so did the rollback: ${s.error || 'see the server log'}. The default login may be half swapped; try Roll back again, or restore ~/.agent-007/account-backup by hand, then check the folder again.`,
-  }[s.status] || s.status;
-  body.innerHTML = '';
-  const status = document.createElement('div');
-  status.className = 'account-status';
-  status.dataset.status = s.status;
-  status.textContent = line;
-  body.appendChild(status);
-
-  const actions = document.createElement('div');
-  actions.className = 'account-actions';
-  // Sent once: the buttons go quiet until the server's next account-state
-  // re-renders the panel, so a second click cannot send the action twice.
-  const sendOnce = (b, action, msg) => {
-    for (const other of actions.querySelectorAll('button')) other.disabled = true;
-    b.textContent = PROGRESS[action] || b.textContent;
-    send(msg);
+  body.replaceChildren();
+  const text = (value, cls = 'account-status') => {
+    const el = document.createElement('div'); el.className = cls; el.textContent = value; body.append(el); return el;
   };
-  const button = (label, action, onclick) => {
-    const b = document.createElement('button');
-    b.className = 'settings-refresh account-btn';
-    b.dataset.action = action;
-    b.textContent = label;
-    b.onclick = onclick || (() => {
-      const ask = CONFIRM[action];
-      if (ask && !confirm(ask(s))) return;
-      sendOnce(b, action, action === 'disarm' ? { type: 'account', action: 'arm', on: false } : { type: 'account', action });
-    });
-    actions.appendChild(b);
-    return b;
+  const transmit = (action, extra = {}) => {
+    lastError = null;
+    for (const control of body.querySelectorAll('button, input')) control.disabled = true;
+    if (!send({ type: 'account', action, ...extra })) { lastError = 'Not connected. Reconnect and try again.'; renderAccount(); }
   };
-  if (s.status === 'not set up' || s.status === 'ready' || s.status === 'rolled back' || s.status === 'rollback failed') {
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'account-folder';
-    input.placeholder = '~/.claude-new';
-    input.spellcheck = false;
-    input.required = true;
-    input.value = s.folder || '';
-    input.setAttribute('aria-label', "New account's config folder");
-    actions.appendChild(input);
-    const check = button(s.status === 'not set up' ? 'Check folder' : 'Check again', 'setup', () => {
-      const folder = input.value.trim();
-      if (!folder) { input.reportValidity?.(); input.focus(); return; }
-      sendOnce(check, 'setup', { type: 'account', action: 'setup', folder });
+  const button = (parent, label, action, fn) => {
+    const el = document.createElement('button'); el.className = 'settings-refresh account-btn';
+    el.textContent = label; el.dataset.action = action; el.onclick = fn; parent.append(el); return el;
+  };
+  const checkbox = (parent, label, checked, onchange) => {
+    const wrap = document.createElement('label'), input = document.createElement('input');
+    wrap.className = 'rotation-toggle'; input.type = 'checkbox'; input.checked = checked;
+    input.onchange = () => onchange(input.checked);
+    wrap.append(input, document.createTextNode(label)); parent.append(wrap); return input;
+  };
+  text(draft.pending ? 'A switch was interrupted. Restore the previous login before continuing.'
+    : draft.enabled ? 'Automatic rotation is on. Claude conversations and settings stay in place.'
+    : draft.defaultSettings ? 'Automatic rotation starts when at least two accounts are added.'
+    : 'Automatic rotation is off. Choose accounts and enable it to rotate at usage limits.');
+  if (draft.error) text(draft.error, 'account-error');
+  if (lastError) text(lastError, 'account-error');
+  if (draft.pending) {
+    button(body, 'Restore previous login', 'rotation-recover', () => transmit('rotation-recover'));
+    return;
+  }
+  if (draft.damaged) return;
+  if (draft.resumePending) button(body, 'Retry paused Claude conversations', 'rotation-resume', () => transmit('rotation-resume'));
+  const accounts = document.createElement('div'); accounts.className = 'rotation-accounts'; body.append(accounts);
+  draft.accounts.forEach((a, index) => {
+    const row = document.createElement('div'); row.className = 'rotation-account'; accounts.append(row);
+    checkbox(row, a.email, a.enabled, on => { a.enabled = on; });
+    const status = document.createElement('span'); status.className = 'settings-dim';
+    status.textContent = a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''); row.append(status);
+    if (a.error) { const error = document.createElement('span'); error.textContent = a.error; row.append(error); }
+    const controls = document.createElement('div'); controls.className = 'account-actions'; row.append(controls);
+    const up = button(controls, 'Move up', 'rotation-up', () => {
+      [draft.accounts[index - 1], draft.accounts[index]] = [draft.accounts[index], draft.accounts[index - 1]]; renderAccount();
+    }); up.disabled = index === 0;
+    const down = button(controls, 'Move down', 'rotation-down', () => {
+      [draft.accounts[index], draft.accounts[index + 1]] = [draft.accounts[index + 1], draft.accounts[index]]; renderAccount();
+    }); down.disabled = index === draft.accounts.length - 1;
+    if (a.id !== draft.active) button(controls, 'Switch now', 'rotation-switch', () => {
+      if (confirm(`Switch to ${a.email}? The app's Claude sessions will restart in their existing conversations.`)) transmit('rotation-switch', { id: a.id });
+    });
+  });
+  const discover = document.createElement('div'); discover.className = 'account-actions'; body.append(discover);
+  button(discover, 'Find logged-in accounts', 'rotation-discover', () => transmit('rotation-discover'));
+  const input = document.createElement('input'); input.className = 'account-folder'; input.placeholder = '~/.claude-work'; input.setAttribute('aria-label', 'Claude account config folder'); discover.append(input);
+  button(discover, 'Add folder', 'rotation-add', () => { if (input.value.trim()) transmit('rotation-add', { folder: input.value.trim() }); });
+  if (draft.accounts.length) {
+    text('Accounts are used in the order above. Source folders supply logins; Claude keeps using its current settings and history. Avoid running the same login from a source folder while rotation is enabled.', 'settings-dim');
+    checkbox(body, 'Automatic rotation', draft.enabled, on => { draft.enabled = on; });
+    checkbox(body, 'Fall back to Codex when Claude accounts are unavailable', draft.fallback, on => { draft.fallback = on; });
+    button(body, 'Save rotation settings', 'rotation-configure', () => {
+      if (draft.enabled && !state.rotation?.enabled && !confirm('Enable automatic account rotation at usage limits? This restarts the app’s Claude sessions with their conversations preserved.')) return;
+      transmit('rotation-configure', { enabled: draft.enabled, fallback: draft.fallback, accounts: draft.accounts.map(({ id, enabled }) => ({ id, enabled })) });
     });
   }
-  if (s.status === 'ready') {
-    button('Arm', 'arm');
-    button('Switch now', 'migrate');
-  }
-  if (s.status === 'armed') {
-    button('Disarm', 'disarm');
-    button('Switch now', 'migrate');
-  }
-  if (s.status === 'migrated' || s.status === 'switching' || s.status === 'rollback failed') {
-    button('Roll back', 'rollback');
-    if (s.status === 'migrated' && !s.retiredTo) button('Retire the new folder', 'retire');
-  }
-  body.appendChild(actions);
-  if (lastError) {
-    const err = document.createElement('div');
-    err.className = 'account-error';
-    err.textContent = lastError;
-    body.appendChild(err);
+  // Recover an unfinished switch made by an older app version. The migration
+  // controls are replaced; its backup remains usable until recovery is done.
+  if (['switching', 'rollback failed'].includes(state.status) || (state.status === 'migrated' && !draft.accounts.length)) {
+    button(body, 'Restore login from previous version', 'rollback', () => {
+      if (confirm('Restore the login backed up by the previous account-switch feature?')) transmit('rollback');
+    });
   }
 }

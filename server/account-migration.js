@@ -558,3 +558,47 @@ export function publicState(dir = CONFIG_DIR) {
   const { status, folder, newEmail, oldEmail, at, retiredTo, error } = loadState(dir);
   return { status, folder, newEmail, oldEmail, at, retiredTo, error };
 }
+
+// Rotation uses the same platform stores and selective account-field writer.
+// Callers hold withAccountLock across capture, journal and activation.
+export const withAccountLock = (fn, deps = {}) => oneAtATime(deps.dir ?? CONFIG_DIR, fn, deps);
+
+export async function captureLogin(folderInput = null, deps = {}) {
+  const { home = homedir(), env = process.env, platform = process.platform, run = runCommand } = deps;
+  let folder = folderInput === null ? null : expandHome(folderInput, home).replace(/(?<=.)[\\/]+$/, '');
+  if (folder !== null && !/^[/\\]|^[A-Za-z]:[/\\]/.test(folder)) throw new Error('Give an absolute path to a Claude login folder.');
+  const current = loginOf(null, { home, env, platform });
+  if (folder && realOr(folder) === realOr(current.folder)) folder = null;
+  let login = loginOf(folder, { home, env, platform });
+  let store = credentialStore(login, { run, platform, env });
+  let item = await store.locate();
+  if (!item && folder) {
+    login = loginOf(`${folder}/`, { home, env, platform });
+    store = credentialStore(login, { run, platform, env });
+    item = await store.locate();
+  }
+  const status = await authStatus(login, { run, platform });
+  if (!status.loggedIn || !email(status.email) || !item) throw new Error('This Claude account needs to log in again.');
+  let fields;
+  try { fields = pick(readJson(login.configJson)); } catch { throw new Error('Could not read the Claude account metadata.'); }
+  if (email(fields.oauthAccount?.emailAddress) !== email(status.email)) throw new Error('Claude account metadata does not match its login.');
+  const secret = await store.read(item.acct);
+  if (!secret) throw new Error('Could not read the Claude login credential.');
+  return { email: email(status.email), fields, secret, folder: login.folder };
+}
+
+// No CLI logout/login: those would clear settings and invalidate refresh tokens.
+// Verify locally; a subsequent request is still needed to establish usable quota.
+export async function activateLogin(snapshot, deps = {}) {
+  const { home = homedir(), env = process.env, platform = process.platform, run = runCommand, wait } = deps;
+  const login = loginOf(null, { home, env, platform });
+  const store = credentialStore(login, { run, platform, env });
+  const item = await store.locate();
+  if (!item) throw new Error('The default Claude credential is missing. Sign in before switching.');
+  if (!snapshot?.secret || !snapshot.fields?.oauthAccount || !snapshot.email) throw new Error('The saved Claude login is incomplete.');
+  await store.write(snapshot.secret, item.acct);
+  if (await store.read(item.acct) !== snapshot.secret) throw new Error('The Claude credential write did not verify.');
+  await writeAccountFields(login.configJson, snapshot.fields, { wait });
+  const status = await authStatus(login, { run, platform });
+  if (!status.loggedIn || email(status.email) !== snapshot.email) throw new Error('The selected Claude login did not verify.');
+}

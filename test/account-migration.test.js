@@ -858,3 +858,25 @@ describe('the armed switch at a usage limit', () => {
     expect(keychain.get(DEFAULT_SERVICE).secret).toBe(OLD_TOKEN);
   });
 });
+
+describe('rotation authentication adapter', () => {
+  it('round-trips through the macOS Keychain while keeping settings, projects and transcript bytes', async () => {
+    const { addRotationAccount, rotateAccount } = await import('../server/account-rotation.js');
+    const settings = join(home, '.claude', 'settings.json');
+    const transcript = join(home, '.claude', 'conversation.jsonl');
+    writeFileSync(settings, '{"model":"opus","permissions":{"defaultMode":"auto"}}');
+    writeFileSync(transcript, '{"sessionId":"keep-me","message":"unfinished work"}\n');
+    const originalConfig = json(defaultJson());
+    const rotateDeps = { ...deps, now: () => Date.now() };
+    expect(await addRotationAccount(newDir, rotateDeps)).toMatchObject({ ok: true });
+    keychain.get(DEFAULT_SERVICE).secret = 'latest-refreshed-old-token';
+    expect(await rotateAccount({}, rotateDeps)).toMatchObject({ ok: true, newEmail: NEW });
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe(NEW_TOKEN);
+    expect(await rotateAccount({}, rotateDeps)).toMatchObject({ ok: true, newEmail: OLD });
+    expect(keychain.get(DEFAULT_SERVICE).secret).toBe('latest-refreshed-old-token');
+    expect(json(defaultJson())).toEqual(originalConfig);
+    expect(readFileSync(settings, 'utf8')).toBe('{"model":"opus","permissions":{"defaultMode":"auto"}}');
+    expect(readFileSync(transcript, 'utf8')).toBe('{"sessionId":"keep-me","message":"unfinished work"}\n');
+    expect(calls.flat().join(' ')).not.toMatch(/latest-refreshed-old-token|sk-ant/);
+  });
+});

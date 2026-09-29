@@ -11,10 +11,10 @@
 // the other CLI is missing or logged out, both are spent: Billion stays where
 // it is and the owner is told, once, until a new Billion starts.
 //
-// One thing comes before the switch: an armed Claude account migration
-// (server/account-migration.js). At a Claude Billion's first hard limit it runs
-// once, disarms, and Billion stays on Claude with the new account; only if it
-// fails (and rolls back) does the next tick switch to Codex as usual.
+// An enabled account pool runs before the CLI fallback: Claude conversations
+// resume on the next eligible login without a handover. Exhausted pools wait
+// until reset/backoff, or let Billion hand over to Codex. The migration adapter
+// remains only for an older installation that has not configured rotation.
 
 import { execFile } from 'child_process';
 import { screenTail, sendText } from './messages.js';
@@ -111,11 +111,11 @@ export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: n
  * and migration { armed(), run(hit) }: the owner's armed Claude account
  * switch, which needs no BILLION_AUTO_SWITCH and applies to a Claude Billion.
  */
-export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log, migration = null } = {}) {
+export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log, migration = null, rotation = null } = {}) {
   if (!session?.isBillion || session.exited || watch.running) return null;
   const agent = session.agent;
   const armed = agent === 'claude' && !!migration?.armed?.();
-  if (!autoSwitchOn(env) && !armed) return null;
+  if (!autoSwitchOn(env) && !armed && !(rotation && agent === 'claude')) return null;
   const to = { claude: 'codex', codex: 'claude' }[agent];
   if (!to) return null;
   const hit = matchLimit(screenTail(session.ringBuffer?.getAll().join('') || '', TAIL_LINES));
@@ -132,9 +132,35 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
     return 'warned';
   }
 
-  if (watch.pausedFor === session.id) return null;
+  if (rotation && session.rotationRetryAt > now) return null;
+  // Rotation cooldown is per login, not the CLI-switch gap. An exhausted
+  // pool is checked again when its earliest known reset/backoff expires.
+  if (rotation && agent === 'claude') {
+    if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
+    if (session.rotationRetryAt > now) return null;
+    watch.running = true;
+    try {
+      const result = await rotation.run(hit, { limited: !session.rotationMarked });
+      if (!result?.busy) session.rotationMarked = true;
+      if (result?.ok) return 'rotated';
+      if (result?.busy || result?.retry) return null;
+      if (result?.error) {
+        if (!session.rotationNotified) { session.rotationNotified = true; await notify(`Claude account rotation paused: ${result.error}`); }
+        session.rotationRetryAt = now + 30 * 60_000;
+        return 'paused';
+      }
+      if (result?.exhausted) {
+        session.rotationRetryAt = Number.isFinite(result.retryAt) ? result.retryAt : now + 30 * 60_000;
+        if (!rotation.fallback() || !autoSwitchOn(env)) {
+          if (!session.rotationNotified) { session.rotationNotified = true; await notify('Claude accounts are unavailable. Waiting for a usage reset before retrying.'); }
+          return 'paused';
+        }
+      }
+    } finally { watch.running = false; }
+  }
+  if (watch.pausedFor === session.id && !rotation) return null;
   if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
-  if (armed) {
+  if (armed && !rotation) {
     // Once: run() disarms on any failure of its own (server/account-migration.js);
     // a busy server (another account action, Billion mid-switch) leaves it
     // armed for the next tick. A switch that cannot start leaves Billion and
@@ -156,10 +182,22 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
       ? `${CLI_NAMES[agent]} hit its limit too, soon after the switch to it`
       : !(await ready(to, { env })) ? `${CLI_NAMES[to]} is not installed or not logged in` : null;
     if (why) {
+      if (rotation) session.rotationRetryAt = Math.min(session.rotationRetryAt || Infinity, now + SWITCH_GAP_MS);
       watch.pausedFor = session.id;
       log(`Billion: paused on ${CLI_NAMES[agent]}: ${why} ("${hit.line}")`);
       await notify(`Billion paused: both Claude Code and Codex are at their limits. ${why}; ${CLI_NAMES[agent]} says "${hit.line}". Billion stays on ${CLI_NAMES[agent]}. Press Start or the switch button next to Billion once either has usage again.`);
       return 'paused';
+    }
+    // Codex -> Claude also selects an eligible Claude login before handing
+    // the conversation over. Exhausted logins are never retried every tick.
+    if (rotation && to === 'claude') {
+      if (session.rotationRetryAt > now) return null;
+      const result = await rotation.prepare();
+      if (!result?.ok) {
+        session.rotationRetryAt = Number.isFinite(result?.retryAt) ? result.retryAt : now + 30 * 60_000;
+        if (!session.rotationNotified) { session.rotationNotified = true; await notify('Codex and the selected Claude accounts are unavailable. Waiting before retrying.'); }
+        return 'paused';
+      }
     }
     const reason = `${CLI_NAMES[agent]} hit its limit`;
     const result = await switchTo(to, reason);

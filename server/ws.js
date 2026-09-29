@@ -438,7 +438,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           // Non-owners are read-only: silently drop input (no per-keystroke error).
           // Billion belongs to no one, so with user accounts nobody may type
           // into it — not even in the second before the check stops it.
-          if (session && !session.exited && owns(ws, session.ownerId) && !(session.isBillion && authEnabled())) {
+          if (session && !session.exited && !session.accountRotating && owns(ws, session.ownerId) && !(session.isBillion && authEnabled())) {
             // Holds agent messages back while a person is mid-line (messages.js).
             if (isTyping(msg.data)) session.lastUserInputAt = Date.now();
             session.pty.write(msg.data);
