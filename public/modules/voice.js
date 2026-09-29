@@ -170,7 +170,7 @@ function flashIndicator(text, kind) {
   announce(text);
   clearTimeout(flashTimer);
   const t = target;
-  flashTimer = setTimeout(() => { if (!listening) hideIndicator(t); }, FLASH_HIDE_MS);
+  flashTimer = setTimeout(() => { if (!listening || target !== t) hideIndicator(t); }, FLASH_HIDE_MS);
 }
 
 function showError(text) { flashIndicator(text, 'error'); }
@@ -297,24 +297,30 @@ function startRecognition() {
 export function toggleVoice(to = TERMINAL) {
   if (listening && target === to) { stopVoice(); to.refocus(); return; }
   if (listening) stopVoice();
+  // A notice still showing on the other target's pill goes with the switch.
+  if (target && target !== to) hideIndicator(target);
+  const previous = target;
   target = to;
 
+  // Refused before listening: the error shows on this target, but the mic
+  // stays with the one it served, so that target's own stops still apply.
+  const refuse = (text) => { showError(text); target = previous || to; };
   if (!recognitionCtor()) {
-    showError('Voice input is not supported in this browser (try Chrome, Edge, or Safari)');
+    refuse('Voice input is not supported in this browser (try Chrome, Edge, or Safari)');
     return;
   }
   if (!window.isSecureContext) {
-    showError('Voice input needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve)');
+    refuse('Voice input needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve)');
     return;
   }
   const why = to.unavailable();
   if (why) {
-    showError(why);
+    refuse(why);
     return;
   }
 
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    showError('Could not start voice input — no microphone API in this browser');
+    refuse('Could not start voice input — no microphone API in this browser');
     return;
   }
 
@@ -422,7 +428,7 @@ export function stopVoice(opts = {}) {
 }
 
 export function setupVoice() {
-  const btn = micBtn();
+  const btn = TERMINAL.button();
   if (!btn) return;
   // Leave the button visible even when unsupported: clicking explains why
   // (missing API vs. insecure context) instead of silently hiding the feature.

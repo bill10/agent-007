@@ -177,6 +177,10 @@ function speakNow(id, text) {
       if (gen !== mine) return;
       // "interrupted"/"canceled" are our own cancel(); anything else, move on.
       if (e?.error !== 'interrupted' && e?.error !== 'canceled') console.warn('[read aloud] speech error:', e?.error);
+      // The message's later pieces are still queued in the browser: drop them,
+      // so they never play over the next message.
+      gen++;
+      try { s.cancel(); } catch {}
       finish();
     };
     return u;

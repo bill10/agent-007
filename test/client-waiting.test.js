@@ -11,7 +11,7 @@ import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingAc
 import { updateTabs, switchToSession, removeSession } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
 import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion } from '../public/modules/waiting.js';
-import { voiceTarget, stopVoice } from '../public/modules/voice.js';
+import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
 import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
 const open = (n, extra = {}) => ({ id: `w${n}`, n, text: `Question ${n}?`, at: new Date().toISOString(), status: 'open', ...extra });
@@ -469,6 +469,27 @@ describe('read aloud and dictation in the tab', () => {
     stopVoice();
     type(input().value);
     expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'chat-send', text: 'not yet', answers: 'w3' }));
+  });
+
+  it('the terminal\'s mic button is still wired up by setupVoice', () => {
+    document.body.insertAdjacentHTML('beforeend', '<button id="btn-voice"></button>');
+    setupVoice();
+    expect(typeof document.getElementById('btn-voice').onclick).toBe('function');
+  });
+
+  it('a refused chat mic leaves the terminal\'s own stops working', async () => {
+    agents.set('s1', { ownerId: null, state: 'IDLE', term: { focus() {} } });
+    setActiveSession('s1');
+    document.body.insertAdjacentHTML('beforeend', '<button id="btn-voice"></button><div id="voice-indicator"><span class="voice-indicator-text"></span></div>');
+    setupVoice();
+    document.getElementById('btn-voice').onclick();
+    await flush();
+    expect(voiceTarget()).toBe('terminal');
+    setWaitingActive(false);                       // the chat mic is refused: no Billion tab
+    document.getElementById('chat-mic').click();
+    expect(voiceTarget()).toBeNull();              // pressing another mic stopped the terminal's
+    stopVoice({ only: 'terminal' });
+    setWaitingActive(true);
   });
 
   it('the terminal\'s stops leave the box\'s mic alone; leaving the tab stops it', async () => {

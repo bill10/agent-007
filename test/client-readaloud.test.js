@@ -175,8 +175,11 @@ describe('the speaker', () => {
     readNew('m1', 'First.');
     readNew('m2', 'Second.');
     endAll();
+    const cancels = window.speechSynthesis.cancel.mock.calls.length;
     spoken.at(-1).onerror({ error: 'synthesis-failed' });
     expect(speakingMessage()).toBe('m2');
+    // The failed message's queued pieces are dropped, not left to play over m2.
+    expect(window.speechSynthesis.cancel.mock.calls.length).toBe(cancels + 1);
   });
 
   it('after a reload, auto-read waits for one tap on Resume reading', () => {
