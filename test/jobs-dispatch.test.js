@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { config, sessions, orphans, adoptingOrphans } from '../server/state.js';
-import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent, releasePushedOrphans, releaseJobHold } from '../server/jobs.js';
+import { dispatchOnce, addJob, updateJob, moveJob, deleteJob, updateSettings, boardSettings, allJobs, jobsPayload, checkPullRequests, checkMergedPullRequests, runScan, relinkSessionToJob, attachmentPath, finishJobForAgent, postJobForAgent, editJobForAgent, releasePushedOrphans, releaseJobHold, noteGithubRemote } from '../server/jobs.js';
 import { parseCommand } from '../lib/helpers.js';
 import { buildJobCommand as buildCommand, buildJobPrompt, jobRequiresPr, DEFAULT_PERMISSION_MODE } from '../lib/jobs.js';
 
@@ -345,7 +346,13 @@ describe('board mutations', () => {
     expect(updateSettings({ intervalMs: 5 }, noopBroadcast).settings.intervalMs).toBe(30_000);
   });
 
-  it('starts with the dispatcher stopped', () => {
+  it('starts with the dispatcher running on a new install', () => {
+    delete config.jobBoard;
+    expect(boardSettings().running).toBe(true);
+  });
+
+  it('keeps a saved stopped dispatcher', () => {
+    config.jobBoard = { running: false };
     expect(boardSettings().running).toBe(false);
   });
 
@@ -2046,5 +2053,34 @@ describe('red team regressions', () => {
       await moveJob(job.id, 'review', noopBroadcast, { findPr: async () => ({ pr: null }) });
       expect(job.reviewAt === '2026-01-01T00:00:00.000Z').toBe(requiresPr);
     }
+  });
+});
+
+describe('a PR job in a repo with no GitHub remote', () => {
+  beforeEach(resetBoard);
+
+  it('says so on the card, and stops once a GitHub remote is added', async () => {
+    const repo = mkdtempSync(join(tmpdir(), 'a007-noremote-'));
+    execFileSync('git', ['init', '-q', repo]);
+    config.repos.push({ path: repo });
+    const { job } = addJob({ title: 'x', repoPath: repo }, noopBroadcast);
+    await noteGithubRemote(job, noopBroadcast);
+    expect(jobsPayload().jobs[0].noGithubRemote).toBe(true);
+
+    // A card that needs no pull request is not told.
+    updateJob(job.id, { requiresPr: false }, noopBroadcast);
+    expect(jobsPayload().jobs[0].noGithubRemote).toBe(false);
+    updateJob(job.id, { requiresPr: true }, noopBroadcast);
+
+    execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', 'git@github.com:o/r.git']);
+    await noteGithubRemote(job, noopBroadcast);
+    expect(jobsPayload().jobs[0].noGithubRemote).toBe(false);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('writes nothing when git cannot answer', async () => {
+    const { job } = addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await noteGithubRemote(job, noopBroadcast);
+    expect(job.noGithubRemote).toBeUndefined();
   });
 });

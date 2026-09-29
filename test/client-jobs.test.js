@@ -306,6 +306,15 @@ describe('live status badge', () => {
   });
 });
 
+describe('a repo with no GitHub remote', () => {
+  it('says on the card that the job cannot open its pull request', () => {
+    handleJobsList({ jobs: [JOB({ noGithubRemote: true })], settings: {} });
+    expect(document.querySelector('.job-card .job-card-error').textContent).toMatch(/no GitHub remote, so the job can't open a pull request/);
+    handleJobsList({ jobs: [JOB()], settings: {} });
+    expect(document.querySelector('.job-card .job-card-error')).toBeNull();
+  });
+});
+
 describe('dispatcher controls', () => {
   it('reflects the stopped state and starts on click', () => {
     handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, intervalMs: 180000 } });
@@ -320,6 +329,21 @@ describe('dispatcher controls', () => {
     handleJobsList({ jobs: [], settings: { running: true, maxPerRepo: 2, intervalMs: 300000 } });
     expect(document.getElementById('btn-dispatcher-toggle').textContent).toBe('Stop');
     expect(document.getElementById('job-dispatcher-status').textContent).toMatch(/every 5m/);
+  });
+
+  it('says in To do why a card waits while the board is stopped, with Start beside it', () => {
+    handleJobsList({ jobs: [JOB()], settings: { running: false } });
+    const line = document.querySelector('.job-column[data-state="todo"] .job-board-stopped');
+    expect(line.textContent).toMatch(/The board is stopped: cards wait here until you press Start/);
+    line.querySelector('button').click();
+    expect(send).toHaveBeenCalledWith({ type: 'job-settings', running: true });
+  });
+
+  it('says nothing about a stopped board with no card waiting, or a running one', () => {
+    handleJobsList({ jobs: [], settings: { running: false } });
+    expect(document.querySelector('.job-board-stopped')).toBeNull();
+    handleJobsList({ jobs: [JOB()], settings: { running: true } });
+    expect(document.querySelector('.job-board-stopped')).toBeNull();
   });
 
   it('sends a manual scan', () => {

@@ -94,6 +94,18 @@ describe('the Billion tab', () => {
     expect(document.getElementById('terminal-empty').style.display).toBe('flex');
     expect(document.querySelector('.mobile-nav [data-view="terminal"]').getAttribute('aria-current')).toBe('true');
   });
+
+  it("the phone's Terminal button opens the first agent when none is selected, never Billion's hidden tab", () => {
+    const agent = (extra) => ({ state: 'IDLE', termEl: document.createElement('div'), term: { dispose() {}, focus() {}, scrollToBottom() {} }, ...extra });
+    agents.set('b1', agent({ name: 'Billion', isBillion: true }));
+    agents.set('w1', agent({ name: 'viper' }));
+    agents.set('w2', agent({ name: 'cobra' }));
+    showWaiting();
+    leaveWaiting();
+    expect(activeSessionId).toBe('w1');
+    expect(agents.get('w1').termEl.style.display).toBe('block');
+    expect(document.getElementById('terminal-empty').style.display).toBe('none');
+  });
 });
 
 describe("the chat tab and Billion's terminal tab", () => {
@@ -255,7 +267,7 @@ describe('the text box', () => {
   });
 
   it('keeps the text and says why when refused, and says when Billion is not running', () => {
-    expect(input().placeholder).toBe('Billion is not running; start it to send');
+    expect(input().placeholder).toBe('Start Billion to send');
     type('are you there?');
     handleChatSent({ nonce: send.mock.calls[0][0].nonce, error: 'Billion is not running; start it, then send again.' });
     expect(input().value).toBe('are you there?');
@@ -269,7 +281,7 @@ describe('the text box', () => {
   it('counts a stopped Billion as not running', () => {
     agents.set('b', { isBillion: true, state: 'DISCONNECTED' });
     renderWaiting();
-    expect(input().placeholder).toBe('Billion is not running; start it to send');
+    expect(input().placeholder).toBe('Start Billion to send');
     agents.delete('b');
   });
 
@@ -301,11 +313,25 @@ describe('the text box', () => {
     setBillionEnabled(false);
   });
 
+  it('hides the empty thread line while a notice says Billion cannot hear', () => {
+    const empty = () => document.querySelector('#waiting-list .waiting-empty');
+    agents.set('b', { isBillion: true, state: 'IDLE' });
+    renderWaiting();
+    expect(empty().hidden).toBe(false);
+    setBillionNotice('b', 'Claude Code says it is not logged in.');
+    expect(empty().hidden).toBe(true);
+    renderWaiting();
+    expect(empty().hidden).toBe(true);
+    setBillionNotice('b', null);
+    expect(empty().hidden).toBe(false);
+    agents.delete('b');
+  });
+
   it('sends a plain message with questions open; only Reply makes it an answer, and × leaves it', () => {
     questions(open(1), open(2, { urgency: 'blocking', choices: ['yes', 'no'] }));
     expect(answerTarget()).toBeNull();
     expect(document.getElementById('chat-target').hidden).toBe(true);
-    expect(input().placeholder).toBe('Billion is not running; start it to send');
+    expect(input().placeholder).toBe('Start Billion to send');
     type('not about Q2');
     expect(send).toHaveBeenLastCalledWith({ type: 'chat-send', nonce: expect.any(String), text: 'not about Q2' });
     handleChatSent({ nonce: send.mock.calls.at(-1)[0].nonce });

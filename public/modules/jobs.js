@@ -175,6 +175,20 @@ export function renderBoard() {
     header.innerHTML = `<span class="job-column-label">${escapeHtml(col.label)}</span><span class="job-column-count">${list.length}</span>`;
     colEl.appendChild(header);
 
+    // A stopped board holds every card in To do with nothing on the card saying
+    // why; the toolbar's Start is easy to miss, so the column says it.
+    if (col.state === 'todo' && list.length && !boardSettings.running) {
+      const stopped = document.createElement('div');
+      stopped.className = 'job-board-stopped';
+      stopped.textContent = 'The board is stopped: cards wait here until you press Start';
+      const start = document.createElement('button');
+      start.className = 'job-run-toggle';
+      start.textContent = 'Start';
+      start.onclick = () => send({ type: 'job-settings', running: true });
+      stopped.appendChild(start);
+      colEl.appendChild(stopped);
+    }
+
     const cards = document.createElement('div');
     cards.className = 'job-cards';
     if (list.length === 0) {
@@ -501,6 +515,13 @@ function renderCard(job) {
     pr.rel = 'noopener noreferrer';
     pr.textContent = job.prNumber ? `PR #${job.prNumber}` : 'View PR';
     card.appendChild(pr);
+  }
+
+  if (job.noGithubRemote) {
+    const err = document.createElement('div');
+    err.className = 'job-card-error';
+    err.textContent = "This repo has no GitHub remote, so the job can't open a pull request; add one, or set its Pull request to Not required";
+    card.appendChild(err);
   }
 
   if (job.lastError) {

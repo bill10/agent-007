@@ -419,6 +419,11 @@ durable (persisted in `config.json`). What a live agent is *doing* is derived;
 what the board could not do — a PR check that failed — is stored, because it is
 a fact about the board, not about a PTY.
 
+The board runs from a fresh install (an install with saved board settings
+keeps them). While it is stopped and To do holds cards, a line at the top of
+To do (`.job-board-stopped`) says "The board is stopped: cards wait here until
+you press Start", with a Start button beside it.
+
 ### How a one-time card moves
 
 | Event | Card | Agent and worktree |
@@ -985,9 +990,11 @@ terminal panel on this tab.
   square while that message is spoken.
 - `prefers-reduced-motion: reduce` stops the mic pulse, the dot and the
   switch's slide.
-- Empty: "Nothing here yet. Say something to Billion." in `--text-dim`.
+- Empty: "Nothing here yet. Say something to Billion." in `--text-dim`,
+  hidden while the notice bar says Billion cannot hear you.
 - Phones: choices, Send and the input are 44px tall; the input is 16px so iOS
-  does not zoom; bubbles go up to 88% wide.
+  does not zoom; bubbles go up to 88% wide. The header row wraps, so the voice
+  picker drops to its own line rather than clipping its name.
 
 ## Interactive Behaviors
 

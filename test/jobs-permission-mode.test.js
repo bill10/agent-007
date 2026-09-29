@@ -194,7 +194,7 @@ describe('the stored board permission mode', () => {
     config.jobBoard = { permissionMode: 'acceptEdits' };
     expect(boardSettings().permissionMode).toBe(DEFAULT_PERMISSION_MODE);
     // ...and the rest of the settings still fill in from the defaults.
-    expect(boardSettings().running).toBe(false);
+    expect(boardSettings().running).toBe(true);
   });
 
   it('migrates once, so a later hand-edit is not silently overwritten', () => {
