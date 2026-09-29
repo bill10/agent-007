@@ -185,6 +185,9 @@ and account metadata, and restarts its Claude sessions on their exact
 conversations. The same Claude config directory keeps settings, skills,
 plugins, MCP configuration, trusted folders, and history. This affects all
 Claude sessions managed by the app because they share the default login.
+If any session's exact conversation ID is unknown or its startup flags cannot
+be preserved, the switch stops before any session is interrupted. Stop that
+session before trying again.
 
 Limited accounts become eligible after an explicit reset time or a 30-minute
 retry delay when the notice's reset time is ambiguous. If all accounts are
@@ -199,8 +202,12 @@ owner-only file permissions on macOS/Linux. Stop Claude processes outside
 this app before rotating; the app refuses to switch while it detects one.
 Avoid using a source login folder concurrently: its copied refresh token can
 become stale. Discovery does not overwrite a maintained login with that stale
-copy. An interrupted switch offers **Restore previous login**. Nothing is
-retired or deleted. Rotation controls require Billion enabled and app user
+copy. An interrupted switch offers **Restore previous login**, which leaves
+automatic rotation off until you enable it again. If a conversation fails to
+restart, fix the reported startup problem, then choose **Settings → Claude
+accounts → Retry paused Claude conversations**. Queued messages are retained
+for that retry; it restarts the app's Claude sessions without changing the login.
+Nothing is retired or deleted. Rotation controls require Billion enabled and app user
 accounts disabled. Details in [FEATURES.md](docs/FEATURES.md).
 
 ### Multiplayer & login
@@ -279,6 +286,7 @@ server/
   account-rotation.js   Persistent account pool, cooldowns, refreshed logins and recovery
   account-migration.js  Platform credential stores, selective account writes and legacy rollback
   claude-rotation-sessions.js  Resume exact conversations after a shared login switch
+  claude-processes.js  Detect Claude processes outside the app before a login switch
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it

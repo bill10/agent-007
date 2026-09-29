@@ -35,6 +35,7 @@ npm run test:watch  # Run tests in watch mode
 
 Tests live in `test/`. We use [Vitest](https://vitest.dev/).
 
+- `test/account-rotation.test.js` -- Account enrollment defaults and saved off settings, ordering, refreshed credentials, cooldowns, rollback and crash recovery; `test/claude-rotation-sessions.test.js` covers exact conversation IDs, preserved startup options, stopping every managed Claude session, failed restarts and external-process checks. `test/account-rotation-server.test.js` exercises the owner socket with real PTYs, stable session/job links, queued messages retained after a restart failure, Settings retry and the interrupted-switch spawn block. `test/client-account-panel.test.js` covers discovery, settings, recovery controls and visible errors.
 - `test/helpers.test.js` -- Pure function unit tests (state detection, including that `MESSAGE_PATTERNS` match each CLI's real dialog wording and not prose about permissions, and that `detectState` reads a Codex session's last synchronized-output frame in place of the five-line window while the frame is the newer source; ANSI stripping, git parsing, file-name sanitising, the UTF-8 locale a pty gets when the server has none)
 - `test/pty-chunking.test.js` -- Drives the real PTY output handler with captured bytes cut at read boundaries: line reassembly across chunks, and the DEC 2026 synchronized frames Codex paints its pane in (a marker split across reads, a partial repaint merged onto the pane, a frame abandoned after 1s, frame bytes kept out of the line stream, frames read for Codex sessions only). The captures live in `test/fixtures/`: a Claude Code AskUserQuestion dialog, and the Claude Code 2.1 Bash and edit permission dialogs
 - `test/server.test.js` -- Integration tests (HTTP API including the job attachment route, WebSocket, PTY lifecycle including a command that is not installed coming back as a readable spawn error, a terminal shown in two windows taking the smaller owner window's size)
@@ -141,7 +142,10 @@ server/
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message; Billion also gets billion_ready, add_repo, close_job, answer_permission)
   messages.js      Agent-to-agent messages and board notices (reach, rate limit, delivery queue)
   billion.js       Billion's folder, templates and charter refresh (docs/BILLION.md)
-  account-migration.js  The owner's Claude account switch: backup, token and account-block write, check, rollback, retire (docs/FEATURES.md)
+  account-rotation.js   Persistent account pool, cooldowns, refreshed logins and recovery (docs/FEATURES.md)
+  account-migration.js  Platform credential stores, selective account writes and legacy rollback
+  claude-rotation-sessions.js  Resume exact conversations after a shared login switch
+  claude-processes.js  Detect Claude processes outside the app before a login switch
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) for workers on Billion's cards
   agent-mcp.js     Per-session MCP config for spawned Claude Code and Codex agents
