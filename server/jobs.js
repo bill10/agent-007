@@ -13,7 +13,7 @@ import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync 
 import { basename, dirname, join, resolve, sep } from 'path';
 import { config, sessions, orphans, adoptingOrphans, codenamePool, CONFIG_DIR } from './state.js';
 import { saveConfig, syncOrphansToConfig } from './config.js';
-import { gitExec, removeWorktree } from './git.js';
+import { gitExec, removeWorktree, hasGithubRemote } from './git.js';
 import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
 import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
@@ -37,10 +37,11 @@ import { commandExists, missingCommandMessage } from './command-path.js';
 
 function defaultSettings() {
   return {
-    // Off until the user presses Start. An unattended process that types into
-    // agents and creates worktrees should not begin on its own the first time
-    // the app is opened.
-    running: false,
+    // On for a new install: a first card that sits in To do with nothing
+    // saying why loses a new user. Only a config with no jobBoard at all gets
+    // this; an install that has one keeps its saved value, since the spread in
+    // boardSettings() puts the stored object over these defaults.
+    running: true,
     maxPerRepo: MAX_AGENTS_PER_REPO,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
@@ -124,6 +125,8 @@ export function jobsPayload() {
       status: deriveJobStatus(job, session),
       agentState: session ? session.state : null,
       agentAlive: !!(session && !session.exited),
+      // Only a card that has to open a pull request cares.
+      noGithubRemote: !!job.noGithubRemote && jobRequiresPr(job),
     };
   });
   // The .env defaults ride along, so the toolbar can show the mode workers
@@ -317,7 +320,20 @@ export function addJob({ title, detail, repoPath, type, schedule, permissionMode
   allJobs().push(result.job);
   persist(broadcast);
   requestDispatch();
+  noteGithubRemote(result.job, broadcast);
   return { job: result.job };
+}
+
+// Written on the card when it is posted and again when it is dispatched, so a
+// PR job in a repo with no GitHub remote says so up front rather than after its
+// worker finishes. The job still runs. Returns the promise for tests; callers
+// don't wait on it.
+export async function noteGithubRemote(job, broadcast) {
+  const has = await hasGithubRemote(job.repoPath);
+  if (has === null || !allJobs().includes(job)) return;
+  if (!!job.noGithubRemote === !has) return;
+  job.noGithubRemote = !has;
+  persist(broadcast);
 }
 
 // --- Repo references ---
@@ -1273,6 +1289,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.lastError = null;
     job.lastErrorAt = null;
     job.holdUntil = null;
+    noteGithubRemote(job, broadcast);
 
     dispatched.push({ job, session });
   }

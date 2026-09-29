@@ -81,6 +81,18 @@ export async function validateRepoPath(repoPath) {
 // UI report a timeout for a spawn that is still on its way to succeeding.
 const FETCH_TIMEOUT = 10000;
 
+// Whether any of the repo's remotes points at GitHub: github.com, or a GitHub
+// Enterprise host with "github" in its name. A PR job in a repo without one can
+// never open its pull request. null when git itself could not answer.
+// ponytail: matches on the URL text; a GHE host named otherwise reads as none.
+export async function hasGithubRemote(repoPath) {
+  try {
+    return /github/i.test(await gitExec(['-C', repoPath, 'remote', '-v']));
+  } catch {
+    return null;
+  }
+}
+
 // The repo's base branch, by name (no `origin/` prefix). Asks the remote's own
 // HEAD first, so a repo whose default is `develop` or `trunk` is handled without
 // a hardcoded list; falls back to the two common names, then null.

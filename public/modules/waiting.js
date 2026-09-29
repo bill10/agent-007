@@ -51,11 +51,17 @@ export function showWaiting() {
 }
 
 // The phone's Terminal button, pressed while this tab is showing: back to
-// the terminal that was open, or to the empty state.
+// the terminal that was open, else the first agent in the strip (never
+// Billion's hidden tab), or the empty state when there is none.
 export function leaveWaiting() {
   hideWaiting();
-  if (!activeSessionId || !agents.has(activeSessionId)) document.getElementById('terminal-empty').style.display = 'flex';
-  else agents.get(activeSessionId).termEl.style.display = 'block';
+  if (activeSessionId && agents.has(activeSessionId)) {
+    agents.get(activeSessionId).termEl.style.display = 'block';
+    return;
+  }
+  const first = [...agents].find(([, a]) => !a.isBillion);
+  if (first) switchToSession(first[0]);
+  else document.getElementById('terminal-empty').style.display = 'flex';
 }
 
 export function hideWaiting() {
@@ -113,6 +119,11 @@ export function setBillionNotice(sessionId, notice) {
   renderComposer();
 }
 
+function noticeText() {
+  const [id] = billionEntry();
+  return (id && notices.get(id)) || (!billionRunning() && billionEnabled ? 'Billion is not running.' : '');
+}
+
 // The bar above the text box: what stands between the owner and Billion, and
 // the button that gets past it. The explorer, with Billion's own Start, starts
 // out collapsed on a first run, so this is the one a new owner sees.
@@ -121,8 +132,11 @@ function renderNotice() {
   if (!bar) return;
   const [id] = billionEntry();
   const running = billionRunning();
-  const text = (id && notices.get(id)) || (!running && billionEnabled ? 'Billion is not running.' : '');
+  const text = noticeText();
   bar.hidden = !text;
+  // "Say something to Billion" contradicts a notice saying it can't hear.
+  const empty = document.querySelector('#waiting-list .waiting-empty');
+  if (empty) empty.hidden = !!text;
   bar.innerHTML = '';
   if (!text) return;
   const btn = el('button', 'chat-notice-btn', running ? "Open Billion's terminal" : 'Start Billion');
@@ -538,7 +552,7 @@ export function renderComposer() {
     chip.appendChild(x);
   }
   const running = billionRunning();
-  input.placeholder = !running ? 'Billion is not running; start it to send'
+  input.placeholder = !running ? 'Start Billion to send'
     : target ? `Answer Q${target.n}` : 'Message Billion';
   document.getElementById('chat-send').disabled = !!sending;
   document.getElementById('chat-send').textContent = sending ? 'Sending' : 'Send';
@@ -591,7 +605,11 @@ export function renderWaiting({ toBottom = false } = {}) {
   list.innerHTML = '';
   clearTimeout(undoTimer);
   undoSoonest = Infinity;
-  if (!chatMessages.length) list.appendChild(el('p', 'waiting-empty', 'Nothing here yet. Say something to Billion.'));
+  if (!chatMessages.length) {
+    const empty = el('p', 'waiting-empty', 'Nothing here yet. Say something to Billion.');
+    empty.hidden = !!noticeText();
+    list.appendChild(empty);
+  }
   for (const m of chatMessages) list.appendChild(bubble(m));
   // Drawn again when an Undo link's minute is up, so it goes.
   if (undoSoonest < Infinity) undoTimer = setTimeout(() => renderWaiting(), Math.min(undoSoonest, UNDO_MS) + 50);

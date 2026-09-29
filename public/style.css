@@ -1726,8 +1726,10 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 @media (max-width: 700px) {
   .chat-mic { width: 44px; min-height: 44px; }
   .chat-autoread, .chat-resume, .chat-stop-reading { min-height: 44px; padding: 0 6px; }
-  .chat-head { flex-wrap: nowrap; padding: 0 6px; }
-  .chat-voice-pick { min-width: 0; max-width: 38%; flex: 0 1 auto; }
+  /* Wraps, so the voice picker drops to its own line rather than clipping
+     its name ("Voice: auto (A"). */
+  .chat-head { padding: 0 6px; }
+  .chat-voice-pick { min-width: 0; max-width: 100%; }
 }
 
 /* An agent the board created, not you. Subtle — it is still an ordinary agent
@@ -1983,6 +1985,16 @@ select.job-mode-danger {
   flex-direction: column;
   gap: 8px;
 }
+.job-board-stopped {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.job-board-stopped .job-run-toggle { flex-shrink: 0; margin-left: auto; }
 .job-column-empty {
   padding: 12px 4px;
   font-size: 10px;
