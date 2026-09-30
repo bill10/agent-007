@@ -8,13 +8,13 @@ import { writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, handleUpdate, waitingItems, waitingPayload, dismissWaiting, answerWaiting, checkChoices,
-  pollOnce, NOTIFY_WINDOW_MS, resolveQuestion, reopenQuestion, UNDO_MS, chatMessages,
+  pollOnce, NOTIFY_WINDOW_MS, resolveQuestion, reopenQuestion, UNDO_MS, chatMessages, questionProject,
 } from '../server/owner.js';
 import { handleMcpMessage, NOTIFY_OWNER_TOOL } from '../server/mcp.js';
 import { dropMessages, takeMessages } from '../server/messages.js';
 import { mayAnswerOwner } from '../server/ws.js';
 import { USERS_PATH } from '../server/auth.js';
-import { sessions, CONFIG_DIR } from '../server/state.js';
+import { sessions, CONFIG_DIR, config } from '../server/state.js';
 
 const TOKEN = '123456:SECRET-token';
 const ENV = { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_CHAT_ID: '42' };
@@ -74,7 +74,7 @@ describe('choices and recommended', () => {
     const notify = vi.fn(async () => ({ ok: true, n: 4 }));
     const res = await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'Buy?', choices: ['yes', 'no'], recommended: 'yes' } } },
       { session: { isBillion: true }, notifyOwner: notify });
-    expect(notify).toHaveBeenCalledWith('Buy?', { choices: ['yes', 'no'], recommended: 'yes', urgency: undefined });
+    expect(notify).toHaveBeenCalledWith('Buy?', { choices: ['yes', 'no'], recommended: 'yes', urgency: undefined, project: undefined });
     expect(res.result.content[0].text).toContain('[Owner via app] Q4:');
   });
 
@@ -356,5 +356,53 @@ describe('urgency', () => {
   it('reads as normal on items saved before it existed', () => {
     writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify([{ id: 'old', n: 1, text: 'Old?', at: '2026-01-01T00:00:00Z', status: 'open' }]));
     expect(waitingItems()[0].urgency).toBe('normal');
+  });
+});
+
+describe('project', () => {
+  const REPOS = ['agent-007', 'finnamon', 'Mirage'];
+
+  it('takes a board repo by name in any case, "general", or an unknown name lower-cased and capped', () => {
+    expect(questionProject('finnamon', 'x', REPOS)).toBe('finnamon');
+    expect(questionProject(' MIRAGE ', 'x', REPOS)).toBe('Mirage');
+    expect(questionProject('General', 'about agent-007', REPOS)).toBe('general');
+    expect(questionProject('Side-Project', 'x', REPOS)).toBe('side-project');
+    expect(questionProject('X'.repeat(90), 'x', REPOS)).toBe('x'.repeat(40));
+  });
+
+  it('is read off a GitHub PR, issue or repo URL whose repo is on the board', () => {
+    expect(questionProject(undefined, 'Merge https://github.com/bill10/finnamon/pull/12 ?', REPOS)).toBe('finnamon');
+    expect(questionProject('', 'See github.com/someone/Agent-007/issues/3', REPOS)).toBe('agent-007');
+    expect(questionProject(undefined, 'Clone https://github.com/x/mirage.git first?', REPOS)).toBe('Mirage');
+    // A repo not on the board: then a name in the text, else general.
+    expect(questionProject(undefined, 'https://github.com/x/other/pull/1 blocks finnamon', REPOS)).toBe('finnamon');
+  });
+
+  it('is read off a board repo named in the text, as a word, else general', () => {
+    expect(questionProject(undefined, 'Ship agent-007 tonight?', REPOS)).toBe('agent-007');
+    expect(questionProject(undefined, 'Rename finnamon-web?', REPOS)).toBe('general');
+    expect(questionProject(undefined, 'Buy a domain?', REPOS)).toBe('general');
+    expect(questionProject(undefined, 'Buy a domain?', [])).toBe('general');
+  });
+
+  it('is in the MCP schema, reaches notifyOwner, is kept on the item and its bubble, and old items read as general', async () => {
+    expect(NOTIFY_OWNER_TOOL.inputSchema.properties.project.type).toBe('string');
+    expect(NOTIFY_OWNER_TOOL.description).toMatch(/Pass project/);
+    const notify = vi.fn(async () => ({ ok: true, n: 1 }));
+    await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'Merge?', project: 'finnamon' } } },
+      { session: { isBillion: true }, notifyOwner: notify });
+    expect(notify).toHaveBeenCalledWith('Merge?', expect.objectContaining({ project: 'finnamon' }));
+
+    const saved = config.repos;
+    config.repos = [{ path: '/code/finnamon' }];
+    try {
+      await ask('Merge https://github.com/bill10/finnamon/pull/4?');
+      await ask('Name?', { project: 'Side' });
+      expect(waitingPayload().items.map(i => i.project)).toEqual(['finnamon', 'side']);
+      expect(chatMessages().filter(m => m.q).slice(-2).map(m => m.q.project)).toEqual(['finnamon', 'side']);
+      expect((await ask('Now?', { project: 7 })).error).toMatch(/project must be/);
+    } finally { config.repos = saved; }
+    writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify([{ id: 'old', n: 1, text: 'Old?', at: '2026-01-01T00:00:00Z', status: 'open' }]));
+    expect(waitingItems()[0].project).toBe('general');
   });
 });

@@ -139,8 +139,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         readApproval: (id) => (req.agentSession.isBillion
           ? readApproval(id)
           : { error: 'Only Billion can read approval requests.' }),
-        notifyOwner: (text, { choices, recommended, urgency } = {}) => (req.agentSession.isBillion
-          ? notifyOwner(text, { choices, recommended, urgency, broadcast })
+        notifyOwner: (text, { choices, recommended, urgency, project } = {}) => (req.agentSession.isBillion
+          ? notifyOwner(text, { choices, recommended, urgency, project, broadcast })
           : { error: 'Only Billion can notify the owner.' }),
         tellOwner: (text) => (req.agentSession.isBillion
           ? tellOwner(text, { broadcast })

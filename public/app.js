@@ -23,7 +23,7 @@ import { setupSettings } from './modules/settings.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
-import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice, setQuestionsOpen } from './modules/waiting.js';
 import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
@@ -474,7 +474,11 @@ function setupResize() {
     // The Billion tab's mic and reading: their buttons are in its view.
     if (view !== 'waiting') leftChat();
     // Waiting is the terminal panel showing the Waiting tab.
-    if (view === 'waiting') { showWaiting(); updateTabs(); }
+    if (view === 'waiting') {
+      showWaiting();
+      if (e.target.closest('#mobile-nav-waiting-count')) setQuestionsOpen(true, { focus: false });
+      updateTabs();
+    }
     else if (view === 'terminal' && waitingActive) { leaveWaiting(); updateTabs(); }
     setView(view === 'waiting' ? 'terminal' : view);
     requestAnimationFrame(() => { renderOffice(); fitActiveTerminal(); });

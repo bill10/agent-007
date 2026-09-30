@@ -5,7 +5,7 @@ import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
 import { stopVoice } from './voice.js';
 import { showJobBoard, hideJobBoard } from './jobs.js';
-import { showWaiting, hideWaiting, openCount, renderComposer, setBillionNotice } from './waiting.js';
+import { showWaiting, hideWaiting, openCount, setQuestionsOpen, renderComposer, setBillionNotice } from './waiting.js';
 // Circular with office.js (it imports switchToSession), which is fine: both
 // sides only call the other's functions at event time, never during load.
 import { noteAgentDeparture } from './office.js';
@@ -458,6 +458,8 @@ export function updateTabs() {
   const badge = document.createElement('span');
   badge.className = 'board-tab-badge chat-badge';
   chatBadge(badge, open);
+  // The badge goes straight to the Open questions panel.
+  badge.onclick = (e) => { e.stopPropagation(); showWaiting(); setQuestionsOpen(true); updateTabs(); };
   icon.appendChild(badge);
   waitingTab.append(icon, document.createTextNode('Billion'));
   waitingTab.onclick = () => { showWaiting(); updateTabs(); };

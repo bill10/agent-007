@@ -2,7 +2,8 @@
 // Telegram channel. One thread of the owner's messages, Billion's tell_owner
 // replies and its notify_owner questions (answered with a tap, or a typed line
 // once the owner picks the question with Reply),
-// a strip pinning the open questions, and a text box that is typed into
+// a strip pinning the open questions that opens them as a panel grouped by
+// project, and a text box that is typed into
 // Billion's terminal as [Owner via app] (server/owner.js ownerSays). Shares the
 // terminal viewport with the terminals and the job board, like Jobs does.
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
@@ -102,7 +103,7 @@ export function answerTarget() {
   return waitingItems.find(item => item.id === replyTo && item.status === 'open') || null;
 }
 
-// Reply on a question, or its chip in the strip: the box answers it.
+// Reply on a question, in the thread or the Open questions panel: the box answers it.
 export function replyToQuestion(id) {
   replyTo = id;
   renderComposer();
@@ -368,27 +369,8 @@ function questionFoot(q) {
   }
   if (q.status === 'dismissed') return el('p', 'chat-answered', 'dismissed');
   const foot = el('div', 'chat-q-foot');
-  if (Array.isArray(q.choices) && q.choices.length) {
-    const choices = el('div', 'waiting-choices');
-    const ordered = [...q.choices].sort((a, b) => (b === q.recommended) - (a === q.recommended));
-    for (const choice of ordered) {
-      const btn = el('button', `waiting-choice${choice === q.recommended ? ' recommended' : ''}`, choice);
-      btn.type = 'button';
-      if (choice === q.recommended) {
-        btn.appendChild(el('span', 'waiting-choice-tag', 'recommended'));
-        btn.setAttribute('aria-label', `${choice} (recommended)`);
-      }
-      btn.disabled = pending.has(q.id);
-      btn.onclick = () => answer(q, choice);
-      choices.appendChild(btn);
-    }
-    foot.appendChild(choices);
-  }
-  const reply = el('button', 'chat-link chat-reply', 'Reply');
-  reply.type = 'button';
-  reply.setAttribute('aria-label', `Answer Q${q.n} by typing`);
-  reply.onclick = () => replyToQuestion(q.id);
-  foot.appendChild(reply);
+  if (Array.isArray(q.choices) && q.choices.length) foot.appendChild(choiceButtons(q));
+  foot.appendChild(replyButton(q, () => replyToQuestion(q.id)));
   const dismiss = el('button', 'waiting-dismiss', 'Dismiss');
   dismiss.type = 'button';
   dismiss.setAttribute('aria-label', `Dismiss Q${q.n}`);
@@ -397,6 +379,32 @@ function questionFoot(q) {
   const error = errorLine(q);
   if (error) foot.appendChild(error);
   return foot;
+}
+
+// A question's choices, recommended first: one tap answers it.
+function choiceButtons(q) {
+  const choices = el('div', 'waiting-choices');
+  const ordered = [...q.choices].sort((a, b) => (b === q.recommended) - (a === q.recommended));
+  for (const choice of ordered) {
+    const btn = el('button', `waiting-choice${choice === q.recommended ? ' recommended' : ''}`, choice);
+    btn.type = 'button';
+    if (choice === q.recommended) {
+      btn.appendChild(el('span', 'waiting-choice-tag', 'recommended'));
+      btn.setAttribute('aria-label', `${choice} (recommended)`);
+    }
+    btn.disabled = pending.has(q.id);
+    btn.onclick = () => answer(q, choice);
+    choices.appendChild(btn);
+  }
+  return choices;
+}
+
+function replyButton(q, onclick) {
+  const reply = el('button', 'chat-link chat-reply', 'Reply');
+  reply.type = 'button';
+  reply.setAttribute('aria-label', `Answer Q${q.n} by typing`);
+  reply.onclick = onclick;
+  return reply;
 }
 
 function bubble(m) {
@@ -577,12 +585,27 @@ function shell() {
   const list = document.getElementById('waiting-list');
   if (!board || !list) return null;
   if (!document.getElementById('chat-compose')) {
-    const strip = el('nav', 'chat-strip');
+    // The whole strip is one button: it opens the Open questions panel.
+    const strip = el('div', 'chat-strip');
     strip.id = 'chat-strip';
-    strip.setAttribute('aria-label', 'Open questions');
+    strip.setAttribute('role', 'button');
+    strip.tabIndex = 0;
+    strip.setAttribute('aria-controls', 'chat-questions');
     strip.hidden = true;
+    strip.onclick = () => setQuestionsOpen(!panelOpen);
+    strip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); strip.onclick(); } };
     board.insertBefore(strip, list);
     if (readAloudSupported()) board.insertBefore(readHead(), strip);
+    // The panel covers the thread only, so the box stays below it.
+    const body = el('div', 'chat-body');
+    board.insertBefore(body, list);
+    body.append(list, questionsPanel());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && waitingActive && document.getElementById('chat-questions')?.hidden === false) {
+        e.preventDefault();
+        setQuestionsOpen(false);
+      }
+    });
 
     const jump = el('button', 'chat-jump', 'New messages ↓');
     jump.id = 'chat-jump';
@@ -724,27 +747,142 @@ export function renderComposer() {
   renderNotice();
 }
 
+// The strip: a one-line summary of the open questions, and the button that
+// opens the Open questions panel.
 function renderStrip() {
   const strip = document.getElementById('chat-strip');
-  const open = waitingItems.filter(item => item.status === 'open').sort(byUrgency);
+  const open = openItems();
   strip.hidden = !open.length;
   strip.innerHTML = '';
+  if (!open.length) return;
+  // "tap to see all" the first time the strip shows in this browser, until opened.
+  if (!hint && !panelOpen && store.get(HINT_KEY) !== '1') { hint = true; store.set(HINT_KEY, '1'); }
+  const count = `${open.length} open question${open.length === 1 ? '' : 's'}`;
+  strip.setAttribute('aria-expanded', String(panelOpen));
+  strip.setAttribute('aria-label', `${count}: ${panelOpen ? 'hide' : 'show'} them by project`);
+  strip.classList.toggle('hinting', hint);
+  const head = el('span', 'chat-strip-head');
+  head.append(el('span', 'chat-strip-chevron', '▾'), count);
+  const items = el('span', 'chat-strip-items');
   for (const item of open) {
-    const btn = el('button', 'chat-strip-item');
-    btn.type = 'button';
-    btn.append(qLabel(item), ' ', el('span', 'chat-strip-text', item.text));
-    btn.title = item.text;
-    btn.onclick = () => {
-      const row = document.querySelector(`.chat-msg[data-q="${CSS.escape(item.id)}"]`);
-      if (!row) return;
-      row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-      row.classList.remove('flash');
-      void row.offsetWidth;   // restart the animation
-      row.classList.add('flash');
-      replyToQuestion(item.id);
-    };
-    strip.appendChild(btn);
+    const chip = el('span', 'chat-strip-item');
+    chip.append(qLabel(item), ' ', el('span', 'chat-strip-text', item.text));
+    items.appendChild(chip);
   }
+  strip.append(head, items);
+  if (hint) strip.appendChild(el('span', 'chat-strip-hint', 'tap to see all'));
+}
+
+// --- The Open questions panel: open questions by project, answered in place.
+// Opened from the strip or the tab's badge; open or closed is kept per browser.
+const PANEL_KEY = 'agent007-questions-open';
+const HINT_KEY = 'agent007-questions-hint';
+const store = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
+};
+let panelOpen = store.get(PANEL_KEY) === '1';
+let hint = false;
+const PHONE = '(max-width: 700px)';
+
+const openItems = () => waitingItems.filter(item => item.status === 'open').sort(byUrgency);
+
+// One group per project with something open, its questions most urgent then
+// oldest. Grouped in that order, so each group lands where its most urgent
+// question falls: blocking projects first, then by oldest.
+export function questionGroups(items = waitingItems) {
+  const groups = new Map();
+  for (const item of items.filter(i => i.status === 'open').sort(byUrgency)) {
+    const project = item.project || 'general';
+    if (!groups.has(project)) groups.set(project, []);
+    groups.get(project).push(item);
+  }
+  return [...groups].map(([project, list]) => ({ project, items: list }));
+}
+
+export function setQuestionsOpen(open, { focus = true } = {}) {
+  panelOpen = open;
+  hint = false;
+  store.set(PANEL_KEY, open ? '1' : '0');
+  renderWaiting();
+  if (focus) document.getElementById(open ? 'chat-questions-close' : 'chat-strip')?.focus();
+}
+
+// The thread's bubble for a question: scrolled to and flashed.
+function jumpTo(id) {
+  const row = document.querySelector(`.chat-msg[data-q="${CSS.escape(id)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('flash');
+  void row.offsetWidth;   // restart the animation
+  row.classList.add('flash');
+}
+
+function age(iso) {
+  const mins = (Date.now() - Date.parse(iso)) / 60000;
+  if (Number.isNaN(mins)) return '';
+  return mins < 1 ? 'now' : mins < 60 ? `${Math.floor(mins)}m` : mins < 1440 ? `${Math.floor(mins / 60)}h` : `${Math.floor(mins / 1440)}d`;
+}
+
+function questionRow(q) {
+  const row = el('div', 'chat-questions-row');
+  row.dataset.q = q.id;
+  const line = el('button', 'chat-questions-line');
+  line.type = 'button';
+  line.title = `${q.text}\n\nShow in the thread`;
+  line.append(qLabel(q), el('span', 'chat-questions-text', String(q.text).split('\n')[0]), el('span', 'chat-questions-age', age(q.at)));
+  line.onclick = () => { setQuestionsOpen(false, { focus: false }); jumpTo(q.id); };
+  const actions = el('div', 'chat-questions-actions');
+  if (Array.isArray(q.choices) && q.choices.length) actions.appendChild(choiceButtons(q));
+  // Full screen on a phone, over the box: it closes so the box can be typed in.
+  actions.appendChild(replyButton(q, () => {
+    if (window.matchMedia?.(PHONE).matches) setQuestionsOpen(false, { focus: false });
+    replyToQuestion(q.id);
+  }));
+  row.append(line, actions);
+  const error = errorLine(q);
+  if (error) row.appendChild(error);
+  return row;
+}
+
+function renderPanel() {
+  const panel = document.getElementById('chat-questions');
+  const groups = questionGroups();
+  const shown = panelOpen && groups.length > 0;
+  panel.hidden = !shown;
+  document.getElementById('waiting-board').classList.toggle('questions-open', shown);
+  const body = document.getElementById('chat-questions-body');
+  body.innerHTML = '';
+  if (!shown) return;
+  for (const { project, items } of groups) {
+    const section = el('section', 'chat-questions-group');
+    const head = el('h3', 'chat-questions-project');
+    head.append(el('span', 'chat-questions-name', project), el('span', 'chat-questions-count', String(items.length)));
+    head.lastChild.setAttribute('aria-label', `${items.length} open`);
+    section.appendChild(head);
+    for (const q of items) section.appendChild(questionRow(q));
+    body.appendChild(section);
+  }
+}
+
+function questionsPanel() {
+  const panel = el('div', 'chat-questions');
+  panel.id = 'chat-questions';
+  panel.setAttribute('role', 'region');
+  panel.setAttribute('aria-label', 'Open questions');
+  panel.hidden = true;
+  const head = el('div', 'chat-questions-head');
+  const close = el('button', 'chat-questions-close chat-control', '×');
+  close.id = 'chat-questions-close';
+  close.type = 'button';
+  close.title = 'Back to the chat (Esc)';
+  close.setAttribute('aria-label', 'Close open questions');
+  close.onclick = () => setQuestionsOpen(false);
+  head.append(el('h2', 'chat-questions-title', 'Open questions'), close);
+  const body = el('div', 'chat-questions-body');
+  body.id = 'chat-questions-body';
+  panel.append(head, body);
+  return panel;
 }
 
 // toBottom: the tab was just opened, so start at the newest.
@@ -787,6 +925,7 @@ export function renderWaiting({ toBottom = false } = {}) {
   }
   lastShown = chatMessages.at(-1)?.id ?? null;
   renderStrip();
+  renderPanel();
   renderComposer();
   renderReadHead();
 }

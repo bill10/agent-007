@@ -10,7 +10,7 @@ import { send } from '../public/modules/ws.js';
 import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive, setBillionEnabled, setView } from '../public/modules/state.js';
 import { updateTabs, switchToSession, removeSession, setupUpload } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
-import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer, questionGroups, setQuestionsOpen } from '../public/modules/waiting.js';
 import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
 import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
@@ -395,7 +395,7 @@ describe('Undo', () => {
 });
 
 describe('the pinned strip', () => {
-  beforeEach(() => showWaiting());
+  beforeEach(() => { setQuestionsOpen(false, { focus: false }); localStorage.clear(); showWaiting(); });
   const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600e3).toISOString();
 
   it('lists open questions blocking, then normal, then low, oldest first within each, and hides when none are open', () => {
@@ -416,18 +416,33 @@ describe('the pinned strip', () => {
     expect(strip.children.length).toBe(0);
   });
 
-  it('scrolls the thread to the question tapped and arms the box for it', () => {
-    questions(open(1), open(2));
-    const target = bubbleOf('w2');
-    target.scrollIntoView = vi.fn();
-    document.querySelectorAll('.chat-strip-item')[1].click();
-    expect(target.scrollIntoView).toHaveBeenCalled();
-    expect(target.classList.contains('flash')).toBe(true);
-    // And the box answers it.
-    expect(answerTarget().id).toBe('w2');
-    expect(document.getElementById('chat-target').textContent).toMatch(/^Answers Q2: /);
+  it('is one button, "N open questions" with a chevron, that opens and closes the panel by click, Enter and Space', () => {
+    questions(open(1), open(2), open(3));
+    const strip = document.getElementById('chat-strip');
+    expect([strip.tagName, strip.getAttribute('role'), strip.tabIndex, strip.getAttribute('aria-expanded')]).toEqual(['DIV', 'button', 0, 'false']);
+    expect(strip.querySelector('.chat-strip-head').textContent).toBe('\u25be3 open questions');
+    expect(strip.querySelectorAll('button')).toHaveLength(0);   // no buttons inside a button
+    strip.click();
+    expect(document.getElementById('chat-questions').hidden).toBe(false);
+    expect(strip.getAttribute('aria-expanded')).toBe('true');
+    strip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect(document.getElementById('chat-questions').hidden).toBe(true);
+    strip.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+    expect(document.getElementById('chat-questions').hidden).toBe(false);
   });
 
+  it('says "tap to see all" the first time it shows in this browser, until opened, then never again', () => {
+    questions(open(1));
+    const hint = () => document.querySelector('#chat-strip .chat-strip-hint');
+    expect(hint().textContent).toBe('tap to see all');
+    expect(document.getElementById('chat-strip').classList.contains('hinting')).toBe(true);
+    renderWaiting();
+    expect(hint()).not.toBeNull();   // still this page's first strip
+    setQuestionsOpen(true);
+    setQuestionsOpen(false);
+    expect(hint()).toBeNull();
+    expect(localStorage.getItem('agent007-questions-hint')).toBe('1');
+  });
   it('marks blocking with a bold "!", leaves normal plain, and dims low', () => {
     questions(open(1, { urgency: 'blocking' }), open(2, { urgency: 'normal' }), open(3, { urgency: 'low' }));
     const n = (id) => bubbleOf(id).querySelector('.waiting-card-n');
@@ -683,5 +698,94 @@ describe('attachments', () => {
     const file = document.querySelector('.chat-msg a.chat-file-chip');
     expect([file.getAttribute('href'), file.download, file.textContent]).toEqual(['/api/chat/m1/files/notes.pdf', 'notes.pdf', 'notes.pdf2 KB']);
     expect(document.querySelector('.chat-msg .chat-text')).toBeNull();
+  });
+});
+
+describe('the Open questions panel', () => {
+  beforeEach(() => { setQuestionsOpen(false, { focus: false }); localStorage.clear(); showWaiting(); });
+  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600e3).toISOString();
+  const panel = () => document.getElementById('chat-questions');
+  const sections = () => [...panel().querySelectorAll('.chat-questions-group')].map(g => [
+    g.querySelector('.chat-questions-name').textContent, g.querySelector('.chat-questions-count').textContent,
+    [...g.querySelectorAll('.waiting-card-n')].map(n => n.textContent).join(' '),
+  ]);
+  const seed = () => questions(
+    open(1, { project: 'finnamon', at: at(30) }),
+    open(2, { project: 'agent-007', at: at(2) }),
+    open(3, { project: 'agent-007', urgency: 'blocking', at: at(1) }),
+    open(4, { at: at(50), text: 'First line\nsecond line' }),   // no project: general
+    open(5, { project: 'finnamon', urgency: 'low', at: at(60) }),
+    open(6, { project: 'finnamon', at: at(40), choices: ['yes', 'no'], recommended: 'no' }),
+    { ...open(7, { project: 'mirage' }), status: 'answered', answer: 'a' },
+  );
+
+  it('groups open questions by project: blocking first by their most urgent, then oldest; rows urgency then oldest', () => {
+    seed();
+    setQuestionsOpen(true);
+    expect(sections()).toEqual([
+      ['agent-007', '2', '! Q3 Q2'],
+      ['general', '1', 'Q4'],
+      ['finnamon', '3', 'Q6 Q1 Q5'],
+    ]);
+    // Rows: the first line of the text and its age.
+    const row = panel().querySelector('[data-q="w4"]');
+    expect(row.querySelector('.chat-questions-text').textContent).toBe('First line');
+    expect(row.querySelector('.chat-questions-age').textContent).toBe('2d');
+    expect(panel().querySelector('[data-q="w3"] .chat-questions-age').textContent).toBe('1h');
+    // A project with nothing open has no section; none at all, no panel.
+    expect(questionGroups().map(g => g.project)).not.toContain('mirage');
+    questions({ ...open(7), status: 'answered', answer: 'a' });
+    expect(panel().hidden).toBe(true);
+  });
+
+  it('answers from a row: the choices (recommended first) and Reply, which arms the box', () => {
+    seed();
+    setQuestionsOpen(true);
+    const row = panel().querySelector('[data-q="w6"]');
+    expect([...row.querySelectorAll('.waiting-choice')].map(b => b.firstChild.textContent)).toEqual(['no', 'yes']);
+    row.querySelector('.waiting-choice').click();
+    expect(send).toHaveBeenCalledWith({ type: 'waiting-answer', id: 'w6', answer: 'no' });
+    panel().querySelector('[data-q="w2"] .chat-reply').click();
+    expect(answerTarget().id).toBe('w2');
+    expect(panel().hidden).toBe(false);   // the box sits below it on a desktop
+    expect(document.activeElement).toBe(input());
+  });
+
+  it('tapping a row\'s text jumps to its bubble and closes the panel', () => {
+    seed();
+    setQuestionsOpen(true);
+    expect(document.getElementById('waiting-board').classList.contains('questions-open')).toBe(true);
+    const scroll = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scroll;
+    panel().querySelector('[data-q="w5"] .chat-questions-line').click();
+    expect(panel().hidden).toBe(true);
+    expect(document.getElementById('waiting-board').classList.contains('questions-open')).toBe(false);
+    expect(scroll).toHaveBeenCalled();
+    expect(bubbleOf('w5').classList.contains('flash')).toBe(true);
+  });
+
+  it('closes with × and with Esc, and remembers open or closed in this browser', () => {
+    seed();
+    setQuestionsOpen(true);
+    expect(localStorage.getItem('agent007-questions-open')).toBe('1');
+    expect(document.activeElement.id).toBe('chat-questions-close');
+    document.getElementById('chat-questions-close').click();
+    expect(panel().hidden).toBe(true);
+    expect(localStorage.getItem('agent007-questions-open')).toBe('0');
+    expect(document.activeElement.id).toBe('chat-strip');
+    setQuestionsOpen(true);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(panel().hidden).toBe(true);
+  });
+
+  it('opens from the tab\'s badge, which still counts every open question', () => {
+    seed();
+    leaveWaiting();
+    updateTabs();
+    const badge = document.querySelector('.waiting-tab .chat-badge');
+    expect(badge.textContent).toBe('6');
+    badge.click();
+    expect(waitingActive).toBe(true);
+    expect(panel().hidden).toBe(false);
   });
 });
