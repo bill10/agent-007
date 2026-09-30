@@ -109,12 +109,14 @@ describe('switchBillion', () => {
     expect(s.order[0]).toEqual(['handover', 'codex', 'claude']);
   });
 
-  it('still switches when the handover cannot be written', async () => {
+  it('keeps the current CLI when the conversation handover cannot be written', async () => {
     const s = steps();
     s.writeHandover.mockImplementation(() => { throw new Error('disk full'); });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    expect((await switchBillion({ current: { agent: 'codex' }, dir, ...s })).session).toBeTruthy();
-    expect(s.saveAgent).toHaveBeenCalledWith('claude');
+    expect((await switchBillion({ current: { agent: 'codex' }, dir, ...s })).error).toMatch(/handover/);
+    expect(s.saveAgent).not.toHaveBeenCalled();
+    expect(s.stop).not.toHaveBeenCalled();
+    expect(s.start).not.toHaveBeenCalled();
   });
 
   it('refuses the CLI it already runs on, and one it does not know', async () => {

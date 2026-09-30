@@ -1,148 +1,81 @@
 // @vitest-environment happy-dom
-// The "Claude account" panel (public/modules/account.js): off by default, one
-// action set per state, every action but the folder check confirmed first.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
-
 import { send } from '../public/modules/ws.js';
 import { setBillionEnabled, setSelf } from '../public/modules/state.js';
 import { handleAccountState, handleAccountError, renderAccount } from '../public/modules/account.js';
-
-const labels = () => [...document.querySelectorAll('.account-btn')].map(b => b.textContent);
-const click = (action) => document.querySelector(`.account-btn[data-action="${action}"]`).click();
-
+const click = action => document.querySelector(`[data-action="${action}"]`).click();
+const account = (id, email, status = 'Available') => ({ id, email, enabled: true, status });
+const show = rotation => handleAccountState({ type: 'account-state', rotation });
 beforeEach(() => {
-  document.body.innerHTML = '<div id="account-panel" hidden><div class="settings-section-head"><h2>Claude account</h2></div><div class="account-body"></div></div>';
-  setBillionEnabled(true);
-  setSelf(null, false);
-  send.mockClear();
+  document.body.innerHTML = '<div id="account-panel"><div class="account-body"></div></div>';
+  setBillionEnabled(true); setSelf(null, false); send.mockReset(); send.mockReturnValue(true);
   window.confirm = vi.fn(() => true);
+  handleAccountError({ message: null });
 });
-
-describe('the Claude account panel', () => {
-  it('offers only the folder when nothing is set up', () => {
-    handleAccountState({ type: 'account-state', status: 'not set up' });
-    expect(document.getElementById('account-panel').hidden).toBe(false);
-    expect(document.querySelector('.account-status').textContent).toMatch(/^Not set up/);
-    expect(labels()).toEqual(['Check folder']);
+describe('account rotation settings', () => {
+  it('keeps the folder available to correct after an error and emphasizes recovery errors', () => {
+    const rotation = { enabled: false, accounts: [{ ...account('a', 'a@x'), error: 'Sign in again' }] };
+    show(rotation);
     const input = document.querySelector('.account-folder');
-    expect(input.required).toBe(true);
-    click('setup');
-    expect(send).not.toHaveBeenCalled();          // an empty folder sends nothing, and the buttons stay live
-    expect(document.querySelector('.account-btn').disabled).toBe(false)
-    input.value = ' ~/.claude-new ';
-    click('setup');
-    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'setup', folder: '~/.claude-new' });
+    input.value = '/incorrect/folder'; input.dispatchEvent(new Event('input'));
+    handleAccountError({ message: 'Folder not found' });
+    expect(document.querySelector('.account-folder').value).toBe('/incorrect/folder');
+    expect([...document.querySelectorAll('.account-error')].some(el => el.textContent === 'Sign in again')).toBe(true);
+    show({ pending: true, accounts: [] });
+    expect(document.querySelector('.account-error').textContent).toContain('switch was interrupted');
+    show(rotation); document.querySelector('.account-folder').value = ''; document.querySelector('.account-folder').dispatchEvent(new Event('input'));
+  });
+
+  it('restores controls and reports a disconnected socket so the owner can retry', () => {
+    show({ enabled: false, accounts: [] });
+    send.mockReturnValue(false);
+    click('rotation-discover');
+    expect(document.querySelector('.account-error').textContent).toContain('Not connected');
+    expect(document.querySelector('[data-action="rotation-discover"]').disabled).toBe(false);
+    send.mockReturnValue(true);
+    click('rotation-discover');
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-action="rotation-discover"]').disabled).toBe(true);
+  });
+
+  it('explains that the default starts once two accounts are added', () => {
+    show({ enabled: false, defaultSettings: true, fallback: true, accounts: [] });
+    expect(document.body.textContent).toContain('starts when at least two accounts are added');
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('offers discovery and custom folders without enabling rotation', () => {
+    show({ enabled: false, fallback: true, accounts: [] });
+    expect(document.body.textContent).toContain('rotation is off');
+    click('rotation-add'); expect(send).not.toHaveBeenCalled();
+    document.querySelector('.account-folder').value = ' ~/.claude-work ';
+    click('rotation-add'); expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-add', folder: '~/.claude-work' });
     expect(window.confirm).not.toHaveBeenCalled();
+    expect([...document.querySelectorAll('button')].every(b => b.disabled)).toBe(true);
   });
-
-  it('ready: arm and switch now, each behind a confirm', () => {
-    handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x' });
-    expect(labels()).toEqual(['Check again', 'Arm', 'Switch now']);
-    window.confirm = vi.fn(() => false);
-    click('arm');
-    click('migrate');
-    expect(send).not.toHaveBeenCalled();
-    window.confirm = vi.fn(() => true);
-    click('arm');
-    expect(window.confirm.mock.calls[0][0]).toMatch(/permanent move, not for getting past a limit/);
-    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'arm' });
-    // Sent once: every button waits for the server's next state, and the clicked one says what it is doing.
-    expect([...document.querySelectorAll('.account-btn')].every(b => b.disabled)).toBe(true);
-    expect(document.querySelector('.account-btn[data-action="arm"]').textContent).toBe('Arming…');
-    click('migrate');
-    expect(send).toHaveBeenCalledTimes(1);   // disabled: nothing sent
-    // A refusal shows in the panel and the buttons are live again; the next state clears it.
-    handleAccountError({ type: 'account-error', message: 'Nothing is armed.' });
-    expect(document.querySelector('.account-error').textContent).toBe('Nothing is armed.');
-    expect([...document.querySelectorAll('.account-btn')].some(b => b.disabled)).toBe(false);
-    handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x' });
-    expect(document.querySelector('.account-error')).toBeNull();
-    click('migrate');
-    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'migrate' });
-    expect(document.querySelector('.account-btn').className).toContain('settings-refresh');
+  it('saves order, inclusion and fallback together, confirms enabling once', () => {
+    show({ enabled: false, fallback: true, active: 'a', accounts: [account('a', 'a@x', 'Active'), account('b', 'b@x'), account('c', 'c@x')] });
+    document.querySelectorAll('[data-action="rotation-up"]')[2].click();
+    const boxes = document.querySelectorAll('input[type="checkbox"]');
+    boxes[2].click(); boxes[3].click(); boxes[4].click();
+    click('rotation-configure');
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-configure', enabled: true, fallback: false, accounts: [{ id: 'a', enabled: true }, { id: 'c', enabled: true }, { id: 'b', enabled: false }] });
+    expect(window.confirm).toHaveBeenCalledTimes(1);
   });
-
-  it('armed: disarm sends arm off; migrated: roll back and retire, once', () => {
-    handleAccountState({ type: 'account-state', status: 'armed', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x' });
-    expect(labels()).toEqual(['Disarm', 'Switch now']);
-    expect(document.querySelector('.account-status').textContent).toMatch(/Armed: switches old@x → new@x/);
-    click('disarm');
-    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'arm', on: false });
-    handleAccountState({ type: 'account-state', status: 'migrated', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z' });
-    expect(labels()).toEqual(['Roll back', 'Retire the new folder']);
-    expect(document.querySelector('.account-status').textContent).toMatch(/Switched to new@x on 2026-09-27 .*Do not run anything with CLAUDE_CONFIG_DIR=\/h\/.claude-new/);
-    click('retire');
-    expect(window.confirm.mock.lastCall[0]).toMatch(/never deleted/);
-    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'retire' });
-    handleAccountState({ type: 'account-state', status: 'migrated', folder: '/h/.claude-new', newEmail: 'new@x', retiredTo: '/h/.claude-new.retired-2026-09-27' });
-    expect(labels()).toEqual(['Roll back']);
-    click('rollback');
-    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'rollback' });
+  it('switches by account id, renders emails as text, and keeps errors visible after state updates', () => {
+    const rotation = { enabled: true, active: 'a', accounts: [account('a', 'a@x'), account('b', '<img src=x>')] };
+    show(rotation); expect(document.querySelector('img')).toBeNull();
+    window.confirm.mockReturnValue(false); click('rotation-switch'); expect(send).not.toHaveBeenCalled();
+    window.confirm.mockReturnValue(true); click('rotation-switch');
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-switch', id: 'b' });
+    handleAccountError({ message: 'Another Claude process is running.' }); show(rotation);
+    expect(document.querySelector('.account-error').textContent).toContain('Another Claude process');
   });
-
-  it('rolled back: says why, offers the folder again, and arms nothing', () => {
-    handleAccountState({ type: 'account-state', status: 'rolled back', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: 'claude auth status reports old@x after the swap, not new@x' });
-    const status = document.querySelector('.account-status');
-    expect(status.textContent).toBe('Rolled back to old@x. Last attempt: claude auth status reports old@x after the swap, not new@x');
-    expect(status.dataset.status).toBe('rolled back');
-    expect(labels()).toEqual(['Check again']);
-    expect(document.querySelector('.account-folder').value).toBe('/h/.claude-new');
-    click('setup');
-    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'setup', folder: '/h/.claude-new' });
-    // Without an error to show, the line ends after the email.
-    handleAccountState({ type: 'account-state', status: 'rolled back', oldEmail: 'old@x' });
-    expect(document.querySelector('.account-status').textContent).toBe('Rolled back to old@x.');
-  });
-
-  it('migrated: a cancelled confirm sends nothing, and a retired folder is named', () => {
-    handleAccountState({ type: 'account-state', status: 'migrated', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z' });
-    window.confirm = vi.fn(() => false);
-    click('rollback');
-    click('retire');
-    expect(send).not.toHaveBeenCalled();
-    expect(window.confirm).toHaveBeenCalledTimes(2);
-    expect(window.confirm.mock.calls[0][0]).toMatch(/Roll back to old@x\?/);
-    handleAccountState({ type: 'account-state', status: 'migrated', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z', retiredTo: '/h/.claude-new.retired-2026-09-27' });
-    expect(document.querySelector('.account-status').textContent).toBe('Switched to new@x on 2026-09-27 (was old@x). Folder retired as /h/.claude-new.retired-2026-09-27.');
-    expect(document.querySelector('.account-folder')).toBeNull();
-  });
-
-  it('armed: a cancelled disarm sends nothing; an unknown status shows as is; no panel is a no-op', () => {
-    handleAccountState({ type: 'account-state', status: 'armed', oldEmail: 'old@x', newEmail: 'new@x' });
-    window.confirm = vi.fn(() => false);
-    click('disarm');
-    expect(send).not.toHaveBeenCalled();
-    expect(window.confirm.mock.calls[0][0]).toMatch(/^Disarm\?/);
-    handleAccountState({ type: 'account-state', status: 'something new' });
-    expect(document.querySelector('.account-status').textContent).toBe('something new');
-    expect(labels()).toEqual([]);
-    document.body.innerHTML = '';
-    expect(() => renderAccount()).not.toThrow();
-  });
-
-  it("shows the last error on a ready line, and offers only Roll back while a switch hangs or a rollback failed", () => {
-    handleAccountState({ type: 'account-state', status: 'ready', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: '/h/.claude-new does not exist' });
-    expect(document.querySelector('.account-status').textContent).toMatch(/Nothing armed\. Last attempt: \/h\/.claude-new does not exist/);
-    handleAccountState({ type: 'account-state', status: 'switching', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', at: '2026-09-27T10:00:00Z' });
-    expect(document.querySelector('.account-status').textContent).toMatch(/started on 2026-09-27 and did not finish/);
-    expect(labels()).toEqual(['Roll back']);
-    handleAccountState({ type: 'account-state', status: 'rollback failed', folder: '/h/.claude-new', oldEmail: 'old@x', newEmail: 'new@x', error: 'boom' });
-    expect(document.querySelector('.account-status').textContent).toMatch(/so did the rollback: boom/);
-    expect(labels()).toEqual(['Check again', 'Roll back']);   // the way out once the store works again
-    click('rollback');
-    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'rollback' });
-  });
-
-  it('hides with user accounts on, or without Billion', () => {
-    handleAccountState({ type: 'account-state', status: 'ready' });
-    setSelf('u1', true);
-    renderAccount();
-    expect(document.getElementById('account-panel').hidden).toBe(true);
-    setSelf(null, false);
-    setBillionEnabled(false);
-    renderAccount();
-    expect(document.getElementById('account-panel').hidden).toBe(true);
+  it('offers recovery after an interrupted switch and hides when owner actions are unavailable', () => {
+    show({ pending: true, accounts: [] });
+    expect(document.querySelector('[data-action="rotation-discover"]')).toBeNull();
+    click('rotation-recover'); expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-recover' });
+    setSelf('u1', true); renderAccount(); expect(document.getElementById('account-panel').hidden).toBe(true);
+    setSelf(null, false); setBillionEnabled(false); renderAccount(); expect(document.getElementById('account-panel').hidden).toBe(true);
   });
 });

@@ -17,7 +17,7 @@
 
 import { readdirSync, statSync, openSync, readSync, closeSync, realpathSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { isCodexSessionId } from '../lib/jobs.js';
 
 function claudeHome() { return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'); }
@@ -203,4 +203,12 @@ export function newestTranscriptFile(agent, dir, { claude = claudeHome(), codex 
   if (agent === 'codex') return newestCodexTranscript(pathForms(dir), codex)?.path ?? null;
   const found = pathForms(dir).map(p => newestClaudeFile(p, claude)).filter(Boolean);
   return found.sort((a, b) => b.m - a.m)[0]?.path ?? null;
+}
+
+// Native Claude conversation id, used to resume the same conversation after
+// authentication changes. Never fall back to --continue during a rotation.
+export function claudeSessionIdFor(dir, homes) {
+  const file = newestTranscriptFile('claude', dir, homes);
+  const id = file && basename(file, '.jsonl');
+  return isCodexSessionId(id) ? id : null;
 }

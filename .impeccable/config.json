@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          "public/index.html"
+        ],
+        "createdAt": "2026-09-29T23:44:33.655Z",
+        "reason": "DESIGN.md Dark Theme explicitly sanctions text-dim #6b7280 for tertiary hints on these existing shell surfaces; no token changes in rotation. New rotation status/instructions use text-muted. Detector does not support individual contrast pair values."
+      },
+      {
+        "rule": "clipped-overflow-container",
+        "value": "*",
+        "files": [
+          "public/index.html"
+        ],
+        "createdAt": "2026-09-29T23:44:33.660Z",
+        "reason": "Existing full-height terminal application intentionally clips body; independently scrolling fixed Settings panel is bounded to viewport width and 70vh height. DESIGN.md Layout specifies panel scrolling and visual viewport sizing; no new positioned overlays introduced."
+      }
+    ]
+  }
+}

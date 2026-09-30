@@ -2287,3 +2287,14 @@ select.job-mode-danger {
   color: var(--text-dim);
   opacity: 0.8;
 }
+
+.rotation-accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 10px 0; }
+.rotation-account { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.rotation-toggle { display: flex; min-width: 0; overflow-wrap: anywhere; align-items: center; gap: 7px; margin: 8px 0; }
+.rotation-toggle input { flex: 0 0 auto; }
+.rotation-account .account-actions { margin-top: 0; }
+/* Availability and reset times are operational information, not placeholders. */
+.account-panel .settings-dim { color: var(--text-muted); }
+@media (max-width: 700px) {
+  .rotation-toggle { min-height: 44px; }
+}

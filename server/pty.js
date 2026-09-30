@@ -2,6 +2,9 @@
 
 import { spawn as spawnPty } from 'node-pty';
 import { homedir } from 'os';
+import { randomUUID } from 'crypto';
+import { rotationState } from './account-rotation.js';
+import { claudeSessionIdFor } from './agent-transcripts.js';
 import { basename } from 'path';
 import { writeSync } from 'fs';
 import { execFileSync } from 'child_process';
@@ -18,6 +21,9 @@ import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs
 import { trustDialogKey } from './billion.js';
 import { codexTrustArgs } from './claude-trust.js';
 import { dropApprovals } from './approvals.js';
+
+let claudeSpawnBlocked = false;
+export function blockClaudeSpawns(on) { claudeSpawnBlocked = on; }
 
 // Regex constants for output filtering (shared, not recreated per event)
 
@@ -159,14 +165,14 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     // already stops honouring the token the moment `exited` is set, so this is
     // about not leaving credentials lying in the filesystem, not about access.
     removeMcpConfig(sessionId);
-    dropMessages(sessionId);
+    if (!session.accountRotating) dropMessages(sessionId);
     if (session.isBillion) dropApprovals();
     updateState(session, broadcast);
     // A board worker gone frees its repo's slot.
-    if (session.jobId) requestDispatch();
+    if (session.jobId && !session.accountRotating) requestDispatch();
     // What it is as it ends, which a relink or a board retirement may have
     // changed since session-created: the client's finished-worker path reads it.
-    broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}`,
+    if (!session.accountRotating) broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}`,
       spawnedBy: session.spawnedBy, jobId: session.jobId });
   });
 
@@ -215,8 +221,11 @@ function answerTrustDialog(session, data, now) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, rotationRestart = false }, broadcast) {
   const { file, args } = parseCommand(command);
+  const isClaude = sessionAgentFromCommand(command) === 'claude';
+  if (isClaude && claudeSpawnBlocked && !rotationRestart) return { error: 'Claude accounts are switching; try again shortly.' };
+  if (isClaude && (rotationState().pending || rotationState().damaged)) return { error: 'Restore the interrupted Claude login in Settings before starting Claude.' };
   // ownCwd: a repo-less agent that still has a folder of its own (Billion).
   const cwd = worktreePath || ownCwd || homedir();
 
@@ -239,6 +248,14 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // Minted before the spawn so it can go into the MCP config the agent reads at
   // startup, and parked on the session below so resolveAgentToken can find its
   // way back from a request to the agent that made it.
+  let claudeSessionId = null;
+  if (isClaude) {
+    const selector = args.findIndex(a => ['--resume', '-r', '--session-id'].includes(a.split('=')[0]));
+    if (selector >= 0) claudeSessionId = args[selector].includes('=') ? args[selector].slice(args[selector].indexOf('=') + 1) : args[selector + 1];
+    else if (args.includes('--continue') || args.includes('-c')) claudeSessionId = claudeSessionIdFor(cwd);
+    else { claudeSessionId = randomUUID(); args.unshift('--session-id', claudeSessionId); }
+    if (args.includes('--fork-session')) claudeSessionId = null; // the CLI chooses a new id; do not resume the source
+  }
   const agentToken = mintAgentToken();
   // Only for a command that can actually read it. Writing one for every session
   // would put a live board credential on disk for terminals that have no way to
@@ -295,6 +312,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     name,
     color,
     command,
+    claudeSessionId,
     createdAt: Date.now(),
     pty: ptyProcess,
     ringBuffer: createRingBuffer(RING_BUFFER_MAX),

@@ -26,10 +26,10 @@ import {
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktree, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, deleteBranch } from './server/git.js';
-import { createSessionFromConfig, killSessionProcesses } from './server/pty.js';
+import { createSessionFromConfig, killSessionProcesses, blockClaudeSpawns } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
-import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans } from './server/jobs.js';
+import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
@@ -37,9 +37,12 @@ import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISS
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
-import { limitTick, cliReady } from './server/billion-limit.js';
+import { limitTick, cliReady, matchLimit, SETTLE_MS } from './server/billion-limit.js';
 import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate, checkSwitch, recheck as recheckAccount, BUSY_ERROR } from './server/account-migration.js';
-import { takeMessages, restoreMessages } from './server/messages.js';
+import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation } from './server/account-rotation.js';
+import { assertClaudeProcessesManaged } from './server/claude-processes.js';
+import { withClaudeSessionsStopped } from './server/claude-rotation-sessions.js';
+import { takeMessages, restoreMessages, dropMessages, screenTail } from './server/messages.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
@@ -145,8 +148,14 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
 }
 
 async function killSession(sessionId, { discardChanges = false } = {}) {
+  // Board retirement must complete after rotation, not report a silent success
+  // while the same worker is about to resume under its original session id.
+  if (sessions.get(sessionId)?.accountRotating && switching) {
+    try { await switching; } catch { /* Retirement still owns the stopped session. */ }
+  }
   const session = sessions.get(sessionId);
   if (!session) return;
+  if (session.rotationResume) { session.accountRotating = false; session.rotationResume = false; dropMessages(sessionId); }
   clearInterval(session.stateCheckInterval);
   clearTimeout(session.scanTimer);
   killSessionProcesses(session);
@@ -187,6 +196,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
 function startBillion({ handover = false, carried = null } = {}) {
   for (const [id, s] of sessions) {
     if (!s.isBillion) continue;
+    if (s.rotationResume) return { error: 'Retry the paused Claude conversations in Settings before starting Billion.' };
     if (!s.exited) return { session: s, existing: true };
     sessions.delete(id);   // a stopped one's tab goes; the new one replaces it
   }
@@ -317,7 +327,7 @@ async function switchBillion(to, reason) {
 // the old account's token back first. The state goes to browsers only where
 // the owner may act (user accounts off), as the actions themselves do.
 const RECHECK_MS = 40_000;
-const accountStatePayload = () => ({ type: 'account-state', ...accountState() });
+const accountStatePayload = () => ({ type: 'account-state', ...accountState(), rotation: { ...publicRotationState(), resumePending: [...sessions.values()].some(s => s.rotationResume) } });
 const announceAccount = () => { if (mayAnswerOwner()) broadcastToBrowsers(accountStatePayload()); };
 async function tellOwnerOrShow(text, level, { show = true } = {}) {
   // In the Billion tab either way; a toast too unless it reached the phone.
@@ -334,6 +344,80 @@ async function aroundBillion(fn) {
   });
   try { return await switching; } finally { switching = null; }
 }
+// Rotation restarts every managed Claude session in its own conversation.
+// Session ids and job links stay stable, including queued mail and UI tabs.
+async function aroundClaude(fn) {
+  if (switching) return { error: BILLION_SWITCHING, busy: true };
+  blockClaudeSpawns(true);
+  switching = assertClaudeProcessesManaged([...sessions.values()]).then(() => withClaudeSessionsStopped(async () => {
+    await assertClaudeProcessesManaged([...sessions.values()]);
+    return fn();
+  }, {
+    list: () => [...sessions.values()],
+    idFor: session => session.claudeSessionId,
+    stop: async session => {
+      if (session.exited && session.rotationResume) return takeMessages(session.id);
+      session.accountRotating = true;
+      const held = session.messagesHeld;
+      if (!session.rotationResume) session.rotationMessagesHeld = held;
+      session.messagesHeld = true;
+      try {
+        await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('A Claude process did not stop; account switching was cancelled.')), 7000);
+          session.pty.onExit(() => { clearTimeout(timeout); resolve(); });
+          killSessionProcesses(session);
+        });
+        // killSessionProcesses also terminates detached tool children after 3s.
+        await new Promise(resolve => setTimeout(resolve, 3100));
+        return takeMessages(session.id);
+      } catch (err) {
+        // A late exit must retain mail and remain eligible for an exact retry.
+        session.rotationResume = true;
+        throw err;
+      }
+    },
+    start: ({ session, command, carried }) => {
+      clearTimeout(session.scanTimer);
+      session.rotationResume = true;
+      // Keep mail recoverable even if spawning the replacement fails.
+      restoreMessages(session.id, carried);
+      const result = createSessionFromConfig({ ...session, sessionId: session.id, command, rotationRestart: true, autoTrust: session.answersTrust }, broadcast);
+      if (result.error) return result;
+      result.session.rotationResume = false;
+      result.session.accountRotating = false;
+      result.session.messagesHeld = !!session.rotationMessagesHeld;
+      result.session.lastWakeAt = session.lastWakeAt;
+      result.session.wakeAt = session.wakeAt;
+      sessions.set(session.id, result.session);
+      if (session.worktreePath) { saveActiveSession(result.session, broadcast); startTreeScanLoop(result.session, broadcast); }
+      broadcast(sessionPayload(result.session));
+      return result;
+    },
+    failed: (session, error) => tellOwnerOrShow(`${session.name} could not resume after the account switch: ${error}`, 'error'),
+  }));
+  try { return await switching; }
+  catch (err) { return { error: err.message, blocked: true, busy: !!err.busy }; }
+  finally { switching = null; blockClaudeSpawns(false); requestDispatch(); }
+}
+async function rotateClaude(options = {}) {
+  const result = await rotateAccount({ ...options, around: aroundClaude });
+  if (result.error === BUSY_ERROR || result.error === BILLION_SWITCHING) result.busy = true;
+  announceAccount();
+  if (result.ok && !result.unchanged) await tellOwnerOrShow(`Claude account switched from ${result.oldEmail} to ${result.newEmail}. Claude conversations resumed.`, 'info');
+  return result;
+}
+async function discoverRotationAccounts() {
+  const scan = await refreshAgentAccounts();
+  const folders = scan.agents.find(a => a.cli === 'claude')?.accounts.filter(a => a.loggedIn).map(a => a.folder) || [];
+  if (!folders.length) return { error: 'No logged-in Claude accounts were found.' };
+  const errors = [];
+  for (const folder of folders) {
+    const result = await addRotationAccount(folder);
+    if (result.error) errors.push(result.error);
+  }
+  return errors.length ? { error: errors[0] } : { ok: true };
+}
+
 // While Billion is out of the way for a swap, nobody starts another one under it.
 const startBillionUnlessSwitching = () => (switching ? { error: BILLION_SWITCHING } : startBillion());
 async function switchAccount(how, { fromBrowser = false } = {}) {
@@ -363,6 +447,12 @@ async function switchAccount(how, { fromBrowser = false } = {}) {
 }
 // Keys looked up with Object.hasOwn: a message naming a prototype key is not an action.
 const accountActions = {
+  'rotation-discover': () => discoverRotationAccounts(),
+  'rotation-add': msg => typeof msg.folder === 'string' ? addRotationAccount(msg.folder) : { error: 'Give a Claude config folder.' },
+  'rotation-configure': msg => configureRotation(msg),
+  'rotation-switch': msg => typeof msg.id === 'string' && /^[a-f0-9]{64}$/.test(msg.id) ? rotateClaude({ id: msg.id }) : { error: 'Select a saved Claude account.' },
+  'rotation-recover': () => recoverRotation(aroundClaude),
+  'rotation-resume': () => aroundClaude(async () => ({ ok: true })),
   setup: (msg) => setupAccount(msg.folder),
   arm: (msg) => armAccount(msg.on !== false),
   migrate: () => switchAccount('by the owner', { fromBrowser: true }),
@@ -386,12 +476,32 @@ async function accountAction(msg) {
 // The server's operating loop for Billion (server/billion-wake.js): sooner
 // while one of its cards is being worked, or just reached Review or finished CI.
 let wakeTimer = null;
+let accountLimitRunning = false;
+async function workerAccountLimitTick(now) {
+  if (accountLimitRunning || switching || !mayAnswerOwner() || !rotationState().enabled) return;
+  const session = [...sessions.values()].find(s => !s.exited && !s.isBillion && s.agent === 'claude'
+    && s.state !== 'WORKING' && now - (s.lastOutputAt || 0) >= SETTLE_MS
+    && !(s.rotationRetryAt > now) && matchLimit(screenTail(s.ringBuffer.getAll().join(''), 15))?.kind === 'hard');
+  if (!session) return;
+  accountLimitRunning = true;
+  try {
+    const hit = matchLimit(screenTail(session.ringBuffer.getAll().join(''), 15));
+    const result = await rotateClaude({ limited: !session.rotationMarked, line: hit.line, allowCurrent: !!session.rotationMarked });
+    if (result.busy) return;
+    session.rotationMarked = true;
+    if (result.exhausted || result.error) {
+      session.rotationRetryAt = Number.isFinite(result.retryAt) ? result.retryAt : now + 30 * 60_000;
+      if (!session.rotationNotified) { session.rotationNotified = true; await tellOwnerOrShow(result.error || 'Claude accounts are unavailable. Workers will retry after a usage reset.', 'info'); }
+    }
+  } finally { accountLimitRunning = false; }
+}
 function startBillionWakes() {
   clearInterval(wakeTimer);
   wakeTimer = setInterval(() => {
-    const session = liveBillion();
-    if (!session) return;
     const now = Date.now();
+    workerAccountLimitTick(now).catch(() => console.error('Claude worker account rotation failed.'));
+    const session = liveBillion();
+    if (!session || accountLimitRunning || switching) return;
     const busy = billionBusy(allJobs(), (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null),
       session.lastWakeAt || session.createdAt || 0, now);
     wakeTick(session, { now, busy });
@@ -407,8 +517,13 @@ function startBillionWakes() {
       tell: (text) => tellOwnerOrShow(text, 'info'),
       // Armed by the owner, and only while the owner may act (user accounts
       // off): the account switch comes before any move to Codex.
+      rotation: mayAnswerOwner() && rotationState().enabled ? {
+        run: (hit, { limited }) => rotateClaude({ limited, line: hit.line, allowCurrent: !limited }),
+        fallback: () => rotationState().fallback,
+        prepare: () => rotateClaude({ allowCurrent: true, preferCurrent: true }),
+      } : null,
       migration: {
-        armed: () => mayAnswerOwner() && accountArmed(),
+        armed: () => mayAnswerOwner() && !rotationState().accounts.length && !rotationState().damaged && accountArmed(),
         run: (hit) => switchAccount(`armed: Claude Code said "${hit.line}"`).finally(announceAccount),
       },
     }).catch(err => console.error('Billion: usage-limit check failed:', err.message));

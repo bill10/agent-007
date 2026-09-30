@@ -333,7 +333,7 @@ export async function switchBillion({ to, current, currentAgent, dir, writeHando
   if (!BILLION_AGENTS.includes(target)) return { error: `Billion runs on ${BILLION_AGENTS.join(' or ')}, not ${to}` };
   if (target === from && current && !current.exited) return { error: `Billion already runs on ${CLI_NAMES[target]}` };
   try { writeHandover(dir, { from, to: target }); } catch (err) {
-    console.error(`Billion: could not write the handover in ${dir}:`, err.message);
+    return { error: 'Could not write the conversation handover. Billion has not switched CLI.' };
   }
   saveAgent(target);
   const carried = current && !current.exited ? await stop(current) : null;

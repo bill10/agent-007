@@ -125,7 +125,7 @@ Any terminal agent runs in its web terminals. The job board and Billion work wit
 No. Each step of the list above works on its own: stop at web terminals, or at the job board, and post the cards yourself.
 
 ### What happens when I hit a usage limit?
-Cards on that model wait for the reset; nothing is switched behind your back. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex, or, if you armed it, move to another Claude account first (see [Moving to another Claude account](#moving-to-another-claude-account)).
+Cards on that model wait for the reset unless you enable Claude account rotation. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex, or rotate through selected Claude accounts first (see [Rotating Claude accounts](#rotating-claude-accounts)).
 
 ## Configuration
 
@@ -170,24 +170,45 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 > open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
 > Tailscale setup.
 
-### Moving to another Claude account
+### Rotating Claude accounts
 
-For a permanent move from one Claude subscription to another, without losing
-Claude Code's conversations, settings, plugins or trusted folders: log the new
-account in once in a folder of its own (`CLAUDE_CONFIG_DIR=~/.claude-new
-claude`, then `/login`), open the Settings gear in the terminal header, find
-**Claude account**, give that folder and press **Check folder**. Then either **Switch now**, or
-**Arm** it to switch the moment Claude Code tells Billion it has hit a usage
-limit (that is the trigger; nothing switches back when the limit lifts). The current login is backed up first (0600, under
-`~/.agent-007/account-backup/`), the switch is checked with `claude auth
-status` and a read-back of the token, and one that does not check out is rolled
-back by itself; **Roll back** does the same on request, backing up what it
-replaces first. Nothing happens until you press a button, and
-no board tool can press it (a same-user process could; see [docs/FEATURES.md](docs/FEATURES.md)). The new folder stays on disk as a fallback: do not
-start anything with `CLAUDE_CONFIG_DIR` pointing at it afterwards, and once you
-have checked the new login works, **Retire the new folder** renames it (never
-deletes). It is for a permanent move, not for rotating accounts past a usage
-limit. Details in [docs/FEATURES.md](docs/FEATURES.md).
+Open **Settings → Claude accounts → Find logged-in accounts**. Each account
+must have its own Claude Code login folder (for example, sign in with
+`CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`). You can also add a
+folder explicitly. **Automatic rotation turns on by default once two accounts
+are added.** Arrange their order and save any changes. An explicitly saved off
+setting stays off, including after a restart or another account discovery. **Switch now** selects an account manually.
+
+At a hard usage limit on Billion or a Claude worker, the app selects the next
+eligible account. It saves refreshed credentials, switches only authentication
+and account metadata, and restarts its Claude sessions on their exact
+conversations. The same Claude config directory keeps settings, skills,
+plugins, MCP configuration, trusted folders, and history. This affects all
+Claude sessions managed by the app because they share the default login.
+If any session's exact conversation ID is unknown or its startup flags cannot
+be preserved, the switch stops before any session is interrupted. Stop that
+session before trying again.
+
+Limited accounts become eligible after an explicit reset time or a 30-minute
+retry delay when the notice's reset time is ambiguous. If all accounts are
+unavailable, workers wait; Billion can hand over to Codex when **Fall back to
+Codex** is enabled and `BILLION_AUTO_SWITCH` is not `0`. CLI changes use
+`HANDOVER.md` for recent conversation and tool activity; Billion's existing
+Git folder already holds its state and pending work. Returning from Codex
+also selects an eligible Claude account and writes a handover.
+
+Credentials are saved locally under `~/.agent-007/account-logins/` with
+owner-only file permissions on macOS/Linux. Stop Claude processes outside
+this app before rotating; the app refuses to switch while it detects one.
+Avoid using a source login folder concurrently: its copied refresh token can
+become stale. Discovery does not overwrite a maintained login with that stale
+copy. An interrupted switch offers **Restore previous login**, which leaves
+automatic rotation off until you enable it again. If a conversation fails to
+restart, fix the reported startup problem, then choose **Settings → Claude
+accounts → Retry paused Claude conversations**. Queued messages are retained
+for that retry; it restarts the app's Claude sessions without changing the login.
+Nothing is retired or deleted. Rotation controls require Billion enabled and app user
+accounts disabled. Details in [FEATURES.md](docs/FEATURES.md).
 
 ### Multiplayer & login
 
@@ -262,7 +283,10 @@ server/
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message, withdraw_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
-  account-migration.js  The owner's Claude account switch (backup, Keychain or .credentials.json write, ~/.claude.json account block, check, rollback, retire; armed, it runs at Billion's first hard limit)
+  account-rotation.js   Persistent account pool, cooldowns, refreshed logins and recovery
+  account-migration.js  Platform credential stores, selective account writes and legacy rollback
+  claude-rotation-sessions.js  Resume exact conversations after a shared login switch
+  claude-processes.js  Detect Claude processes outside the app before a login switch
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
@@ -290,7 +314,7 @@ public/
     voice.js       Voice input (Web Speech API dictation into the terminal or the Billion tab's text box)
     auth.js        Login tokens, presence, HTML escaping
     settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Claude account)
-    account.js     The Claude account section of the Settings panel (Check folder, Switch now, Arm, Roll back, Retire the new folder)
+    account.js     Claude account rotation settings (discovery, inclusion, order, fallback, recovery)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)

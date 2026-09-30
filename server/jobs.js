@@ -1185,7 +1185,7 @@ export function updateSettings(fields, broadcast) {
 
 function liveSessionIds() {
   const live = new Set();
-  for (const [id, s] of sessions) if (!s.exited) live.add(id);
+  for (const [id, s] of sessions) if (!s.exited || s.accountRotating) live.add(id);
   return live;
 }
 

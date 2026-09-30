@@ -190,3 +190,65 @@ describe('cliReady', () => {
     expect(await cliReady('claude', { env: { PATH: '/nonexistent' } })).toBe(false);
   });
 });
+
+describe('persistent account rotation before CLI fallback', () => {
+  beforeEach(() => resetLimitWatch());
+  const rotation = over => ({ run: vi.fn(async () => ({ ok: true })), prepare: vi.fn(async () => ({ ok: true })), fallback: () => true, ...over });
+  it('keeps Codex running when CLI auto-switch is off even with account rotation enabled', async () => {
+    const r = rotation(), d = deps({ rotation: r, env: { BILLION_AUTO_SWITCH: '0' } });
+    const s = billion("You've hit your usage limit", { agent: 'codex' });
+    expect(await limitTick(s, d)).toBeNull();
+    expect(r.prepare).not.toHaveBeenCalled();
+    expect(r.run).not.toHaveBeenCalled();
+    expect(d.switchTo).not.toHaveBeenCalled();
+    expect(d.tell).not.toHaveBeenCalled();
+  });
+  it('rotates Claude accounts without a handover or the CLI switch cooldown', async () => {
+    const r = rotation(), d = deps({ rotation: r });
+    resetLimitWatch({ switchAt: T0 - 100 });
+    expect(await limitTick(billion(CLAUDE_OUT), d)).toBe('rotated');
+    expect(r.run).toHaveBeenCalledWith(expect.objectContaining({ kind: 'hard' }), { limited: true });
+    expect(d.switchTo).not.toHaveBeenCalled();
+    expect(await limitTick(billion(CLAUDE_OUT), d)).toBe('rotated');
+  });
+  it('hands over to Codex only after the Claude pool is exhausted', async () => {
+    const r = rotation({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
+    const d = deps({ rotation: r });
+    expect(await limitTick(billion(CLAUDE_OUT), d)).toBe('switched');
+    expect(d.switchTo).toHaveBeenCalledWith('codex', expect.any(String));
+  });
+  it('waits for the reset with fallback off, then retries without extending the old limit', async () => {
+    const r = rotation({ run: vi.fn().mockResolvedValueOnce({ exhausted: true, retryAt: T0 + 60_000 }).mockResolvedValue({ ok: true }), fallback: () => false });
+    const d = deps({ rotation: r }), s = billion(CLAUDE_OUT);
+    expect(await limitTick(s, d)).toBe('paused');
+    expect(await limitTick(s, { ...d, now: T0 + 1000 })).toBeNull();
+    expect(r.run).toHaveBeenCalledTimes(1);
+    expect(await limitTick(s, { ...d, now: T0 + 60_001 })).toBe('rotated');
+    expect(r.run).toHaveBeenLastCalledWith(expect.anything(), { limited: false });
+    expect(d.switchTo).not.toHaveBeenCalled();
+    expect(d.notify).toHaveBeenCalledTimes(1);
+  });
+  it('does not change CLI after a failed rollback and does not spin while another action is busy', async () => {
+    const r = rotation({ run: vi.fn().mockResolvedValueOnce({ busy: true }).mockResolvedValue({ error: 'Restore the previous login', blocked: true }) });
+    const d = deps({ rotation: r }), s = billion(CLAUDE_OUT);
+    expect(await limitTick(s, d)).toBeNull();
+    expect(s.rotationMarked).toBeUndefined();
+    expect(await limitTick(s, d)).toBe('paused');
+    expect(d.switchTo).not.toHaveBeenCalled();
+    expect(d.notify).toHaveBeenCalledWith(expect.stringContaining('Restore the previous login'));
+  });
+  it('selects an available Claude login before the Codex-to-Claude handover', async () => {
+    const order = [], r = rotation({ prepare: vi.fn(async () => { order.push('account'); return { ok: true }; }) });
+    const d = deps({ rotation: r, switchTo: vi.fn(async () => { order.push('handover'); return { session: {} }; }) });
+    expect(await limitTick(billion("You've hit your usage limit", { agent: 'codex' }), d)).toBe('switched');
+    expect(order).toEqual(['account', 'handover']);
+  });
+  it('retries an exhausted Claude pool later while Codex waits, without repeated notifications', async () => {
+    const r = rotation({ prepare: vi.fn().mockResolvedValueOnce({ exhausted: true, retryAt: T0 + 1000 }).mockResolvedValue({ ok: true }) });
+    const d = deps({ rotation: r }), s = billion("You've hit your usage limit", { agent: 'codex' });
+    expect(await limitTick(s, d)).toBe('paused');
+    expect(await limitTick(s, { ...d, now: T0 + 500 })).toBeNull();
+    expect(await limitTick(s, { ...d, now: T0 + 1001 })).toBe('switched');
+    expect(d.notify).toHaveBeenCalledTimes(1);
+  });
+});
