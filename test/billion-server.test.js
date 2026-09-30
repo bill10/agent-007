@@ -287,6 +287,16 @@ describe('connecting Telegram over the socket', () => {
       owner.ws.send(JSON.stringify({ type: 'telegram-use', chatId: '555' }));
       expect(await waitFor(owner.seen, m => m.type === 'telegram-state' && m.connected)).toMatchObject({ connectedTo: 'Ann', offers: [] });
       expect(savedChatId()).toBe('555');
+
+      const from = (seen) => { const at = seen.length; return (pred) => waitFor(seen, m => seen.indexOf(m) >= at && pred(m)); };
+      const plainNext = from(plain.seen);
+      plain.ws.send(JSON.stringify({ type: 'telegram-forget' }));
+      expect((await plainNext(m => m.type === 'notification')).message).toMatch(/browser only/);
+      expect(savedChatId()).toBe('555');
+      const ownerNext = from(owner.seen);
+      owner.ws.send(JSON.stringify({ type: 'telegram-forget' }));
+      expect(await ownerNext(m => m.type === 'telegram-state')).toMatchObject({ connected: false });
+      expect(savedChatId()).toBe('');
       expect(plain.seen.filter(m => m.type === 'telegram-state')).toEqual([]);
     } finally {
       console.log = quiet;

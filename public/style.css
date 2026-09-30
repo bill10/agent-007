@@ -684,6 +684,9 @@ body {
 
 /* The owner's Claude account switch, a section of the Settings panel */
 .account-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
+.telegram-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.telegram-settings[hidden] { display: none; }
+.settings-telegram { line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
 .account-intro { margin-bottom: 8px; line-height: 1.4; }
 .account-body { display: flex; flex-direction: column; gap: 8px; }
 .account-status { line-height: 1.4; overflow-wrap: anywhere; }

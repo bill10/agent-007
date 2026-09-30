@@ -714,7 +714,10 @@ Every chat that messages the bot is offered, one by one (up to 20 a run), and
 none is ever picked for you, so a stranger who finds the bot is just an offer
 to *Dismiss*. Only the owner's browser sees the offers and can accept one: with
 user accounts on, nobody can. The chat picked is kept in
-`~/.agent-007/telegram-chat.json`; delete that file to pick another chat. `TELEGRAM_CHAT_ID` in the environment or `.env`
+`~/.agent-007/telegram-chat.json`. The Settings gear's *Telegram* line names the
+connected chat; its **Change** forgets it, and the next chat to message the bot
+is offered again (with nothing connected, the line gives the two steps above).
+The offers are server state, so they stay through a reload until you act on them. `TELEGRAM_CHAT_ID` in the environment or `.env`
 still works and wins over it; with neither, the server log also shows each
 chat's id, for a server with no browser.
 

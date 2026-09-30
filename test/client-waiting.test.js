@@ -714,3 +714,25 @@ describe('Telegram in the Billion tab', () => {
     expect(bar.textContent).toBe('Telegram connected: Team');
   });
 });
+
+describe('Telegram in Settings', async () => {
+  const { renderTelegramSettings } = await import('../public/modules/settings.js');
+  beforeEach(() => { document.body.innerHTML = '<div id="telegram-settings" hidden></div>'; });
+  const box = () => document.getElementById('telegram-settings');
+
+  it('names the connected chat, and Change forgets it', () => {
+    renderTelegramSettings({ on: true, connected: true, chat: { chatId: '-5', name: 'Team', fromEnv: false } });
+    expect(box().hidden).toBe(false);
+    expect(box().querySelector('.settings-telegram').textContent).toBe('Connected to Team (chat -5).');
+    [...box().querySelectorAll('button')].find(b => b.textContent === 'Change').click();
+    expect(send).toHaveBeenCalledWith({ type: 'telegram-forget' });
+  });
+
+  it('has no Change for a chat set by TELEGRAM_CHAT_ID, and gives the steps when none is connected', () => {
+    renderTelegramSettings({ on: true, connected: true, chat: { chatId: '42', name: '', fromEnv: true } });
+    expect(box().textContent).toContain('Connected to chat 42, set by TELEGRAM_CHAT_ID.');
+    expect(box().querySelector('button')).toBeNull();
+    renderTelegramSettings({ on: true, connected: false, offers: [] });
+    expect(box().textContent).toContain('Press "Use this chat" in the Billion tab');
+  });
+});

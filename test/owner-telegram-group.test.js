@@ -7,7 +7,7 @@ import { rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
   handleUpdate, notifyOwner, waitingItems, chatMessages, cleanName, senderName, telegramSettings,
-  telegramPayload, useTelegramChat, dismissTelegramChat, savedChatId, _resetTelegramChats, NOTIFY_WINDOW_MS, MAX_NAME_CHARS,
+  telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat, savedChatId, _resetTelegramChats, NOTIFY_WINDOW_MS, MAX_NAME_CHARS,
 } from '../server/owner.js';
 import { dropMessages } from '../server/messages.js';
 import { sessions, CONFIG_DIR } from '../server/state.js';
@@ -175,6 +175,25 @@ describe('connecting a chat from the browser', () => {
     await useTelegramChat('777', { env: NOCHAT });
     expect(telegramSettings({ ...NOCHAT, TELEGRAM_CHAT_ID: '42' }).chatId).toBe('42');
     expect((await useTelegramChat('777', { env: { ...NOCHAT, TELEGRAM_CHAT_ID: '42' } })).error).toMatch(/set in the environment/);
+    vi.restoreAllMocks();
+  });
+
+  it('"Change" forgets the chat, and the next message, even from a chat seen before, is offered again', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const broadcast = vi.fn();
+    await handleUpdate(text({ id: 777, type: 'private' }, ALICE, 'hi'), { env: NOCHAT });
+    await useTelegramChat('777', { env: NOCHAT });
+    expect(telegramPayload(NOCHAT).chat).toEqual({ chatId: '777', name: 'Alice Liddell', fromEnv: false });
+    expect(forgetTelegramChat({ env: NOCHAT, broadcast })).toEqual({ ok: true });
+    expect(savedChatId()).toBe('');
+    expect(broadcast.mock.calls.at(-1)[0]).toMatchObject({ connected: false, offers: [] });
+    expect(broadcast.mock.calls.at(-1)[0]).not.toHaveProperty('chat');
+    expect(await handleUpdate(text({ id: 777, type: 'private' }, ALICE, 'back'), { env: NOCHAT, broadcast })).toBe('discovery');
+    expect(telegramPayload(NOCHAT).offers).toEqual([{ chatId: '777', name: 'Alice Liddell' }]);
+    // A chat set in the environment is changed there, not here.
+    const env = { ...NOCHAT, TELEGRAM_CHAT_ID: '42' };
+    expect(telegramPayload(env).chat).toEqual({ chatId: '42', name: '', fromEnv: true });
+    expect(forgetTelegramChat({ env }).error).toMatch(/set in the environment/);
     vi.restoreAllMocks();
   });
 });

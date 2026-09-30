@@ -169,7 +169,7 @@ function renderTelegram() {
     const use = el('button', 'chat-notice-btn', 'Use this chat');
     use.type = 'button';
     use.onclick = () => send({ type: 'telegram-use', chatId: offer.chatId });
-    const no = el('button', 'waiting-dismiss', 'Dismiss');
+    const no = el('button', 'chat-link', 'Dismiss');
     no.type = 'button';
     no.setAttribute('aria-label', `Dismiss the Telegram chat ${offer.name}`);
     no.onclick = () => send({ type: 'telegram-dismiss', chatId: offer.chatId });

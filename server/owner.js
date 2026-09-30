@@ -52,9 +52,8 @@ export function telegramSettings(env = process.env) {
 
 const tgChatPath = () => join(CONFIG_DIR, 'telegram-chat.json');
 
-export function savedChatId() {
-  try { return String(JSON.parse(readFileSync(tgChatPath(), 'utf8')).chatId ?? '').trim(); } catch { return ''; }
-}
+const savedChat = () => { try { return JSON.parse(readFileSync(tgChatPath(), 'utf8')) || {}; } catch { return {}; } };
+export const savedChatId = () => String(savedChat().chatId ?? '').trim();
 
 // Who spoke, in a group chat: every member counts as the owner, and this says
 // which one. '' in a private chat, so nothing changes there. It lands in
@@ -680,10 +679,13 @@ let connectedNow = '';      // the chat just picked, for "Telegram connected"
 
 const chatName = (msg) => cleanName(msg.chat.title) || personName(msg.from) || 'an unnamed chat';
 
+// chat: the connected one, for the Settings panel; fromEnv when TELEGRAM_CHAT_ID set it.
 export const telegramPayload = (env = process.env) => {
   const { token, chatId } = telegramSettings(env);
+  const fromEnv = !!(env.TELEGRAM_CHAT_ID || '').trim();
   return {
     type: 'telegram-state', on: !!token, connected: !!chatId,
+    ...(chatId ? { chat: { chatId, name: fromEnv ? '' : cleanName(savedChat().name), fromEnv } } : {}),
     ...(connectedNow && chatId ? { connectedTo: connectedNow } : {}),
     offers: chatId ? [] : [...offers.values()],
   };
@@ -718,6 +720,19 @@ export async function useTelegramChat(chatId, { broadcast, env = process.env } =
   broadcast?.(telegramPayload(env));
   const said = await sendTelegram('Connected to Agent 007.', { env });
   if (said.error) console.error('Telegram: could not say hello in the new chat:', said.error);
+  return { ok: true };
+}
+
+// "Change" in Settings: forget the picked chat, so the next message to the bot
+// is offered again (every chat, even one seen before). { ok } or { error }.
+export function forgetTelegramChat({ broadcast, env = process.env } = {}) {
+  if ((env.TELEGRAM_CHAT_ID || '').trim()) return { error: 'TELEGRAM_CHAT_ID is set in the environment; remove it from .env and restart to change the chat.' };
+  try { rmSync(tgChatPath(), { force: true }); } catch (err) { return { error: `Could not forget the chat: ${err.message}` }; }
+  seenChats.clear();
+  offers.clear();
+  connectedNow = '';
+  console.log('  Telegram: chat forgotten in the browser; the next chat to message the bot is offered');
+  broadcast?.(telegramPayload(env));
   return { ok: true };
 }
 

@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
@@ -542,14 +542,17 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
           break;
         }
-        // "Use this chat" on a Telegram chat offer, and its dismiss: the owner's
+        // "Use this chat" on a Telegram chat offer, its dismiss, and Settings'
+        // "Change" that forgets the chat: the owner's
         // browser only, like chat-send, since the chat picked is who talks to Billion.
         case 'telegram-use':
-        case 'telegram-dismiss': {
-          if (typeof msg.chatId !== 'string') break;
+        case 'telegram-dismiss':
+        case 'telegram-forget': {
+          if (msg.type !== 'telegram-forget' && typeof msg.chatId !== 'string') break;
           const result = !mayAnswerOwner() ? { error: 'Only the owner connects Telegram, and with user accounts on nobody does.' }
             : !ws.fromBrowser ? { error: 'Telegram is connected from the browser only.' }
             : msg.type === 'telegram-use' ? await useTelegramChat(msg.chatId, { broadcast })
+            : msg.type === 'telegram-forget' ? forgetTelegramChat({ broadcast })
             : (dismissTelegramChat(msg.chatId, { broadcast }), {});
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;

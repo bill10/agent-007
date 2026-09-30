@@ -19,7 +19,7 @@ import {
   handleRepoError as explorerHandleRepoError,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
-import { setupSettings } from './modules/settings.js';
+import { setupSettings, renderTelegramSettings } from './modules/settings.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
@@ -586,6 +586,7 @@ function handleTelegramState(msg) {
   }
   telegramOffers = (msg.offers || []).length;
   setTelegramState(msg);
+  renderTelegramSettings(msg);
 }
 
 function handleRepoError(msg) {
