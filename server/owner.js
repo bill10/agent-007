@@ -447,12 +447,13 @@ export function questionProject(project, text, repos = config.repos.map(r => bas
 export const QUESTION_TYPES = ['engineering', 'marketing', 'outreach', 'finance', 'product', 'admin', 'other'];
 
 // Read off the text when Billion names no type; the first rule that matches
-// wins, so outreach (a reply to a post) beats marketing.
+// wins, so outreach (a reply to a post) beats marketing. X the platform is
+// capitalised; a lowercase x is a variable or a times sign.
 const TYPE_RULES = [
   ['finance', /\$|\b(money|prices?|priced|pricing|plans?|subscriptions?|renew(s|ed|al|als)?|pay(s|ing|ment|ments)?|paid)\b/i],
   ['engineering', /\b(PRs?|CI|merge[sd]?|merging|deploy(s|ed|ing|ment)?|bugs?|tests?|testing|releases?|released)\b/i],
   ['outreach', /\b(repl(y|ies|ied)|responded|linkedin|email from|DMs?|DM'd|outreach|inbound)\b/i],
-  ['marketing', /\b(posts?|posted|posting|reddit|HN|newsletters?|tweets?|tweeted|changelog|launch(es|ed|ing)?)\b|\bX\b/i],
+  ['marketing', /\b(posts?|posted|posting|reddit|HN|newsletters?|tweets?|tweeted|changelog|launch(es|ed|ing)?)\b/i, /\bX\b/],
   ['admin', /\b(log ?in|logins?|tokens?|accounts?|access|credentials?|set ?up|install(s|ed|ing)?)\b/i],
   ['product', /\b(features?|design(s|ed|ing)?|UX|roadmap|direction)\b/i],
 ];
@@ -464,7 +465,7 @@ export function questionType(type, text) {
     const given = String(type).trim().toLowerCase();
     return QUESTION_TYPES.includes(given) ? given : 'other';
   }
-  return TYPE_RULES.find(([, rule]) => rule.test(String(text ?? '')))?.[0] || 'other';
+  return TYPE_RULES.find(([, ...rules]) => rules.some(rule => rule.test(String(text ?? ''))))?.[0] || 'other';
 }
 
 export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal', project, type, env = process.env } = {}) {

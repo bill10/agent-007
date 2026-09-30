@@ -388,7 +388,7 @@ export const NOTIFY_OWNER_TOOL = {
     + 'one you recommend: the owner answers with one tap. Their answer arrives in '
     + 'this terminal as "[Owner via app] Q3: <answer>" or "[Owner via Telegram] Q3: '
     + '<answer>". Pass project, the repo it is about, so the owner sees it under that project. '
-    + 'Pass type, what kind of question it is (engineering, marketing, outreach, finance, product, admin or other), so the owner can group by it. At most a few per minute.',
+    + `Pass type, what kind of question it is (${QUESTION_TYPES.join(', ')}), so the owner can group by it. At most a few per minute.`,
   inputSchema: {
     type: 'object',
     properties: {

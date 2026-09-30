@@ -821,8 +821,7 @@ const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
   set(key, value) { try { localStorage.setItem(key, value); } catch {} },
 };
-let panelOpen = store.get(PANEL_KEY) === '1';
-let groupBy = store.get(BY_KEY) === 'type' ? 'type' : 'project';
+let panelOpen, groupBy;
 let hint = false;
 const PHONE = '(max-width: 700px)';
 
@@ -841,17 +840,20 @@ export function questionGroups(items = waitingItems, by = groupBy) {
   return [...groups].map(([name, list]) => ({ name, items: list }));
 }
 
+const asGrouping = (by) => (by === 'type' ? 'type' : 'project');
+
 export function setGroupBy(by) {
-  groupBy = by === 'type' ? 'type' : 'project';
+  groupBy = asGrouping(by);
   store.set(BY_KEY, groupBy);
   renderWaiting();
 }
 
-// What a page refresh reads back from this browser; a test stands in for one with it.
+// What a page load reads back from this browser; a test calls it to stand in for a refresh.
 export function _reloadQuestionPrefs() {
   panelOpen = store.get(PANEL_KEY) === '1';
-  groupBy = store.get(BY_KEY) === 'type' ? 'type' : 'project';
+  groupBy = asGrouping(store.get(BY_KEY));
 }
+_reloadQuestionPrefs();
 
 export function setQuestionsOpen(open, { focus = true } = {}) {
   panelOpen = open;

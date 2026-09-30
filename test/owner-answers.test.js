@@ -4,7 +4,7 @@
 // nothing here talks to Telegram.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, rmSync, readFileSync } from 'fs';
+import { writeFileSync, rmSync, readFileSync, chmodSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, handleUpdate, waitingItems, waitingPayload, dismissWaiting, answerWaiting, checkChoices,
@@ -414,6 +414,8 @@ describe('type', () => {
     expect(questionType(' Finance ', 'x')).toBe('finance');
     expect(questionType('legal', 'Merge the PR?')).toBe('other');
     expect(questionType(7, 'x')).toBe('other');
+    // Empty is none: read off the text.
+    expect(questionType('', 'Merge the PR?')).toBe('engineering');
   });
 
   it('is read off the text when not given, the first rule that matches winning', () => {
@@ -431,6 +433,8 @@ describe('type', () => {
     expect(questionType(undefined, 'Someone replied to our Reddit post: answer?')).toBe('outreach');
     // First match wins: money before a PR.
     expect(questionType(null, 'Merge the PR that changes the price?')).toBe('finance');
+    // X the platform, not a lowercase x.
+    for (const text of ['Option x or y?', 'Retry 5 x 2?']) expect([text, questionType(undefined, text)]).toEqual([text, 'other']);
     // Words, not parts of words.
     expect(questionType(undefined, 'Is the postgres move fine?')).toBe('other');
   });
@@ -453,5 +457,21 @@ describe('type', () => {
     writeFileSync(file, JSON.stringify([{ id: 'old', n: 1, text: 'Renew the domain?', at: '2026-01-01T00:00:00Z', status: 'open' }]));
     expect(waitingItems()[0].type).toBe('finance');
     expect(JSON.parse(readFileSync(file, 'utf8'))[0].type).toBe('finance');
+
+    // A stored type stands; the file is rewritten only while one lacks it.
+    writeFileSync(file, JSON.stringify([
+      { id: 'a', n: 1, text: 'Renew the domain?', at: '2026-01-01T00:00:00Z', status: 'open', type: 'admin' },
+      { id: 'b', n: 2, text: 'Merge the PR?', at: '2026-01-01T00:00:00Z', status: 'open' },
+    ]));
+    expect(waitingItems().map(i => i.type)).toEqual(['admin', 'engineering']);
+    expect(JSON.parse(readFileSync(file, 'utf8')).map(i => i.type)).toEqual(['admin', 'engineering']);
+    const typed = JSON.stringify([{ id: 'c', text: 'Renew the domain?', type: 'admin' }]);
+    writeFileSync(file, typed);
+    expect(waitingItems()[0]).toMatchObject({ type: 'admin', n: 1, status: 'open' });
+    expect(readFileSync(file, 'utf8')).toBe(typed);   // all typed: read, not rewritten
+    // A save that fails still reads, typed.
+    writeFileSync(file, JSON.stringify([{ id: 'd', text: 'Merge the PR?' }]));
+    chmodSync(CONFIG_DIR, 0o555);
+    try { expect(waitingItems()[0].type).toBe('engineering'); } finally { chmodSync(CONFIG_DIR, 0o755); }
   });
 });

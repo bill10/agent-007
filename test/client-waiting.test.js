@@ -804,6 +804,8 @@ describe('the Open questions panel', () => {
     panel().querySelectorAll('.chat-questions-by button')[1].click();
     expect(by()).toEqual([['by project', 'false'], ['by type', 'true']]);
     expect(localStorage.getItem('agent007-questions-by')).toBe('type');
+    // The strip's label names the grouping.
+    expect(document.getElementById('chat-strip').getAttribute('aria-label')).toBe('6 open questions: hide them by type');
     expand();
     // The same rows, regrouped; a question with no type is "other".
     expect(sections()).toEqual([
@@ -817,6 +819,11 @@ describe('the Open questions panel', () => {
     expect(by()[1][1]).toBe('true');
     expect(questionGroups().map(g => g.name)).toEqual(['engineering', 'other', 'outreach', 'finance']);
     expect(questionGroups(undefined, 'project').map(g => g.name)).toEqual(['agent-007', 'general', 'finnamon']);
+    // Anything else stored reads as by project.
+    localStorage.setItem('agent007-questions-by', 'bogus');
+    _reloadQuestionPrefs();
+    renderWaiting();
+    expect(by()[0][1]).toBe('true');
   });
 
   it('starts every section closed, with its count and a "!" when a blocking question is inside; a tap opens it, kept across a reload', () => {
@@ -826,6 +833,9 @@ describe('the Open questions panel', () => {
     expect(panel().querySelectorAll('.chat-questions-row')).toHaveLength(0);
     const urgent = (name) => !!header(name).querySelector('.chat-questions-urgent');
     expect([urgent('agent-007'), urgent('general'), urgent('finnamon')]).toEqual([true, false, false]);
+    // The "!" is hidden from screen readers; the count says it.
+    const countLabel = (name) => header(name).querySelector('.chat-questions-count').getAttribute('aria-label');
+    expect([countLabel('agent-007'), countLabel('finnamon')]).toEqual(['2 open, blocking', '3 open']);
     expect(header('agent-007').tagName).toBe('BUTTON');
     expect(header('agent-007').getAttribute('aria-expanded')).toBe('false');
     header('finnamon').click();

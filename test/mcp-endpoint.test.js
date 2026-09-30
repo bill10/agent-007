@@ -729,3 +729,12 @@ describe('messaging another agent through the tools', () => {
     expect(theirs.pty.write).not.toHaveBeenCalled();
   });
 });
+
+describe('notify_owner through the route', () => {
+  it('files Billion\'s question with the project and type it named', async () => {
+    const { waitingItems } = await import('../server/owner.js');
+    sessions.get('session-1').isBillion = true;
+    await callNamed('notify_owner', { text: 'Ship it?', project: 'general', type: 'product' });
+    expect(waitingItems().at(-1)).toMatchObject({ text: 'Ship it?', project: 'general', type: 'product' });
+  });
+});
