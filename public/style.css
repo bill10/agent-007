@@ -1253,8 +1253,8 @@ body {
   }
   .mobile-nav button:hover, .mobile-nav button[aria-current="true"] { color: var(--accent); }
   .mobile-nav-waiting { display: inline-flex; align-items: center; justify-content: center; gap: 12px; }
-  .waiting-choice, .waiting-send { min-height: 44px; }
-  #chat-input { min-height: 44px; font-size: 16px; }
+  .waiting-choice { min-height: 44px; }
+  #chat-input { font-size: 16px; }
   .chat-bubble { max-width: 88%; }
   /* Overlays sized for desktop */
   .spawn-form-inner, .dir-browser-inner { width: auto; max-width: 100%; }
@@ -1544,7 +1544,8 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 }
 .chat-target[hidden] { display: none; }
 .chat-target-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
-.chat-target-x { padding: 0 6px; font: inherit; font-size: 14px; color: var(--text-dim); background: none; border: none; cursor: pointer; }
+/* A real target, though the bar's line stays one text line tall. */
+.chat-target-x { min-width: var(--chat-control-h); min-height: 32px; margin-block: -8px; padding: 0 6px; font: inherit; font-size: 14px; color: var(--text-dim); background: none; border: none; cursor: pointer; }
 .chat-target-x:hover { color: var(--text); }
 /* Why Billion cannot talk yet, and the button past it (waiting.js renderNotice). */
 .chat-notice {
@@ -1563,12 +1564,19 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 .chat-notice[hidden] { display: none; }
 .chat-notice-text { flex: 1 1 240px; min-width: 0; }
 .chat-notice-btn { padding: 6px 14px; font: inherit; font-size: 11px; color: var(--accent-contrast); background: var(--accent); border: none; border-radius: 3px; cursor: pointer; }
-.chat-compose-row { display: flex; gap: 6px; align-items: flex-end; }
+/* One control height and one gap for the Billion tab's two control rows
+   (the text box, mic and Send; the read-aloud header). 40px is the tab's
+   hit area on desktop, 44px the phone touch target. The row is bottom-
+   aligned, so a growing text box leaves mic and Send by its last line. */
+:root { --chat-control-h: 40px; --chat-gap: 6px; }
+@media (max-width: 700px) { :root { --chat-control-h: 44px; } }
+.chat-control { min-height: var(--chat-control-h); }
+.chat-compose-row { display: flex; gap: var(--chat-gap); align-items: flex-end; }
 #chat-input {
   flex: 1;
   min-width: 0;
   resize: none;
-  padding: 6px 8px;
+  padding: 10px 8px;
   font-size: 12px;
   line-height: 1.4;
   font-family: inherit;
@@ -1579,6 +1587,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 }
 #chat-input:focus { outline: none; border-color: var(--accent); }
 .waiting-send {
+  min-width: calc(7ch + 28px); /* "Sending" fits, so the box does not shift */
   padding: 6px 14px;
   font-size: 11px;
   font-family: inherit;
@@ -1595,9 +1604,9 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 .chat-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--chat-gap);
   flex-wrap: wrap;
-  padding: 2px 12px;
+  padding: 4px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-dark);
   flex-shrink: 0;
@@ -1606,7 +1615,6 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 40px;
   padding: 0 8px;
   font: inherit;
   font-size: 11px;
@@ -1649,7 +1657,6 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 .chat-voice-pick {
   margin-left: auto;
   max-width: 220px;
-  min-height: 32px;
   font: inherit;
   font-size: 11px;
   color: var(--text-muted);
@@ -1679,9 +1686,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  min-height: 40px;
-  align-self: stretch;
+  width: var(--chat-control-h);
   padding: 0;
   color: var(--text-muted);
   background: var(--bg-panel);
@@ -1713,12 +1718,13 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   .chat-mic.listening, .chat-voice .voice-indicator-dot { animation: none; }
 }
 @media (max-width: 700px) {
-  .chat-mic { width: 44px; min-height: 44px; }
-  .chat-autoread, .chat-resume, .chat-stop-reading { min-height: 44px; padding: 0 6px; }
+  .chat-autoread, .chat-resume, .chat-stop-reading { padding: 0 6px; }
+  /* Beside the 16px inputs iOS needs, 11px labels looked lost. */
+  .waiting-send, .chat-autoread, .chat-resume, .chat-stop-reading { font-size: 13px; }
   /* Wraps, so the voice picker drops to its own line rather than clipping
      its name ("Voice: auto (A"). */
-  .chat-head { padding: 0 6px; }
-  .chat-voice-pick { min-width: 0; max-width: 100%; }
+  .chat-head { padding: 4px 6px; }
+  .chat-voice-pick { flex: 0 1 auto; min-width: 0; max-width: 100%; margin: 0 0 var(--chat-gap) auto; }
 }
 
 /* An agent the board created, not you. Subtle — it is still an ordinary agent

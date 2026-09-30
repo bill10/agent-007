@@ -518,6 +518,20 @@ describe('read aloud and dictation in the tab', () => {
     stopReading();
   });
 
+  it('the box, mic and Send, and the header controls, share one control height token', () => {
+    for (const id of ['chat-input', 'chat-mic', 'chat-send', 'chat-autoread', 'chat-resume', 'chat-stop-reading', 'chat-voice-pick']) {
+      expect(document.getElementById(id).classList.contains('chat-control'), id).toBe(true);
+    }
+    const css = readFileSync('public/style.css', 'utf8');
+    expect(css).toMatch(/\.chat-control \{ min-height: var\(--chat-control-h\); \}/);
+    expect(css).toMatch(/\.chat-mic \{[^}]*width: var\(--chat-control-h\);/);
+    // No per-control height left to drift from the token.
+    for (const sel of ['.chat-mic', '#chat-input', '.waiting-send', '.chat-voice-pick']) {
+      const block = css.match(new RegExp(`\\n${sel.replace('.', '\\.')} \\{([^}]*)\\}`))[1];
+      expect(block, sel).not.toMatch(/(^|\s)(min-)?height:/);
+    }
+  });
+
   it('the mic beside the box dictates into it: interim greyed, final appended, nothing sent', async () => {
     const mic = document.getElementById('chat-mic');
     expect(mic.getAttribute('aria-label')).toBe('Dictate a reply');
