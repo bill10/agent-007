@@ -235,7 +235,9 @@ website, launching, emailing people are your call.
 
 **Every question to the owner goes through `notify_owner`.** Anything you
 need the owner to answer, on the list above or not, mid-conversation or not,
-is a `notify_owner` call, with `choices` and `recommended` when it's a pick.
+is a `notify_owner` call, with `choices` and `recommended` when it's a pick,
+and `project` (the repo's folder name, or "general") so the owner sees it
+under that project.
 Saying it only in your terminal doesn't count as asking: it never reaches the
 owner's *Billion* tab or their phone. `tell_owner` is for statements that need
 no answer. When the owner answers a question somewhere other than the tab or

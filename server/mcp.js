@@ -387,7 +387,7 @@ export const NOTIFY_OWNER_TOOL = {
     + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the '
     + 'one you recommend: the owner answers with one tap. Their answer arrives in '
     + 'this terminal as "[Owner via app] Q3: <answer>" or "[Owner via Telegram] Q3: '
-    + '<answer>". At most a few per minute.',
+    + '<answer>". Pass project, the repo it is about, so the owner sees it under that project. At most a few per minute.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -402,6 +402,10 @@ export const NOTIFY_OWNER_TOOL = {
         type: 'string', enum: ['blocking', 'normal', 'low'],
         description: 'blocking: a worker or a merge is stopped until the owner answers. '
           + 'normal (the default): a decision you work around meanwhile. low: optional.',
+      },
+      project: {
+        type: 'string', maxLength: 200,
+        description: 'Pass the repo the question is about, by its folder name on the board (e.g. "agent-007"), or "general"; the owner\'s tab groups questions by it.',
       },
     },
     required: ['text'],
@@ -765,7 +769,7 @@ const CALLS = {
 
   [NOTIFY_OWNER_TOOL.name]: async (args, ctx) => {
     const result = ctx.notifyOwner
-      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency })
+      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency, project: args.project })
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
     return toolText(`Put in the owner's Billion tab as Q${result.n} and sent on Telegram. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);

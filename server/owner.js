@@ -10,9 +10,9 @@
 // sent to a browser: every error that leaves this module goes through redact().
 
 import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from 'fs';
-import { join, resolve, sep } from 'path';
+import { join, resolve, sep, basename } from 'path';
 import { randomUUID } from 'crypto';
-import { CONFIG_DIR } from './state.js';
+import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
 import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
@@ -245,9 +245,10 @@ async function transcribeNote(note, env) {
 // --- The "Waiting on you" list, in the config dir so it survives restarts ---
 //
 // An item: { id, n, text, at, choices?, recommended?, status, answer?,
-// answeredAt?, answeredVia?, answeredBy?, tgMessageId?, tgVoice?, urgency }. answeredBy
+// answeredAt?, answeredVia?, answeredBy?, tgMessageId?, tgVoice?, urgency, project }. answeredBy
 // is the group member who answered on Telegram (senderName). urgency is
-// blocking, normal or low; items written before it read as normal. answeredVia is app,
+// blocking, normal or low; items written before it read as normal. project is
+// a board repo's folder name or "general", which older items read as. answeredVia is app,
 // telegram or terminal (resolve_question). n is the short number the owner sees (Q3). status is open, answered or dismissed. Items written
 // before v0.10 have neither n nor status: they read as open, numbered in order.
 
@@ -257,7 +258,7 @@ export function waitingItems() {
   let items;
   try { items = JSON.parse(readFileSync(waitingPath(), 'utf8')); } catch { return []; }
   if (!Array.isArray(items)) return [];
-  return items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal' }));
+  return items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal', project: item.project || 'general' }));
 }
 
 function saveWaiting(items) {
@@ -392,7 +393,7 @@ export function addChat(message, broadcast, env = process.env) {
 }
 
 const questionState = (item) => ({
-  id: item.id, n: item.n, urgency: item.urgency, status: item.status,
+  id: item.id, n: item.n, urgency: item.urgency, project: item.project, status: item.status,
   ...(item.choices ? { choices: item.choices, recommended: item.recommended } : {}),
   ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt, ...(item.answeredBy ? { answeredBy: item.answeredBy } : {}) } : {}),
 });
@@ -420,11 +421,29 @@ export function checkChoices(choices, recommended) {
 }
 
 export const URGENCIES = ['blocking', 'normal', 'low'];
+const MAX_PROJECT_CHARS = 40;
 
-export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal', env = process.env } = {}) {
+// Which project a question is about: the board repo named (in any case), else
+// the name as given, lower-cased and capped. Unnamed, it is read off the text:
+// a GitHub URL whose repo is on the board, then a board repo's folder name
+// mentioned as a word; else "general".
+export function questionProject(project, text, repos = config.repos.map(r => basename(r.path))) {
+  const find = (name) => repos.find(r => r.toLowerCase() === name.toLowerCase());
+  const given = typeof project === 'string' ? project.trim() : '';
+  if (given) return given.toLowerCase() === 'general' ? 'general' : find(given) || given.toLowerCase().slice(0, MAX_PROJECT_CHARS);
+  for (const [, repo] of String(text).matchAll(/github\.com\/[\w.-]+\/([\w.-]+)/gi)) {
+    const hit = find(repo.replace(/\.git$/i, ''));
+    if (hit) return hit;
+  }
+  const words = String(text).toLowerCase();
+  const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return repos.find(r => new RegExp(`(^|[^\\w.-])${escape(r.toLowerCase())}($|[^\\w-])`).test(words)) || 'general';
+}
+
+export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal', project, env = process.env } = {}) {
   const items = waitingItems();
   text = redact(text, env);   // shown in every browser, like the thread
-  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency };
+  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency, project: questionProject(project, text) };
   if (choices) item.choices = choices.map(c => c.trim());
   if (recommended) item.recommended = recommended.trim();
   // The thread first: one not written yet starts from the list as it stands.
@@ -600,7 +619,7 @@ async function showAnswerOnPhone(item, env) {
 
 let sent = [];   // times of recent notify_owner calls
 
-export async function notifyOwner(text, { choices, recommended, urgency = 'normal', broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -608,13 +627,14 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
   if (bad) return { error: bad };
   urgency ??= 'normal';
   if (!URGENCIES.includes(urgency)) return { error: `urgency must be "blocking", "normal" or "low", not ${JSON.stringify(urgency)}.` };
+  if (project != null && typeof project !== 'string') return { error: 'project must be a repo\'s folder name or "general".' };
   sent = sent.filter(t => now - t < NOTIFY_WINDOW_MS);
   if (sent.length >= NOTIFY_LIMIT) {
     return { error: `Not sent: you have notified the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later, or under Waiting on you in STATE.md.` };
   }
   sent.push(now);
   let item;
-  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency, env }); } catch (err) {
+  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency, project, env }); } catch (err) {
     console.error('Could not save the Waiting list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';

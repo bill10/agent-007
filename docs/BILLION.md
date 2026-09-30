@@ -615,7 +615,19 @@ Telegram channel. Billion's `notify_owner` questions, its `tell_owner`
 replies and your messages, from the tab and from Telegram, are one
 conversation there, newest at the bottom; the last 500 messages are kept in
 `~/.agent-007/chat.json`. Open questions also pin to a strip at the top of
-the tab, blocking first, then oldest; tap one to jump to it. When Billion
+the tab ("7 open questions ▾", blocking first, then oldest). The strip is one
+button: tap it (or the tab's badge) and the **Open questions** panel slides
+over the thread, one section per project with its open count, the project
+with a blocking question first, then the one whose question has waited
+longest. Each row is a question's urgency mark, Q-number, first line and age,
+with its choices (recommended first) and *Reply*, which sets the box below to
+answer it; tap a row's text to jump to its bubble. × or Esc goes back to the
+chat; on a phone the panel fills the screen and *Reply* closes it. The first
+time the strip shows it says "tap to see all", and the browser remembers
+whether the panel was open. Billion names the project with `notify_owner`'s
+`project` (a repo's folder name on the board, or `general`); left out, the
+server reads it off a GitHub URL or a repo's name in the text, else
+`general`. A name not on the board is kept, lower-cased. When Billion
 cannot talk yet, a bar above the text box says why, with the button past it:
 its CLI is missing (Start), Billion is stopped (Start), or `claude auth status`
 / `codex login status` said it is logged out, so it sits at the CLI's own
@@ -626,7 +638,7 @@ Type in the box at the bottom (Enter sends, Shift+Enter is a new line) and it
 is typed into Billion's terminal as `[Owner via app] <text>`, as a turn of its
 own, while mail keeps flowing to it as before, even while questions are
 open: typing never answers a question you did not pick. To answer one by
-typing, tap *Reply* under it (or its chip in the strip): the box then says
+typing, tap *Reply* under it (or on its row in the Open questions panel): the box then says
 "Answers Q3" (× goes back to a plain message). If Billion is not running the
 message is refused and stays in the box.
 
