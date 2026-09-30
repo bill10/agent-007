@@ -193,11 +193,6 @@ function insideAttachments(path) {
   return resolve(String(path || '')).startsWith(ATTACHMENTS_DIR + sep);
 }
 
-// The full list the card should have: { name } keeps an existing file, { name,
-// data } writes a new one, and anything on disk that is not named is removed.
-// Split in two so updateJob can refuse before it has touched the job: plan
-// decodes and validates without side effects, apply writes. Returns null when
-// the message did not mention attachments at all.
 // A client's file name as it will be stored, or why it cannot be. No
 // separator survives the sanitiser and a name with no letter or digit is
 // refused, so join() cannot climb out of the folder. taken: the files already
@@ -210,6 +205,11 @@ export function uploadName(raw, taken) {
   return { name };
 }
 
+// The full list the card should have: { name } keeps an existing file, { name,
+// data } writes a new one, and anything on disk that is not named is removed.
+// Split in two so updateJob can refuse before it has touched the job: plan
+// decodes and validates without side effects, apply writes. Returns null when
+// the message did not mention attachments at all.
 function planAttachments(job, list) {
   if (!Array.isArray(list)) return null;
   if (list.length > MAX_ATTACHMENTS) return { error: `At most ${MAX_ATTACHMENTS} files per job` };
