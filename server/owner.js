@@ -249,7 +249,8 @@ async function transcribeNote(note, env) {
 // is the group member who answered on Telegram (senderName). urgency is
 // blocking, normal or low; items written before it read as normal. project is
 // a board repo's folder name or "general", which older items read as. type is
-// one of QUESTION_TYPES; older items have it read off their text once, and saved. answeredVia is app,
+// one of QUESTION_TYPES; an older item has it read off its text (a name off
+// the list reads as other) the first time it is read, and saved. answeredVia is app,
 // telegram or terminal (resolve_question). n is the short number the owner sees (Q3). status is open, answered or dismissed. Items written
 // before v0.10 have neither n nor status: they read as open, numbered in order.
 
@@ -259,8 +260,8 @@ export function waitingItems() {
   let items;
   try { items = JSON.parse(readFileSync(waitingPath(), 'utf8')); } catch { return []; }
   if (!Array.isArray(items)) return [];
-  const untyped = items.some(item => !item.type);
-  items = items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal', project: item.project || 'general', type: item.type || questionType(null, item.text) }));
+  const untyped = items.some(item => !QUESTION_TYPES.includes(item.type));
+  items = items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal', project: item.project || 'general', type: questionType(item.type, item.text) }));
   if (untyped) try { saveWaiting(items); } catch {}
   return items;
 }

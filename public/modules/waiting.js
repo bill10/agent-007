@@ -911,9 +911,8 @@ function questionSection(name, items) {
   head.type = 'button';
   head.setAttribute('aria-expanded', String(open));
   const blocking = items.some(q => q.urgency === 'blocking');
-  const count = el('span', 'chat-questions-count', String(items.length));
-  count.setAttribute('aria-label', `${items.length} open${blocking ? ', blocking' : ''}`);
-  head.append(el('span', 'chat-questions-name', name), count);
+  head.setAttribute('aria-label', `${name}, ${items.length} open${blocking ? ', blocking' : ''}`);
+  head.append(el('span', 'chat-questions-name', name), el('span', 'chat-questions-count', String(items.length)));
   if (blocking) head.appendChild(el('b', 'waiting-urgent chat-questions-urgent', '!')).setAttribute('aria-hidden', 'true');
   head.appendChild(el('span', 'chat-questions-chevron', '▾')).setAttribute('aria-hidden', 'true');
   head.onclick = () => {

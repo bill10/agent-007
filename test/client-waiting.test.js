@@ -833,9 +833,8 @@ describe('the Open questions panel', () => {
     expect(panel().querySelectorAll('.chat-questions-row')).toHaveLength(0);
     const urgent = (name) => !!header(name).querySelector('.chat-questions-urgent');
     expect([urgent('agent-007'), urgent('general'), urgent('finnamon')]).toEqual([true, false, false]);
-    // The "!" is hidden from screen readers; the count says it.
-    const countLabel = (name) => header(name).querySelector('.chat-questions-count').getAttribute('aria-label');
-    expect([countLabel('agent-007'), countLabel('finnamon')]).toEqual(['2 open, blocking', '3 open']);
+    // The "!" is hidden from screen readers; the header's name says it.
+    expect(['agent-007', 'finnamon'].map(name => header(name).getAttribute('aria-label'))).toEqual(['agent-007, 2 open, blocking', 'finnamon, 3 open']);
     expect(header('agent-007').tagName).toBe('BUTTON');
     expect(header('agent-007').getAttribute('aria-expanded')).toBe('false');
     header('finnamon').click();

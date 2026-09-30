@@ -469,6 +469,10 @@ describe('type', () => {
     writeFileSync(file, typed);
     expect(waitingItems()[0]).toMatchObject({ type: 'admin', n: 1, status: 'open' });
     expect(readFileSync(file, 'utf8')).toBe(typed);   // all typed: read, not rewritten
+    // A stored type off the list is set right, and saved.
+    writeFileSync(file, JSON.stringify([{ id: 'e', text: 'Merge the PR?', type: 'Finance' }, { id: 'f', text: 'Merge the PR?', type: 'eng' }]));
+    expect(waitingItems().map(i => i.type)).toEqual(['finance', 'other']);
+    expect(JSON.parse(readFileSync(file, 'utf8')).map(i => i.type)).toEqual(['finance', 'other']);
     // A save that fails (a directory where its temp file goes) still reads, typed.
     writeFileSync(file, JSON.stringify([{ id: 'd', text: 'Merge the PR?' }]));
     mkdirSync(`${file}.tmp`);
