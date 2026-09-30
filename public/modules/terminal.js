@@ -687,6 +687,8 @@ function setupClipboardPaste() {
     // A screenshot pasted into the job form is a card attachment, not an
     // upload to whichever agent happens to be selected.
     if (e.target.closest?.('#job-form')) return;
+    // Nor one pasted in the Billion tab: that attaches to the chat (waiting.js).
+    if (waitingActive) return;
     const items = e.clipboardData?.items;
     if (!items) return;
     for (const item of items) {

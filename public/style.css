@@ -1590,6 +1590,46 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 }
 .waiting-send:disabled { opacity: 0.55; cursor: default; }
 
+/* Attachments (waiting.js): chips above the box before Send, thumbnails and
+   download chips in the owner's bubble, and the tab lit while files are
+   dragged over it. */
+.chat-files-pending, .chat-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-files-pending[hidden] { display: none; }
+.chat-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text);
+  text-decoration: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+a.chat-file-chip:hover { border-color: var(--accent); }
+.chat-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-file-size { color: var(--text-dim); font-size: 10px; flex-shrink: 0; }
+.chat-file-thumb { display: block; max-width: 100%; max-height: 48px; border-radius: 2px; }
+.chat-files .chat-file-thumb { max-height: 160px; }
+.chat-file-image { display: block; max-width: 100%; border: 1px solid var(--border); border-radius: 3px; }
+.chat-file-image:hover { border-color: var(--accent); }
+.chat-file-remove {
+  padding: 2px 6px;
+  margin: -2px -6px -2px 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.chat-file-remove:hover { color: var(--state-disconnected); }
+.waiting-board.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
+
 /* Read aloud and dictation (readaloud.js, voice.js's chat target). The
    header sits above the question strip, in the flow, so nothing overlaps. */
 .chat-head {
@@ -1714,6 +1754,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 }
 @media (max-width: 700px) {
   .chat-mic { width: 44px; min-height: 44px; }
+  .chat-file-remove { min-width: 32px; min-height: 32px; }
   .chat-autoread, .chat-resume, .chat-stop-reading { min-height: 44px; padding: 0 6px; }
   /* Wraps, so the voice picker drops to its own line rather than clipping
      its name ("Voice: auto (A"). */

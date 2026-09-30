@@ -2,15 +2,15 @@
 // The "Billion" tab (public/modules/waiting.js): the chat bubble's badge, the chat
 // thread with question bubbles whose choices collapse on answer, the text box
 // and which question it answers, and the pinned strip of open questions.
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { send } from '../public/modules/ws.js';
 import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive, setBillionEnabled, setView } from '../public/modules/state.js';
-import { updateTabs, switchToSession, removeSession } from '../public/modules/terminal.js';
+import { updateTabs, switchToSession, removeSession, setupUpload } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
-import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer } from '../public/modules/waiting.js';
 import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
 import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
@@ -575,5 +575,96 @@ describe('read aloud and dictation in the tab', () => {
     expect(voiceTarget()).toBe('chat');
     leaveWaiting();
     expect(voiceTarget()).toBeNull();
+  });
+});
+
+// Pasted, dropped or picked files: chips above the box, sent with the message.
+describe('attachments', () => {
+  beforeEach(() => {
+    _resetComposer();
+    agents.set('b1', { isBillion: true, state: 'WAITING', termEl: document.createElement('div') });
+    showWaiting();
+  });
+  // Module state: a send an earlier test left in flight, or files it left attached.
+  afterEach(() => _resetComposer());
+
+  URL.createObjectURL ??= () => 'blob:x';
+  URL.revokeObjectURL ??= () => {};
+  const png = (name = 'image.png') => new File(['PNG'], name, { type: 'image/png' });
+  const pdf = (name = 'notes.pdf', size = 3) => new File(['x'.repeat(size)], name, { type: 'application/pdf' });
+  const chips = () => [...document.querySelectorAll('#chat-files .chat-file-chip')];
+  const read = () => vi.waitFor(() => expect(document.getElementById('chat-send').disabled).toBe(false));
+  const dataTransfer = (files) => ({ files, types: ['Files'], items: [], dropEffect: '' });
+  const fire = (target, type, init) => {
+    const e = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(e, init);
+    target.dispatchEvent(e);
+    return e;
+  };
+
+  it('a pasted screenshot becomes a thumbnail chip, named so a second one does not replace it', async () => {
+    // The terminal's paste handler (an upload to the selected agent) stays out of it.
+    setupUpload();
+    agents.set('a1', { name: 'Viper', repoPath: '/r', termEl: document.createElement('div') });
+    setActiveSession('a1');
+    const blob = png();
+    const e = fire(input(), 'paste', { clipboardData: { files: [blob], items: [{ type: 'image/png', getAsFile: () => blob }] } });
+    expect(e.defaultPrevented).toBe(true);
+    await new Promise(r => setTimeout(r, 30));   // the upload would go once its FileReader is done
+    expect(send).not.toHaveBeenCalled();
+    expect(chips()).toHaveLength(1);
+    expect(chips()[0].querySelector('img.chat-file-thumb').alt).toMatch(/^screenshot-\d+\.png$/);
+  });
+
+  it('files dropped on the tab light it while dragged and become chips; the paperclip picks too', () => {
+    const board = document.getElementById('waiting-board');
+    fire(board, 'dragenter', { dataTransfer: dataTransfer([]) });
+    expect(board.classList.contains('dropping')).toBe(true);
+    const drop = fire(board, 'drop', { dataTransfer: dataTransfer([pdf('a.pdf'), pdf('b.pdf', 2048)]) });
+    expect(drop.defaultPrevented).toBe(true);
+    expect(board.classList.contains('dropping')).toBe(false);
+    expect(chips().map(c => c.textContent)).toEqual(['a.pdf3 B×', 'b.pdf2 KB×']);
+
+    const pick = document.getElementById('chat-attach-input');
+    const click = vi.spyOn(pick, 'click').mockImplementation(() => {});
+    document.getElementById('chat-attach').click();
+    expect(click).toHaveBeenCalled();
+    Object.defineProperty(pick, 'files', { value: [pdf('c.pdf')], configurable: true });
+    pick.dispatchEvent(new Event('change'));
+    expect(chips()).toHaveLength(3);
+    chips()[0].querySelector('.chat-file-remove').click();
+    expect(chips().map(c => c.querySelector('.chat-file-name').textContent)).toEqual(['b.pdf', 'c.pdf']);
+  });
+
+  it('refuses past the job-attachment limits with a line under the box', () => {
+    const big = pdf('big.pdf');
+    Object.defineProperty(big, 'size', { value: 10 * 1024 * 1024 + 1 });
+    fire(document.getElementById('waiting-board'), 'drop', { dataTransfer: dataTransfer([big]) });
+    expect(chips()).toHaveLength(0);
+    expect(document.getElementById('chat-error').textContent).toBe('big.pdf is too large (max 10MB)');
+  });
+
+  it('sends files with no text, and clears the chips once the server took them', async () => {
+    fire(document.getElementById('waiting-board'), 'drop', { dataTransfer: dataTransfer([pdf('a.pdf')]) });
+    await vi.waitFor(() => {
+      type('');
+      expect(send).toHaveBeenCalledWith({ type: 'chat-send', nonce: expect.any(String), text: '', files: [{ name: 'a.pdf', type: 'application/pdf', data: btoa('xxx') }] });
+    });
+    handleChatSent({ nonce: send.mock.calls.at(-1)[0].nonce });
+    expect(chips()).toHaveLength(0);
+    await read();
+  });
+
+  it('shows the owner\'s files in the bubble: images open full size, others download', () => {
+    setChatMessages([{ id: 'm1', at: new Date().toISOString(), from: 'owner', via: 'app', text: '', files: [
+      { name: 'shot.png', size: 3, type: 'image/png' }, { name: 'notes.pdf', size: 2048, type: 'application/pdf' },
+    ] }]);
+    renderWaiting();
+    const image = document.querySelector('.chat-msg .chat-file-image');
+    expect([image.getAttribute('href'), image.target, image.querySelector('img').getAttribute('src')])
+      .toEqual(['/api/chat/m1/files/shot.png', '_blank', '/api/chat/m1/files/shot.png']);
+    const file = document.querySelector('.chat-msg a.chat-file-chip');
+    expect([file.getAttribute('href'), file.download, file.textContent]).toEqual(['/api/chat/m1/files/notes.pdf', 'notes.pdf', 'notes.pdf2 KB']);
+    expect(document.querySelector('.chat-msg .chat-text')).toBeNull();
   });
 });

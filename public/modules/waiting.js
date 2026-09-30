@@ -11,7 +11,7 @@
 import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled } from './state.js';
 import { switchToSession } from './terminal.js';
 import { send } from './ws.js';
-import { hideJobBoard } from './jobs.js';
+import { hideJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
 import {
   readAloudSupported, speakableText, toggleSpeak, readNew, speakingMessage, stopReading,
@@ -29,6 +29,9 @@ let undoSoonest = Infinity;   // ms until the first Undo link on screen goes
 let nonces = 0;
 const SEND_TIMEOUT_MS = 20 * 1000;
 let lastShown = null;       // the newest message when the thread was last drawn
+// Files pasted, dropped or picked for the next message: { name, size, type,
+// data (base64, once read), reading, url (a thumbnail's object URL) }.
+let attached = [];
 
 export const openCount = () => waitingItems.filter(item => item.status === 'open').length;
 
@@ -182,11 +185,16 @@ const undoLeft = (q) => (q.answeredVia === 'app' || q.answeredVia === 'telegram'
 
 function submit() {
   const input = document.getElementById('chat-input');
-  const text = input?.value.trim();
-  if (!text || sending) return;
+  const text = input?.value.trim() || '';
+  if ((!text && !attached.length) || sending) return;
+  if (attached.some(a => a.reading)) {
+    sendError = 'Still reading an attached file; send again in a moment.';
+    return renderComposer();
+  }
   const target = answerTarget();
   const nonce = `c${++nonces}`;
-  if (!send({ type: 'chat-send', nonce, text, ...(target ? { answers: target.id } : {}) })) {
+  const files = attached.length ? { files: attached.map(a => ({ name: a.name, type: a.type, data: a.data })) } : {};
+  if (!send({ type: 'chat-send', nonce, text, ...(target ? { answers: target.id } : {}), ...files })) {
     sendError = 'Not connected to the server; try again in a moment.';
   } else {
     sending = nonce;
@@ -212,8 +220,103 @@ export function handleChatSent(msg) {
   if (!msg.error && input) {
     input.value = '';
     fitInput(input);
+    for (const a of attached) if (a.url) URL.revokeObjectURL(a.url);
+    attached = [];
   }
   renderComposer();
+}
+
+const sizeText = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
+const isImage = (type) => /^image\//.test(type || '');
+
+// Pasted, dropped or picked: chips above the box until Send, under the job
+// form's limits (the server checks them again).
+export function attachFiles(files, fallbackName) {
+  sendError = '';
+  for (const file of files) {
+    const name = attachmentName(file, fallbackName);
+    const others = attached.filter(a => a.name !== name);
+    const refuse = file.size > MAX_ATTACHMENT_BYTES ? `${name} is too large (max 10MB)`
+      : others.length >= MAX_ATTACHMENTS ? `At most ${MAX_ATTACHMENTS} files per message`
+      : others.reduce((n, a) => n + a.size, 0) + file.size > MAX_ATTACHMENT_TOTAL_BYTES ? 'Attachments add up to more than 50MB'
+      : '';
+    if (refuse) { sendError = refuse; continue; }
+    const entry = { name, size: file.size, type: file.type || '', reading: true };
+    if (isImage(file.type) && URL.createObjectURL) entry.url = URL.createObjectURL(file);
+    removeAttached(attached.find(a => a.name === name));
+    attached.push(entry);
+    const reader = new FileReader();
+    reader.onload = () => { entry.data = String(reader.result).split(',')[1]; delete entry.reading; };
+    reader.onerror = reader.onabort = () => {
+      removeAttached(entry);
+      sendError = `Could not read ${name}`;
+      renderComposer();
+    };
+    reader.readAsDataURL(file);
+  }
+  renderComposer();
+}
+
+// Tests only: a send left in flight and its files, gone.
+export function _resetComposer() {
+  sending = null;
+  sendError = '';
+  for (const a of attached) if (a.url) URL.revokeObjectURL(a.url);
+  attached = [];
+}
+
+function removeAttached(entry) {
+  if (!entry) return;
+  if (entry.url) URL.revokeObjectURL(entry.url);
+  attached = attached.filter(a => a !== entry);
+}
+
+function renderAttached() {
+  const box = document.getElementById('chat-files');
+  box.hidden = !attached.length;
+  box.innerHTML = '';
+  for (const a of attached) {
+    const chip = el('span', 'chat-file-chip');
+    chip.title = `${a.name}, ${sizeText(a.size)}`;
+    if (a.url) {
+      const img = el('img', 'chat-file-thumb');
+      img.src = a.url;
+      img.alt = a.name;
+      chip.appendChild(img);
+    } else chip.append(el('span', 'chat-file-name', a.name), el('span', 'chat-file-size', sizeText(a.size)));
+    const x = el('button', 'chat-file-remove', '\u00d7');
+    x.type = 'button';
+    x.setAttribute('aria-label', `Remove ${a.name}`);
+    x.onclick = () => { removeAttached(a); renderComposer(); };
+    chip.appendChild(x);
+    box.appendChild(chip);
+  }
+}
+
+// The owner's files in their bubble: images as thumbnails that open full size,
+// others as a download link. Served from the config dir by server/http.js.
+function sentFiles(m) {
+  const box = el('div', 'chat-files');
+  for (const f of m.files) {
+    const url = `/api/chat/${encodeURIComponent(m.id)}/files/${encodeURIComponent(f.name)}`;
+    const link = el('a', isImage(f.type) ? 'chat-file-image' : 'chat-file-chip');
+    link.href = url;
+    link.title = `${f.name}, ${sizeText(f.size || 0)}`;
+    if (isImage(f.type)) {
+      link.target = '_blank';
+      link.rel = 'noopener';
+      const img = el('img', 'chat-file-thumb');
+      img.src = url;
+      img.alt = f.name;
+      img.loading = 'lazy';
+      link.appendChild(img);
+    } else {
+      link.download = f.name;
+      link.append(el('span', 'chat-file-name', f.name), el('span', 'chat-file-size', sizeText(f.size || 0)));
+    }
+    box.appendChild(link);
+  }
+  return box;
 }
 
 function fitInput(input) {
@@ -307,7 +410,8 @@ function bubble(m) {
     box.appendChild(qLabel(m.q));
   }
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
-  box.appendChild(el('p', 'chat-text', m.text));
+  if (m.text || !m.files?.length) box.appendChild(el('p', 'chat-text', m.text));
+  if (m.files?.length) box.appendChild(sentFiles(m));
   const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && 'Telegram', time(m.at)].filter(Boolean);
   const metaLine = el('span', 'chat-meta', meta.join(' · '));
   if (!mine && readAloudSupported()) {
@@ -322,6 +426,7 @@ function bubble(m) {
 
 const SPEAKER_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3h-2.5z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5"/><path d="M12.8 3.5a6 6 0 0 1 0 9"/></svg>';
 const STOP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>';
+const CLIP_SVG = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 7.5l-5.6 5.6a3.2 3.2 0 0 1-4.5-4.5l6-6a2.1 2.1 0 0 1 3 3l-6 6a1 1 0 0 1-1.5-1.5l5.5-5.5"/></svg>';
 const MIC_SVG = '<svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/></svg>';
 
 // A Billion message's speaker: reads it aloud, and while it does, stops it.
@@ -501,6 +606,22 @@ function shell() {
         submit();
       }
     };
+    const clip = el('button', 'chat-mic chat-attach');
+    clip.id = 'chat-attach';
+    clip.type = 'button';
+    clip.innerHTML = CLIP_SVG;
+    clip.title = 'Attach files (or paste a screenshot, or drop files here)';
+    clip.setAttribute('aria-label', 'Attach files');
+    const pick = el('input');
+    pick.type = 'file';
+    pick.multiple = true;
+    pick.hidden = true;
+    pick.id = 'chat-attach-input';
+    clip.onclick = () => pick.click();
+    pick.onchange = () => { attachFiles(pick.files); pick.value = ''; };
+    const chips = el('div', 'chat-files-pending');
+    chips.id = 'chat-files';
+    chips.hidden = true;
     const mic = el('button', 'chat-mic');
     mic.id = 'chat-mic';
     mic.type = 'button';
@@ -526,11 +647,49 @@ function shell() {
     error.setAttribute('role', 'alert');
     error.hidden = true;
     form.onsubmit = (e) => { e.preventDefault(); submit(); };
-    row.append(input, mic, btn);
-    form.append(notice, target, voice, row, error);
+    row.append(input, clip, pick, mic, btn);
+    form.append(notice, target, chips, voice, row, error);
     board.append(jump, form);
+    board.addEventListener('paste', (e) => {
+      const files = [...(e.clipboardData?.files || [])];
+      if (!files.length) return;
+      e.preventDefault();
+      attachFiles(files, 'screenshot');
+    });
+    dropTarget(board);
   }
   return list;
+}
+
+// Files dropped anywhere on the tab attach to the box. Stopped here, so the
+// terminal viewport's own drop (an upload to the selected agent) never sees them.
+function dropTarget(board) {
+  let depth = 0;
+  const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+  board.addEventListener('dragenter', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    depth++;
+    board.classList.add('dropping');
+  });
+  board.addEventListener('dragover', (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  });
+  board.addEventListener('dragleave', (e) => {
+    e.stopPropagation();
+    if (--depth <= 0) { depth = 0; board.classList.remove('dropping'); }
+  });
+  board.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    depth = 0;
+    board.classList.remove('dropping');
+    if (e.dataTransfer?.files?.length) attachFiles(e.dataTransfer.files);
+  });
 }
 
 const atBottom = (list) => list.scrollHeight - list.scrollTop - list.clientHeight < 40;
@@ -556,6 +715,7 @@ export function renderComposer() {
     : target ? `Answer Q${target.n}` : 'Message Billion';
   document.getElementById('chat-send').disabled = !!sending;
   document.getElementById('chat-send').textContent = sending ? 'Sending' : 'Send';
+  renderAttached();
   const error = document.getElementById('chat-error');
   error.textContent = sendError;
   error.hidden = !sendError;

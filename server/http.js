@@ -17,7 +17,7 @@ import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
-import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion } from './owner.js';
+import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath } from './owner.js';
 import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
 import { setBillionNotice } from './billion.js';
@@ -250,6 +250,24 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         'Referrer-Policy': 'no-referrer',
       },
     }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'Attachment missing on disk' }); });
+  });
+
+  // A file the owner attached in the Billion tab, for the thumbnail and the
+  // link in their bubble. The chat is the owner's alone (ws.js mayAnswerOwner):
+  // with user accounts on nobody has it, so nobody gets its files either.
+  // Served like a card's attachment, for the same reasons.
+  app.get('/api/chat/:id/files/:name', (req, res) => {
+    if (authEnabled()) return res.status(403).json({ error: 'The Billion chat is the owner\'s alone' });
+    const path = chatFilePath(req.params.id, req.params.name);
+    if (!path) return res.status(404).json({ error: 'No such file' });
+    res.sendFile(path, {
+      dotfiles: 'allow',
+      headers: {
+        'Content-Security-Policy': 'sandbox',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+      },
+    }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'File missing on disk' }); });
   });
 
   // The Settings panel's "Agents & accounts": the last scan, or a fresh one on POST (Refresh).

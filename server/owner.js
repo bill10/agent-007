@@ -9,12 +9,13 @@
 // bot. The token is a password to the bot, so it is never logged and never
 // sent to a browser: every error that leaves this module goes through redact().
 
-import { readFileSync, writeFileSync, renameSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync } from 'fs';
+import { join, resolve, sep } from 'path';
 import { randomUUID } from 'crypto';
 import { CONFIG_DIR } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
+import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import {
   chooseMode, voiceSetting, speechUnavailable, synthesize, sayVoice, sayRate, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
 } from './voice.js';
@@ -242,14 +243,82 @@ export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems
 
 // --- The Billion chat: the thread the Billion tab shows, beside waiting.json ---
 //
-// A message: { id, at, from: 'owner' | 'billion', text, via?, voice?, re?, q? }.
-// via is app or telegram (the owner's side). re is the question number a typed
+// A message: { id, at, from: 'owner' | 'billion', text, via?, voice?, re?, q?, files? }.
+// via is app or telegram (the owner's side). files: what the owner attached
+// in the tab, [{ name, size, type }] (see "The chat's attachments"). re is the question number a typed
 // answer went to. q is a notify_owner question, copied here with its state so
 // the thread keeps it after the Waiting list lets it go: { id, n, urgency,
 // choices?, recommended?, status, answer?, answeredVia? }. The newest CHAT_CAP
 // are kept. Everything in it reaches a browser, so the bot token is redacted.
 
 const chatPath = () => join(CONFIG_DIR, 'chat.json');
+
+// --- The chat's attachments ---
+//
+// Files the owner pastes, drops or picks in the Billion tab arrive inline on
+// chat-send as base64, like a card's attachments and under the same limits.
+// They live in chat-files/<message id>/<name> under the config dir, owner-only
+// on disk, and Billion reads them by the absolute paths its turn carries. The
+// message keeps { name, size, type } per file; its id is the folder.
+const chatFilesDir = () => resolve(CONFIG_DIR, 'chat-files');
+const insideChatFiles = (path) => resolve(path).startsWith(chatFilesDir() + sep);
+
+// The files a chat-send carried, decoded and checked, nothing written yet.
+// { files: [{ name, type, buf }] } or { error }.
+export function planChatFiles(list) {
+  if (list === undefined || list === null) return { files: [] };
+  if (!Array.isArray(list)) return { error: 'The attachments are not a list.' };
+  if (list.length > MAX_ATTACHMENTS) return { error: `At most ${MAX_ATTACHMENTS} files per message` };
+  const files = [];
+  let total = 0;
+  for (const item of list) {
+    const checked = uploadName(item?.name, files);
+    if (checked.error) return checked;
+    if (typeof item.data !== 'string') return { error: `${checked.name} has no contents` };
+    const buf = Buffer.from(item.data, 'base64');
+    if (buf.length > MAX_ATTACHMENT_BYTES) return { error: `${checked.name} is too large (max 10MB)` };
+    total += buf.length;
+    if (total > MAX_ATTACHMENT_TOTAL_BYTES) return { error: 'Attachments add up to more than 50MB' };
+    // Only says which bubble to draw (thumbnail or chip); the route serves by extension.
+    const type = typeof item.type === 'string' && /^[\w.+-]+\/[\w.+-]+$/.test(item.type) ? item.type.slice(0, 100) : '';
+    files.push({ name: checked.name, type, buf });
+  }
+  return { files };
+}
+
+// Written under the message's id: { paths, records } or { error }, nothing left behind.
+function saveChatFiles(id, files) {
+  const dir = join(chatFilesDir(), id);
+  if (!insideChatFiles(dir)) return { error: 'Bad message id' };
+  try {
+    mkdirSync(chatFilesDir(), { recursive: true, mode: 0o700 });
+    mkdirSync(dir, { mode: 0o700 });
+    for (const f of files) writeFileSync(join(dir, f.name), f.buf, { mode: 0o600 });
+  } catch (err) {
+    removeChatFiles(id);
+    return { error: `Could not save the attachments: ${err.message}` };
+  }
+  return {
+    paths: files.map(f => join(dir, f.name)),
+    records: files.map(f => ({ name: f.name, size: f.buf.length, type: f.type })),
+  };
+}
+
+function removeChatFiles(id) {
+  const dir = join(chatFilesDir(), String(id));
+  if (insideChatFiles(dir)) rmSync(dir, { recursive: true, force: true });
+}
+
+// For the download route: the file's path, or null unless that message has it.
+export function chatFilePath(id, name) {
+  const message = chatMessages().find(m => m.id === id);
+  if (!message || !(message.files || []).some(f => f.name === name)) return null;
+  const path = join(chatFilesDir(), id, name);
+  return insideChatFiles(path) ? path : null;
+}
+
+// One turn: the paths go on the end, so Billion reads them with its file tools.
+const withFiles = (line, paths) => (paths.length ? `${line} (attached: ${paths.join(', ')})` : line);
 
 export function chatMessages() {
   try {
@@ -273,6 +342,7 @@ function saveChat(messages) {
   // The oldest go first, except open questions: their bubble is where they are answered.
   let over = messages.length - CHAT_CAP;
   const kept = messages.filter(m => !(over > 0 && m.q?.status !== 'open' && over--));
+  for (const m of messages) if (m.files && !kept.includes(m)) removeChatFiles(m.id);
   try {
     writeFileSync(`${chatPath()}.tmp`, JSON.stringify(kept));
     renameSync(`${chatPath()}.tmp`, chatPath());
@@ -376,8 +446,10 @@ const tidyAnswer = (answer) => (typeof answer === 'string'
   ? answer.replace(/\r\n?/g, '\n').replace(/[^\S\n]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
   : '');
 
-export async function answerWaiting(id, answer, via, { broadcast, env = process.env, typed = false } = {}) {
-  const body = tidyAnswer(answer);
+// files: planChatFiles's, typed in the app; an answer of files alone is
+// recorded as their names.
+export async function answerWaiting(id, answer, via, { broadcast, env = process.env, typed = false, files = [] } = {}) {
+  const body = tidyAnswer(answer) || files.map(f => f.name).join(', ');
   if (!body) return { error: 'The answer is empty.' };
   if (body.length > MAX_ANSWER_CHARS) return { error: `The answer is over ${MAX_ANSWER_CHARS} characters; send it in parts.` };
   const item = waitingItems().find(i => i.id === id);
@@ -385,29 +457,43 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   if (item.status === 'answered') return { error: `Q${item.n} was answered already: ${item.answer}` };
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running' };
-  if (!sendText(billion, answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body))) {
+  const messageId = randomUUID();
+  const saved = files.length ? saveChatFiles(messageId, files) : { paths: [], records: [] };
+  if (saved.error) return saved;
+  if (!sendText(billion, withFiles(answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body), saved.paths))) {
+    if (files.length) removeChatFiles(messageId);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel(via);
   const done = await markAnswered(id, body, via, { broadcast, env });
-  if (typed) addChat({ from: 'owner', via, text: body, re: item.n }, broadcast, env);
+  if (typed) addChat({ id: messageId, from: 'owner', via, text: tidyAnswer(answer), re: item.n, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   return { ok: true, item: done };
 }
 
 // What the owner types in the Billion tab. With answers (a question's id) it
 // answers that question; otherwise it goes into Billion's terminal as a turn
 // of its own, like a Telegram message. Refused, never queued, while Billion is
-// not running: the browser keeps the text in the box. { ok } or { error }.
-export async function ownerSays(text, { answers, broadcast, env = process.env } = {}) {
+// not running: the browser keeps the text in the box. files: the attachments
+// as the browser sent them (planChatFiles); files alone, no text, is a message.
+// { ok } or { error }.
+export async function ownerSays(text, { answers, files: list, broadcast, env = process.env } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
-  if (!body) return { error: 'The message is empty.' };
-  if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true });
+  const { files, error } = planChatFiles(list);
+  if (error) return { error };
+  if (!body && !files.length) return { error: 'The message is empty.' };
+  if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
   if (body.length > MAX_OWNER_CHARS) return { error: `The message is over ${MAX_OWNER_CHARS} characters; send it in parts.` };
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running; start it, then send again.' };
-  if (!sendText(billion, `${APP_PREFIX} ${body}`)) return { error: 'Billion has too much waiting for it; try again in a while.' };
+  const id = randomUUID();
+  const saved = files.length ? saveChatFiles(id, files) : { paths: [], records: [] };
+  if (saved.error) return saved;
+  if (!sendText(billion, withFiles(body ? `${APP_PREFIX} ${body}` : APP_PREFIX, saved.paths))) {
+    if (files.length) removeChatFiles(id);
+    return { error: 'Billion has too much waiting for it; try again in a while.' };
+  }
   setOwnerChannel('app');
-  addChat({ from: 'owner', via: 'app', text: body }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: body, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   return { ok: true };
 }
 
