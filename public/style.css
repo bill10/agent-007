@@ -274,7 +274,8 @@ body {
   animation: mic-pulse 1.6s ease-in-out infinite;
   flex-shrink: 0;
 }
-/* After the dot rule: an earlier block lost the cascade to it. */
+/* Must stay after every rule that sets animation on these selectors (equal
+   specificity, the later rule wins); test/theme-tokens.test.js checks it. */
 @media (prefers-reduced-motion: reduce) {
   .voice-indicator,
   .voice-indicator-dot,
@@ -1801,7 +1802,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   align-items: center;
   gap: 5px;
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 .job-cap-label input,

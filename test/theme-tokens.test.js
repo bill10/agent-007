@@ -78,6 +78,8 @@ describe('DESIGN.md light palette matches style.css', () => {
 
 describe('reduced-motion overrides win the cascade', () => {
   // Value: protects=prefers-reduced-motion stops every animation it names; fails_when=a normal rule setting `animation` on the same selector sits after the @media block (equal specificity, later wins — the #167 voice-indicator-dot bug); why_new=nothing checked CSS source order; seam=none
+  // Matches identical selector text only: a later, differently written selector
+  // that reaches the same element (or an animation-name longhand) is not caught.
   it('every `animation: none` under prefers-reduced-motion comes after the rules it overrides', () => {
     const media = [];
     for (const m of css.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/g)) {

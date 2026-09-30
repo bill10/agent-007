@@ -121,9 +121,10 @@ because the stock brights wash out on the cream ground.
 - **Sizes:**
   - 10px — branch labels, diff viewer, loading text
   - 11px — explorer items (files, agents), form labels, panel labels (REPOS,
-    the job columns, Finished; uppercase, letter-spacing: 2px). 11px is the
-    floor for functional labels; 9px still remains on some badges, form hints
-    and card metadata
+    the job columns, Finished; uppercase, letter-spacing: 2px), the job board
+    toolbar's labels. 11px is the floor for labels that name a field or a
+    section; 10px stays on the branch names and diff/loading text above, 9px
+    on some badges, form hints and card metadata
   - 12px — terminal tabs, form inputs, repo/branch in terminal header
   - 13px — terminal header agent info
   - 14px — app title (bold, letter-spacing: 1px)
