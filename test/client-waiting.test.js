@@ -525,11 +525,14 @@ describe('read aloud and dictation in the tab', () => {
     const css = readFileSync('public/style.css', 'utf8');
     expect(css).toMatch(/\.chat-control \{ min-height: var\(--chat-control-h\); \}/);
     expect(css).toMatch(/\.chat-mic \{[^}]*width: var\(--chat-control-h\);/);
-    // No per-control height left to drift from the token.
-    for (const sel of ['.chat-mic', '#chat-input', '.waiting-send', '.chat-voice-pick']) {
-      const block = css.match(new RegExp(`\\n${sel.replace('.', '\\.')} \\{([^}]*)\\}`))[1];
-      expect(block, sel).not.toMatch(/(^|\s)(min-)?height:/);
-    }
+    // No rule anywhere, media queries included, gives one of them its own
+    // height to drift from the token.
+    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-voice-pick)(?![-\w])/;
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => controls.test(sel));
+    expect(rules.length).toBeGreaterThan(5);
+    for (const [, sel, body] of rules) expect(body, sel.trim()).not.toMatch(/(^|[\s;])(min-|max-)?height:/);
+    expect(css).toMatch(/\.chat-compose-row \{[^}]*gap: var\(--chat-gap\);/);
+    expect(css).toMatch(/\.chat-head \{[^}]*gap: var\(--chat-gap\);/);
   });
 
   it('the mic beside the box dictates into it: interim greyed, final appended, nothing sent', async () => {
