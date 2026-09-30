@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.33.0.1] - 2026-09-30
+
+### Changed
+
+- **Settings icon is a conventional gear.** The terminal header's Settings button no longer looks like the theme toggle's sun.
+
 ## [0.33.0.0] - 2026-09-30
 
 ### Added
