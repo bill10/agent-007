@@ -1019,7 +1019,8 @@ terminal panel on this tab.
 ## Interactive Behaviors
 
 ### Icon buttons
-- Shared `.icon-btn` primitive (formerly `.theme-toggle`): Settings gear, theme
+- Shared `.icon-btn` primitive (formerly `.theme-toggle`): Settings gear (Lucide
+  "settings" cog, 24-box at 14px, stroke 2 ≈ 1.2px), theme
   toggle and the rename pencil in the terminal header; the voice mic reuses it with the
   `.voice-fab` overlay class
 
