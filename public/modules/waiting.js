@@ -900,8 +900,9 @@ function questionRow(q) {
   return row;
 }
 
-// A section: a header button (name, count, "!" when a blocking question is
-// inside, chevron), closed until tapped open.
+// A section: an <h3> (so screen readers can jump between sections) wrapping a
+// button (name, count, "!" when a blocking question is inside, chevron),
+// closed until tapped open. The button controls the body holding the rows.
 function questionSection(name, items) {
   const key = SECTION_KEY(groupBy, name);
   const open = store.get(key) === '1';
@@ -910,6 +911,10 @@ function questionSection(name, items) {
   const head = el('button', 'chat-questions-project');
   head.type = 'button';
   head.setAttribute('aria-expanded', String(open));
+  const body = el('div', 'chat-questions-body');
+  body.id = `qsec-${groupBy}-${encodeURIComponent(name).replace(/%/g, '_')}`;
+  body.hidden = !open;
+  head.setAttribute('aria-controls', body.id);
   const blocking = items.some(q => q.urgency === 'blocking');
   head.setAttribute('aria-label', `${name}, ${items.length} open${blocking ? ', blocking' : ''}`);
   head.append(el('span', 'chat-questions-name', name), el('span', 'chat-questions-count', String(items.length)));
@@ -921,8 +926,9 @@ function questionSection(name, items) {
     document.querySelector(`.chat-questions-project[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
   };
   head.dataset.name = name;
-  section.appendChild(head);
-  if (open) for (const q of items) section.appendChild(questionRow(q));
+  section.append(el('h3', 'chat-questions-heading'), body);
+  section.firstChild.appendChild(head);
+  if (open) for (const q of items) body.appendChild(questionRow(q));
   return section;
 }
 
