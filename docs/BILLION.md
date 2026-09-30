@@ -627,7 +627,19 @@ time the strip shows it says "tap to see all", and the browser remembers
 whether the panel was open. Billion names the project with `notify_owner`'s
 `project` (a repo's folder name on the board, or `general`); left out, the
 server reads it off a GitHub URL or a repo's name in the text, else
-`general`. A name not on the board is kept, lower-cased. When Billion
+`general`. A name not on the board is kept, lower-cased. A switch at the
+top of the panel, *by project | by type*, regroups the same rows by the
+question's `type` (engineering, marketing, outreach, finance, product, admin
+or other): Billion passes it to `notify_owner`, a name off the list reads as
+other, and left out the server reads it off the text (money, price or a `$`
+is finance; a PR, CI, deploy, bug, test or release is engineering; a reply,
+LinkedIn, an email from, a DM or inbound is outreach, even about a post; a
+post, Reddit, HN, a newsletter, tweet, X, Changelog or launch is marketing;
+a login, token, account, access, credentials, setup or install is admin; a
+feature, design, UX, roadmap or direction is product). Every section starts
+closed, a header with its name, count, "!" when a blocking question is
+inside, and a chevron; tap it to open. The browser remembers the grouping
+and which sections are open. When Billion
 cannot talk yet, a bar above the text box says why, with the button past it:
 its CLI is missing (Start), Billion is stopped (Start), or `claude auth status`
 / `codex login status` said it is logged out, so it sits at the CLI's own

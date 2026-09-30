@@ -4,11 +4,12 @@
 // nothing here talks to Telegram.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, rmSync } from 'fs';
+import { writeFileSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, handleUpdate, waitingItems, waitingPayload, dismissWaiting, answerWaiting, checkChoices,
   pollOnce, NOTIFY_WINDOW_MS, resolveQuestion, reopenQuestion, UNDO_MS, chatMessages, questionProject,
+  questionType, QUESTION_TYPES,
 } from '../server/owner.js';
 import { handleMcpMessage, NOTIFY_OWNER_TOOL } from '../server/mcp.js';
 import { dropMessages, takeMessages } from '../server/messages.js';
@@ -404,5 +405,53 @@ describe('project', () => {
     } finally { config.repos = saved; }
     writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify([{ id: 'old', n: 1, text: 'Old?', at: '2026-01-01T00:00:00Z', status: 'open' }]));
     expect(waitingItems()[0].project).toBe('general');
+  });
+});
+
+describe('type', () => {
+  it('takes one from the list in any case; any other name is other', () => {
+    for (const t of QUESTION_TYPES) expect(questionType(t, 'Merge the PR?')).toBe(t);
+    expect(questionType(' Finance ', 'x')).toBe('finance');
+    expect(questionType('legal', 'Merge the PR?')).toBe('other');
+    expect(questionType(7, 'x')).toBe('other');
+  });
+
+  it('is read off the text when not given, the first rule that matches winning', () => {
+    const cases = {
+      finance: ['Raise the price to $12?', 'Renew the domain?', 'Which plan?', 'Cancel the subscription?', 'Pay the invoice?', 'Spend the money?', 'Is $5 ok?'],
+      engineering: ['Merge PR #12?', 'CI is red, retry?', 'Deploy tonight?', 'Fix this bug first?', 'Skip the flaky test?', 'Cut a release?'],
+      marketing: ['Post it on Reddit?', 'Submit to HN?', 'Send the newsletter?', 'Tweet the launch?', 'Share on X?', 'Update the Changelog page?'],
+      outreach: ['Someone replied, answer them?', 'She responded to the pitch; follow up?', 'A LinkedIn message came in: take the call?', 'An email from Acme: accept?', 'Answer the DM?', 'More outreach this week?', 'An inbound lead: call?'],
+      admin: ['Log in to Stripe for me?', 'The token expired; rotate it?', 'Make an account on Fly?', 'Grant access to the repo?', 'Where are the credentials?', 'Finish the setup?', 'Install Docker?'],
+      product: ['Add the feature?', 'Which design?', 'Is the UX right?', 'Change the roadmap?', 'Which direction?'],
+      other: ['What do you think?', 'Hello?', ''],
+    };
+    for (const [t, texts] of Object.entries(cases)) for (const text of texts) expect([text, questionType(undefined, text)]).toEqual([text, t]);
+    // Outreach beats marketing: a reply to a post.
+    expect(questionType(undefined, 'Someone replied to our Reddit post: answer?')).toBe('outreach');
+    // First match wins: money before a PR.
+    expect(questionType(null, 'Merge the PR that changes the price?')).toBe('finance');
+    // Words, not parts of words.
+    expect(questionType(undefined, 'Is the postgres move fine?')).toBe('other');
+  });
+
+  it('is in the MCP schema, reaches notifyOwner, is kept on the item and its bubble, and old items get one once, saved', async () => {
+    expect(NOTIFY_OWNER_TOOL.inputSchema.properties.type.enum).toEqual(QUESTION_TYPES);
+    expect(NOTIFY_OWNER_TOOL.description).toMatch(/Pass type/);
+    const notify = vi.fn(async () => ({ ok: true, n: 1 }));
+    await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'Merge?', type: 'engineering' } } },
+      { session: { isBillion: true }, notifyOwner: notify });
+    expect(notify).toHaveBeenCalledWith('Merge?', expect.objectContaining({ type: 'engineering' }));
+
+    await ask('Merge the PR?');
+    await ask('Name?', { type: 'Product' });
+    await ask('Name?', { type: 'legal' });
+    expect(waitingPayload().items.map(i => i.type)).toEqual(['engineering', 'product', 'other']);
+    expect(chatMessages().filter(m => m.q).slice(-3).map(m => m.q.type)).toEqual(['engineering', 'product', 'other']);
+
+    const file = join(CONFIG_DIR, 'waiting.json');
+    writeFileSync(file, JSON.stringify([{ id: 'old', n: 1, text: 'Renew the domain?', at: '2026-01-01T00:00:00Z', status: 'open' }]));
+    expect(waitingItems()[0].type).toBe('finance');
+    expect(JSON.parse(readFileSync(file, 'utf8'))[0].type).toBe('finance');
   });
 });
