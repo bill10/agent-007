@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.34.0.1] - 2026-09-30
+
+### Fixed
+
+- **Open questions section headers are headings again.** The project and type sections in the Open questions panel are `<h3>` headings wrapping the fold button, so screen-reader heading navigation jumps between them; the button now names the section body it opens (`aria-controls`). Look, keyboard behaviour and the remembered open/closed state are unchanged.
+
 ## [0.34.0.0] - 2026-09-30
 
 ### Added
