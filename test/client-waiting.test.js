@@ -10,7 +10,7 @@ import { send } from '../public/modules/ws.js';
 import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive, setBillionEnabled, setView } from '../public/modules/state.js';
 import { updateTabs, switchToSession, removeSession, setupUpload } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
-import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer, questionGroups, setQuestionsOpen, setTelegramState } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer, questionGroups, setQuestionsOpen, setTelegramState, setGroupBy, _reloadQuestionPrefs } from '../public/modules/waiting.js';
 import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
 import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
@@ -702,26 +702,32 @@ describe('attachments', () => {
 });
 
 describe('the Open questions panel', () => {
-  beforeEach(() => { setQuestionsOpen(false, { focus: false }); localStorage.clear(); showWaiting(); });
+  beforeEach(() => { localStorage.clear(); _reloadQuestionPrefs(); setQuestionsOpen(false, { focus: false }); showWaiting(); });
   const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600e3).toISOString();
   const panel = () => document.getElementById('chat-questions');
   const sections = () => [...panel().querySelectorAll('.chat-questions-group')].map(g => [
     g.querySelector('.chat-questions-name').textContent, g.querySelector('.chat-questions-count').textContent,
     [...g.querySelectorAll('.waiting-card-n')].map(n => n.textContent).join(' '),
   ]);
+  const header = (name) => panel().querySelector(`.chat-questions-project[data-name="${name}"]`);
+  // Sections start closed: tap each one open.
+  const expand = () => {
+    for (const name of questionGroups().map(g => g.name)) if (header(name).getAttribute('aria-expanded') === 'false') header(name).click();
+  };
   const seed = () => questions(
-    open(1, { project: 'finnamon', at: at(30) }),
-    open(2, { project: 'agent-007', at: at(2) }),
-    open(3, { project: 'agent-007', urgency: 'blocking', at: at(1) }),
-    open(4, { at: at(50), text: 'First line\nsecond line' }),   // no project: general
-    open(5, { project: 'finnamon', urgency: 'low', at: at(60) }),
-    open(6, { project: 'finnamon', at: at(40), choices: ['yes', 'no'], recommended: 'no' }),
-    { ...open(7, { project: 'mirage' }), status: 'answered', answer: 'a' },
+    open(1, { project: 'finnamon', type: 'finance', at: at(30) }),
+    open(2, { project: 'agent-007', type: 'engineering', at: at(2) }),
+    open(3, { project: 'agent-007', type: 'engineering', urgency: 'blocking', at: at(1) }),
+    open(4, { at: at(50), text: 'First line\nsecond line' }),   // no project: general; no type: other
+    open(5, { project: 'finnamon', type: 'finance', urgency: 'low', at: at(60) }),
+    open(6, { project: 'finnamon', type: 'outreach', at: at(40), choices: ['yes', 'no'], recommended: 'no' }),
+    { ...open(7, { project: 'mirage', type: 'marketing' }), status: 'answered', answer: 'a' },
   );
 
   it('groups open questions by project: blocking first by their most urgent, then oldest; rows urgency then oldest', () => {
     seed();
     setQuestionsOpen(true);
+    expand();
     expect(sections()).toEqual([
       ['agent-007', '2', '! Q3 Q2'],
       ['general', '1', 'Q4'],
@@ -733,7 +739,7 @@ describe('the Open questions panel', () => {
     expect(row.querySelector('.chat-questions-age').textContent).toBe('2d');
     expect(panel().querySelector('[data-q="w3"] .chat-questions-age').textContent).toBe('1h');
     // A project with nothing open has no section; none at all, no panel.
-    expect(questionGroups().map(g => g.project)).not.toContain('mirage');
+    expect(questionGroups().map(g => g.name)).not.toContain('mirage');
     questions({ ...open(7), status: 'answered', answer: 'a' });
     expect(panel().hidden).toBe(true);
   });
@@ -741,6 +747,7 @@ describe('the Open questions panel', () => {
   it('answers from a row: the choices (recommended first) and Reply, which arms the box', () => {
     seed();
     setQuestionsOpen(true);
+    expand();
     const row = panel().querySelector('[data-q="w6"]');
     expect([...row.querySelectorAll('.waiting-choice')].map(b => b.firstChild.textContent)).toEqual(['no', 'yes']);
     row.querySelector('.waiting-choice').click();
@@ -754,6 +761,7 @@ describe('the Open questions panel', () => {
   it('tapping a row\'s text jumps to its bubble and closes the panel', () => {
     seed();
     setQuestionsOpen(true);
+    expand();
     expect(document.getElementById('waiting-board').classList.contains('questions-open')).toBe(true);
     const scroll = vi.fn();
     window.HTMLElement.prototype.scrollIntoView = scroll;
@@ -787,6 +795,64 @@ describe('the Open questions panel', () => {
     badge.click();
     expect(waitingActive).toBe(true);
     expect(panel().hidden).toBe(false);
+  });
+  it('groups by type with the switch, which this browser remembers across a reload', () => {
+    seed();
+    setQuestionsOpen(true);
+    const by = () => [...panel().querySelectorAll('.chat-questions-by button')].map(b => [b.textContent, b.getAttribute('aria-pressed')]);
+    expect(by()).toEqual([['by project', 'true'], ['by type', 'false']]);
+    panel().querySelectorAll('.chat-questions-by button')[1].click();
+    expect(by()).toEqual([['by project', 'false'], ['by type', 'true']]);
+    expect(localStorage.getItem('agent007-questions-by')).toBe('type');
+    // The strip's label names the grouping.
+    expect(document.getElementById('chat-strip').getAttribute('aria-label')).toBe('6 open questions: hide them by type');
+    expand();
+    // The same rows, regrouped; a question with no type is "other".
+    expect(sections()).toEqual([
+      ['engineering', '2', '! Q3 Q2'],
+      ['other', '1', 'Q4'],
+      ['outreach', '1', 'Q6'],
+      ['finance', '2', 'Q1 Q5'],
+    ]);
+    _reloadQuestionPrefs();
+    renderWaiting();
+    expect(by()[1][1]).toBe('true');
+    expect(questionGroups().map(g => g.name)).toEqual(['engineering', 'other', 'outreach', 'finance']);
+    expect(questionGroups(undefined, 'project').map(g => g.name)).toEqual(['agent-007', 'general', 'finnamon']);
+    // Anything else stored reads as by project.
+    localStorage.setItem('agent007-questions-by', 'bogus');
+    _reloadQuestionPrefs();
+    renderWaiting();
+    expect(by()[0][1]).toBe('true');
+  });
+
+  it('starts every section closed, with its count and a "!" when a blocking question is inside; a tap opens it, kept across a reload', () => {
+    seed();
+    setQuestionsOpen(true);
+    expect(sections()).toEqual([['agent-007', '2', ''], ['general', '1', ''], ['finnamon', '3', '']]);
+    expect(panel().querySelectorAll('.chat-questions-row')).toHaveLength(0);
+    const urgent = (name) => !!header(name).querySelector('.chat-questions-urgent');
+    expect([urgent('agent-007'), urgent('general'), urgent('finnamon')]).toEqual([true, false, false]);
+    // The "!" is hidden from screen readers; the header's name says it.
+    expect(['agent-007', 'finnamon'].map(name => header(name).getAttribute('aria-label'))).toEqual(['agent-007, 2 open, blocking', 'finnamon, 3 open']);
+    expect(header('agent-007').tagName).toBe('BUTTON');
+    expect(header('agent-007').getAttribute('aria-expanded')).toBe('false');
+    header('finnamon').click();
+    expect(header('finnamon').getAttribute('aria-expanded')).toBe('true');
+    expect(document.activeElement).toBe(header('finnamon'));
+    expect(sections()[2]).toEqual(['finnamon', '3', 'Q6 Q1 Q5']);
+    expect(localStorage.getItem('agent007-questions-section:project:finnamon')).toBe('1');
+    // A refresh: the same sections open and closed.
+    _reloadQuestionPrefs();
+    showWaiting();
+    expect(sections().map(g => g[2])).toEqual(['', '', 'Q6 Q1 Q5']);
+    // Kept per grouping: by type, finance starts closed.
+    setGroupBy('type');
+    expect(panel().querySelectorAll('.chat-questions-row')).toHaveLength(0);
+    setGroupBy('project');
+    header('finnamon').click();
+    expect(sections()[2]).toEqual(['finnamon', '3', '']);
+    expect(localStorage.getItem('agent007-questions-section:project:finnamon')).toBe('0');
   });
 });
 

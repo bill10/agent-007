@@ -3,7 +3,7 @@
 // replies and its notify_owner questions (answered with a tap, or a typed line
 // once the owner picks the question with Reply),
 // a strip pinning the open questions that opens them as a panel grouped by
-// project, and a text box that is typed into
+// project or by type, and a text box that is typed into
 // Billion's terminal as [Owner via app] (server/owner.js ownerSays). Shares the
 // terminal viewport with the terminals and the job board, like Jobs does.
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
@@ -796,7 +796,7 @@ function renderStrip() {
   if (!hint && !panelOpen && store.get(HINT_KEY) !== '1') { hint = true; store.set(HINT_KEY, '1'); }
   const count = `${open.length} open question${open.length === 1 ? '' : 's'}`;
   strip.setAttribute('aria-expanded', String(panelOpen));
-  strip.setAttribute('aria-label', `${count}: ${panelOpen ? 'hide' : 'show'} them by project`);
+  strip.setAttribute('aria-label', `${count}: ${panelOpen ? 'hide' : 'show'} them by ${groupBy}`);
   strip.classList.toggle('hinting', hint);
   const head = el('span', 'chat-strip-head');
   head.append(el('span', 'chat-strip-chevron', '▾'), count);
@@ -810,32 +810,50 @@ function renderStrip() {
   if (hint) strip.appendChild(el('span', 'chat-strip-hint', 'tap to see all'));
 }
 
-// --- The Open questions panel: open questions by project, answered in place.
-// Opened from the strip or the tab's badge; open or closed is kept per browser.
+// --- The Open questions panel: open questions by project or by type, answered
+// in place. Opened from the strip or the tab's badge; open or closed, the
+// grouping and each section's open or closed are kept per browser.
 const PANEL_KEY = 'agent007-questions-open';
 const HINT_KEY = 'agent007-questions-hint';
+const BY_KEY = 'agent007-questions-by';
+const SECTION_KEY = (by, name) => `agent007-questions-section:${by}:${name}`;
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
   set(key, value) { try { localStorage.setItem(key, value); } catch {} },
 };
-let panelOpen = store.get(PANEL_KEY) === '1';
+let panelOpen, groupBy;
 let hint = false;
 const PHONE = '(max-width: 700px)';
 
 const openItems = () => waitingItems.filter(item => item.status === 'open').sort(byUrgency);
 
-// One group per project with something open, its questions most urgent then
-// oldest. Grouped in that order, so each group lands where its most urgent
-// question falls: blocking projects first, then by oldest.
-export function questionGroups(items = waitingItems) {
+// One group per project (or type) with something open, its questions most
+// urgent then oldest. Grouped in that order, so each group lands where its
+// most urgent question falls: blocking groups first, then by oldest.
+export function questionGroups(items = waitingItems, by = groupBy) {
   const groups = new Map();
   for (const item of items.filter(i => i.status === 'open').sort(byUrgency)) {
-    const project = item.project || 'general';
-    if (!groups.has(project)) groups.set(project, []);
-    groups.get(project).push(item);
+    const name = (by === 'type' ? item.type || 'other' : item.project || 'general');
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(item);
   }
-  return [...groups].map(([project, list]) => ({ project, items: list }));
+  return [...groups].map(([name, list]) => ({ name, items: list }));
 }
+
+const asGrouping = (by) => (by === 'type' ? 'type' : 'project');
+
+export function setGroupBy(by) {
+  groupBy = asGrouping(by);
+  store.set(BY_KEY, groupBy);
+  renderWaiting();
+}
+
+// What a page load reads back from this browser; a test calls it to stand in for a refresh.
+export function _reloadQuestionPrefs() {
+  panelOpen = store.get(PANEL_KEY) === '1';
+  groupBy = asGrouping(store.get(BY_KEY));
+}
+_reloadQuestionPrefs();
 
 export function setQuestionsOpen(open, { focus = true } = {}) {
   panelOpen = open;
@@ -882,24 +900,45 @@ function questionRow(q) {
   return row;
 }
 
+// A section: a header button (name, count, "!" when a blocking question is
+// inside, chevron), closed until tapped open.
+function questionSection(name, items) {
+  const key = SECTION_KEY(groupBy, name);
+  const open = store.get(key) === '1';
+  const section = el('section', 'chat-questions-group');
+  section.classList.toggle('open', open);
+  const head = el('button', 'chat-questions-project');
+  head.type = 'button';
+  head.setAttribute('aria-expanded', String(open));
+  const blocking = items.some(q => q.urgency === 'blocking');
+  head.setAttribute('aria-label', `${name}, ${items.length} open${blocking ? ', blocking' : ''}`);
+  head.append(el('span', 'chat-questions-name', name), el('span', 'chat-questions-count', String(items.length)));
+  if (blocking) head.appendChild(el('b', 'waiting-urgent chat-questions-urgent', '!')).setAttribute('aria-hidden', 'true');
+  head.appendChild(el('span', 'chat-questions-chevron', '▾')).setAttribute('aria-hidden', 'true');
+  head.onclick = () => {
+    store.set(key, open ? '0' : '1');
+    renderWaiting();
+    document.querySelector(`.chat-questions-project[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
+  };
+  head.dataset.name = name;
+  section.appendChild(head);
+  if (open) for (const q of items) section.appendChild(questionRow(q));
+  return section;
+}
+
 function renderPanel() {
   const panel = document.getElementById('chat-questions');
   const groups = questionGroups();
   const shown = panelOpen && groups.length > 0;
   panel.hidden = !shown;
   document.getElementById('waiting-board').classList.toggle('questions-open', shown);
+  for (const b of panel.querySelectorAll('.chat-questions-by button')) b.setAttribute('aria-pressed', String(b.value === groupBy));
   const body = document.getElementById('chat-questions-body');
+  const keep = body.scrollTop;
   body.innerHTML = '';
   if (!shown) return;
-  for (const { project, items } of groups) {
-    const section = el('section', 'chat-questions-group');
-    const head = el('h3', 'chat-questions-project');
-    head.append(el('span', 'chat-questions-name', project), el('span', 'chat-questions-count', String(items.length)));
-    head.lastChild.setAttribute('aria-label', `${items.length} open`);
-    section.appendChild(head);
-    for (const q of items) section.appendChild(questionRow(q));
-    body.appendChild(section);
-  }
+  for (const { name, items } of groups) body.appendChild(questionSection(name, items));
+  body.scrollTop = keep;
 }
 
 function questionsPanel() {
@@ -915,7 +954,18 @@ function questionsPanel() {
   close.title = 'Back to the chat (Esc)';
   close.setAttribute('aria-label', 'Close open questions');
   close.onclick = () => setQuestionsOpen(false);
-  head.append(el('h2', 'chat-questions-title', 'Open questions'), close);
+  // by project | by type
+  const by = el('div', 'chat-questions-by');
+  by.setAttribute('role', 'group');
+  by.setAttribute('aria-label', 'Group questions');
+  for (const value of ['project', 'type']) {
+    const b = el('button', '', `by ${value}`);
+    b.type = 'button';
+    b.value = value;
+    b.onclick = () => setGroupBy(value);
+    by.appendChild(b);
+  }
+  head.append(el('h2', 'chat-questions-title', 'Open questions'), by, close);
   const body = el('div', 'chat-questions-body');
   body.id = 'chat-questions-body';
   panel.append(head, body);

@@ -245,10 +245,12 @@ async function transcribeNote(note, env) {
 // --- The "Waiting on you" list, in the config dir so it survives restarts ---
 //
 // An item: { id, n, text, at, choices?, recommended?, status, answer?,
-// answeredAt?, answeredVia?, answeredBy?, tgMessageId?, tgVoice?, urgency, project }. answeredBy
+// answeredAt?, answeredVia?, answeredBy?, tgMessageId?, tgVoice?, urgency, project, type }. answeredBy
 // is the group member who answered on Telegram (senderName). urgency is
 // blocking, normal or low; items written before it read as normal. project is
-// a board repo's folder name or "general", which older items read as. answeredVia is app,
+// a board repo's folder name or "general", which older items read as. type is
+// one of QUESTION_TYPES; an older item has it read off its text (a name off
+// the list reads as other) the first time it is read, and saved. answeredVia is app,
 // telegram or terminal (resolve_question). n is the short number the owner sees (Q3). status is open, answered or dismissed. Items written
 // before v0.10 have neither n nor status: they read as open, numbered in order.
 
@@ -258,7 +260,10 @@ export function waitingItems() {
   let items;
   try { items = JSON.parse(readFileSync(waitingPath(), 'utf8')); } catch { return []; }
   if (!Array.isArray(items)) return [];
-  return items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal', project: item.project || 'general' }));
+  const untyped = items.some(item => !QUESTION_TYPES.includes(item.type));
+  items = items.map((item, i) => ({ ...item, n: item.n ?? i + 1, status: item.status || 'open', urgency: item.urgency || 'normal', project: item.project || 'general', type: questionType(item.type, item.text) }));
+  if (untyped) try { saveWaiting(items); } catch {}
+  return items;
 }
 
 function saveWaiting(items) {
@@ -280,7 +285,8 @@ export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems
 // in the tab, [{ name, size, type }] (see "The chat's attachments"). re is the question number a typed
 // answer went to. q is a notify_owner question, copied here with its state so
 // the thread keeps it after the Waiting list lets it go: { id, n, urgency,
-// choices?, recommended?, status, answer?, answeredVia? }. The newest CHAT_CAP
+// project, type, choices?, recommended?, status, answer?, answeredVia?,
+// answeredAt?, answeredBy? }. The newest CHAT_CAP
 // are kept. Everything in it reaches a browser, so the bot token is redacted.
 
 const chatPath = () => join(CONFIG_DIR, 'chat.json');
@@ -393,7 +399,7 @@ export function addChat(message, broadcast, env = process.env) {
 }
 
 const questionState = (item) => ({
-  id: item.id, n: item.n, urgency: item.urgency, project: item.project, status: item.status,
+  id: item.id, n: item.n, urgency: item.urgency, project: item.project, type: item.type, status: item.status,
   ...(item.choices ? { choices: item.choices, recommended: item.recommended } : {}),
   ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt, ...(item.answeredBy ? { answeredBy: item.answeredBy } : {}) } : {}),
 });
@@ -440,10 +446,34 @@ export function questionProject(project, text, repos = config.repos.map(r => bas
   return repos.find(r => new RegExp(`(^|[^\\w.-])${escape(r.toLowerCase())}($|[^\\w-])`).test(words)) || 'general';
 }
 
-export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal', project, env = process.env } = {}) {
+export const QUESTION_TYPES = ['engineering', 'marketing', 'outreach', 'finance', 'product', 'admin', 'other'];
+
+// Read off the text when Billion names no type; the first rule that matches
+// wins, so outreach (a reply to a post) beats marketing. X the platform is
+// capitalised; a lowercase x is a variable or a times sign.
+const TYPE_RULES = [
+  ['finance', /\$|\b(money|prices?|priced|pricing|plans?|subscriptions?|renew(s|ed|al|als)?|pay(s|ing|ment|ments)?|paid)\b/i],
+  ['engineering', /\b(PRs?|CI|merge[sd]?|merging|deploy(s|ed|ing|ment)?|bugs?|tests?|testing|releases?|released)\b/i],
+  ['outreach', /\b(repl(y|ies|ied)|responded|linkedin|email from|DMs?|DM'd|outreach|inbound)\b/i],
+  ['marketing', /\b(posts?|posted|posting|reddit|HN|newsletters?|tweets?|tweeted|changelog|launch(es|ed|ing)?)\b/i, /\bX\b/],
+  ['admin', /\b(log ?in|logins?|tokens?|accounts?|access|credentials?|set ?up|install(s|ed|ing)?)\b/i],
+  ['product', /\b(features?|design(s|ed|ing)?|UX|roadmap|direction)\b/i],
+];
+
+// A named type from the list stands (any case); any other name is "other";
+// none at all, it is read off the text.
+export function questionType(type, text) {
+  if (type != null && type !== '') {
+    const given = String(type).trim().toLowerCase();
+    return QUESTION_TYPES.includes(given) ? given : 'other';
+  }
+  return TYPE_RULES.find(([, ...rules]) => rules.some(rule => rule.test(String(text ?? ''))))?.[0] || 'other';
+}
+
+export function addWaiting(text, broadcast, now = Date.now(), { choices, recommended, urgency = 'normal', project, type, env = process.env } = {}) {
   const items = waitingItems();
   text = redact(text, env);   // shown in every browser, like the thread
-  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency, project: questionProject(project, text) };
+  const item = { id: randomUUID(), n: Math.max(0, ...items.map(i => i.n)) + 1, text, at: new Date(now).toISOString(), status: 'open', urgency, project: questionProject(project, text), type: questionType(type, text) };
   if (choices) item.choices = choices.map(c => c.trim());
   if (recommended) item.recommended = recommended.trim();
   // The thread first: one not written yet starts from the list as it stands.
@@ -619,7 +649,7 @@ async function showAnswerOnPhone(item, env) {
 
 let sent = [];   // times of recent notify_owner calls
 
-export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, type, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -634,7 +664,7 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
   }
   sent.push(now);
   let item;
-  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency, project, env }); } catch (err) {
+  try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency, project, type, env }); } catch (err) {
     console.error('Could not save the Waiting list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';
