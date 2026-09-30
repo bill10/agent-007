@@ -122,14 +122,14 @@ because the stock brights wash out on the cream ground.
   - 10px — branch labels, diff viewer, loading text
   - 11px — explorer items (files, agents), form labels, panel labels (REPOS,
     the job columns, Finished; uppercase, letter-spacing: 2px). 11px is the
-    floor for anything functional; 9px is left only on badges and card
-    metadata
-- **Uppercase** goes on a label's own words, never on a container: the job
-  form's labels wrap their word in `.job-form-label` so the select, input or
-  hint nested in the `<label>` keeps its case
+    floor for functional labels; 9px still remains on some badges, form hints
+    and card metadata
   - 12px — terminal tabs, form inputs, repo/branch in terminal header
   - 13px — terminal header agent info
   - 14px — app title (bold, letter-spacing: 1px)
+- **Uppercase** goes on a label's own words, never on a container: the job
+  form's labels wrap their word in `.job-form-label` so the select, input or
+  hint nested in the `<label>` keeps its case
 
 ## Text Hierarchy
 
