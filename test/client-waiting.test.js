@@ -836,9 +836,14 @@ describe('the Open questions panel', () => {
     // The "!" is hidden from screen readers; the header's name says it.
     expect(['agent-007', 'finnamon'].map(name => header(name).getAttribute('aria-label'))).toEqual(['agent-007, 2 open, blocking', 'finnamon, 3 open']);
     expect(header('agent-007').tagName).toBe('BUTTON');
+    // A heading wraps the button; the button controls the body, hidden while closed.
+    expect(header('agent-007').parentElement.tagName).toBe('H3');
+    const body = () => document.getElementById(header('finnamon').getAttribute('aria-controls'));
+    expect(body().hidden).toBe(true);
     expect(header('agent-007').getAttribute('aria-expanded')).toBe('false');
     header('finnamon').click();
     expect(header('finnamon').getAttribute('aria-expanded')).toBe('true');
+    expect(body().hidden).toBe(false);
     expect(document.activeElement).toBe(header('finnamon'));
     expect(sections()[2]).toEqual(['finnamon', '3', 'Q6 Q1 Q5']);
     expect(localStorage.getItem('agent007-questions-section:project:finnamon')).toBe('1');
