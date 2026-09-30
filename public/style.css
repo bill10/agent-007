@@ -1952,6 +1952,7 @@ select.job-mode-danger {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 8px 10px;
   background: var(--bg-tabs);
   border-bottom: 1px solid var(--border);
