@@ -71,7 +71,7 @@ body {
   height: 36px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 4px 12px;
   gap: 8px;
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
@@ -112,6 +112,7 @@ body {
 .topbar-btn:hover { color: var(--accent); }
 /* Primary action — give it button chrome so it reads as a CTA, not a label. */
 #btn-new-agent, #btn-new-job-shortcut {
+  padding: 4px 12px;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--text);
@@ -265,11 +266,6 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .voice-indicator,
-  .voice-indicator-dot,
-  #btn-voice.listening { animation: none; }
-}
 .voice-indicator-dot {
   width: 7px;
   height: 7px;
@@ -277,6 +273,13 @@ body {
   background: var(--state-recording);
   animation: mic-pulse 1.6s ease-in-out infinite;
   flex-shrink: 0;
+}
+/* Must stay after every rule that sets animation on these selectors (equal
+   specificity, the later rule wins); test/theme-tokens.test.js checks it. */
+@media (prefers-reduced-motion: reduce) {
+  .voice-indicator,
+  .voice-indicator-dot,
+  #btn-voice.listening { animation: none; }
 }
 .voice-indicator-text {
   white-space: nowrap;
@@ -591,7 +594,6 @@ body {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 200ms ease-out;
   overflow: hidden;
 }
 .explorer.collapsed {
@@ -601,17 +603,17 @@ body {
   overflow: hidden;
 }
 .explorer-header {
-  height: 28px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px;
+  padding: 4px 10px;
   background: var(--bg-dark);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .explorer-label {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-dim);
   text-transform: uppercase;
   letter-spacing: 2px;
@@ -902,7 +904,6 @@ body {
 .explorer-file-tree {
   max-height: 400px;
   overflow-y: auto;
-  transition: max-height 150ms ease-out;
 }
 .explorer-dir {
   padding: 2px 10px;
@@ -1046,18 +1047,6 @@ body {
   display: flex;
   flex-direction: column;
 }
-.office-label {
-  position: absolute;
-  top: 8px;
-  left: 10px;
-  font-size: 9px;
-  color: rgba(255,255,255,0.15);
-  text-transform: uppercase;
-  letter-spacing: 3px;
-  pointer-events: none;
-}
-/* White watermark is invisible on the light office canvas */
-[data-theme="light"] .office-label { color: rgba(0,0,0,0.14); }
 #office-canvas {
   width: 100%;
   flex: 1;
@@ -1813,7 +1802,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   align-items: center;
   gap: 5px;
   margin-left: auto;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 .job-cap-label input,
@@ -1855,8 +1844,12 @@ select.job-mode-danger {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-dim);
+}
+/* Uppercase goes on the label's word only: the select, input and hint nested
+   in the <label> are running text and stay in their own case. */
+.job-form-label {
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -1870,8 +1863,6 @@ select.job-mode-danger {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 3px;
-  text-transform: none;
-  letter-spacing: 0;
 }
 .job-form textarea { resize: vertical; line-height: 1.5; }
 .job-form input:focus,
@@ -1909,8 +1900,6 @@ select.job-mode-danger {
 .job-form-hint {
   font-size: 9px;
   color: var(--text-dim);
-  text-transform: none;
-  letter-spacing: 0;
 }
 .job-form-error { font-size: 11px; color: var(--state-disconnected); }
 
@@ -1963,19 +1952,26 @@ select.job-mode-danger {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 6px;
   padding: 8px 10px;
   background: var(--bg-tabs);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .job-column-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--text-dim);
+  /* A terminal panel dragged narrow gives each column ~100px: truncate
+     rather than wrap, so the three headers stay one height. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.job-column-count { font-size: 10px; color: var(--text-dim); }
+.job-column-count { font-size: 11px; color: var(--text-dim); }
 
 .job-cards {
   flex: 1;
@@ -2023,13 +2019,13 @@ select.job-mode-danger {
   flex-shrink: 0;
 }
 .job-finished-label {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--text-dim);
 }
-.job-finished-count { font-size: 10px; color: var(--text-dim); }
+.job-finished-count { font-size: 11px; color: var(--text-dim); }
 
 /* --- Cards --- */
 
