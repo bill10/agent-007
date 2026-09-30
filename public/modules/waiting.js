@@ -426,8 +426,10 @@ function bubble(m) {
 
 const SPEAKER_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3h-2.5z"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5"/><path d="M12.8 3.5a6 6 0 0 1 0 9"/></svg>';
 const STOP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>';
-const CLIP_SVG = '<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 7.5l-5.6 5.6a3.2 3.2 0 0 1-4.5-4.5l6-6a2.1 2.1 0 0 1 3 3l-6 6a1 1 0 0 1-1.5-1.5l5.5-5.5"/></svg>';
-const MIC_SVG = '<svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" aria-hidden="true"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/></svg>';
+// 16px with a 1.05 stroke draws a 1.2px line, the weight of the header's
+// gear and theme icons (14px at 1.2).
+const MIC_SVG = '<svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" aria-hidden="true"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/></svg>';
+const CLIP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 7.5l-5.6 5.6a3.2 3.2 0 0 1-4.5-4.5l6-6a2.1 2.1 0 0 1 3 3l-6 6a1 1 0 0 1-1.5-1.5l5.5-5.5"/></svg>';
 
 // A Billion message's speaker: reads it aloud, and while it does, stops it.
 function speakButton(m) {
@@ -539,26 +541,26 @@ export const toggleChatVoice = () => toggleVoice(CHAT_VOICE);
 function readHead() {
   const head = el('div', 'chat-head');
   head.id = 'chat-head';
-  const toggle = el('button', 'chat-autoread');
+  const toggle = el('button', 'chat-autoread chat-control');
   toggle.id = 'chat-autoread';
   toggle.type = 'button';
   toggle.innerHTML = SPEAKER_SVG;
   toggle.append(el('span', null, 'Read new messages aloud'), el('span', 'chat-switch'));
   toggle.title = 'Speak each new message from Billion as it arrives, while this tab is open';
   toggle.onclick = () => setAutoRead(!autoReadOn());
-  const resume = el('button', 'chat-resume', 'Resume reading');
+  const resume = el('button', 'chat-resume chat-control', 'Resume reading');
   resume.id = 'chat-resume';
   resume.type = 'button';
   resume.title = 'The browser lets a page speak only after a tap: tap to go on reading new messages aloud';
   resume.hidden = true;
   resume.onclick = () => resumeReading();
-  const stop = el('button', 'chat-stop-reading', 'Stop');
+  const stop = el('button', 'chat-stop-reading chat-control', 'Stop');
   stop.id = 'chat-stop-reading';
   stop.type = 'button';
   stop.setAttribute('aria-label', 'Stop reading aloud');
   stop.hidden = true;
   stop.onclick = () => stopReading();
-  const pick = el('select', 'chat-voice-pick');
+  const pick = el('select', 'chat-voice-pick chat-control');
   pick.id = 'chat-voice-pick';
   pick.setAttribute('aria-label', 'Reading voice');
   pick.hidden = true;
@@ -595,7 +597,7 @@ function shell() {
     target.id = 'chat-target';
     target.hidden = true;
     const row = el('div', 'chat-compose-row');
-    const input = el('textarea');
+    const input = el('textarea', 'chat-control');
     input.id = 'chat-input';
     input.rows = 1;
     input.setAttribute('aria-label', 'Message Billion');
@@ -606,7 +608,7 @@ function shell() {
         submit();
       }
     };
-    const clip = el('button', 'chat-mic chat-attach');
+    const clip = el('button', 'chat-mic chat-control chat-attach');
     clip.id = 'chat-attach';
     clip.type = 'button';
     clip.innerHTML = CLIP_SVG;
@@ -622,7 +624,7 @@ function shell() {
     const chips = el('div', 'chat-files-pending');
     chips.id = 'chat-files';
     chips.hidden = true;
-    const mic = el('button', 'chat-mic');
+    const mic = el('button', 'chat-mic chat-control');
     mic.id = 'chat-mic';
     mic.type = 'button';
     mic.innerHTML = MIC_SVG;
@@ -635,7 +637,7 @@ function shell() {
     voice.style.display = 'none';
     voice.setAttribute('aria-hidden', 'true');
     voice.append(el('span', 'voice-indicator-dot'), el('span', 'voice-indicator-text'));
-    const btn = el('button', 'waiting-send', 'Send');
+    const btn = el('button', 'waiting-send chat-control', 'Send');
     btn.id = 'chat-send';
     btn.type = 'submit';
     const notice = el('div', 'chat-notice');
