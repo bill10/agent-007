@@ -639,6 +639,18 @@ messages to your phone go as consecutive messages instead of being cut, and a
 question's answered copy that no longer fits gets the rest as a follow-up
 message.
 
+To show Billion a screenshot or a file, paste an image into the box, drop
+files anywhere on the tab, or pick them with the paperclip beside the mic.
+They wait as chips above the box (× removes one) and go with the next Send,
+with or without text. Each is saved owner-only (files 0600, folders 0700) in
+`~/.agent-007/chat-files/<message id>/`, under the job form's limits (10MB a
+file, 20 files and 50MB a message), and the turn ends with their absolute
+paths: `[Owner via app] <text> (attached: /path/a.png, /path/b.pdf)`, or
+`[Owner via app] Q3: <text> (re: "...") (attached: ...)` for an answer. Your
+bubble shows images as thumbnails that open full size and other files as
+download links; they are served only from that folder, never while user
+accounts are on, and deleted when their message falls out of the last 500.
+
 `notify_owner` puts each question in the tab and, when a Telegram bot is set
 up, on your phone. Each question gets a short number, Q1, Q2 and so on. When the answer
 is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
