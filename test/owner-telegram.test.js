@@ -230,7 +230,7 @@ describe('replies from Telegram', () => {
     expect(await handleUpdate(update(1, 777, 'hi bot'), { env, broadcast })).toBe('discovery');
     expect(log.mock.calls.join('\n')).toContain('TELEGRAM_CHAT_ID=777');
     expect(log.mock.calls.join('\n')).not.toContain(TOKEN);
-    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'notification' }));
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'telegram-state' }));
     // A second chat is shown too: a stranger messaging first cannot hide the owner's id.
     await handleUpdate(update(2, 888, 'me'), { env, broadcast });
     expect(log.mock.calls.join('\n')).toContain('TELEGRAM_CHAT_ID=888');

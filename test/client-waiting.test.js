@@ -10,7 +10,7 @@ import { send } from '../public/modules/ws.js';
 import { agents, setActiveSession, setBoardActive, setWaitingItems, setWaitingActive, setChatMessages, upsertChatMessage, setBillionTabOpen, activeSessionId, waitingActive, setBillionEnabled, setView } from '../public/modules/state.js';
 import { updateTabs, switchToSession, removeSession, setupUpload } from '../public/modules/terminal.js';
 import { readFileSync } from 'node:fs';
-import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer, questionGroups, setQuestionsOpen } from '../public/modules/waiting.js';
+import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer, questionGroups, setQuestionsOpen, setTelegramState } from '../public/modules/waiting.js';
 import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
 import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
 
@@ -787,5 +787,56 @@ describe('the Open questions panel', () => {
     badge.click();
     expect(waitingActive).toBe(true);
     expect(panel().hidden).toBe(false);
+  });
+});
+
+describe('Telegram in the Billion tab', () => {
+  beforeEach(() => { setWaitingActive(true); setTelegramState({ offers: [] }); });
+
+  it('names the group member who answered, and who wrote a Telegram message', () => {
+    const q = { id: 'w1', n: 1, urgency: 'normal', status: 'answered', answer: 'Merge', answeredVia: 'telegram', answeredBy: 'Alice', answeredAt: new Date(0).toISOString() };
+    setChatMessages([
+      { id: 'm1', at: new Date().toISOString(), from: 'billion', text: 'Merge?', q },
+      { id: 'm2', at: new Date().toISOString(), from: 'owner', via: 'telegram', name: 'Alice', text: 'done' },
+    ]);
+    renderWaiting();
+    expect(bubbleOf('w1').querySelector('.chat-answered').textContent).toBe('Alice answered: Merge (on Telegram)');
+    expect(document.querySelector('.chat-msg[data-id="m2"] .chat-meta').textContent).toMatch(/^Alice on Telegram · /);
+  });
+
+  it('offers a chat with "Use this chat" and Dismiss, then says it is connected', () => {
+    renderWaiting();
+    setTelegramState({ type: 'telegram-state', on: true, connected: false, offers: [{ chatId: '-5', name: 'Team' }] });
+    const bar = document.getElementById('chat-telegram');
+    expect(bar.hidden).toBe(false);
+    expect(bar.textContent).toContain('Telegram: a message from Team (chat -5). Use it for Billion?');
+    [...bar.querySelectorAll('button')].find(b => b.textContent === 'Use this chat').click();
+    expect(send).toHaveBeenCalledWith({ type: 'telegram-use', chatId: '-5' });
+    [...bar.querySelectorAll('button')].find(b => b.textContent === 'Dismiss').click();
+    expect(send).toHaveBeenCalledWith({ type: 'telegram-dismiss', chatId: '-5' });
+    setTelegramState({ type: 'telegram-state', on: true, connected: true, connectedTo: 'Team', offers: [] });
+    expect(bar.textContent).toBe('Telegram connected: Team');
+  });
+});
+
+describe('Telegram in Settings', async () => {
+  const { renderTelegramSettings } = await import('../public/modules/settings.js');
+  beforeEach(() => { document.body.innerHTML = '<div id="telegram-settings" hidden></div>'; });
+  const box = () => document.getElementById('telegram-settings');
+
+  it('names the connected chat, and Change forgets it', () => {
+    renderTelegramSettings({ on: true, connected: true, chat: { chatId: '-5', name: 'Team', fromEnv: false } });
+    expect(box().hidden).toBe(false);
+    expect(box().querySelector('.settings-telegram').textContent).toBe('Connected to Team (chat -5).');
+    [...box().querySelectorAll('button')].find(b => b.textContent === 'Change').click();
+    expect(send).toHaveBeenCalledWith({ type: 'telegram-forget' });
+  });
+
+  it('has no Change for a chat set by TELEGRAM_CHAT_ID, and gives the steps when none is connected', () => {
+    renderTelegramSettings({ on: true, connected: true, chat: { chatId: '42', name: '', fromEnv: true } });
+    expect(box().textContent).toContain('Connected to chat 42, set by TELEGRAM_CHAT_ID.');
+    expect(box().querySelector('button')).toBeNull();
+    renderTelegramSettings({ on: true, connected: false, offers: [] });
+    expect(box().textContent).toContain('Press "Use this chat" in the Billion tab');
   });
 });

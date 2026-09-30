@@ -149,6 +149,38 @@ function renderNotice() {
   bar.append(el('span', 'chat-notice-text', text), btn);
 }
 
+// Telegram's chat offers (server/owner.js telegramPayload): with no chat
+// connected, each chat that messages the bot is offered here, and "Use this
+// chat" connects it. connectedTo: the chat just picked, shown for a moment.
+let telegram = { offers: [] };
+let connectedTimer = null;
+export function setTelegramState(state) {
+  telegram = state;
+  clearTimeout(connectedTimer);
+  if (state.connectedTo) connectedTimer = setTimeout(() => { telegram = { ...telegram, connectedTo: '' }; renderTelegram(); }, 8000);
+  renderTelegram();
+}
+
+function renderTelegram() {
+  const bar = document.getElementById('chat-telegram');
+  if (!bar) return;
+  bar.innerHTML = '';
+  for (const offer of telegram.offers || []) {
+    const row = el('div', 'chat-notice');
+    const use = el('button', 'chat-notice-btn', 'Use this chat');
+    use.type = 'button';
+    use.onclick = () => send({ type: 'telegram-use', chatId: offer.chatId });
+    const no = el('button', 'chat-link', 'Dismiss');
+    no.type = 'button';
+    no.setAttribute('aria-label', `Dismiss the Telegram chat ${offer.name}`);
+    no.onclick = () => send({ type: 'telegram-dismiss', chatId: offer.chatId });
+    row.append(el('span', 'chat-notice-text', `Telegram: a message from ${offer.name} (chat ${offer.chatId}). Use it for Billion?`), use, no);
+    bar.appendChild(row);
+  }
+  if (telegram.connected && telegram.connectedTo) bar.appendChild(el('div', 'chat-notice', `Telegram connected: ${telegram.connectedTo}`));
+  bar.hidden = !bar.childElementCount;
+}
+
 // A tap on a question's choice.
 function answer(q, choice) {
   request(q, { type: 'waiting-answer', id: q.id, answer: choice });
@@ -350,7 +382,7 @@ const VIA = { telegram: 'on Telegram', terminal: 'in the terminal' };
 // became of it.
 function questionFoot(q) {
   if (q.status === 'answered') {
-    const line = el('p', 'chat-answered', `you answered: ${q.answer}${VIA[q.answeredVia] ? ` (${VIA[q.answeredVia]})` : ''}`);
+    const line = el('p', 'chat-answered', `${q.answeredBy || 'you'} answered: ${q.answer}${VIA[q.answeredVia] ? ` (${VIA[q.answeredVia]})` : ''}`);
     const left = undoLeft(q);
     if (left > 0) {
       const btn = el('button', 'chat-link chat-undo', 'Undo');
@@ -420,7 +452,7 @@ function bubble(m) {
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
   if (m.text || !m.files?.length) box.appendChild(el('p', 'chat-text', m.text));
   if (m.files?.length) box.appendChild(sentFiles(m));
-  const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && 'Telegram', time(m.at)].filter(Boolean);
+  const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at)].filter(Boolean);
   const metaLine = el('span', 'chat-meta', meta.join(' · '));
   if (!mine && readAloudSupported()) {
     const foot = el('div', 'chat-meta-row');
@@ -663,6 +695,10 @@ function shell() {
     const btn = el('button', 'waiting-send chat-control', 'Send');
     btn.id = 'chat-send';
     btn.type = 'submit';
+    const tg = el('div', 'chat-telegram');
+    tg.id = 'chat-telegram';
+    tg.setAttribute('role', 'status');
+    tg.hidden = true;
     const notice = el('div', 'chat-notice');
     notice.id = 'chat-notice';
     notice.setAttribute('role', 'status');
@@ -673,7 +709,7 @@ function shell() {
     error.hidden = true;
     form.onsubmit = (e) => { e.preventDefault(); submit(); };
     row.append(input, clip, pick, mic, btn);
-    form.append(notice, target, chips, voice, row, error);
+    form.append(tg, notice, target, chips, voice, row, error);
     board.append(jump, form);
     board.addEventListener('paste', (e) => {
       const files = [...(e.clipboardData?.files || [])];
@@ -745,6 +781,7 @@ export function renderComposer() {
   error.textContent = sendError;
   error.hidden = !sendError;
   renderNotice();
+  renderTelegram();
 }
 
 // The strip: a one-line summary of the open questions, and the button that
