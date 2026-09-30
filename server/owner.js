@@ -284,7 +284,8 @@ export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems
 // in the tab, [{ name, size, type }] (see "The chat's attachments"). re is the question number a typed
 // answer went to. q is a notify_owner question, copied here with its state so
 // the thread keeps it after the Waiting list lets it go: { id, n, urgency,
-// choices?, recommended?, status, answer?, answeredVia? }. The newest CHAT_CAP
+// project, type, choices?, recommended?, status, answer?, answeredVia?,
+// answeredAt?, answeredBy? }. The newest CHAT_CAP
 // are kept. Everything in it reaches a browser, so the bot token is redacted.
 
 const chatPath = () => join(CONFIG_DIR, 'chat.json');

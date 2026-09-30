@@ -919,7 +919,7 @@ function questionSection(name, items) {
   head.onclick = () => {
     store.set(key, open ? '0' : '1');
     renderWaiting();
-    document.querySelector(`.chat-questions-project[data-name="${CSS.escape(name)}"]`)?.focus();
+    document.querySelector(`.chat-questions-project[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
   };
   head.dataset.name = name;
   section.appendChild(head);
@@ -935,9 +935,11 @@ function renderPanel() {
   document.getElementById('waiting-board').classList.toggle('questions-open', shown);
   for (const b of panel.querySelectorAll('.chat-questions-by button')) b.setAttribute('aria-pressed', String(b.value === groupBy));
   const body = document.getElementById('chat-questions-body');
+  const keep = body.scrollTop;
   body.innerHTML = '';
   if (!shown) return;
   for (const { name, items } of groups) body.appendChild(questionSection(name, items));
+  body.scrollTop = keep;
 }
 
 function questionsPanel() {

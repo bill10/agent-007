@@ -631,8 +631,9 @@ server reads it off a GitHub URL or a repo's name in the text, else
 top of the panel, *by project | by type*, regroups the same rows by the
 question's `type` (engineering, marketing, outreach, finance, product, admin
 or other): Billion passes it to `notify_owner`, a name off the list reads as
-other, and left out the server reads it off the text (money, price or a `$`
-is finance; a PR, CI, deploy, bug, test or release is engineering; a reply,
+other, and left out the server reads it off the text, first match winning
+(money, a `$`, price, plan, subscription, renew or pay is finance, so it
+wins over the rest; a PR, CI, deploy, bug, test or release is engineering; a reply,
 LinkedIn, an email from, a DM or inbound is outreach, even about a post; a
 post, Reddit, HN, a newsletter, tweet, X, Changelog or launch is marketing;
 a login, token, account, access, credentials, setup or install is admin; a

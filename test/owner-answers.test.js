@@ -4,7 +4,7 @@
 // nothing here talks to Telegram.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { writeFileSync, rmSync, readFileSync, chmodSync } from 'fs';
+import { writeFileSync, rmSync, readFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import {
   notifyOwner, handleUpdate, waitingItems, waitingPayload, dismissWaiting, answerWaiting, checkChoices,
@@ -469,9 +469,12 @@ describe('type', () => {
     writeFileSync(file, typed);
     expect(waitingItems()[0]).toMatchObject({ type: 'admin', n: 1, status: 'open' });
     expect(readFileSync(file, 'utf8')).toBe(typed);   // all typed: read, not rewritten
-    // A save that fails still reads, typed.
+    // A save that fails (a directory where its temp file goes) still reads, typed.
     writeFileSync(file, JSON.stringify([{ id: 'd', text: 'Merge the PR?' }]));
-    chmodSync(CONFIG_DIR, 0o555);
-    try { expect(waitingItems()[0].type).toBe('engineering'); } finally { chmodSync(CONFIG_DIR, 0o755); }
+    mkdirSync(`${file}.tmp`);
+    try {
+      expect(waitingItems()[0].type).toBe('engineering');
+      expect(JSON.parse(readFileSync(file, 'utf8'))[0].type).toBeUndefined();
+    } finally { rmSync(`${file}.tmp`, { recursive: true, force: true }); }
   });
 });
