@@ -166,29 +166,29 @@
           </div>
 
           <div class="job-form" id="job-form" style="display:none">
-            <label>Title<input type="text" id="job-title" placeholder="What needs doing" spellcheck="false" maxlength="200"></label>
-            <label>Repository
+            <label><span class="job-form-label">Title</span><input type="text" id="job-title" placeholder="What needs doing" spellcheck="false" maxlength="200"></label>
+            <label><span class="job-form-label">Repository</span>
               <select id="job-repo"></select>
             </label>
             <div class="job-form-row">
-              <label>Type
+              <label><span class="job-form-label">Type</span>
                 <select id="job-type">
                   <option value="one-time">One-time</option>
                   <option value="scheduled">Scheduled</option>
                 </select>
               </label>
-              <label title="Which CLI the board spawns for this job.">Agent
+              <label title="Which CLI the board spawns for this job."><span class="job-form-label">Agent</span>
                 <select id="job-agent">
                   <option value="claude">Claude Code</option>
                   <option value="codex">Codex</option>
                 </select>
               </label>
-              <label title="Which model this job's agent runs. The list is what the board found for the chosen CLI on this computer; CLI default leaves the choice to the CLI.">Model
+              <label title="Which model this job's agent runs. The list is what the board found for the chosen CLI on this computer; CLI default leaves the choice to the CLI."><span class="job-form-label">Model</span>
                 <select id="job-model">
                   <option value="">CLI default</option>
                 </select>
               </label>
-              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different. A Codex card offers auto (Codex's own default) and bypassPermissions (--dangerously-bypass-approvals-and-sandbox); a board set to another mode maps onto Codex's nearest flag: plan is read-only, manual asks before every command, dontAsk never asks.">Permissions
+              <label title="How much this job's agent may do without asking. Leave it on the board default unless this one job needs something different. A Codex card offers auto (Codex's own default) and bypassPermissions (--dangerously-bypass-approvals-and-sandbox); a board set to another mode maps onto Codex's nearest flag: plan is read-only, manual asks before every command, dontAsk never asks."><span class="job-form-label">Permissions</span>
                 <select id="job-permission-mode-field">
                   <option value="">Board default</option>
                   <option value="auto" data-codex-label="auto — Codex default, no flag">auto — classifier decides</option>
@@ -199,18 +199,18 @@
                   <option value="plan" data-claude-only>plan — read-only</option>
                 </select>
               </label>
-              <label id="job-pr-field" title="Whether the work ends in a pull request. Choose Not required for research, investigations or chores that change no code: the agent reports a summary instead. On a schedule this is what each run gets, and it starts at Not required.">Pull request
+              <label id="job-pr-field" title="Whether the work ends in a pull request. Choose Not required for research, investigations or chores that change no code: the agent reports a summary instead. On a schedule this is what each run gets, and it starts at Not required."><span class="job-form-label">Pull request</span>
                 <select id="job-requires-pr">
                   <option value="yes">Required</option>
                   <option value="no">Not required</option>
                 </select>
               </label>
-              <label class="job-form-schedule" id="job-schedule-field" style="display:none">Schedule
+              <label class="job-form-schedule" id="job-schedule-field" style="display:none"><span class="job-form-label">Schedule</span>
                 <input type="text" id="job-schedule" placeholder="0 9 * * 1-5" spellcheck="false" autocomplete="off" maxlength="120">
                 <span class="job-form-hint" id="job-schedule-hint">min hour day month weekday, or @daily · server local time</span>
               </label>
             </div>
-            <label>Details<textarea id="job-detail" rows="5" placeholder="Everything the agent needs to know. It runs unattended, so be explicit about scope and acceptance criteria."></textarea></label>
+            <label><span class="job-form-label">Details</span><textarea id="job-detail" rows="5" placeholder="Everything the agent needs to know. It runs unattended, so be explicit about scope and acceptance criteria."></textarea></label>
             <div class="job-form-attach">
               <button type="button" id="btn-job-attach" class="secondary" title="Attach screenshots or files. The agent is told where to find them.">Attach files</button>
               <span class="job-form-hint">or paste a screenshot into Details · 10MB each</span>

@@ -119,9 +119,14 @@ because the stock brights wash out on the cream ground.
 
 - **Font stack:** `'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace`
 - **Sizes:**
-  - 9px — panel labels (REPOS), uppercase, letter-spacing: 2-3px
   - 10px — branch labels, diff viewer, loading text
-  - 11px — explorer items (files, agents), form labels
+  - 11px — explorer items (files, agents), form labels, panel labels (REPOS,
+    the job columns, Finished; uppercase, letter-spacing: 2px). 11px is the
+    floor for anything functional; 9px is left only on badges and card
+    metadata
+- **Uppercase** goes on a label's own words, never on a container: the job
+  form's labels wrap their word in `.job-form-label` so the select, input or
+  hint nested in the `<label>` keeps its case
   - 12px — terminal tabs, form inputs, repo/branch in terminal header
   - 13px — terminal header agent info
   - 14px — app title (bold, letter-spacing: 1px)
@@ -150,9 +155,15 @@ Three-panel layout with per-panel headers:
 └─────────────┴──────────────┴────────────────────────┘
 ```
 
-- **Panel headers:** All use `--bg-dark` background for visual continuity
+- **Panel headers:** All use `--bg-dark` background for visual continuity.
+  Fixed heights (36px panel headers, 32px REPOS row) with 4px of vertical
+  padding, so the bordered "+ Agent"/"+ Job" buttons (24px) and icon buttons
+  sit inset from the bottom border rather than against it
 - **Dividers:** Gradient top (matches header bg) + border below. Gold on hover.
-- **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E
+- **Explorer:** Two-row header (logo row + REPOS row), collapsible via Cmd+E.
+  Collapse and divider drags change its width instantly: a width transition
+  made the panel trail the cursor while dragging and re-laid-out the office
+  and terminal on every frame of a collapse
 - **Office:** Centered "+ Agent" and "+ Job" buttons
 - **Terminal:** "Repo:" label + repo name + branch icon + branch name + Settings gear + theme toggle in the header, plus a pencil rename button when the viewer owns the agent; the voice-input mic floats at the viewport's bottom-right, next to the prompt line
 - **Terminal tabs:** Draggable for reordering, order persisted to localStorage; double-click renames the agent (owner only)
@@ -1020,6 +1031,15 @@ terminal panel on this tab.
   turn on only after `getUserMedia` grants — the requesting phase uses the
   dot-less notice variant
 - `prefers-reduced-motion: reduce` disables the pulse and slide animations
+  (that block sits after the `.voice-indicator-dot` rule so it wins the cascade)
+- **Audit exception, `pulsing-dot`:** the design audit flags
+  `.voice-indicator-dot`'s infinite `mic-pulse` as decorative liveness. It is
+  kept: the dot is only in the DOM flow while the pill's `live` state shows,
+  which `beginListening()` sets after the mic is granted; `notice` and
+  `error` hide it and stopping hides the pill, so it pulses only while audio
+  is actually being recorded, and not at all under reduced motion. The
+  detector can only waive this rule for all of `public/index.html`, so no
+  ignore is configured; this note is the record
 - The pill's pulsing dot means "recording" — hidden on notice/error variants
   (the mic is off there; a red dot would be an inverted privacy signal)
 - Screen-reader announcements go to a visually-hidden `.sr-only` live region
