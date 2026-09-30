@@ -75,3 +75,29 @@ describe('DESIGN.md light palette matches style.css', () => {
     }
   });
 });
+
+describe('reduced-motion overrides win the cascade', () => {
+  // Value: protects=prefers-reduced-motion stops every animation it names; fails_when=a normal rule setting `animation` on the same selector sits after the @media block (equal specificity, later wins — the #167 voice-indicator-dot bug); why_new=nothing checked CSS source order; seam=none
+  it('every `animation: none` under prefers-reduced-motion comes after the rules it overrides', () => {
+    const media = [];
+    for (const m of css.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/g)) {
+      let depth = 1, i = m.index + m[0].length;
+      while (depth) depth += { '{': 1, '}': -1 }[css[i++]] || 0;
+      media.push([m.index, i]);
+    }
+    const inMedia = (pos) => media.find(([s, e]) => pos >= s && pos < e);
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+      pos: m.index,
+      selectors: m[1].replace(/\/\*[\s\S]*?\*\//g, '').split(',').map((s) => s.trim()),
+      anim: m[2].match(/(?:^|;|\s)animation:\s*([^;]+)/)?.[1].trim(),
+    })).filter((r) => r.anim);
+    const overrides = rules.filter((r) => r.anim === 'none' && inMedia(r.pos));
+    expect(overrides.length).toBeGreaterThan(0);
+    for (const o of overrides) {
+      for (const sel of o.selectors) {
+        const later = rules.find((r) => r.pos > o.pos && !inMedia(r.pos) && r.anim !== 'none' && r.selectors.includes(sel));
+        expect(later, `${sel} re-sets animation after its reduced-motion override`).toBeUndefined();
+      }
+    }
+  });
+});
