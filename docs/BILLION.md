@@ -633,11 +633,13 @@ question's `type` (engineering, marketing, outreach, finance, product, admin
 or other): Billion passes it to `notify_owner`, a name off the list reads as
 other, and left out the server reads it off the text, first match winning
 (money, a `$`, price, plan, subscription, renew or pay is finance, so it
-wins over the rest; a PR, CI, deploy, bug, test or release is engineering; a reply,
+wins over the rest; a PR, CI, merge, deploy, bug, test or release is engineering; a reply,
 LinkedIn, an email from, a DM or inbound is outreach, even about a post; a
-post, Reddit, HN, a newsletter, tweet, X, Changelog or launch is marketing;
+post, Reddit, HN, a newsletter, tweet, a capital X, Changelog or launch is marketing;
 a login, token, account, access, credentials, setup or install is admin; a
-feature, design, UX, roadmap or direction is product). Every section starts
+feature, design, UX, roadmap or direction is product). A question saved
+before types existed gets one read off its text the first time the list is
+read, and keeps it. Every section starts
 closed, a header with its name, count, "!" when a blocking question is
 inside, and a chevron; tap it to open. The browser remembers the grouping
 and which sections are open. When Billion
