@@ -1963,6 +1963,12 @@ select.job-mode-danger {
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--text-dim);
+  /* A terminal panel dragged narrow gives each column ~100px: truncate
+     rather than wrap, so the three headers stay one height. */
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .job-column-count { font-size: 11px; color: var(--text-dim); }
 
