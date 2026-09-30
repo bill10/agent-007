@@ -518,6 +518,23 @@ describe('read aloud and dictation in the tab', () => {
     stopReading();
   });
 
+  it('the box, mic and Send, and the header controls, share one control height token', () => {
+    for (const id of ['chat-input', 'chat-mic', 'chat-send', 'chat-autoread', 'chat-resume', 'chat-stop-reading', 'chat-voice-pick']) {
+      expect(document.getElementById(id).classList.contains('chat-control'), id).toBe(true);
+    }
+    const css = readFileSync('public/style.css', 'utf8');
+    expect(css).toMatch(/\.chat-control \{ min-height: var\(--chat-control-h\); \}/);
+    expect(css).toMatch(/\.chat-mic \{[^}]*width: var\(--chat-control-h\);/);
+    // No rule anywhere, media queries included, gives one of them its own
+    // height to drift from the token.
+    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-voice-pick)(?![-\w])/;
+    const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => controls.test(sel));
+    expect(rules.length).toBeGreaterThan(5);
+    for (const [, sel, body] of rules) expect(body, sel.trim()).not.toMatch(/(^|[\s;])(min-|max-)?height:/);
+    expect(css).toMatch(/\.chat-compose-row \{[^}]*gap: var\(--chat-gap\);/);
+    expect(css).toMatch(/\.chat-head \{[^}]*gap: var\(--chat-gap\);/);
+  });
+
   it('the mic beside the box dictates into it: interim greyed, final appended, nothing sent', async () => {
     const mic = document.getElementById('chat-mic');
     expect(mic.getAttribute('aria-label')).toBe('Dictate a reply');

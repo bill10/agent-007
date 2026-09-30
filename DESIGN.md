@@ -989,10 +989,17 @@ terminal panel on this tab.
   ("Billion is not running") shows in `--state-disconnected` and the text
   stays in the box.
 - The terminal's floating voice mic is hidden on this tab. The tab has its
-  own: `.chat-mic`, a 40px outline button beside the textarea (44px on
-  phones) that pulses `--state-recording` red while listening (`mic-pulse`).
+  own: `.chat-mic`, a square outline button beside the textarea that pulses `--state-recording` red while listening (`mic-pulse`).
   What is being heard shows greyed and italic in a line above the box
   (`.chat-voice`), with the same red dot; notices and errors drop the dot.
+- One control height and one gap for the tab's two control rows: the
+  textarea, mic and Send, and the header's toggle, Resume, Stop and voice
+  picker all carry `.chat-control` (`min-height: var(--chat-control-h)`,
+  40px, 44px on phones) and sit `--chat-gap` (6px) apart. The composer row
+  is bottom-aligned: a multi-line message grows the box upward and mic and
+  Send stay beside its last line, where the caret is. The mic's glyph is
+  16px at a 1.05 stroke, the same 1.2px line as the header's gear and theme
+  icons.
 - A header row above the question strip (`.chat-head`, `--bg-dark`, hairline
   bottom border) holds *Read new messages aloud* (a small switch, accent when
   on), *Resume reading (N new)* as an accent pill after a reload, *Stop*
@@ -1004,9 +1011,10 @@ terminal panel on this tab.
   switch's slide.
 - Empty: "Nothing here yet. Say something to Billion." in `--text-dim`,
   hidden while the notice bar says Billion cannot hear you.
-- Phones: choices, Send and the input are 44px tall; the input is 16px so iOS
-  does not zoom; bubbles go up to 88% wide. The header row wraps, so the voice
-  picker drops to its own line rather than clipping its name.
+- Phones: choices and the `.chat-control` rows are 44px tall; the input is
+  16px so iOS does not zoom, and Send and the header's labels 13px beside it;
+  bubbles go up to 88% wide. The header row wraps, so the voice picker drops
+  to its own line, right-aligned, rather than clipping its name.
 
 ## Interactive Behaviors
 
