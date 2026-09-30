@@ -1562,6 +1562,8 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   overflow-wrap: anywhere;
 }
 .chat-notice[hidden] { display: none; }
+.chat-telegram { display: flex; flex-direction: column; gap: 6px; }
+.chat-telegram[hidden] { display: none; }
 .chat-notice-text { flex: 1 1 240px; min-width: 0; }
 .chat-notice-btn { padding: 6px 14px; font: inherit; font-size: 11px; color: var(--accent-contrast); background: var(--accent); border: none; border-radius: 3px; cursor: pointer; }
 /* One control height and one gap for the Billion tab's two control rows

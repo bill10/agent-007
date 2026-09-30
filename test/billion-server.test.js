@@ -6,7 +6,8 @@ import { tmpdir } from 'os';
 import { server, sessions, killSession } from '../server.js';
 import { createSessionFromConfig } from '../server/pty.js';
 import { broadcast } from '../server/ws.js';
-import { codenamePool, nextSessionId } from '../server/state.js';
+import { handleUpdate, savedChatId } from '../server/owner.js';
+import { codenamePool, nextSessionId, CONFIG_DIR } from '../server/state.js';
 import { BILLION_NAME } from '../server/billion.js';
 import { hashToken } from '../server/auth.js';
 
@@ -262,5 +263,35 @@ describe('the Billion tab over the socket', () => {
       await new Promise(r => setTimeout(r, 100));
       expect(plain.seen.filter(m => m.type === 'chat-list' || m.type === 'chat-message')).toEqual([]);
     } finally { plain.ws.close(); owner.ws.close(); }
+  });
+});
+
+// "Use this chat" on a Telegram chat offer (server/owner.js useTelegramChat).
+describe('connecting Telegram over the socket', () => {
+  const browser = () => ({ headers: { origin: `http://127.0.0.1:${new URL(wsUrl).port}` } });
+
+  it('shows the offer to the owner\'s page only, and only that page can take it', async () => {
+    const plain = await connect();
+    const owner = await connect(browser());
+    const quiet = console.log;
+    console.log = () => {};
+    try {
+      await handleUpdate({ update_id: 1, message: { chat: { id: 555, type: 'private' }, from: { first_name: 'Ann' }, text: 'hi' } },
+        { env: { TELEGRAM_BOT_TOKEN: '1:x' }, broadcast });
+      expect(await waitFor(owner.seen, m => m.type === 'telegram-state' && m.offers.length)).toMatchObject({ offers: [{ chatId: '555', name: 'Ann' }] });
+
+      plain.ws.send(JSON.stringify({ type: 'telegram-use', chatId: '555' }));
+      expect((await waitFor(plain.seen, m => m.type === 'notification' && m.level === 'error')).message).toMatch(/browser only/);
+      expect(savedChatId()).toBe('');
+
+      owner.ws.send(JSON.stringify({ type: 'telegram-use', chatId: '555' }));
+      expect(await waitFor(owner.seen, m => m.type === 'telegram-state' && m.connected)).toMatchObject({ connectedTo: 'Ann', offers: [] });
+      expect(savedChatId()).toBe('555');
+      expect(plain.seen.filter(m => m.type === 'telegram-state')).toEqual([]);
+    } finally {
+      console.log = quiet;
+      rmSync(join(CONFIG_DIR, 'telegram-chat.json'), { force: true });
+      plain.ws.close(); owner.ws.close();
+    }
   });
 });

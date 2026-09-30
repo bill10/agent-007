@@ -14,7 +14,7 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
@@ -33,7 +33,8 @@ const clients = new Set();
 export function broadcast(message) {
   // The owner's chat with Billion (server/owner.js) is theirs alone: their
   // browser, and nobody's while user accounts are on.
-  if (message.type === 'chat-message') {
+  // So are Telegram's chat offers: a chat id and who sent it.
+  if (message.type === 'chat-message' || message.type === 'telegram-state') {
     if (mayAnswerOwner()) broadcastToBrowsers(message);
     return;
   }
@@ -401,6 +402,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));
     // So is their chat with Billion.
     if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(chatPayload()));
+    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(telegramPayload()));
 
     broadcastPresence();
 
@@ -538,6 +540,18 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
             : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, files: msg.files, broadcast });
           ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
+          break;
+        }
+        // "Use this chat" on a Telegram chat offer, and its dismiss: the owner's
+        // browser only, like chat-send, since the chat picked is who talks to Billion.
+        case 'telegram-use':
+        case 'telegram-dismiss': {
+          if (typeof msg.chatId !== 'string') break;
+          const result = !mayAnswerOwner() ? { error: 'Only the owner connects Telegram, and with user accounts on nobody does.' }
+            : !ws.fromBrowser ? { error: 'Telegram is connected from the browser only.' }
+            : msg.type === 'telegram-use' ? await useTelegramChat(msg.chatId, { broadcast })
+            : (dismissTelegramChat(msg.chatId, { broadcast }), {});
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }
         case 'kill': {

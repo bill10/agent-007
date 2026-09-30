@@ -41,11 +41,42 @@ export const TG_CAPTION_CHARS = 1024;
 export const CHAT_CAP = 500;
 const CLOSED_KEPT = 30;   // answered and dismissed items kept; open ones always are
 
+// The chat id is TELEGRAM_CHAT_ID when set, else the chat the owner picked
+// with "Use this chat" in the Billion tab (telegram-chat.json), read on every
+// call so picking one applies without a restart.
 export function telegramSettings(env = process.env) {
   const token = (env.TELEGRAM_BOT_TOKEN || '').trim();
-  const chatId = (env.TELEGRAM_CHAT_ID || '').trim();
+  const chatId = (env.TELEGRAM_CHAT_ID || '').trim() || savedChatId();
   return { token, chatId };
 }
+
+const tgChatPath = () => join(CONFIG_DIR, 'telegram-chat.json');
+
+export function savedChatId() {
+  try { return String(JSON.parse(readFileSync(tgChatPath(), 'utf8')).chatId ?? '').trim(); } catch { return ''; }
+}
+
+// Who spoke, in a group chat: every member counts as the owner, and this says
+// which one. '' in a private chat, so nothing changes there. It lands in
+// Billion's prompt inside "(...)", so it is one short line with no brackets.
+const GROUP_TYPES = ['group', 'supergroup'];
+export const MAX_NAME_CHARS = 40;
+
+export function cleanName(raw) {
+  const flat = String(raw ?? '').replace(/[\p{C}\[\]()]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  return Array.from(flat).slice(0, MAX_NAME_CHARS).join('').trim();
+}
+
+const personName = (from) => cleanName([from?.first_name, from?.last_name].filter(Boolean).join(' '))
+  || (from?.username ? cleanName(`@${from.username}`) : '');
+
+export function senderName(chat, from) {
+  return GROUP_TYPES.includes(chat?.type) ? personName(from) : '';
+}
+
+export const telegramPrefix = (name, voice = false) => (name
+  ? `[Owner via Telegram (${name})${voice ? ', voice' : ''}]`
+  : voice ? OWNER_VOICE_PREFIX : OWNER_PREFIX);
 
 export function redact(text, env = process.env) {
   const { token } = telegramSettings(env);
@@ -215,7 +246,8 @@ async function transcribeNote(note, env) {
 // --- The "Waiting on you" list, in the config dir so it survives restarts ---
 //
 // An item: { id, n, text, at, choices?, recommended?, status, answer?,
-// answeredAt?, answeredVia?, tgMessageId?, tgVoice?, urgency }. urgency is
+// answeredAt?, answeredVia?, answeredBy?, tgMessageId?, tgVoice?, urgency }. answeredBy
+// is the group member who answered on Telegram (senderName). urgency is
 // blocking, normal or low; items written before it read as normal. answeredVia is app,
 // telegram or terminal (resolve_question). n is the short number the owner sees (Q3). status is open, answered or dismissed. Items written
 // before v0.10 have neither n nor status: they read as open, numbered in order.
@@ -243,8 +275,8 @@ export const waitingPayload = () => ({ type: 'waiting-list', items: waitingItems
 
 // --- The Billion chat: the thread the Billion tab shows, beside waiting.json ---
 //
-// A message: { id, at, from: 'owner' | 'billion', text, via?, voice?, re?, q?, files? }.
-// via is app or telegram (the owner's side). files: what the owner attached
+// A message: { id, at, from: 'owner' | 'billion', text, via?, name?, voice?, re?, q?, files? }.
+// via is app or telegram (the owner's side); name, which group member wrote it. files: what the owner attached
 // in the tab, [{ name, size, type }] (see "The chat's attachments"). re is the question number a typed
 // answer went to. q is a notify_owner question, copied here with its state so
 // the thread keeps it after the Waiting list lets it go: { id, n, urgency,
@@ -363,7 +395,7 @@ export function addChat(message, broadcast, env = process.env) {
 const questionState = (item) => ({
   id: item.id, n: item.n, urgency: item.urgency, status: item.status,
   ...(item.choices ? { choices: item.choices, recommended: item.recommended } : {}),
-  ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt } : {}),
+  ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt, ...(item.answeredBy ? { answeredBy: item.answeredBy } : {}) } : {}),
 });
 
 // A question's bubble follows it: answered, dismissed.
@@ -448,7 +480,8 @@ const tidyAnswer = (answer) => (typeof answer === 'string'
 
 // files: planChatFiles's, typed in the app; an answer of files alone is
 // recorded as their names.
-export async function answerWaiting(id, answer, via, { broadcast, env = process.env, typed = false, files = [] } = {}) {
+// name: which member of the owner's Telegram group answered (senderName).
+export async function answerWaiting(id, answer, via, { broadcast, env = process.env, typed = false, files = [], name = '' } = {}) {
   const body = tidyAnswer(answer) || files.map(f => f.name).join(', ');
   if (!body) return { error: 'The answer is empty.' };
   if (body.length > MAX_ANSWER_CHARS) return { error: `The answer is over ${MAX_ANSWER_CHARS} characters; send it in parts.` };
@@ -460,13 +493,13 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   const messageId = randomUUID();
   const saved = files.length ? saveChatFiles(messageId, files) : { paths: [], records: [] };
   if (saved.error) return saved;
-  if (!sendText(billion, withFiles(answerLine(via === 'app' ? APP_PREFIX : OWNER_PREFIX, item, body), saved.paths))) {
+  if (!sendText(billion, withFiles(answerLine(via === 'app' ? APP_PREFIX : telegramPrefix(name), item, body), saved.paths))) {
     if (files.length) removeChatFiles(messageId);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel(via);
-  const done = await markAnswered(id, body, via, { broadcast, env });
-  if (typed) addChat({ id: messageId, from: 'owner', via, text: tidyAnswer(answer), re: item.n, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  const done = await markAnswered(id, body, via, { broadcast, env, name });
+  if (typed) addChat({ id: messageId, from: 'owner', via, ...(name ? { name } : {}), text: tidyAnswer(answer), re: item.n, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   return { ok: true, item: done };
 }
 
@@ -499,8 +532,8 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
 
 // Answered everywhere: the item moves to Answered in every browser, and the
 // phone's copy shows the answer.
-async function markAnswered(id, answer, via, { broadcast, env }) {
-  const done = updateWaiting(id, { status: 'answered', answer, answeredAt: new Date().toISOString(), answeredVia: via });
+async function markAnswered(id, answer, via, { broadcast, env, name }) {
+  const done = updateWaiting(id, { status: 'answered', answer, answeredAt: new Date().toISOString(), answeredVia: via, answeredBy: name || undefined });
   syncQuestion(done, broadcast);
   broadcast?.(waitingPayload());
   if (done.tgMessageId) await showAnswerOnPhone(done, env);
@@ -543,7 +576,7 @@ export async function reopenQuestion({ number, id } = {}, { broadcast, owner = f
       return { error: 'Billion has too much waiting for it; try again in a while.' };
     }
   }
-  const done = updateWaiting(item.id, { status: 'open', answer: undefined, answeredAt: undefined, answeredVia: undefined });
+  const done = updateWaiting(item.id, { status: 'open', answer: undefined, answeredAt: undefined, answeredVia: undefined, answeredBy: undefined });
   syncQuestion(done, broadcast);
   broadcast?.(waitingPayload());
   return { ok: true, item: done };
@@ -553,7 +586,8 @@ export async function reopenQuestion({ number, id } = {}, { broadcast, owner = f
 async function showAnswerOnPhone(item, env) {
   const { chatId } = telegramSettings(env);
   const where = { app: ' in app', terminal: ' in terminal' }[item.answeredVia] || '';
-  const shown = `${questionText(item)}\n\nAnswered${where}: ${item.answer}`;
+  const by = item.answeredBy ? ` by ${item.answeredBy}` : '';
+  const shown = `${questionText(item)}\n\nAnswered${by}${where}: ${item.answer}`;
   // The message is edited with what fits; the rest follows as messages of its own.
   const [first, ...rest] = splitForTelegram(shown, item.tgVoice ? TG_CAPTION_CHARS : TG_MESSAGE_CHARS);
   const edit = (item.tgVoice
@@ -631,9 +665,94 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
   return { ok: true, telegram: true };
 }
 
-// --- Replies: long-polling getUpdates ---
+// --- Connecting a chat: "Use this chat" in the Billion tab ---
+//
+// With no chat id yet, a message from any chat becomes an offer in the owner's
+// browser (ws.js sends these to the owner's pages only). Nothing is adopted
+// until the owner accepts one, so a stranger who finds the bot is just an
+// offer to ignore. Each new chat is offered, up to OFFER_CAP a run, so a
+// stranger messaging first cannot hide the owner's.
 
-const discovered = new Set();   // chat ids already shown, so a stranger's first message cannot hide the owner's
+const OFFER_CAP = 20;
+const seenChats = new Set();
+const offers = new Map();   // chat id (string) -> { chatId, name }
+let connectedNow = '';      // the chat just picked, for "Telegram connected"
+
+const chatName = (msg) => cleanName(msg.chat.title) || personName(msg.from) || 'an unnamed chat';
+
+export const telegramPayload = (env = process.env) => {
+  const { token, chatId } = telegramSettings(env);
+  return {
+    type: 'telegram-state', on: !!token, connected: !!chatId,
+    ...(connectedNow && chatId ? { connectedTo: connectedNow } : {}),
+    offers: chatId ? [] : [...offers.values()],
+  };
+};
+
+function offerChat(msg, broadcast, env) {
+  const id = String(msg.chat.id);
+  if (seenChats.has(id) || seenChats.size >= OFFER_CAP) return;
+  seenChats.add(id);
+  const name = chatName(msg);
+  offers.set(id, { chatId: id, name });
+  // For a headless setup, where no browser shows the offer.
+  console.log(`  Telegram: a message came from ${name} (chat ${id}). If that was you, press "Use this chat" in the Billion tab, or set TELEGRAM_CHAT_ID=${id} in ~/.agent-007/.env and restart.`);
+  broadcast?.(telegramPayload(env));
+}
+
+// The owner pressed "Use this chat" (ws.js checks it is the owner). Only a
+// chat that messaged the bot and is on offer can be picked. { ok } or { error }.
+export async function useTelegramChat(chatId, { broadcast, env = process.env } = {}) {
+  const offer = offers.get(String(chatId));
+  if ((env.TELEGRAM_CHAT_ID || '').trim()) return { error: 'TELEGRAM_CHAT_ID is set in the environment; it wins over a chat picked here.' };
+  if (!offer) return { error: 'That chat is no longer on offer; send the bot a message again.' };
+  try {
+    writeFileSync(`${tgChatPath()}.tmp`, JSON.stringify({ chatId: offer.chatId, name: offer.name }), { mode: 0o600 });
+    renameSync(`${tgChatPath()}.tmp`, tgChatPath());
+  } catch (err) {
+    return { error: `Could not save the chat: ${err.message}` };
+  }
+  offers.clear();
+  connectedNow = offer.name;
+  console.log(`  Telegram: connected to ${offer.name} (chat ${offer.chatId}), picked in the browser`);
+  broadcast?.(telegramPayload(env));
+  const said = await sendTelegram('Connected to Agent 007.', { env });
+  if (said.error) console.error('Telegram: could not say hello in the new chat:', said.error);
+  return { ok: true };
+}
+
+export function dismissTelegramChat(chatId, { broadcast, env = process.env } = {}) {
+  if (!offers.delete(String(chatId))) return false;
+  broadcast?.(telegramPayload(env));
+  return true;
+}
+
+// For the tests: a fresh run.
+export function _resetTelegramChats() {
+  seenChats.clear();
+  offers.clear();
+  connectedNow = '';
+  groupPlain = false;
+  groupRestricted = 0;
+}
+
+// A group with the bot's privacy mode on delivers only commands and replies
+// to the bot, so members' plain messages never arrive. Seen only those a few
+// times and never a plain one: say how to fix it, once.
+let groupPlain = false;
+let groupRestricted = 0;
+const PRIVACY_HINT_AFTER = 3;
+
+function watchPrivacy(msg) {
+  if (!GROUP_TYPES.includes(msg.chat?.type) || groupPlain) return;
+  const restricted = /^\//.test(msg.text || '') || msg.reply_to_message?.from?.is_bot;
+  if (!restricted) { groupPlain = true; return; }
+  if (++groupRestricted === PRIVACY_HINT_AFTER) {
+    console.log('  Telegram: the group only sends the bot commands and replies so far. If members\' plain messages are not reaching Billion, turn the bot\'s privacy mode off: /setprivacy in @BotFather, Disable, then remove and re-add the bot.');
+  }
+}
+
+// --- Replies: long-polling getUpdates ---
 
 // One update. Returns what happened, for the tests and the log.
 export async function handleUpdate(update, { broadcast, env = process.env } = {}) {
@@ -643,27 +762,23 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   if (chat === undefined || chat === null) return 'ignored';
   const { chatId } = telegramSettings(env);
   if (!chatId) {
-    // Setting up: say whose chat this was, and use nothing else from it. Every
-    // new chat is shown, not only the first.
-    if (!discovered.has(chat) && discovered.size < 20) {
-      discovered.add(chat);
-      const line = `Telegram: a message came from chat ${chat}. If that was you, set TELEGRAM_CHAT_ID=${chat} in ~/.agent-007/.env and restart.`;
-      console.log(`  ${line}`);
-      broadcast?.({ type: 'notification', level: 'info', message: line });
-    }
+    // Setting up: offer the chat to the owner, and use nothing else from it.
+    offerChat(msg, broadcast, env);
     return 'discovery';
   }
   if (String(chat) !== chatId) return 'ignored';
+  watchPrivacy(msg);
   const note = (msg.voice || msg.audio)?.file_id ? (msg.voice || msg.audio) : null;
   const typed = typeof msg.text === 'string' && msg.text.trim() ? msg.text : null;
   if (!note && !typed) return 'ignored';
   saveOwnerMode(note ? 'voice' : 'text');
   setOwnerChannel('telegram');
+  const name = senderName(msg.chat, msg.from);
   // A typed reply to one of Billion's questions answers that question.
   const repliedTo = typed && msg.reply_to_message?.message_id;
   const question = repliedTo && waitingItems().find(i => i.tgMessageId === repliedTo && i.status === 'open');
   if (question) {
-    const result = await answerWaiting(question.id, typed, 'telegram', { broadcast, env, typed: true });
+    const result = await answerWaiting(question.id, typed, 'telegram', { broadcast, env, typed: true, name });
     if (result.error) {
       await sendTelegram(result.error, { env });
       return result.error === 'Billion is not running' ? 'not-running' : 'full';
@@ -675,8 +790,9 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     await sendTelegram('Billion is not running', { env });
     return 'not-running';
   }
-  let line = `${OWNER_PREFIX} ${typed}`;
-  let said = { from: 'owner', via: 'telegram', text: typed };
+  const who = name ? { name } : {};
+  let line = `${telegramPrefix(name)} ${typed}`;
+  let said = { from: 'owner', via: 'telegram', ...who, text: typed };
   if (note) {
     const heard = await transcribeNote(note, env);
     if (heard.reply) {
@@ -684,8 +800,8 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
       return heard.result;
     }
     const caption = typeof msg.caption === 'string' && msg.caption.trim() ? ` (caption: ${msg.caption.trim()})` : '';
-    line = `${OWNER_VOICE_PREFIX} ${heard.transcript}${caption}`;
-    said = { from: 'owner', via: 'telegram', voice: true, text: `${heard.transcript}${caption}` };
+    line = `${telegramPrefix(name, true)} ${heard.transcript}${caption}`;
+    said = { from: 'owner', via: 'telegram', ...who, voice: true, text: `${heard.transcript}${caption}` };
   }
   if (!sendText(billion, line)) {
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
@@ -709,7 +825,7 @@ async function handleButton(query, { broadcast, env }) {
     await ack(item?.status === 'answered' ? `Already answered: ${item.answer}` : 'That question is gone.');
     return 'stale';
   }
-  const result = await answerWaiting(id, choice, 'telegram', { broadcast, env });
+  const result = await answerWaiting(id, choice, 'telegram', { broadcast, env, name: senderName(query.message?.chat, query.from) });
   await ack(result.error || `Sent: ${choice}`);
   if (result.error) return result.error === 'Billion is not running' ? 'not-running' : 'full';
   return 'answered';
@@ -753,7 +869,7 @@ const pause = (ms, signal) => new Promise(resolve => {
 export function startTelegram({ broadcast, env = process.env } = {}) {
   const { token, chatId } = telegramSettings(env);
   if (!token || stopper) return false;
-  if (!chatId) console.log('  Telegram: send any message to your bot, then set TELEGRAM_CHAT_ID=<id> (the id is shown here when it arrives)');
+  if (!chatId) console.log('  Telegram: send any message to your bot, then press "Use this chat" in the Billion tab (the chat id is shown here too when it arrives)');
   else console.log('  Telegram: on');
   if (voiceSetting(env) !== 'never' && !speechUnavailable(env)) {
     sayVoice(env).then(v => {
