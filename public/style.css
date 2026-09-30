@@ -1593,7 +1593,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 /* Attachments (waiting.js): chips above the box before Send, thumbnails and
    download chips in the owner's bubble, and the tab lit while files are
    dragged over it. */
-.chat-files-pending, .chat-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.chat-files-pending, .chat-files { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px; }
 .chat-files-pending[hidden] { display: none; }
 .chat-file-chip {
   display: inline-flex;
