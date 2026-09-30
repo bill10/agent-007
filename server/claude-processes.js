@@ -21,11 +21,11 @@ export function externalClaudePids(rows, managed) {
   };
   return rows.filter(r => (looksClaude(r.name) || looksClaude(r.command)) && !belongs(r.pid)).map(r => r.pid);
 }
-export async function assertClaudeProcessesManaged(sessions, { platform = process.platform, run = execFile } = {}) {
+export async function assertClaudeProcessesManaged(sessions, { platform = process.platform, run = execFile, getuid = process.getuid } = {}) {
   const win = platform === 'win32';
   const file = win ? 'powershell.exe' : '/bin/ps';
   const args = win ? ['-NoProfile', '-NonInteractive', '-Command', 'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress']
-    : ['-U', String(process.getuid()), '-o', 'pid=,ppid=,args='];
+    : ['-U', String(getuid()), '-o', 'pid=,ppid=,args='];
   const output = await new Promise((resolve, reject) => run(file, args, { encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout) => err ? reject(new Error('Could not check for other Claude processes. Account switching was cancelled.')) : resolve(stdout)));
   let rows;
   try {

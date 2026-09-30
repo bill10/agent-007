@@ -7,6 +7,12 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
+// These cases exercise board transitions, not remote discovery. addJob's
+// background git probe can otherwise hold REPO open during Windows cleanup.
+vi.mock('../server/git.js', async original => ({
+  ...await original(), hasGithubRemote: vi.fn(async () => null),
+}));
+
 const { config, sessions } = await import('../server/state.js');
 const { setupPtyHandlers } = await import('../server/pty.js');
 const { requestApproval, clearApprovals, dropApprovals, APPROVAL_WAIT_MS } = await import('../server/approvals.js');

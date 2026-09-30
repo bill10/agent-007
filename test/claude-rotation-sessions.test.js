@@ -44,8 +44,13 @@ describe('Claude conversation continuity', () => {
     const rows = [{ pid: 10, ppid: 1, command: '/bin/claude' }, { pid: 11, ppid: 10, command: '/bin/claude' }, { pid: 12, ppid: 1, command: '/Users/a/.local/bin/claude' }, { pid: 13, ppid: 1, command: 'node server.js' }];
     expect(externalClaudePids(rows, new Set([10]))).toEqual([12]);
     expect(externalClaudePids([{ pid: 1, ppid: 0, command: 'node /x/@anthropic-ai/claude-code/cli.js' }], new Set())).toEqual([1]);
-    await expect(assertClaudeProcessesManaged([], { platform: 'darwin', run: (_f, _a, _o, cb) => cb(null, '12 1 /bin/claude\n') })).rejects.toThrow(/outside this app/);
-    await expect(assertClaudeProcessesManaged([], { platform: 'darwin', run: (_f, _a, _o, cb) => cb(Error('raw sensitive output')) })).rejects.toThrow(/Could not check/);
+    // Emulate the complete POSIX boundary even when this test runs on Windows.
+    const getuid = () => 1234;
+    await expect(assertClaudeProcessesManaged([], { platform: 'darwin', getuid, run: (_f, args, _o, cb) => {
+      expect(args).toEqual(['-U', '1234', '-o', 'pid=,ppid=,args=']);
+      cb(null, '12 1 /bin/claude\n');
+    } })).rejects.toThrow(/outside this app/);
+    await expect(assertClaudeProcessesManaged([], { platform: 'darwin', getuid, run: (_f, _a, _o, cb) => cb(Error('raw sensitive output')) })).rejects.toThrow(/Could not check/);
   });
 });
 
