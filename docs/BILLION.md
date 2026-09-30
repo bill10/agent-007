@@ -703,13 +703,41 @@ Setup:
 
 1. In Telegram, message **@BotFather**, send `/newbot`, and put the token it
    gives you in `~/.agent-007/.env` as `TELEGRAM_BOT_TOKEN=...`. Restart.
-2. Send your new bot any message. The server log (and a notice in the
-   browser) shows `Telegram: a message came from chat <id>` (for each new chat, so
-   check it is yours).
-3. Add `TELEGRAM_CHAT_ID=<id>` to the same file and restart.
+2. Send your new bot any message (or add it to your team's group and say
+   something there).
+3. The *Billion* tab shows `Telegram: a message from <name> (chat <id>). Use it
+   for Billion?`. Check it is yours and press **Use this chat**. The bot answers
+   "Connected to Agent 007." in that chat and the tab says *Telegram connected*;
+   no restart.
 
-The chat id is the only gate: messages and button taps from any other chat are ignored
-without a reply, so don't add the bot to a group. The token is never logged or sent to the browser. Billion can notify
+Every chat that messages the bot is offered, one by one (up to 20 a run), and
+none is ever picked for you, so a stranger who finds the bot is just an offer
+to *Dismiss*. Only the owner's browser sees the offers and can accept one: with
+user accounts on, nobody can. The chat picked is kept in
+`~/.agent-007/telegram-chat.json`. The Settings gear's *Telegram* line names the
+connected chat; its **Change** forgets it, and the next chat to message the bot
+is offered again (with nothing connected, the line gives the two steps above).
+The offers are server state, so they stay through a reload until you act on them. `TELEGRAM_CHAT_ID` in the environment or `.env`
+still works and wins over it; with neither, the server log also shows each
+chat's id, for a server with no browser.
+
+The chat id is the only gate: messages and button taps from any other chat are
+ignored without a reply. The token is never logged or sent to the browser. 
+
+**A group as the owner's chat.** A team can connect a Telegram group instead of
+a private chat: every member of it counts as the owner (there is no per-member
+allowlist). Their messages carry the sender's name so Billion knows who spoke:
+`[Owner via Telegram (Alice)] <text>`, `[Owner via Telegram (Alice), voice] ...`
+and `[Owner via Telegram (Alice)] Q3: <answer> (re: "...")`; the thread's bubble
+reads *Alice on Telegram* and the question *Alice answered: Merge*. The name is
+the member's first and last name, else their @username, cut to 40 characters
+on one line with no brackets. A private chat is unchanged. By default a bot in
+a group only receives commands and replies to its own messages, so turn its
+privacy mode off: `/setprivacy` in @BotFather, pick the bot, *Disable*, then
+remove the bot from the group and add it back. The server logs a hint when a
+group has only sent it commands and replies.
+
+Billion can notify
 you at most five times a minute. No library: the server long-polls
 `getUpdates` with Node's own `fetch`.
 

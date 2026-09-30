@@ -161,6 +161,15 @@ describe('when the owner speaks', () => {
     expect(lastOwnerMode()).toBe('text');
   });
 
+  it('names the member who spoke when the chat is a group', async () => {
+    const b = billion();
+    sessions.set(b.id, b);
+    const note = { update_id: 1, message: { chat: { id: 42, type: 'group' }, from: { first_name: 'Alice' }, voice: { file_id: 'F1', duration: 4 } } };
+    expect(await handleUpdate(note, { env: ENV })).toBe('delivered');
+    expect(typedInto(b)).toContain('[Owner via Telegram (Alice), voice] Yes, buy the domain.');
+    expect(chatMessages().at(-1)).toMatchObject({ name: 'Alice', voice: true });
+  });
+
   it('takes an audio file the same way', async () => {
     const b = billion();
     sessions.set(b.id, b);

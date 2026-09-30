@@ -684,6 +684,9 @@ body {
 
 /* The owner's Claude account switch, a section of the Settings panel */
 .account-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
+.telegram-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.telegram-settings[hidden] { display: none; }
+.settings-telegram { line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
 .account-intro { margin-bottom: 8px; line-height: 1.4; }
 .account-body { display: flex; flex-direction: column; gap: 8px; }
 .account-status { line-height: 1.4; overflow-wrap: anywhere; }
@@ -1562,6 +1565,8 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
   overflow-wrap: anywhere;
 }
 .chat-notice[hidden] { display: none; }
+.chat-telegram { display: flex; flex-direction: column; gap: 6px; }
+.chat-telegram[hidden] { display: none; }
 .chat-notice-text { flex: 1 1 240px; min-width: 0; }
 .chat-notice-btn { padding: 6px 14px; font: inherit; font-size: 11px; color: var(--accent-contrast); background: var(--accent); border: none; border-radius: 3px; cursor: pointer; }
 /* One control height and one gap for the Billion tab's two control rows

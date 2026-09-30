@@ -19,11 +19,11 @@ import {
   handleRepoError as explorerHandleRepoError,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
-import { setupSettings } from './modules/settings.js';
+import { setupSettings, renderTelegramSettings } from './modules/settings.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
-import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice, setTelegramState } from './modules/waiting.js';
 import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
@@ -551,6 +551,7 @@ function onMessage(msg) {
     case 'chat-list': setChatMessages(msg.messages); renderWaiting(); break;
     case 'chat-message': handleChatMessage(msg.message); break;
     case 'chat-sent': handleChatSent(msg); break;
+    case 'telegram-state': handleTelegramState(msg); break;
     case 'account-state': handleAccountState(msg); break;
     case 'account-error': handleAccountError(msg); break;
     // The office canvas pins one paper per job, so a jobs-list broadcast has
@@ -574,6 +575,18 @@ function handleNotification(msg) {
     bar.style.color = '';
     updateStatusBar();
   }, duration);
+}
+
+// A new Telegram chat on offer flashes here too; it is taken in the Billion tab.
+let telegramOffers = 0;
+function handleTelegramState(msg) {
+  const newest = (msg.offers || []).at(-1);
+  if ((msg.offers || []).length > telegramOffers && newest) {
+    handleNotification({ level: 'info', message: `Telegram: a message from ${newest.name} (chat ${newest.chatId}). Use it for Billion from the Billion tab.` });
+  }
+  telegramOffers = (msg.offers || []).length;
+  setTelegramState(msg);
+  renderTelegramSettings(msg);
 }
 
 function handleRepoError(msg) {
