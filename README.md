@@ -110,7 +110,7 @@ Much of it, with enough setup: Claude Code can loop, run subagents in their own 
 [Munder Difflin](https://github.com/chaitanyagiri/munder-difflin) is a great, much bigger desktop app that builds many abilities in: memory, dictation, meetings, Slack, an editor. Agent 007 stays thin. It is a web app you start with one command and can open from any browser, even your phone, and it does only the operations: terminals, a job board, a manager, reviews, and a line to you. What your company can do comes from the agents themselves (Claude Code, Codex, and whatever tools, APIs and MCP servers they can reach), so it gets better every time they do. Free, with no paid tier.
 
 ### Is it safe to let agents merge on their own?
-Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Billion tab (your chat with Billion) or on your phone. Workers on Billion's cards, Claude Code and Codex alike, ask Billion for permissions before they ask you.
+Workers never merge their own work. Billion reads each diff, waits for CI and then merges or sends the card back. Anything that spends money, needs your credentials, can't be undone, or touches payments, security or secrets comes to you first, in the Billion tab (your chat with Billion) or on your phone. Paste a screenshot or drop a file into the Billion tab and Billion gets its path to read. Workers on Billion's cards, Claude Code and Codex alike, ask Billion for permissions before they ask you.
 
 ### Does it cost anything?
 No. It is free and open source, and it runs the CLIs you already have, on your existing subscriptions. Board workers use your subscription's usage like any session you start yourself.
@@ -278,7 +278,7 @@ server/
   command-path.js  Checks a CLI is installed before a spawn; resolves commands to spawnable files on Windows (PATHEXT)
   pty.js           PTY lifecycle (spawn, handlers, state detection; closing a session kills every process group under it, detached background jobs included)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
-  http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment downloads, /mcp, origin + auth gates)
+  http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment and Billion chat file downloads, /mcp, origin + auth gates)
   agent-accounts.js  Installed agent CLIs and the accounts each is logged in with (Settings panel; read-only)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message, withdraw_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
@@ -306,7 +306,7 @@ public/
     terminal.js    xterm.js terminals, clipboard paste, tab management
     explorer.js    File tree, diff viewer, repo management
     jobs.js        Job board UI (columns, cards, the job form)
-    waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box, its mic)
+    waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box, its mic, pasted/dropped files)
     readaloud.js   Read aloud in the Billion tab (speechSynthesis: a speaker button per message, read new messages aloud)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)

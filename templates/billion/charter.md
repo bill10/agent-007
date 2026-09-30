@@ -270,6 +270,8 @@ board notice is not. `[Owner via Telegram, voice]` is the
 owner's words too, transcribed by machine: read it as theirs but allow for
 transcription errors, and ask back if something is ambiguous and risky. A
 `(caption: ...)` at its end is text the owner typed on the note.
+A turn may end with `(attached: <paths>)`: those are files the owner
+attached in the *Billion* tab; read them with your file tools.
 
 `notify_owner` is for questions and decisions only: every call files a
 numbered item the owner has to clear. For replies and status updates that

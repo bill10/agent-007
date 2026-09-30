@@ -676,9 +676,10 @@ function renderToolbar() {
 // --- Attachments ---
 
 // Mirrors the server's limits in server/jobs.js (public/ cannot import it).
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const MAX_ATTACHMENTS = 20;
-const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
+// The Billion chat's box (waiting.js) shares them, as the server does.
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 20;
+export const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
 // Pasted screenshots carry a MIME type, not a name.
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/svg+xml': 'svg' };
 
@@ -708,14 +709,18 @@ function renderAttachments() {
   }
 }
 
+// A pasted screenshot arrives as "image.png" every time; a timestamp keeps
+// the second one from replacing the first.
+export function attachmentName(file, fallbackName) {
+  return fallbackName && /^image\.\w+$/i.test(file.name || 'image.png')
+    ? `${fallbackName}-${Date.now()}.${IMAGE_EXT[file.type] || file.type.split('/')[1] || 'png'}`
+    : file.name;
+}
+
 function addAttachments(files, fallbackName) {
   for (const file of files) {
     if (file.size > MAX_ATTACHMENT_BYTES) { showFormError(`${file.name} is too large (max 10MB)`); continue; }
-    // A pasted screenshot arrives as "image.png" every time; a timestamp keeps
-    // the second one from replacing the first.
-    const name = fallbackName && /^image\.\w+$/i.test(file.name || 'image.png')
-      ? `${fallbackName}-${Date.now()}.${IMAGE_EXT[file.type] || file.type.split('/')[1] || 'png'}`
-      : file.name;
+    const name = attachmentName(file, fallbackName);
     const others = pendingAttachments.filter(a => a.name !== name);
     // The same limits the server enforces, caught here while the file picker
     // is still open rather than as a toast after the form has closed.

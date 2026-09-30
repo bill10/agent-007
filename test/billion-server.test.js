@@ -224,6 +224,34 @@ describe('the Billion tab over the socket', () => {
     }
   });
 
+  it('takes a message\'s files and serves them back from chat-files only, to the owner only', async () => {
+    const billion = spawn({ isBillion: true, name: BILLION_NAME });
+    const owner = await connect(browser());
+    const http = `http://127.0.0.1:${new URL(wsUrl).port}`;
+    try {
+      const nonce = 'files1';
+      owner.ws.send(JSON.stringify({ type: 'chat-send', nonce, text: '', files: [{ name: 'shot.png', type: 'image/png', data: Buffer.from('PNG').toString('base64') }] }));
+      expect(await waitFor(owner.seen, m => m.type === 'chat-sent' && m.nonce === nonce)).not.toHaveProperty('error');
+      const { message } = await waitFor(owner.seen, m => m.type === 'chat-message' && m.message.files);
+      const res = await fetch(`${http}/api/chat/${message.id}/files/shot.png`);
+      expect([res.status, await res.text(), res.headers.get('content-security-policy')]).toEqual([200, 'PNG', 'sandbox']);
+      for (const path of [`${message.id}/files/other.png`, `${message.id}/files/..%2F..%2Fchat.json`, `..%2F/files/chat.json`]) {
+        expect((await fetch(`${http}/api/chat/${path}`)).status).toBe(404);
+      }
+      // With user accounts on the chat is nobody's, and so are its files.
+      const usersPath = process.env.AGENT007_USERS_PATH;
+      const token = 'tokFile_' + Math.random().toString(36).slice(2, 10);
+      writeFileSync(usersPath, JSON.stringify([{ id: 'u_file', displayName: 'Owner', color: '#d4a847', tokenHash: hashToken(token) }]));
+      try {
+        expect((await fetch(`${http}/api/chat/${message.id}/files/shot.png`)).status).toBe(401);
+        expect((await fetch(`${http}/api/chat/${message.id}/files/shot.png?token=${token}`)).status).toBe(403);
+      } finally { rmSync(usersPath, { force: true }); }
+    } finally {
+      owner.ws.close();
+      await killSession(billion.id);
+    }
+  });
+
   it('refuses a socket that is not this server\'s page, and never shows it the thread', async () => {
     const plain = await connect();
     const owner = await connect(browser());

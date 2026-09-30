@@ -4,10 +4,10 @@
 // Telegram messages in the same thread, the cap, and the token redacted.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { rmSync, writeFileSync, readFileSync } from 'fs';
+import { rmSync, writeFileSync, readFileSync, statSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import {
-  ownerSays, chatMessages, chatPayload, notifyOwner, tellOwner, handleUpdate, dismissWaiting, waitingItems,
+  ownerSays, chatMessages, chatFilePath, chatPayload, notifyOwner, tellOwner, handleUpdate, dismissWaiting, waitingItems,
   APP_PREFIX, OWNER_PREFIX, CHAT_CAP, NOTIFY_WINDOW_MS, MAX_OWNER_CHARS,
 } from '../server/owner.js';
 import { dropMessages } from '../server/messages.js';
@@ -25,6 +25,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 7 } }) })));
   rmSync(join(CONFIG_DIR, 'waiting.json'), { force: true });
   rmSync(join(CONFIG_DIR, 'chat.json'), { force: true });
+  rmSync(join(CONFIG_DIR, 'chat-files'), { recursive: true, force: true });
   b = {
     id: 'chat-billion', name: 'Billion', isBillion: true, command: 'claude', state: 'WAITING', exited: false,
     ownerId: null, stateChangedAt: Date.now() - 5000, recentStrippedLines: [], isTUI: true, lastOutputAt: 0, pty: { write: vi.fn() },
@@ -168,5 +169,83 @@ describe('Telegram in the same thread', () => {
     const thread = chatMessages();
     expect(thread).toHaveLength(3);
     expect(thread.at(-1).q).toMatchObject({ status: 'answered', answer: 'yes', answeredVia: 'telegram' });
+  });
+});
+
+// Files pasted, dropped or picked in the Billion tab (server/owner.js "The
+// chat's attachments").
+describe('attachments in the Billion tab', () => {
+  const file = (name, text = 'hello', type = 'text/plain') => ({ name, type, data: Buffer.from(text).toString('base64') });
+  const dir = () => join(CONFIG_DIR, 'chat-files');
+
+  it('saves them owner-only under chat-files/<message id>, and one turn carries their absolute paths', async () => {
+    expect(await ownerSays('look at this', { files: [file('shot.png', 'png', 'image/png'), file('notes.pdf')] })).toEqual({ ok: true });
+    const [m] = chatMessages();
+    expect(m.files).toEqual([{ name: 'shot.png', size: 3, type: 'image/png' }, { name: 'notes.pdf', size: 5, type: 'text/plain' }]);
+    const a = join(dir(), m.id, 'shot.png');
+    const b2 = join(dir(), m.id, 'notes.pdf');
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} look at this (attached: ${a}, ${b2})\r`));
+    expect(readFileSync(a, 'utf8')).toBe('png');
+    if (process.platform !== 'win32') {
+      expect(statSync(a).mode & 0o777).toBe(0o600);
+      expect(statSync(join(dir(), m.id)).mode & 0o777).toBe(0o700);
+    }
+    // In chat.json, so a restart keeps the bubble's files.
+    expect(JSON.parse(readFileSync(join(CONFIG_DIR, 'chat.json'), 'utf8'))[0].files).toEqual(m.files);
+  });
+
+  it('sends files with no text', async () => {
+    expect(await ownerSays('', { files: [file('a.txt')] })).toEqual({ ok: true });
+    const [m] = chatMessages();
+    expect(m.text).toBe('');
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} (attached: ${join(dir(), m.id, 'a.txt')})\r`));
+  });
+
+  it('answers a question with them, the paths on the same turn', async () => {
+    await notifyOwner('Which logo?', { env: {}, now: now() });
+    const [q] = waitingItems();
+    expect(await ownerSays('this one', { answers: q.id, files: [file('logo.svg', '<svg/>', 'image/svg+xml')] })).toMatchObject({ ok: true });
+    const answer = chatMessages().at(-1);
+    expect(answer).toMatchObject({ re: 1, text: 'this one', files: [{ name: 'logo.svg', type: 'image/svg+xml' }] });
+    await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} Q1: this one (re: "Which logo?") (attached: ${join(dir(), answer.id, 'logo.svg')})\r`));
+  });
+
+  it('sanitises names and refuses what the job form refuses: too big, too many, unnamed, clashing', async () => {
+    expect(await ownerSays('x', { files: [file('../../etc/passwd')] })).toEqual({ ok: true });
+    expect(chatMessages()[0].files[0].name).toBe('.._.._etc_passwd');
+    const big = { name: 'big.bin', data: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64') };
+    expect((await ownerSays('x', { files: [big] })).error).toMatch(/too large/);
+    expect((await ownerSays('x', { files: Array.from({ length: 21 }, (_, i) => file(`f${i}.txt`)) })).error).toMatch(/At most 20/);
+    expect((await ownerSays('x', { files: [file('...')] })).error).toMatch(/Unusable/);
+    expect((await ownerSays('x', { files: [file('A.png'), file('a.png')] })).error).toMatch(/Two files/);
+    expect((await ownerSays('x', { files: 'nope' })).error).toMatch(/not a list/);
+    expect(chatMessages()).toHaveLength(1);
+  });
+
+  it('keeps nothing on disk when Billion cannot take the turn', async () => {
+    b.exited = true;
+    expect((await ownerSays('x', { files: [file('a.txt')] })).error).toMatch(/not running/);
+    expect(existsSync(dir()) ? readdirSync(dir()) : []).toEqual([]);
+  });
+
+  it('finds a file only by a message that has it, never outside chat-files', async () => {
+    await ownerSays('x', { files: [file('a.txt')] });
+    const [m] = chatMessages();
+    expect(chatFilePath(m.id, 'a.txt')).toBe(join(dir(), m.id, 'a.txt'));
+    expect(chatFilePath(m.id, 'b.txt')).toBeNull();
+    expect(chatFilePath('nope', 'a.txt')).toBeNull();
+    // A hand-edited chat.json cannot point the route elsewhere.
+    writeFileSync(join(CONFIG_DIR, 'chat.json'), JSON.stringify([{ id: '..', from: 'owner', text: '', files: [{ name: 'chat.json' }] }]));
+    expect(chatFilePath('..', 'chat.json')).toBeNull();
+  });
+
+  it('deletes a message\'s files when the cap lets the message go', async () => {
+    await ownerSays('x', { files: [file('a.txt')] });
+    const [m] = chatMessages();
+    const later = Array.from({ length: CHAT_CAP }, (_, i) => ({ id: `m${i}`, at: new Date(i).toISOString(), from: 'billion', text: `m${i}` }));
+    writeFileSync(join(CONFIG_DIR, 'chat.json'), JSON.stringify([m, ...later]));
+    await tellOwner('one more', { env: {}, now: now() });
+    expect(chatMessages().some(x => x.id === m.id)).toBe(false);
+    expect(existsSync(join(dir(), m.id))).toBe(false);
   });
 });

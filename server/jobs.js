@@ -172,13 +172,14 @@ function clearPrCheckError(job) {
 // the agent reads them by absolute path and nothing can end up committed. They
 // arrive inline on the job message as base64, the same shape as the terminal's
 // upload-file, so the id is known before anything touches the disk.
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-const MAX_ATTACHMENTS = 20;
+// The Billion chat's attachments (server/owner.js) share these limits.
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENTS = 20;
 // Per save, not per card: one message is one WebSocket frame, and ws drops
 // the socket (not the message) past its 100MiB default. Bounded well under
 // that, base64 included, so the failure a user sees is a form error rather
 // than a vanished card.
-const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
+export const MAX_ATTACHMENT_TOTAL_BYTES = 50 * 1024 * 1024;
 const ATTACHMENTS_DIR = resolve(CONFIG_DIR, 'attachments');
 
 function attachmentDir(jobId) {
@@ -190,6 +191,18 @@ function attachmentDir(jobId) {
 // through one unless it resolves inside the attachments dir.
 function insideAttachments(path) {
   return resolve(String(path || '')).startsWith(ATTACHMENTS_DIR + sep);
+}
+
+// A client's file name as it will be stored, or why it cannot be. No
+// separator survives the sanitiser and a name with no letter or digit is
+// refused, so join() cannot climb out of the folder. taken: the files already
+// planned, compared case-insensitively since macOS and Windows would store
+// Shot.png and shot.png as one file that two records then fight over.
+export function uploadName(raw, taken) {
+  const name = safeFilename(raw).slice(0, 120);
+  if (!/[a-zA-Z0-9]/.test(name)) return { error: `Unusable file name "${String(raw || '')}"` };
+  if (taken.some(a => a.name.toLowerCase() === name.toLowerCase())) return { error: `Two files would be stored as "${name}"` };
+  return { name };
 }
 
 // The full list the card should have: { name } keeps an existing file, { name,
@@ -207,14 +220,11 @@ function planAttachments(job, list) {
   const writes = [];
   let total = 0;
   for (const item of list) {
-    // No separator survives the sanitiser and a name with no letter or digit
-    // is refused, so join() cannot climb out of the job's dir. Every refusal
-    // is an error, not a silent drop: the user attached the file on purpose.
-    const name = safeFilename(item?.name).slice(0, 120);
-    if (!/[a-zA-Z0-9]/.test(name)) return { error: `Unusable file name "${String(item?.name || '')}"` };
-    // Case-insensitive: macOS and Windows would store Shot.png and shot.png
-    // as one file that two records then fight over.
-    if (kept.some(a => a.name.toLowerCase() === name.toLowerCase())) return { error: `Two files would be stored as "${name}"` };
+    // Every refusal is an error, not a silent drop: the user attached the
+    // file on purpose.
+    const checked = uploadName(item?.name, kept);
+    if (checked.error) return checked;
+    const { name } = checked;
     const path = join(dir, name);
     if (typeof item.data === 'string') {
       const buf = Buffer.from(item.data, 'base64');

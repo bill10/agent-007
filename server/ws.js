@@ -536,7 +536,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         case 'chat-send': {
           const result = !mayAnswerOwner() ? { error: 'Only the owner talks to Billion here, and with user accounts on nobody does.' }
             : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
-            : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, broadcast });
+            : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, files: msg.files, broadcast });
           ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
           break;
         }
