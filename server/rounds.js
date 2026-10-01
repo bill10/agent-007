@@ -94,6 +94,13 @@ export function nextRound(now = Date.now(), settings = roundSettings()) {
   return null;
 }
 
+// The round the owner should expect next: the first after `now` and after
+// the last one released, since a round the owner started early has already
+// gone (its time is still ahead, so the clock alone would name it again).
+export function comingRound(now = Date.now(), settings = roundSettings()) {
+  return nextRound(Math.max(now, Date.parse(roundState().lastAt) || 0), settings);
+}
+
 // The latest round at or before `now`.
 export function lastRound(now = Date.now(), settings = roundSettings()) {
   if (!settings.on) return null;
@@ -142,16 +149,18 @@ export function saveRoundState(state) {
   }
 }
 
-// What the Billion tab draws above the round: the round on screen and when
-// the next one is.
-export function roundPayload(now = Date.now(), settings = roundSettings()) {
+// What the Billion tab draws above the round: the round on screen, when the
+// next one is, and how many questions wait for it (a count only: what they
+// are stays Billion's until a round shows them). queued comes from owner.js.
+export function roundPayload(now = Date.now(), settings = roundSettings(), queued = 0) {
   const { current } = roundState();
   return {
     type: 'round-state',
     on: settings.on,
     max: settings.max,
     current: current || null,
-    next: nextRound(now, settings),
+    next: comingRound(now, settings),
+    queued,
   };
 }
 

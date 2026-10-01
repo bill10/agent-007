@@ -17,8 +17,8 @@ import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
-import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath, roundQueue, dropQueued } from './owner.js';
-import { nextRound, setRoundBrief, roundPayload } from './rounds.js';
+import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath, roundQueue, dropQueued, roundView } from './owner.js';
+import { comingRound, setRoundBrief } from './rounds.js';
 import { setBillionStatus, publishStatus } from './billion-status.js';
 import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
@@ -98,6 +98,8 @@ export function requireAgent(req, res, next) {
 
 // --- Routes ---
 export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAgent } = {}) {
+  // The tab's "N waiting" follows the queue.
+  const withView = (result) => { if (result.ok) broadcast?.(roundView()); return result; };
   app.use(express_static(staticDir));
 
   // --- POST /mcp — the board's MCP server ---
@@ -143,18 +145,18 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           ? readApproval(id)
           : { error: 'Only Billion can read approval requests.' }),
         notifyOwner: async (text, { choices, recommended, urgency, project, type, telegram, rank } = {}) => (req.agentSession.isBillion
-          ? { ...await notifyOwner(text, { choices, recommended, urgency, project, type, telegram, rank, broadcast }), nextRound: nextRound() }
+          ? { ...await notifyOwner(text, { choices, recommended, urgency, project, type, telegram, rank, broadcast }), nextRound: comingRound() }
           : { error: 'Only Billion can notify the owner.' }),
         listRoundQueue: () => (req.agentSession.isBillion
-          ? { ...roundQueue(), nextRound: nextRound() }
+          ? { ...roundQueue(), nextRound: comingRound() }
           : { error: 'Only Billion has a round queue.' }),
         dropQueued: (ref) => (req.agentSession.isBillion
-          ? dropQueued(ref)
+          ? withView(dropQueued(ref))
           : { error: 'Only Billion has a round queue.' }),
         setRoundBrief: (text, which) => {
           if (!req.agentSession.isBillion) return { error: 'Only Billion writes the round brief.' };
           const result = setRoundBrief(text, which);
-          if (result.ok && which === 'current') broadcast(roundPayload());
+          if (result.ok && which === 'current') broadcast(roundView());
           return result;
         },
         setStatus: (text) => {

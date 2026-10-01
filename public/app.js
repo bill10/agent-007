@@ -554,7 +554,7 @@ function onMessage(msg) {
     case 'waiting-list': setWaitingItems(msg.items); renderWaiting(); updateTabs(); break;
     case 'waiting-error': handleWaitingError(msg); handleRoundError(msg); break;
     case 'round-state': setRoundInfo(msg); renderRound(); renderBillionStatus(); break;
-    case 'billion-status': setBillionStatus(msg); renderBillionStatus(); break;
+    case 'billion-status': setBillionStatus(msg); renderBillionStatus(); renderWaiting(); break;
     case 'chat-list': setChatMessages(msg.messages); renderWaiting(); break;
     case 'chat-message': handleChatMessage(msg.message); break;
     case 'chat-sent': handleChatSent(msg); break;

@@ -1746,6 +1746,40 @@ body {
 }
 .round-reply-input:focus { outline: none; border-color: var(--accent); }
 .round-skip { color: var(--text-dim); }
+.round-card-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-radius: 11px;
+  align-self: center;
+}
+.round-card.done .round-card-num { color: var(--text-dim); background: transparent; border: 1px solid var(--border); }
+.round-done { color: var(--state-waiting); }
+.round-start { align-self: flex-start; padding: 0 14px; }
+
+/* The progress box: what Billion is doing while the owner's message waits. */
+.chat-progress {
+  align-self: flex-start;
+  max-width: 88%;
+  padding: 10px 12px;
+  border: 1px dashed var(--state-working);
+  border-radius: 6px;
+  background: var(--bg-dark);
+  font-size: 12px;
+}
+.chat-progress-head { margin: 0 0 4px; color: var(--text); font-weight: 700; }
+.chat-progress-head::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--state-working); animation: billion-status-pulse 1.4s ease-in-out infinite; }
+.chat-progress-steps { margin: 0; padding-left: 16px; color: var(--text-muted); }
+.chat-progress-steps li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-msg.pending .chat-bubble { opacity: 0.8; }
+
 /* Answered: folded to its number and the answer, where it stood. */
 .round-card.done { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 12px; background: transparent; }
 .round-card.done .round-card-type { display: none; }
@@ -1775,6 +1809,7 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .billion-status[data-mood="busy"] .billion-status-dot { animation: none; }
+  .chat-progress-head::before { animation: none; }
 }
 
 body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none !important; }

@@ -79,9 +79,10 @@ export function roundTime(ms, now = Date.now()) {
 // "Working: reviewing PR #120 · 3 workers running · next round 3:30 pm"
 export function statusLine(status = billionStatus, info = roundInfo, now = Date.now()) {
   const s = status || {};
+  const waiting = Array.isArray(s.pending) ? s.pending.length : 0;
   const lead = !status ? 'Connecting…'
     : !s.running ? 'Billion is not running'
-      : s.awaitingReply ? 'Billion is working on your message…'
+      : s.awaitingReply ? (waiting > 1 ? `Billion is working on your ${waiting} messages…` : 'Billion is working on your message…')
         : s.text ? (s.working ? `Working: ${s.text}` : s.text)
           : s.working ? 'Thinking…' : 'Idle';
   const next = s.nextRoundAt ?? info?.next?.at;
@@ -122,12 +123,13 @@ export function roundModel(items = waitingItems, info = roundInfo) {
     && (i.status === 'open' || Date.parse(i.answeredAt) >= since);
   const shown = new Set();
   const sections = [];
-  const now = items.filter(urgent).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const byNum = (a, b) => (a.num ?? Infinity) - (b.num ?? Infinity) || String(a.at).localeCompare(String(b.at));
+  const now = items.filter(urgent).sort(byNum);
   if (now.length) sections.push({ key: 'now', title: 'Needs you now', items: now, urgent: true });
   now.forEach(i => shown.add(i.id));
   const byProject = new Map();
   const ordered = items.filter(i => !shown.has(i.id) && inRound(i))
-    .sort((a, b) => (a.pos ?? Infinity) - (b.pos ?? Infinity) || (RANK[a.urgency] ?? 1) - (RANK[b.urgency] ?? 1) || String(a.at).localeCompare(String(b.at)));
+    .sort((a, b) => (a.num ?? Infinity) - (b.num ?? Infinity) || (a.pos ?? Infinity) - (b.pos ?? Infinity) || (RANK[a.urgency] ?? 1) - (RANK[b.urgency] ?? 1) || String(a.at).localeCompare(String(b.at)));
   for (const item of ordered) {
     const name = item.project || 'general';
     if (!byProject.has(name)) byProject.set(name, []);
@@ -144,6 +146,14 @@ export function roundModel(items = waitingItems, info = roundInfo) {
 
 // --- Cards ---
 
+// "1d", "1d 3d": the round's items the owner marks done (server/owner.js doneNumbers).
+export function doneNumbers(text) {
+  const body = String(text ?? '').trim();
+  if (!/^(\d{1,3}\s?d)([\s,]+\d{1,3}\s?d)*$/i.test(body)) return null;
+  return [...new Set(body.match(/\d{1,3}/g).map(Number))];
+}
+
+let starting = null;         // the round on screen when "Start the round now" was pressed
 const pending = new Map();   // question id -> its status when tapped
 const errors = new Map();    // question id -> { error, status }
 const drafts = new Map();    // question id -> typed reply not sent yet
@@ -186,6 +196,12 @@ function card(q) {
   const node = el('article', 'round-card');
   node.dataset.q = q.id;
   const head = el('div', 'round-card-head');
+  // The owner's short number for it in this round: "1d" (or Done) clears it.
+  if (q.num) {
+    const num = el('span', 'round-card-num', String(q.num));
+    num.title = `Item ${q.num}: type ${q.num}d to mark it done`;
+    head.append(num);
+  }
   head.append(label(q));
   if (q.type && q.type !== 'other') head.append(el('span', 'round-card-type', q.type));
   node.append(head, el('p', 'round-card-text', q.text), el('div', 'round-card-foot'));
@@ -202,7 +218,8 @@ function fillFoot(node, q) {
   if (DONE.has(q.status)) {
     foot.innerHTML = '';
     const line = el('p', 'round-card-answer', q.status === 'dismissed' ? 'skipped'
-      : `✓ ${q.answeredBy || 'you'} answered${VIA[q.answeredVia] || ''}: ${q.answer}`);
+      : q.done ? `✓ done${VIA[q.answeredVia] || ''}`
+        : `✓ ${q.answeredBy || 'you'} answered${VIA[q.answeredVia] || ''}: ${q.answer}`);
     if (q.status === 'answered' && (q.answeredVia === 'app' || q.answeredVia === 'telegram') && Date.now() - Date.parse(q.answeredAt) < UNDO_MS) {
       const undo = el('button', 'chat-link', 'Undo');
       undo.type = 'button';
@@ -251,6 +268,13 @@ function fillFoot(node, q) {
     };
     const go = el('button', 'waiting-send chat-control round-reply-send', 'Send');
     go.type = 'submit';
+    const finish = q.num ? el('button', 'chat-link round-done', 'Done') : null;
+    if (finish) {
+      finish.type = 'button';
+      finish.title = `Done: tell Billion item ${q.num} is done (or type ${q.num}d)`;
+      finish.setAttribute('aria-label', `Item ${q.num} done`);
+      finish.onclick = () => request(q, { type: 'round-done', id: q.id, nums: [q.num] });
+    }
     const skip = el('button', 'chat-link round-skip', 'Skip');
     skip.type = 'button';
     skip.title = 'Not now: dismiss it';
@@ -262,9 +286,12 @@ function fillFoot(node, q) {
       if (!text) return;
       drafts.delete(q.id);
       const live = waitingItems.find(i => i.id === q.id) || q;
+      // "1d 3d" in any card's box marks those items done, not an answer to this one.
+      const nums = doneNumbers(text);
+      if (nums) { box.value = ''; return request(live, { type: 'round-done', id: q.id, nums }); }
       request(live, { type: 'waiting-answer', id: q.id, answer: text });
     };
-    reply.append(box, go, skip);
+    reply.append(box, go, ...(finish ? [finish] : []), skip);
     foot.append(reply);
   }
   for (const b of foot.querySelectorAll('button')) b.disabled = pending.has(q.id);
@@ -302,6 +329,23 @@ function heading(info, model) {
   return head;
 }
 
+// "Start the round now": the next round, released at once, when something waits for it.
+function startButton(info) {
+  if (info?.on === false || !info?.queued) return null;
+  const btn = el('button', 'waiting-send chat-control round-start', `Start the round now (${info.queued} waiting)`);
+  btn.type = 'button';
+  btn.title = 'Show the next round now instead of at its time (same two per department)';
+  btn.disabled = starting !== null && starting === (info.current?.id ?? '');
+  btn.onclick = () => {
+    if (!send({ type: 'round-start' })) return;
+    starting = info.current?.id ?? '';
+    renderRound();
+    // A refusal comes back as a notification: the button is pressable again after a while.
+    setTimeout(() => { if (starting !== null) { starting = null; renderRound(); } }, 15000);
+  };
+  return btn;
+}
+
 // Rebuilt only when the cards on screen change; otherwise each card is
 // brought up to date where it stands.
 export function renderRound() {
@@ -311,7 +355,8 @@ export function renderRound() {
   if (!view) return;
   const model = roundModel();
   const info = roundInfo;
-  const structure = JSON.stringify([info?.on, info?.current?.id, info?.current?.brief, info?.next?.at, earlierOpen,
+  if (starting !== null && starting !== (info?.current?.id ?? '')) starting = null;
+  const structure = JSON.stringify([info?.on, info?.current?.id, info?.current?.brief, info?.next?.at, info?.queued, starting, earlierOpen,
     model.sections.map(s => [s.key, s.items.map(i => i.id)]), model.earlier.map(i => [i.id, i.status, i.answer])]);
   if (structure === built) {
     for (const s of model.sections) {
@@ -333,6 +378,8 @@ export function renderRound() {
   view.innerHTML = '';
   const page = el('div', 'round-page');
   page.append(heading(info, model));
+  const start = startButton(info);
+  if (start) page.append(start);
   const brief = info?.on !== false && info?.current?.brief;
   if (brief) page.append(el('p', 'round-brief', brief));
   if (!model.sections.length) {
@@ -376,5 +423,6 @@ export function _resetRound() {
   errors.clear();
   drafts.clear();
   earlierOpen = false;
+  starting = null;
   built = '';
 }

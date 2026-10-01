@@ -10,13 +10,15 @@ import { join } from 'path';
 import {
   notifyOwner, tellOwner, ownerSays, waitingItems, waitingPayload, chatMessages, answerWaiting, reopenQuestion,
   releaseRound, roundTick, migrateToRounds, roundQueue, dropQueued, NOTIFY_LIMIT, NOTIFY_WINDOW_MS, setOwnerChannel,
+  startRoundNow, doneNumbers, markDone, handleUpdate, roundView, START_ROUND_RE,
 } from '../server/owner.js';
 import {
   roundSettings, nextRound, lastRound, byPriority, roundState, roundPayload, setRoundBrief, appLink, DEFAULT_ROUNDS, MAX_BRIEF_CHARS,
 } from '../server/rounds.js';
 import {
-  setBillionStatus, statusPayload, publishStatus, setStatusFacts, _resetStatus, STATUS_TTL_MS, MAX_STATUS_CHARS,
+  setBillionStatus, statusPayload, publishStatus, setStatusFacts, _resetStatus, STATUS_TTL_MS, MAX_STATUS_CHARS, screenSteps,
 } from '../server/billion-status.js';
+import { comingRound } from '../server/rounds.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { takeMessages, dropMessages } from '../server/messages.js';
 import { sessions, CONFIG_DIR, config } from '../server/state.js';
@@ -103,7 +105,9 @@ describe('notify_owner queues for the round', () => {
     expect(waitingPayload().items).toEqual([]);
     expect(chatMessages().filter(m => m.q)).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(broadcast).not.toHaveBeenCalled();
+    // Only the count waiting for the round reaches the tab, never the question.
+    expect(broadcast.mock.calls.map(([m]) => m.type)).toEqual(['round-state']);
+    expect(broadcast).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'round-state', queued: 1 }));
   });
 
   it('is not held to the per-minute limit, which is for what reaches the owner', async () => {
@@ -170,7 +174,9 @@ describe('a round', () => {
     // Consolidated: off the open list and the badge, kept as history, its bubble says so.
     expect(waitingPayload().items.filter(i => i.status === 'consolidated').map(i => i.text)).toEqual(['A1', 'B1']);
     expect(chatMessages().find(m => m.text === 'A1').q.status).toBe('consolidated');
-    expect(billionHeard()).toEqual([`[Owner round] Round 10/1 pm released 1 (Q${waitingItems().find(i => i.text === 'A2').n}); consolidated Q1, Q4: re-queue only if still top two.`]);
+    // Numbered for the owner: the emergency first, then the round's question.
+    expect(waitingItems().filter(i => i.status === 'open').map(i => [i.text, i.num])).toEqual([['A2', 2], ['Now!', 1]]);
+    expect(billionHeard()).toEqual([`[Owner round] Round 10/1 pm released 1 (item 2 = Q${waitingItems().find(i => i.text === 'A2').n}); consolidated Q1, Q4: re-queue only if still top two.`]);
   });
 
   it('sends one Telegram message for the round, with the brief and a link, never one per question', async () => {
@@ -306,7 +312,7 @@ describe('the status line', () => {
     const b = { state: 'WORKING', exited: false };
     setStatusFacts(() => ({ billion: b, workers: 3, nextRoundAt: 123 }));
     expect(setBillionStatus('  reviewing   PR #120 ', 1000)).toEqual({ ok: true, cleared: false });
-    expect(statusPayload(1000)).toEqual({ type: 'billion-status', text: 'reviewing PR #120', running: true, working: true, workers: 3, nextRoundAt: 123, awaitingReply: false });
+    expect(statusPayload(1000)).toEqual({ type: 'billion-status', text: 'reviewing PR #120', running: true, working: true, workers: 3, nextRoundAt: 123, awaitingReply: false, pending: [], steps: [] });
     expect(statusPayload(1000 + STATUS_TTL_MS).text).toBe('');
     expect(setBillionStatus('x'.repeat(MAX_STATUS_CHARS + 1)).error).toMatch(/140/);
     expect(setBillionStatus('').cleared).toBe(true);
@@ -350,4 +356,112 @@ it('caps queued questions on their own, so a long queue never pushes an open que
   expect(saved.filter(i => i.status === 'open')).toHaveLength(50);
   expect(saved.filter(i => i.status === 'queued').map(i => i.text)).not.toContain('queued 0');
   expect(saved.filter(i => i.status === 'queued').map(i => i.text)).toContain('one more');
+});
+
+describe('the owner starts a round early', () => {
+  it('releases the next round now under the same rules, and the clock does not release it again', async () => {
+    const t = at('2026-10-01T13:00:00Z');
+    await roundTick({ now: at('2026-10-01T09:00:00Z'), env: {}, settings: UTC });
+    billionHeard();
+    for (const p of ['a', 'a', 'a', 'b']) await ask(`${p} question`, { project: p });
+    const result = await startRoundNow({ now: t, env: {}, settings: UTC });
+    expect(result.released.map(i => i.project)).toEqual(['b', 'a', 'a']);
+    expect(result.left).toBe(1);
+    expect(roundState().current).toMatchObject({ id: '2026-10-01 15:30', early: true });
+    expect(billionHeard()[0]).toMatch(/^\[Owner round\] Round 10\/1 pm \(started early by the owner\) released 3 \(item 1 = Q\d+, item 2 = Q\d+, item 3 = Q\d+\); 1 still queued/);
+    expect(await roundTick({ now: at('2026-10-01T15:30:05Z'), env: {}, settings: UTC })).toBeNull();
+    expect(comingRound(at('2026-10-01T15:31:00Z'), UTC).id).toBe('2026-10-02 08:30');
+    expect(roundView(t, UTC)).toMatchObject({ queued: 1, next: { id: '2026-10-02 08:30' } });
+  });
+
+  it('is refused with rounds off', async () => {
+    expect((await startRoundNow({ settings: { ...UTC, on: false } })).error).toMatch(/Rounds are off/);
+  });
+
+  it('is what "start the round now" in the chat does, and it is not a turn of Billion\'s', async () => {
+    for (const phrase of ['Start the round now', 'start round', 'please release the next round.', 'Begin the round now!']) expect(START_ROUND_RE.test(phrase)).toBe(true);
+    for (const phrase of ['start the round after lunch', 'when does the round start?']) expect(START_ROUND_RE.test(phrase)).toBe(false);
+    await ask('Queued one', { project: 'a' });
+    expect(await ownerSays('Start the round now', { env: {} })).toEqual({ ok: true });
+    expect(waitingItems()[0]).toMatchObject({ status: 'open', num: 1 });
+    expect(billionHeard().filter(l => l.startsWith('[Owner via app]'))).toEqual([]);
+    expect(chatMessages().at(-1)).toMatchObject({ from: 'owner', text: 'Start the round now' });
+  });
+});
+
+describe('numbered items and "1d"', () => {
+  it('reads "1d", "1d 3d" and "1d, 3d", and nothing else', () => {
+    expect(doneNumbers('1d')).toEqual([1]);
+    expect(doneNumbers(' 1d 3D ')).toEqual([1, 3]);
+    expect(doneNumbers('1d, 3d,1d')).toEqual([1, 3]);
+    expect(doneNumbers('2 d')).toEqual([2]);
+    for (const text of ['1', 'd', '1d3d', 'done 1', '1day', '12 dogs']) expect(doneNumbers(text)).toBeNull();
+  });
+
+  it('numbers an emergency next in the round, and marks items done: folded as done, Billion told which', async () => {
+    await ask('Pick a name', { project: 'a' });
+    await releaseRound({ id: 'r1', label: '10/1 am', name: 'Morning round', at: at('2026-10-01T08:30:00Z') }, { env: {}, settings: UTC });
+    await ask('2FA code please', { urgency: 'blocking', env: {} });
+    expect(waitingItems().map(i => [i.text, i.num, i.numRound])).toEqual([['Pick a name', 1, 'r1'], ['2FA code please', 2, 'r1']]);
+    billionHeard();
+    expect(await ownerSays('1d 2d 7d', { env: {} })).toEqual({ ok: true, note: 'No open item 7.' });
+    expect(waitingItems().map(i => [i.status, i.answer, i.done])).toEqual([['answered', 'done', true], ['answered', 'done', true]]);
+    expect(billionHeard()).toEqual(['[Owner via app] item 1 done (Q1: "Pick a name"); item 2 done (Q2: "2FA code please")']);
+    expect(chatMessages().find(m => m.q?.n === 1).q).toMatchObject({ status: 'answered', done: true, num: 1 });
+    expect((await ownerSays('1d', { env: {} })).error).toBe('No open item 1 in this round.');
+  });
+
+  it('works from Telegram too, with a reply saying what was done', async () => {
+    await ask('Pick a name', { project: 'a' });
+    await releaseRound({ id: 'r1', label: '10/1 am', name: 'Morning round', at: at('2026-10-01T08:30:00Z') }, { env: {}, settings: UTC });
+    fetchMock.mockClear();
+    expect(await handleUpdate({ update_id: 1, message: { chat: { id: 42 }, text: '1d' } }, { env: ENV })).toBe('done');
+    expect(sent().map(c => c.body.text)).toEqual(['Done: item 1.']);
+    expect(billionHeard()).toContain('[Owner via Telegram] item 1 done (Q1: "Pick a name")');
+  });
+
+  it('needs Billion running, like an answer', async () => {
+    await ask('Pick', { urgency: 'blocking', env: {} });
+    sessions.delete(billion.id);
+    expect((await markDone([1])).error).toBe('Billion is not running');
+    expect(waitingItems()[0].status).toBe('open');
+  });
+});
+
+describe('the owner\'s messages wait for replies of their own', () => {
+  it('keeps each message pending until a tell_owner answers it, oldest first; a server notice answers none', async () => {
+    setStatusFacts(() => ({ billion }));
+    await ownerSays('First question?', { env: {} });
+    await ownerSays('Second question?', { env: {} });
+    const [first, second] = chatMessages().filter(m => m.from === 'owner').map(m => m.id);
+    expect(statusPayload().pending).toEqual([first, second]);
+    await tellOwner('Account switched.', { env: {}, now: now(), notice: true });
+    expect(statusPayload().pending).toEqual([first, second]);
+    await tellOwner('Answer one.', { env: {}, now: now() });
+    expect(chatMessages().at(-1)).toMatchObject({ text: 'Answer one.', replyTo: first });
+    expect(statusPayload()).toMatchObject({ pending: [second], awaitingReply: true });
+    await tellOwner('Answer two.', { env: {}, now: now() });
+    expect(statusPayload()).toMatchObject({ pending: [], awaitingReply: false });
+  });
+
+  it('lists the last steps on Billion\'s screen while it works on one', async () => {
+    const raw = '⏺ Read(sheet.csv)\r\n  ⎿ Read 40 lines\n⏺ Bash(gh pr merge 178 --squash --delete-branch --admin --body "a long body here")\n'
+      + '⏺ agent-007-board - list_jobs (MCP)()\n• Ran npm test\nplain text\n⏺ I will merge it now.\n';
+    expect(screenSteps(raw)).toEqual(['Bash gh pr merge 178 --squash --delete-branch --admin --bod…', 'agent-007-board - list_jobs', 'Ran npm test']);
+    expect(screenSteps(raw, 5)[0]).toBe('Read sheet.csv');
+    // The bot token never reaches the owner's screen, even cut short.
+    const env = process.env.TELEGRAM_BOT_TOKEN;
+    process.env.TELEGRAM_BOT_TOKEN = TOKEN;
+    try { expect(screenSteps(`⏺ Bash(curl https://api.telegram.org/bot${TOKEN}/getMe)\n`, 3)).toEqual(['Bash curl https://api.telegram.org/bot<token>/getMe']); } finally {
+      if (env === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = env;
+    }
+    const b = { ...billion, state: 'WORKING', ringBuffer: { getAll: () => [raw] } };
+    setStatusFacts(() => ({ billion: b }));
+    expect(statusPayload().steps).toEqual([]);   // nothing pending: no box
+    sessions.set(billion.id, b);
+    try {
+      await ownerSays('Merged yet?', { env: {} });
+      expect(statusPayload().steps).toEqual(['Bash gh pr merge 178 --squash --delete-branch --admin --bod…', 'agent-007-board - list_jobs', 'Ran npm test']);
+    } finally { sessions.set(billion.id, billion); }
+  });
 });

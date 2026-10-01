@@ -9,7 +9,7 @@
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
 // each, and "Read new messages aloud" in the header), and the box has its own
 // mic (voice.js with the CHAT_VOICE target), all in the browser and free.
-import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled } from './state.js';
+import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionStatus } from './state.js';
 import { switchToSession } from './terminal.js';
 import { send } from './ws.js';
 import { hideJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
@@ -328,6 +328,27 @@ function renderAttached() {
   }
 }
 
+// While Billion works on the owner's messages: a bounded box at the end of the
+// thread with what it is doing (its set_status line and the last steps on its
+// screen), replaced by the answer when its tell_owner lands. Updated in place
+// on each status; the reader's scroll is kept like any bubble's.
+function progressBox() {
+  const s = billionStatus;
+  const count = waitingOnBillion().length;
+  if (!count) return null;
+  const box = el('div', 'chat-progress');
+  box.dataset.key = 'progress';
+  box.setAttribute('role', 'status');
+  box.setAttribute('aria-live', 'polite');
+  box.append(el('p', 'chat-progress-head', count > 1 ? `Billion is working on your ${count} messages…` : 'Billion is working on your message…'));
+  const lines = [s.text, ...(s.steps || [])].filter(Boolean);
+  if (!lines.length) lines.push(s.working ? 'Thinking…' : 'Waiting to start…');
+  const list = el('ul', 'chat-progress-steps');
+  for (const line of lines) list.append(el('li', null, line));
+  box.append(list);
+  return box;
+}
+
 // The owner's files in their bubble: images as thumbnails that open full size,
 // others as a download link. Served from the config dir by server/http.js.
 function sentFiles(m) {
@@ -442,13 +463,17 @@ function replyButton(q, onclick) {
   return reply;
 }
 
+// The owner's messages still waiting for a reply of their own (server/billion-status.js).
+const waitingOnBillion = () => (Array.isArray(billionStatus?.pending) ? billionStatus.pending : []);
+
 function bubble(m) {
   const mine = m.from === 'owner';
-  const row = el('div', `chat-msg ${mine ? 'mine' : 'theirs'}`);
+  const unanswered = mine && waitingOnBillion().includes(m.id);
+  const row = el('div', `chat-msg ${mine ? 'mine' : 'theirs'}${unanswered ? ' pending' : ''}`);
   row.dataset.id = m.id;
   // Keyed, so a redraw keeps an unchanged bubble (and its own scroll) as it is.
   row.dataset.key = m.id;
-  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id)]);
+  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id), unanswered]);
   const box = el('div', 'chat-bubble');
   if (m.q) {
     row.dataset.q = m.q.id;
@@ -458,7 +483,7 @@ function bubble(m) {
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
   if (m.text || !m.files?.length) box.appendChild(el('p', 'chat-text', m.text));
   if (m.files?.length) box.appendChild(sentFiles(m));
-  const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at)].filter(Boolean);
+  const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), unanswered && 'waiting for Billion…'].filter(Boolean);
   const metaLine = el('span', 'chat-meta', meta.join(' · '));
   if (!mine && readAloudSupported()) {
     const foot = el('div', 'chat-meta-row');
@@ -1010,6 +1035,8 @@ export function renderWaiting({ toBottom = false } = {}) {
     empty.hidden = !!noticeText();
     nodes.push(empty);
   }
+  const box = progressBox();
+  if (box) nodes.push(box);
   patchChildren(list, nodes);
   // Drawn again when an Undo link's minute is up, so it goes.
   if (undoSoonest < Infinity) undoTimer = setTimeout(() => renderWaiting(), Math.min(undoSoonest, UNDO_MS) + 50);

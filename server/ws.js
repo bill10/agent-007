@@ -14,8 +14,8 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
-import { roundPayload } from './rounds.js';
 import { statusPayload } from './billion-status.js';
+import { roundView, startRoundNow, markDone } from './owner.js';
 import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
@@ -407,7 +407,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     // So is their chat with Billion.
     if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(chatPayload()));
     if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(telegramPayload()));
-    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(roundPayload()));
+    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(roundView()));
     if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(statusPayload()));
 
     broadcastPresence();
@@ -546,6 +546,22 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
             : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, files: msg.files, broadcast });
           ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
+          break;
+        }
+        // The Billion tab's "Start the round now", and Done on a round's item
+        // (or several, from "1d 3d" typed in a card's box): the owner's browser only.
+        case 'round-start':
+        case 'round-done': {
+          const nums = Array.isArray(msg.nums) ? msg.nums.filter(n => Number.isInteger(n) && n > 0 && n < 1000).slice(0, 50) : [];
+          const result = !mayAnswerOwner() ? { error: 'Only the owner runs the rounds, and with user accounts on nobody does.' }
+            : !ws.fromBrowser ? { error: 'Rounds are run from the browser only.' }
+            : msg.type === 'round-start' ? await startRoundNow({ broadcast })
+            : nums.length ? await markDone(nums, 'app', { broadcast })
+            : { error: 'Which item?' };
+          if (result.error) {
+            if (msg.type === 'round-done' && typeof msg.id === 'string') ws.send(JSON.stringify({ type: 'waiting-error', id: msg.id, error: result.error }));
+            else ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          }
           break;
         }
         // "Use this chat" on a Telegram chat offer, its dismiss, and Settings'

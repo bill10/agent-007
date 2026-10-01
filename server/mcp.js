@@ -530,7 +530,8 @@ export const SET_STATUS_TOOL = {
   description:
     `Say in one line (up to ${MAX_STATUS_CHARS} characters) what you are doing now, e.g. "reviewing PR #120". It shows `
     + 'at the top of the owner\'s Billion tab beside what the server knows (workers running, the next round), so a '
-    + `slow reply is never a blank screen. Cheap: call it when you start something that takes a while. It fades after ${STATUS_TTL_MS / 60000} `
+    + 'slow reply is never a blank screen; while the owner waits on a reply it heads the progress box under their message, '
+    + `beside the steps the server reads off your screen. Cheap: call it when you start something that takes a while. It fades after ${STATUS_TTL_MS / 60000} `
     + 'minutes without an update; "" clears it.',
   inputSchema: {
     type: 'object',
@@ -546,7 +547,9 @@ export const TELL_OWNER_TOOL = {
   name: 'tell_owner',
   description:
     'Send the owner a reply or status update that needs no answer ("Got it", '
-    + '"Restart looks clean"): it shows in the owner\'s "Billion" chat tab, and on '
+    + '"Restart looks clean"). Each message the owner sends shows as pending, with a progress box, until a '
+    + 'tell_owner answers it, oldest first: answer each of their messages with a tell_owner of its own, in order. '
+    + 'It shows in the owner\'s "Billion" chat tab, and on '
     + 'their phone over Telegram when that is set up and their last message did '
     + 'not come from the tab. Unlike notify_owner it files no numbered question. Use it to answer an [Owner via app] or [Owner via '
     + 'Telegram] message that is not a question. Shares notify_owner\'s limit of a '

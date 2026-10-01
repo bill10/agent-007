@@ -10,7 +10,8 @@ vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { send } from '../public/modules/ws.js';
 import { setWaitingItems, setRoundInfo, setBillionStatus, setWaitingActive, setChatMessages } from '../public/modules/state.js';
-import { renderRound, renderBillionStatus, roundModel, statusLine, setSubTab, subTab, initSubTabs, handleRoundError, _resetRound } from '../public/modules/round.js';
+import { renderRound, renderBillionStatus, roundModel, statusLine, setSubTab, subTab, initSubTabs, handleRoundError, _resetRound, doneNumbers } from '../public/modules/round.js';
+import { renderWaiting } from '../public/modules/waiting.js';
 
 const ROUND = { id: '2026-10-01 15:30', label: '10/1 pm', name: 'Afternoon round', at: '2026-10-01T15:30:00Z', releasedAt: '2026-10-01T15:30:05Z' };
 const INFO = { type: 'round-state', on: true, max: 2, current: { ...ROUND, brief: 'Billing fix shipped. Two pricing calls below.' }, next: { id: '2026-10-02 08:30', label: '10/2 am', at: Date.parse('2026-10-02T08:30:00Z') } };
@@ -151,5 +152,59 @@ describe('the status line', () => {
     const dot = line.querySelector('.billion-status-dot');
     renderBillionStatus();
     expect(line.querySelector('.billion-status-dot')).toBe(dot);
+  });
+});
+
+describe('numbered items, Done and "1d"', () => {
+  it('shows each item\'s number, sends Done for it, and reads "1d 3d" typed in any card\'s box', () => {
+    show([q(1, { num: 1, numRound: ROUND.id }), q(2, { num: 2, numRound: ROUND.id })]);
+    expect([...document.querySelectorAll('.round-card-num')].map(n => n.textContent)).toEqual(['1', '2']);
+    document.querySelector('[data-q="q2"] .round-done').click();
+    expect(send).toHaveBeenLastCalledWith({ type: 'round-done', id: 'q2', nums: [2] });
+    const box = document.querySelector('[data-q="q1"] .round-reply-input');
+    box.value = '1d 2d';
+    box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    expect(send).toHaveBeenLastCalledWith({ type: 'round-done', id: 'q1', nums: [1, 2] });
+    show([q(1, { num: 1, status: 'answered', answer: 'done', done: true, answeredVia: 'app', answeredAt: '2026-10-01T15:40:00Z' }), q(2, { num: 2 })]);
+    expect(document.querySelector('[data-q="q1"] .round-card-answer').textContent).toBe('✓ done');
+  });
+
+  it('reads "1d" the way the server does (test/owner-rounds.test.js has the same cases)', () => {
+    expect(['1d', '1d 3d', '1d, 3D', '2 d', '1', 'done', '1d3d', '12 dogs'].map(doneNumbers)).toEqual([[1], [1, 3], [1, 3], [2], null, null, null, null]);
+  });
+});
+
+describe('Start the round now', () => {
+  it('shows while questions wait for the next round, and asks the server to release it', () => {
+    show([q(1)], { ...INFO, queued: 0 });
+    expect(document.querySelector('.round-start')).toBeNull();
+    show([q(1)], { ...INFO, queued: 4 });
+    const btn = document.querySelector('.round-start');
+    expect(btn.textContent).toBe('Start the round now (4 waiting)');
+    btn.click();
+    expect(send).toHaveBeenLastCalledWith({ type: 'round-start' });
+    expect(document.querySelector('.round-start').disabled).toBe(true);
+    show([q(1)], { ...INFO, queued: 1, current: { ...ROUND, id: 'next' } });
+    expect(document.querySelector('.round-start').disabled).toBe(false);
+  });
+});
+
+describe('the progress box', () => {
+  it('marks the owner\'s unanswered messages pending and shows what Billion is doing below them, until the reply', () => {
+    setChatMessages([{ id: 'm1', at: new Date().toISOString(), from: 'owner', via: 'app', text: 'How is the launch?' }]);
+    setBillionStatus({ running: true, working: true, awaitingReply: true, pending: ['m1'], text: 'checking the launch metrics', steps: ['Bash gh pr view 178', 'Read sheet.csv'] });
+    renderWaiting();
+    expect(document.querySelector('.chat-msg[data-id="m1"]').classList.contains('pending')).toBe(true);
+    const box = document.querySelector('#waiting-list .chat-progress');
+    expect(box.querySelector('.chat-progress-head').textContent).toBe('Billion is working on your message…');
+    expect([...box.querySelectorAll('li')].map(l => l.textContent)).toEqual(['checking the launch metrics', 'Bash gh pr view 178', 'Read sheet.csv']);
+    expect(document.querySelector('#waiting-list').lastElementChild).toBe(box);
+
+    setChatMessages([{ id: 'm1', at: new Date().toISOString(), from: 'owner', via: 'app', text: 'How is the launch?' },
+      { id: 'm2', at: new Date().toISOString(), from: 'billion', text: 'Going well.', replyTo: 'm1' }]);
+    setBillionStatus({ running: true, working: false, awaitingReply: false, pending: [], steps: [] });
+    renderWaiting();
+    expect(document.querySelector('.chat-progress')).toBeNull();
+    expect(document.querySelector('.chat-msg[data-id="m1"]').classList.contains('pending')).toBe(false);
   });
 });

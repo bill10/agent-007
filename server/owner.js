@@ -15,7 +15,7 @@ import { randomUUID } from 'crypto';
 import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
-import { roundSettings, roundState, saveRoundState, lastRound, nextRound, roundPayload, byPriority, appLink } from './rounds.js';
+import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
 import { ownerAwaitsReply, billionReplied, publishStatus } from './billion-status.js';
 import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import {
@@ -412,6 +412,8 @@ export function addChat(message, broadcast, env = process.env) {
 const questionState = (item) => ({
   id: item.id, n: item.n, urgency: item.urgency, project: item.project, type: item.type, status: item.status,
   ...(item.round ? { round: item.round } : {}),
+  ...(item.num ? { num: item.num, numRound: item.numRound ?? null } : {}),
+  ...(item.done ? { done: true } : {}),
   ...(item.choices ? { choices: item.choices, recommended: item.recommended } : {}),
   ...(item.answer !== undefined ? { answer: item.answer, answeredVia: item.answeredVia, answeredAt: item.answeredAt, ...(item.answeredBy ? { answeredBy: item.answeredBy } : {}) } : {}),
 });
@@ -491,7 +493,7 @@ export function addWaiting(text, broadcast, now = Date.now(), { choices, recomme
   if (choices) item.choices = choices.map(c => c.trim());
   if (recommended) item.recommended = recommended.trim();
   if (rank != null) item.rank = rank;
-  if (outside) item.outside = true;
+  if (outside) Object.assign(item, { outside: true, ...itemNumber(items) });
   if (status === 'queued') {
     saveWaiting([...items, item]);
     return item;
@@ -584,6 +586,16 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   if (error) return { error };
   if (!body && !files.length) return { error: 'The message is empty.' };
   if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
+  // Two things the server does itself, never a turn of Billion's: start the
+  // round now, and "1d 3d". The words still show in the thread.
+  const nums = !files.length && doneNumbers(body);
+  if (!files.length && (nums || START_ROUND_RE.test(body))) {
+    const result = nums ? await markDone(nums, 'app', { broadcast, env }) : await startRoundNow({ broadcast, env });
+    if (result.error) return result;
+    setOwnerChannel('app');
+    addChat({ from: 'owner', via: 'app', text: body }, broadcast, env);
+    return { ok: true, ...(result.missing?.length ? { note: `No open item ${result.missing.join(', ')}.` } : {}) };
+  }
   if (body.length > MAX_OWNER_CHARS) return { error: `The message is over ${MAX_OWNER_CHARS} characters; send it in parts.` };
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running; start it, then send again.' };
@@ -596,16 +608,16 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   }
   setOwnerChannel('app');
   addChat({ id, from: 'owner', via: 'app', text: body, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
-  // The status line says Billion has it until its next tell_owner.
-  ownerAwaitsReply();
+  // Pending, with the progress box under it, until a tell_owner answers it.
+  ownerAwaitsReply(id);
   publishStatus(broadcast);
   return { ok: true };
 }
 
 // Answered everywhere: the item moves to Answered in every browser, and the
 // phone's copy shows the answer.
-async function markAnswered(id, answer, via, { broadcast, env, name }) {
-  const done = updateWaiting(id, { status: 'answered', answer, answeredAt: new Date().toISOString(), answeredVia: via, answeredBy: name || undefined });
+async function markAnswered(id, answer, via, { broadcast, env, name, done: finished = false }) {
+  const done = updateWaiting(id, { status: 'answered', answer, answeredAt: new Date().toISOString(), answeredVia: via, answeredBy: name || undefined, ...(finished ? { done: true } : {}) });
   syncQuestion(done, broadcast);
   broadcast?.(waitingPayload());
   if (done.tgMessageId) await showAnswerOnPhone(done, env);
@@ -701,6 +713,7 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
     try { item = addWaiting(body, broadcast, now, { choices, recommended, urgency, project, type, rank, status: 'queued', env }); } catch (err) {
       return { error: `Could not queue it: ${err.message}` };
     }
+    broadcast?.(roundView(now));
     const mine = roundQueueFor(item.project);
     return { ok: true, queued: true, n: item.n, project: item.project, position: mine.findIndex(i => i.id === item.id) + 1, of: mine.length, max: roundSettings().max };
   }
@@ -745,7 +758,9 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
 // { ok, telegram } (telegram: sent there too), { ok, note } when only the
 // Telegram send failed, or { error }.
 
-export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+// notice: the server's own words (an account switch, say), which answer none
+// of the owner's messages, so a pending one stays pending.
+export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform, notice = false } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -755,8 +770,9 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
     return { error: `Not sent: you have messaged the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later.` };
   }
   sent.push(now);
-  addChat({ from: 'billion', text: body }, broadcast, env);
-  billionReplied();
+  // Each of the owner's messages gets its own reply, oldest first.
+  const replyTo = notice ? null : billionReplied();
+  addChat({ from: 'billion', text: body, ...(replyTo ? { replyTo } : {}) }, broadcast, env);
   publishStatus(broadcast);
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) return { ok: true, telegram: false };
@@ -818,7 +834,7 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const topWords = (max) => (max === 2 ? 'top two' : `top ${max}`);
 
 // round: rounds.js's { id, label, name, at }. Returns { released, consolidated, left }.
-export async function releaseRound(round, { broadcast, env = process.env, settings = roundSettings(), now = Date.now() } = {}) {
+export async function releaseRound(round, { broadcast, env = process.env, settings = roundSettings(), now = Date.now(), early = false } = {}) {
   const items = waitingItems();
   const iso = new Date(now).toISOString();
   const consolidated = items.filter(i => i.status === 'open' && i.round && i.round !== round.id);
@@ -832,6 +848,16 @@ export async function releaseRound(round, { broadcast, env = process.env, settin
     Object.assign(item, { status: 'open', round: round.id, pos: released.length, releasedAt: iso });
     released.push(item);
   }
+  // The owner's short numbers for this round (1, 2, 3…), in the order the tab
+  // shows them: what still needs them from outside a round first, then each
+  // project in the order of its first question.
+  const firstPos = new Map();
+  for (const item of released) if (!firstPos.has(item.project)) firstPos.set(item.project, item.pos);
+  const shown = [
+    ...items.filter(i => i.status === 'open' && i.outside).sort((a, b) => String(a.at).localeCompare(String(b.at))),
+    ...[...released].sort((a, b) => firstPos.get(a.project) - firstPos.get(b.project) || a.pos - b.pos),
+  ];
+  shown.forEach((item, i) => Object.assign(item, { num: i + 1, numRound: round.id }));
   // The thread first, as addWaiting does: one not written yet starts from the list as it stands.
   for (const item of released) addChat({ from: 'billion', text: item.text, q: questionState(item) }, broadcast, env);
   saveWaiting(items);
@@ -840,13 +866,13 @@ export async function releaseRound(round, { broadcast, env = process.env, settin
   const brief = state.brief;
   delete state.brief;
   state.lastAt = new Date(round.at).toISOString();
-  state.current = { id: round.id, label: round.label, name: round.name, at: state.lastAt, releasedAt: iso, ...(brief ? { brief } : {}) };
+  state.current = { id: round.id, label: round.label, name: round.name, at: state.lastAt, releasedAt: iso, ...(brief ? { brief } : {}), ...(early ? { early: true } : {}) };
   saveRoundState(state);
   broadcast?.(waitingPayload());
-  broadcast?.(roundPayload(now, settings));
+  broadcast?.(roundView(now, settings));
   const left = items.filter(i => i.status === 'queued').length;
-  if (released.length || consolidated.length || left) {
-    noteForBillion(`[Owner round] Round ${round.label} released ${released.length}${released.length ? ` (${qList(released)})` : ''}`
+  if (released.length || consolidated.length || left || early) {
+    noteForBillion(`[Owner round] Round ${round.label}${early ? ' (started early by the owner)' : ''} released ${released.length}${released.length ? ` (${released.map(i => `item ${i.num} = Q${i.n}`).join(', ')})` : ''}`
       + `${consolidated.length ? `; consolidated ${qList(consolidated)}: re-queue only if still ${topWords(settings.max)}` : ''}`
       + `${left ? `; ${left} still queued for later rounds (list_round_queue to re-rank or drop)` : ''}.`);
   }
@@ -875,11 +901,67 @@ export function migrateToRounds({ broadcast, now = Date.now(), settings = roundS
   // The round already past today is not released on the spot: the next one is.
   saveRoundState({ ...state, migratedAt: iso, lastAt: state.lastAt || iso });
   if (moved.length) broadcast?.(waitingPayload());
-  const next = nextRound(now, settings);
+  const next = comingRound(now, settings);
   noteForBillion(`[Owner round] Rounds are on: the owner now sees your questions only at ${settings.slots.join(' and ')}, at most ${settings.max} per project; notify_owner queues them (see Escalate in CHARTER.md).`
     + `${moved.length ? ` Consolidated ${plural(moved.length, 'open question')} (${qList(moved)}): re-queue only the ones still in a project's ${topWords(settings.max)}.` : ''}`
     + `${next ? ` Next round: ${next.label}.` : ''}`);
   return moved;
+}
+
+// The tab's round-state: rounds.js's payload with how many questions wait.
+export const roundView = (now = Date.now(), settings = roundSettings()) =>
+  roundPayload(now, settings, waitingItems().filter(i => i.status === 'queued').length);
+
+// The next number in the round on screen (or before the first round), for a
+// question that arrives outside a round: { num, numRound }.
+function itemNumber(items) {
+  const numRound = roundState().current?.id ?? null;
+  return { num: Math.max(0, ...items.filter(i => (i.numRound ?? null) === numRound && i.num).map(i => i.num)) + 1, numRound };
+}
+
+// "Start the round now" (the tab's button, or the owner saying so): the next
+// round, released now under the same rules. Its time is then taken, so the
+// clock does not release it again. { ok, released, consolidated, left } or { error }.
+export async function startRoundNow({ broadcast, env = process.env, now = Date.now(), settings = roundSettings() } = {}) {
+  if (!settings.on) return { error: 'Rounds are off (rounds: [] in config.json), so every question already shows at once.' };
+  migrateToRounds({ broadcast, now, settings });
+  const next = comingRound(now, settings);
+  if (!next) return { error: 'No round is scheduled.' };
+  return { ok: true, ...await releaseRound(next, { broadcast, env, settings, now, early: true }) };
+}
+
+// What the owner types to start it: "start the round now", "start round", "release the round".
+export const START_ROUND_RE = /^\s*(please\s+)?(start|begin|release|open)\s+(the\s+)?(next\s+)?round(\s+now)?(\s+please)?\s*[.!]?\s*$/i;
+
+// "1d", "1d 3d", "1d, 3d": the items of the round the owner marks done. The numbers, or null.
+export function doneNumbers(text) {
+  const body = String(text ?? '').trim();
+  if (!/^(\d{1,3}\s?d)([\s,]+\d{1,3}\s?d)*$/i.test(body)) return null;
+  return [...new Set(body.match(/\d{1,3}/g).map(Number))];
+}
+
+// "1d" or Done: the item is done and leaves the owner's list (it folds as
+// done), and Billion reads "[Owner via app] item 1 done (Q12: "…")". Every
+// number in one line. { ok, done, missing } or { error }.
+export async function markDone(nums, via = 'app', { broadcast, env = process.env, name = '' } = {}) {
+  const numRound = roundState().current?.id ?? null;
+  const items = waitingItems();
+  const found = nums.map(n => [n, items.find(i => (i.numRound ?? null) === numRound && i.num === n && i.status === 'open')]);
+  const done = found.filter(([, item]) => item).map(([, item]) => item);
+  const missing = found.filter(([, item]) => !item).map(([n]) => n);
+  if (!done.length) return { error: `No open item ${missing.join(', ')} in this round.` };
+  const billion = liveBillion();
+  if (!billion) return { error: 'Billion is not running' };
+  const prefix = via === 'app' ? APP_PREFIX : telegramPrefix(name);
+  const context = (item) => {
+    const flat = item.text.replace(/\s+/g, ' ').trim();
+    return flat.length > 60 ? `${flat.slice(0, 60).trimEnd()}…` : flat;
+  };
+  const line = `${prefix} ${done.map(item => `item ${item.num} done (Q${item.n}: "${context(item)}")`).join('; ')}`;
+  if (!sendText(billion, line)) return { error: 'Billion has too much waiting for it; try again in a while.' };
+  setOwnerChannel(via);
+  for (const item of done) await markAnswered(item.id, 'done', via, { broadcast, env, name, done: true });
+  return { ok: true, done, missing };
 }
 
 // From the server's 10 s tick: the first-start migration, a note waiting for
@@ -1030,6 +1112,14 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     }
     return 'answered';
   }
+  const nums = typed && doneNumbers(typed);
+  if (nums || (typed && START_ROUND_RE.test(typed))) {
+    const result = nums ? await markDone(nums, 'telegram', { broadcast, env, name }) : await startRoundNow({ broadcast, env });
+    await sendTelegram(result.error || (nums ? `Done: ${result.done.map(i => `item ${i.num}`).join(', ')}${result.missing.length ? `; no open item ${result.missing.join(', ')}` : ''}.`
+      : `Round started: ${plural(result.released.length, 'item')}.`), { env });
+    addChat({ from: 'owner', via: 'telegram', ...(name ? { name } : {}), text: typed }, broadcast, env);
+    return result.error ? 'refused' : nums ? 'done' : 'round';
+  }
   const billion = liveBillion();
   if (!billion) {
     await sendTelegram('Billion is not running', { env });
@@ -1052,8 +1142,8 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
     return 'full';
   }
-  addChat(said, broadcast, env);
-  ownerAwaitsReply();
+  const added = addChat(said, broadcast, env);
+  ownerAwaitsReply(added.id);
   publishStatus(broadcast);
   return 'delivered';
 }

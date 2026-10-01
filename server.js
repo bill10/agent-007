@@ -49,7 +49,7 @@ import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
-import { nextRound } from './server/rounds.js';
+import { comingRound } from './server/rounds.js';
 import { setStatusFacts, publishStatus } from './server/billion-status.js';
 import { startModelRefresh } from './server/models.js';
 import { refreshAgentAccounts } from './server/agent-accounts.js';
@@ -335,7 +335,7 @@ const accountStatePayload = () => ({ type: 'account-state', ...accountState(), r
 const announceAccount = () => { if (mayAnswerOwner()) broadcastToBrowsers(accountStatePayload()); };
 async function tellOwnerOrShow(text, level, { show = true } = {}) {
   // In the Billion tab either way; a toast too unless it reached the phone.
-  const result = await tellOwner(text, { broadcast });
+  const result = await tellOwner(text, { broadcast, notice: true });
   if (!result.telegram && show && mayAnswerOwner()) broadcastToBrowsers({ type: 'notification', level, message: text });
 }
 const workersOnClaude = () => [...sessions.values()].filter(s => !s.isBillion && !s.exited && s.agent === 'claude').length;
@@ -546,7 +546,7 @@ function startRounds() {
     billion: liveBillion(),
     workers: allJobs().filter(job => job.postedByBillion && job.state === 'in-progress'
       && deriveJobStatus(job, sessionForJob(job)) === 'running').length,
-    nextRoundAt: nextRound()?.at ?? null,
+    nextRoundAt: comingRound()?.at ?? null,
   }));
   clearInterval(roundTimer);
   let ticking = false;

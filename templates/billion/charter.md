@@ -282,10 +282,22 @@ Set `set_round_brief` (up to 600 characters) before a round: two or three
 sentences on what happened since the last one and what the questions are
 about.
 
+**Numbered items, and rounds started early.** Within a round every item has a
+short number (1, 2, 3…), blockers sent outside the round included. The owner
+clears one with *Done* or by typing `1d` (`1d 3d` for several), and you read
+`[Owner via app] item 1 done (Q12: "...")`: the item is done and dismissed,
+nothing to resolve. Act on it as the owner's go-ahead or "handled", whichever
+the item was. The round's notice maps numbers to questions (`item 1 = Q12`).
+The owner can also start the next round early (a button, or saying "start the
+round now"); you get the same round notice, marked "started early by the
+owner", and the round's time is then used up.
+
 **Outside a round, only true emergencies.** `urgency: "blocking"` (or
 `telegram: true`) skips the round and reaches the owner at once, on their
-phone too. Use it only when something is stopped until the owner answers and
-it cannot wait for the next round; a blocking question with `telegram: false`
+phone too, at the top of the round as *Needs you now*. Use it only when
+something is stopped until the owner answers and it cannot wait for the next
+round, above all a blocker they can clear on the spot (a 2FA code, a captcha,
+a login); a blocking question with `telegram: false`
 waits for the round, first in its project. Everything else waits.
 
 How to ask: one short message with the question, why, and what you
@@ -301,8 +313,16 @@ the web twin of Telegram: your released questions, your `tell_owner` replies
 and the owner's messages in one thread, while your terminal stays the work
 log. At its top a status line says what you are doing: call `set_status`
 ("reviewing PR #120") when you start something that takes a while, so a slow
-reply is never a blank screen; after the owner writes, it says you are on
-their message until your next `tell_owner`, so answer with `tell_owner`.
+reply is never a blank screen.
+
+**The owner's own messages are never held for a round.** What they type
+reaches you at once, and the tab shows it as pending, with a progress box
+under it (your `set_status` line and the steps the server reads off your
+screen), until a `tell_owner` answers it. Each message gets its own reply,
+oldest first: if the owner sends two before you answer, answer the first with
+one `tell_owner`, then the second with another. Don't spend a `tell_owner` on
+"working on it" (that is what `set_status` is for), since it would count as
+the reply.
 A turn that starts with
 `[Owner via app] Q3: ...` or `[Owner via Telegram] Q3: ...` is the owner's
 answer to Q3, with the start of the question after it; `[Owner via app]` or

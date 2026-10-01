@@ -666,6 +666,24 @@ round: 5 items across 3 departments", with Billion's brief and a link to the
 app (`APP_URL`, else the first `ALLOWED_ORIGINS` entry), never one per
 question.
 
+**Numbers and Done.** Every item in a round carries a short number, 1, 2,
+3…, in the order the tab shows them (*Needs you now* first, then each
+project); an emergency asked during the round takes the next number. The
+owner clears items with a card's *Done*, or by typing `1d` (`1d 3d`, `1d, 3d`)
+in the chat box, in any card's reply box, or on Telegram. Each becomes
+answered "done" (it folds as *✓ done*) and Billion reads one line:
+`[Owner via app] item 1 done (Q12: "..."); item 3 done (Q14: "...")`. A
+number with no open item in this round is reported back and the rest still
+go. Like an answer, it needs Billion running.
+
+**Start the round now.** *Start the round now (N waiting)* at the top of
+This round, or the owner typing "start the round now" (also "start round",
+"release the next round") in the chat or on Telegram, releases the next
+round immediately, with the same two-per-department rule and the same
+consolidation. That round's time is then used up, so the clock does not
+release it again, and "next round" moves on to the one after. These two
+commands are handled by the server and are not typed into Billion's terminal.
+
 **Brief.** `set_round_brief` (up to 600 characters) is shown at the top of
 the round and in its Telegram message: for the next round by default, or
 `round: "current"` for the one on screen.
@@ -694,7 +712,21 @@ scroll position, the drafts typed in reply boxes and the focus. *Earlier*
 chat thread moved to the second view, **Chat**, unchanged; the browser
 remembers which view was last open.
 
-![This round on a phone](img/billion-round-dark.png)
+![This round on a phone](img/billion-round-numbers.png)
+
+**The owner's messages and the progress box.** What the owner types is never
+queued: it reaches Billion at once. Each message stays *pending* ("waiting
+for Billion…") until a `tell_owner` answers it, oldest first, so two
+messages sent before a reply each get their own (the reply carries `replyTo`,
+the message it answered). A server notice (an account switch) answers none.
+Under the last pending message the thread shows a bounded **progress box**:
+"Billion is working on your message…", Billion's `set_status` line, and the
+last three steps read off the end of Billion's screen while it is mid-turn
+(Claude Code's `⏺ Bash(…)`, Codex's `• Ran …`, cut to 60 characters, the bot
+token redacted). It updates every ten seconds and goes when the reply lands.
+After an hour without one, a message stops counting as pending.
+
+![A pending message and the progress box](img/billion-chat-progress.png)
 
 **Status line.** One line at the top of both views: what Billion is doing and
 what is running, "Working: reviewing PR #120 · 3 workers running · next round
