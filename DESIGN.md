@@ -459,6 +459,12 @@ progress, so a kept agent idling in Review does not hold a slot. A restart
 kills every agent, so a Review card may reach Done with no live agent; its
 worktree then comes back as an orphan record, and Done releases it through that.
 
+Each scan considers a finite queue snapshot and tries each card at most once.
+A failed spawn keeps its card and error, then the scan can try the next eligible
+card with the unused capacity. Eligibility and live capacity are checked before
+each attempt and again before claiming its worker. If an abandoned worker cannot
+be cleaned up, that repo waits for the next scan rather than starting another.
+
 ### The fourth state has no column
 
 A job whose PR has merged is `done`, and `done` is the one state with no
@@ -905,9 +911,12 @@ and `finish_job` for a dispatched agent to report its own card done — over str
 Board branches are named from the job title rather than a cocktail:
 `{git-username}/add-rate-limiting`. Slugged to `[a-z0-9-]` and length-bounded,
 which side-steps every git ref rule at once instead of enumerating them. Two jobs
-may share a title, so collisions walk `-2`, `-3`; names taken on the remote count
-as collisions too, since a finished job leaves its remote branch alive (that is
-the open PR).
+may share a title, so collisions use a fresh UUID suffix; names taken on the
+remote count as collisions too, since a finished job leaves its remote branch
+alive (that is the open PR). If the remote cannot be checked, start with a UUID
+suffix too. Git checks local collisions atomically; naming attempts are bounded
+at ten and never delete an existing branch. A branch name typed by the user
+still fails on collision instead of being silently renamed.
 
 ### Attachments
 A card can carry screenshots and files: picked with **Attach files**, or pasted

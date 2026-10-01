@@ -150,7 +150,7 @@ describe('branch naming against an open PR', () => {
 
     const result = await createWorktree(repo, 'Viper', 'fix-flaky-test', { suffixOnCollision: true });
     expect(result.error).toBeUndefined();
-    expect(result.branchName).toBe('bill10/fix-flaky-test-2');
+    expect(result.branchName).toMatch(/^bill10\/fix-flaky-test-[a-f0-9-]{36}$/);
   });
 
   it('still uses the plain name when the remote is clear', async () => {
