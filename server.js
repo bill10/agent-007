@@ -512,7 +512,8 @@ function startBillionWakes() {
         if (!result.error && !result.existing) broadcast(sessionPayload(result.session));
         return result;
       },
-      notify: (text) => notifyOwner(text, { broadcast }),
+      // Billion stalled with no one to unstick it: super urgent, so the phone too.
+      notify: (text) => notifyOwner(text, { broadcast, telegram: true }),
       // No Telegram: the browser's notice instead.
       tell: (text) => tellOwnerOrShow(text, 'info'),
       // Armed by the owner, and only while the owner may act (user accounts

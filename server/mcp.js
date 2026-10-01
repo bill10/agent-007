@@ -382,8 +382,8 @@ export const NOTIFY_OWNER_TOOL = {
   description:
     'Put a question or a decision in front of the owner when they may be away '
     + 'from the terminal: it goes in the "Billion" chat tab of the owner\'s '
-    + 'browser, numbered (Q3), and to their phone over Telegram when that is set '
-    + 'up. One short message: the question, why, and what you recommend. When the '
+    + 'browser, numbered (Q3), and to their phone over Telegram only when it is '
+    + 'blocking (or you pass telegram: true); normal and low questions wait in the tab. One short message: the question, why, and what you recommend. When the '
     + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the '
     + 'one you recommend: the owner answers with one tap. Their answer arrives in '
     + 'this terminal as "[Owner via app] Q3: <answer>" or "[Owner via Telegram] Q3: '
@@ -411,6 +411,11 @@ export const NOTIFY_OWNER_TOOL = {
       type: {
         type: 'string', enum: QUESTION_TYPES,
         description: 'What kind of question it is; left out, it is read off the text. The owner\'s tab can group questions by it.',
+      },
+      telegram: {
+        type: 'boolean',
+        description: 'Whether to push it to the owner\'s phone over Telegram. Left out: yes when urgency is blocking, '
+          + 'no otherwise. Pass true only for a non-blocking question that is super urgent; false keeps even a blocking one in the tab.',
       },
     },
     required: ['text'],
@@ -774,10 +779,11 @@ const CALLS = {
 
   [NOTIFY_OWNER_TOOL.name]: async (args, ctx) => {
     const result = ctx.notifyOwner
-      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency, project: args.project, type: args.type })
+      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency, project: args.project, type: args.type, telegram: args.telegram })
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
-    return toolText(`Put in the owner's Billion tab as Q${result.n} and sent on Telegram. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
+    const where = result.telegram === false ? `; not sent to Telegram (${result.held})` : ' and sent on Telegram';
+    return toolText(`Put in the owner's Billion tab as Q${result.n}${where}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
   },
 
   [TELL_OWNER_TOOL.name]: async (args, ctx) => {

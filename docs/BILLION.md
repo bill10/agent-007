@@ -678,8 +678,16 @@ bubble shows images as thumbnails that open full size and other files as
 download links; they are served only from that folder, never while user
 accounts are on, and deleted when their message falls out of the last 500.
 
-`notify_owner` puts each question in the tab and, when a Telegram bot is set
-up, on your phone. Each question gets a short number, Q1, Q2 and so on. When the answer
+`notify_owner` puts each question in the tab. Only a **blocking** one also
+goes to your phone, when a Telegram bot is set up: normal and low questions
+wait in the tab (the thread, the open-questions strip and the badge) without
+buzzing it. Billion can override that per question with `telegram`: `true`
+pushes a non-blocking question it judges super urgent, `false` keeps even a
+blocking one off the phone; left out, blocking goes and the rest stay. Its
+tool result says which happened ("Put in the owner's Billion tab as Q12; not
+sent to Telegram (urgency normal)"). A question that went to the phone can be
+answered there, by button or reply; one that did not is answered in the tab.
+Each question gets a short number, Q1, Q2 and so on. When the answer
 is a pick, Billion passes `choices` (2 to 5 short answers) and marks the one
 it `recommended`.
 
@@ -692,7 +700,8 @@ message (`[Owner via app]` or `[Owner via Telegram]`, answers included) until
 it restarts; before your first message a `tell_owner` goes to the phone too,
 so a status update still finds you away from the browser. Server notices
 (account-switch results, a Billion switched at its limit) follow the same
-rule. `notify_owner` questions always go to both.
+rule. `notify_owner` questions follow their own rule above: blocking ones (or
+`telegram: true`) go to both, the rest stay in the tab.
 
 On Telegram the bot is Billion's own, so messages carry no name: a question
 reads `Q3: <text>` (`! Q3: <text>` when blocking), a reply is its text alone.

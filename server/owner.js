@@ -649,7 +649,12 @@ async function showAnswerOnPhone(item, env) {
 
 let sent = [];   // times of recent notify_owner calls
 
-export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, type, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+// Only a blocking question reaches the phone, unless Billion says otherwise
+// with telegram: true (a non-blocking one it judges super urgent) or false
+// (keep even a blocking one off it). The rest wait in the Billion tab.
+// { ok, n, telegram } (telegram: pushed to the phone; held: why not), or
+// { pinned, n, error } when it was filed but the push could not happen.
+export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, type, telegram, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -658,6 +663,7 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
   urgency ??= 'normal';
   if (!URGENCIES.includes(urgency)) return { error: `urgency must be "blocking", "normal" or "low", not ${JSON.stringify(urgency)}.` };
   if (project != null && typeof project !== 'string') return { error: 'project must be a repo\'s folder name or "general".' };
+  if (telegram != null && typeof telegram !== 'boolean') return { error: 'telegram must be true or false.' };
   sent = sent.filter(t => now - t < NOTIFY_WINDOW_MS);
   if (sent.length >= NOTIFY_LIMIT) {
     return { error: `Not sent: you have notified the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later, or under Waiting on you in STATE.md.` };
@@ -668,6 +674,10 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
     console.error('Could not save the Waiting list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';
+  // Held back only once it is safely filed: a question the tab lost still goes to the phone.
+  if (item && !(telegram ?? urgency === 'blocking')) {
+    return { ok: true, n: item?.n, telegram: false, held: telegram === false ? 'telegram: false' : `urgency ${urgency}` };
+  }
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) {
     return { pinned: true, n: item?.n, error: `Put in the owner's Billion tab${n}, but not sent to their phone: Telegram is not configured (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID). Say it in your terminal as well.` };
@@ -685,7 +695,7 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
     // Answered in the app while the send was on its way.
     if (saved?.status === 'answered') await showAnswerOnPhone(saved, env);
   }
-  return { ok: true, n: item?.n };
+  return { ok: true, n: item?.n, telegram: true };
 }
 
 // --- tell_owner: a reply or status update, no Waiting item, no badge ---

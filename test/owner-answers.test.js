@@ -44,7 +44,8 @@ afterEach(() => {
   dropMessages(b.id);
 });
 
-const ask = (text, opts = {}) => notifyOwner(text, { env: ENV, now: now(), ...opts });
+// Pushed to the phone unless a test says otherwise: most of these are about Telegram.
+const ask = (text, opts = {}) => notifyOwner(text, { env: ENV, now: now(), telegram: true, ...opts });
 
 describe('choices and recommended', () => {
   it('accepts 2 to 5 short distinct choices and a recommended one of them', () => {
@@ -80,7 +81,7 @@ describe('choices and recommended', () => {
   });
 
   it('go to Telegram as buttons, the recommended one marked, callback_data under 64 bytes', async () => {
-    expect(await ask('Buy the domain?', { choices: ['yes', 'no'], recommended: 'yes' })).toEqual({ ok: true, n: 1 });
+    expect(await ask('Buy the domain?', { choices: ['yes', 'no'], recommended: 'yes' })).toEqual({ ok: true, n: 1, telegram: true });
     const [item] = waitingItems();
     expect(item).toMatchObject({ n: 1, status: 'open', choices: ['yes', 'no'], recommended: 'yes', tgMessageId: 900 });
     const { body } = calls()[0];

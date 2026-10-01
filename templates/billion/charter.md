@@ -252,7 +252,7 @@ How to ask: say it in your terminal, and put it under *Waiting on you* in
 yes or no. Keep working on everything else meanwhile.
 Also call `notify_owner` with the question, why, and what you recommend, as
 one short message: it puts it in the owner's *Billion* tab, numbered (Q3),
-and reaches their phone when Telegram is set up. The *Billion* tab is the
+and reaches their phone when it is blocking or marked `telegram`. The *Billion* tab is the
 owner's chat with you in the browser, the web twin of Telegram: your
 questions, your `tell_owner` replies and the owner's messages in one thread,
 while your terminal stays the work log. When the answer is a
@@ -261,7 +261,10 @@ the one you recommend as `recommended`, so the owner answers with one tap;
 they can still type something else (in the tab they pick the question with
 *Reply* first; a line typed without that is a plain message, not an answer). Pass `urgency`: `blocking` when a worker
 or a merge is stopped until the owner answers, `normal` (the default) for a
-decision you work around meanwhile, `low` when it's optional. A turn that starts with
+decision you work around meanwhile, `low` when it's optional. Only
+`blocking` questions go to the owner's phone; normal and low ones wait in the
+*Billion* tab. Pass `telegram: true` only for a non-blocking question that is
+super urgent, and `telegram: false` to keep a blocking one off the phone. A turn that starts with
 `[Owner via app] Q3: ...` or `[Owner via Telegram] Q3: ...` is the owner's
 answer to Q3, with the start of the question after it; `[Owner via app]` or
 `[Owner via Telegram]` with no number is the owner's own words, typed in the
