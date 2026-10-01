@@ -160,7 +160,8 @@ if (positionals[0] === 'init') {
   // no longer than STARTUP_CHECK_MS in all. Only problems are printed.
   const STARTUP_CHECK_MS = 2000;
   const doctor = import('../server/doctor.js').then(d => d.runDoctor({ fast: true, budgetMs: STARTUP_CHECK_MS })
-    .then(results => d.formatStartup(results, ownCommand('doctor'))))
+    // With --port, so doctor checks this port and not PORT's.
+    .then(results => d.formatStartup(results, ownCommand(values.port ? `doctor --port ${values.port}` : 'doctor'))))
     .catch(() => '');
   // Imported only now: server/state.js reads PORT when it loads.
   const { startup, gracefulShutdown } = await import('../server.js');

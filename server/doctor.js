@@ -23,7 +23,7 @@ import { ghAccounts, ghAccountFor, ghAgentEnv, parseGithubRemote } from './jobs.
 import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
 import { tilde } from './settings.js';
-import { jobAgent, JOB_AGENTS } from '../lib/jobs.js';
+import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -39,6 +39,9 @@ const ok = (text) => ({ status: 'ok', text });
 const na = (text) => ({ status: 'na', text });
 const fail = (text, fix) => ({ status: 'fail', text, fix });
 const firstLine = (s) => String(s ?? '').trim().split('\n')[0].slice(0, 200);
+// A path as a fix line types it: ~-short when the shell needs no quotes,
+// else the full path quoted (a ~ inside quotes is not expanded).
+const shellPath = (path) => (/^[\w@%+=:,./~-]+$/.test(tilde(path)) ? tilde(path) : JSON.stringify(path));
 // A URL's user:token@ never reaches the screen.
 const redact = (s) => String(s).replace(/\/\/[^@\s/]+@/g, '//***@');
 
@@ -120,13 +123,15 @@ function readBoard(p) {
   try {
     const c = JSON.parse(p.readFile(p.configPath));
     const jobs = (Array.isArray(c.jobs) ? c.jobs : []).filter(j => j && j.state !== 'done');
-    const repos = [...new Set([
-      ...(Array.isArray(c.repos) ? c.repos : []).map(r => r?.path),
-      ...jobs.map(j => j.repoPath),
-    ].filter(r => typeof r === 'string' && r))];
-    return { repos, jobs };
+    const isPath = (r) => typeof r === 'string' && r;
+    // explorer: the repos added in the Explorer; the rest only cards name.
+    const explorer = new Set((Array.isArray(c.repos) ? c.repos : []).map(r => r?.path).filter(isPath));
+    const repos = [...new Set([...explorer, ...jobs.map(j => j.repoPath).filter(isPath)])];
+    return { repos, jobs, explorer };
   } catch (err) {
-    return { error: firstLine(err.message), repos: [], jobs: [] };
+    // Only where it broke: V8's message quotes the file's text, which may be anything.
+    const at = /position (\d+)/.exec(err.message);
+    return { error: `not valid JSON${at ? ` (at character ${at[1]})` : ''}`, repos: [], jobs: [] };
   }
 }
 
@@ -174,7 +179,10 @@ export async function checkClis(p, board) {
     const account = found.accounts.find(a => a.isDefault);
     const where = `${cli} ${found.version || '(version unknown)'} at ${tilde(found.path)}`;
     if (account?.loggedIn) return ok(`${where}, logged in${account.plan ? ` (${account.plan})` : ''}`);
-    if (account?.loggedIn === null) return ok(`${where}, login not known`);
+    // null: the status command timed out or said something unreadable.
+    if (account?.loggedIn === null) {
+      return needed ? fail(`${where}, could not tell whether it is logged in${why}`, `${cli} ${cli === 'codex' ? 'login status' : 'auth status'}`) : na(`${where}, login not known (nothing uses it)`);
+    }
     return needed ? fail(`${where}, not logged in${why}`, LOGIN[cli]) : na(`${where}, not logged in (nothing uses it)`);
   });
 }
@@ -193,8 +201,9 @@ export async function checkGh(p, board, origin, { fast = false, account = accoun
       ? fail(`gh is not installed; the board finds pull requests with it (${github.length} GitHub repo${github.length === 1 ? '' : 's'})`, INSTALL_HINTS.gh)
       : na('gh not installed (no GitHub repo on the board)')];
   }
+  if (!github.length) return [na('gh installed (no GitHub repo on the board)')];
   const accounts = await p.ghAccounts();
-  if (!accounts.length) return [fail('gh is installed but signed in to no account', 'gh auth login')];
+  if (!accounts.length) return [fail('gh is installed but signed in to no account (or GitHub is not reachable)', 'gh auth login')];
   // The walk takes an account named like the repo's owner on trust; the repo
   // check's ls-remote, run as that account, is what proves it can reach it.
   return [ok(`gh signed in as ${[...new Set(accounts)].join(', ')}`), ...await Promise.all(github.map(async ({ repo, slug }) => {
@@ -211,20 +220,42 @@ export async function checkRepos(p, board, origin, account = accountOf(p, new Ma
   if (!board.repos.length) return [...lines, na('no repos on the board')];
   return [...lines, ...await Promise.all(board.repos.map(async (repo) => {
     const name = tilde(repo);
-    if (!p.exists(repo)) return fail(`${name} does not exist`, 'Remove it from the Explorer, or put the repo back at that path');
-    try { await p.git(['-C', repo, 'rev-parse', '--git-dir'], LOCAL_GIT_MS); } catch {
-      return fail(`${name} is not a git repository`, `git -C ${name} status`);
+    const sh = shellPath(repo);
+    if (!p.exists(repo)) {
+      return fail(`${name} does not exist`, board.explorer?.has(repo)
+        ? 'Remove it from the Explorer, or put the repo back at that path'
+        : 'Edit or archive the board cards that name it, or put the repo back at that path');
     }
-    if (!await origin(repo)) return fail(`${name} has no origin remote`, `git -C ${name} remote add origin <url>`);
-    const base = (await p.baseBranch(repo).catch(() => null)) || 'main';
+    try { await p.git(['-C', repo, 'rev-parse', '--git-dir'], LOCAL_GIT_MS); } catch {
+      return fail(`${name} is not a git repository`, `git -C ${sh} status`);
+    }
+    if (!await origin(repo)) {
+      // Worktrees need no remote; only a card that ends in a pull request does.
+      return board.jobs.some(j => j.repoPath === repo && jobRequiresPr(j))
+        ? fail(`${name} has no origin remote; a card on it needs a pull request`, `git -C ${sh} remote add origin <url>`)
+        : na(`${name}: no origin remote (local only)`);
+    }
+    // null: no origin/HEAD and no local main or master; the board then
+    // branches from HEAD, so any branch on the remote will do.
+    const base = await p.baseBranch(repo).catch(() => null);
     try {
-      const env = parseGithubRemote(await origin(repo)) && p.which('gh') ? p.repoEnv(await account(repo)) : {};
-      const heads = await p.git(['-C', repo, 'ls-remote', '--heads', 'origin', base], REMOTE_GIT_MS, env);
-      return heads.trim()
-        ? ok(`${name}: origin has ${base}`)
-        : fail(`${name}: origin has no ${base} branch`, `git -C ${name} push -u origin ${base}`);
+      const env = {
+        ...(parseGithubRemote(await origin(repo)) && p.which('gh') ? p.repoEnv(await account(repo)) : {}),
+        // GIT_TERMINAL_PROMPT stops only git's own prompts: ssh's (a new host
+        // key, a passphrase) and Git Credential Manager's sign-in would write
+        // or log in, so both are told not to ask. An ssh command set by the
+        // owner is left alone.
+        GCM_INTERACTIVE: 'never',
+        ...(p.env.GIT_SSH_COMMAND || await p.git(['-C', repo, 'config', 'core.sshCommand'], LOCAL_GIT_MS).then(Boolean, () => false)
+          ? {} : { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }),
+      };
+      const heads = await p.git(['-C', repo, 'ls-remote', '--heads', 'origin', ...(base ? [base] : [])], REMOTE_GIT_MS, env);
+      if (heads.trim()) return ok(`${name}: origin has ${base || 'branches'}`);
+      return base
+        ? fail(`${name}: origin has no ${base} branch`, `git -C ${sh} push -u origin ${base}`)
+        : fail(`${name}: origin has no branches yet`, `git -C ${sh} push -u origin HEAD`);
     } catch (err) {
-      return fail(`${name}: could not reach origin (${redact(firstLine(err.stderr || err.message))})`, `git -C ${name} ls-remote origin`);
+      return fail(`${name}: could not reach origin (${redact(firstLine(err.stderr || err.message))})`, `git -C ${sh} ls-remote origin`);
     }
   }))];
 }
@@ -284,8 +315,8 @@ export function checkPlugins(p) {
       const gone = !p.exists(e.projectPath);
       if (!gone && !inside(p.worktreeDir, e.projectPath)) continue;
       // The uninstall applies to the folder it runs in, so a gone one comes back first.
-      const where = tilde(e.projectPath);
-      lines.push(fail(`stray local plugin ${name} registered for ${where}${gone ? ' (folder no longer exists)' : ' (a board worktree)'}`,
+      const where = shellPath(e.projectPath);
+      lines.push(fail(`stray local plugin ${name} registered for ${tilde(e.projectPath)}${gone ? ' (folder no longer exists)' : ' (a board worktree)'}`,
         `${gone ? `mkdir -p ${where} && ` : ''}cd ${where} && claude plugin uninstall ${name} --scope local${gone ? ` && rmdir ${where}` : ''} (README "Troubleshooting")`));
     }
   }
@@ -315,10 +346,11 @@ function checks(fast) {
 // dropped without a word (the start never waits on one); a check that throws
 // says so as one ✗.
 export async function runDoctor({ probes, fast = false, budgetMs = Infinity } = {}) {
-  const p = probes || defaultProbes();
-  const c = { p, board: readBoard(p), origin: originOf(p, new Map()), account: accountOf(p, new Map()) };
+  // The budget runs from here, so reading config.json counts against it too.
   let timer;
   const late = Number.isFinite(budgetMs) ? new Promise(r => { timer = setTimeout(() => r(null), budgetMs); }) : null;
+  const p = probes || defaultProbes();
+  const c = { p, board: readBoard(p), origin: originOf(p, new Map()), account: accountOf(p, new Map()) };
   const results = await Promise.all(checks(fast).map(async ([title, check]) => {
     const done = Promise.resolve().then(() => check(c)).catch(err => [fail(`${title} check failed: ${redact(firstLine(err?.message))}`)]);
     const lines = await (late ? Promise.race([done, late]) : done);

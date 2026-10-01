@@ -149,7 +149,7 @@ describe('settings', () => {
       held.close();
     }
     expect(out).toContain(`  ✗ port ${port} is in use by another program\n      Stop it, or start Agent 007 with --port ${port + 1}`);
-    expect(out).toMatch(/ {2}Run `[^`]*doctor` for details\./);
+    expect(out).toMatch(new RegExp(` {2}Run \`[^\`]*doctor --port ${port}\` for details\\.`));
     expect(out).not.toContain('✓');
   }, 30000);
 

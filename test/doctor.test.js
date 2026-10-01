@@ -113,7 +113,13 @@ describe('doctor checks', () => {
   it('repos: ls-remote runs as the repo\'s gh account', async () => {
     const envs = [];
     await checkRepos(probes({ git: async (a, t, env) => { if (a.includes('ls-remote')) envs.push(env); return 'x'; } }), board(), origin);
-    expect(envs).toEqual([{ GH_TOKEN: 'ghp_secret' }]);
+    expect(envs).toEqual([{ GH_TOKEN: 'ghp_secret', GCM_INTERACTIVE: 'never' }]);
+    // No ssh command of the owner's (core.sshCommand unset): ssh is told not to prompt.
+    const batch = [];
+    const unset = async (a, t, env) => { if (a.includes('config')) throw new Error('unset'); if (a.includes('ls-remote')) batch.push(env.GIT_SSH_COMMAND); return 'x'; };
+    await checkRepos(probes({ git: unset }), board(), origin);
+    await checkRepos(probes({ git: unset, env: { GIT_SSH_COMMAND: 'ssh -i k' } }), board(), origin);
+    expect(batch).toEqual(['ssh -o BatchMode=yes', undefined]);
   });
 
   it('port: free, held by Agent 007 (✗ only when starting), held by something else', async () => {
@@ -248,17 +254,20 @@ describe('doctor gaps', () => {
       git: async (a, t, env) => { if (a.includes('ls-remote')) { envs.push(env); heads.push(a.at(-1)); } return 'x'; },
     });
     const [, line] = await checkRepos(plain, board(), async () => 'git@gitlab.com:acme/app.git');
-    expect(line).toMatchObject({ status: 'ok', text: '/r/app: origin has main' });
-    expect(envs).toEqual([{}]);
-    expect(heads).toEqual(['main']);
+    // No base branch known: any branch on origin will do, as the board branches from HEAD.
+    expect(line).toMatchObject({ status: 'ok', text: '/r/app: origin has branches' });
+    expect(envs).toEqual([{ GCM_INTERACTIVE: 'never' }]);
+    expect(heads).toEqual(['origin']);
   });
 
   // Value: protects=checkClis unknown-login and unused-logged-out branches; fails_when=an unknown login turns into ✗ or an unused logged-out CLI fails the run; why_new=only loggedIn true/false-and-used were covered; seam=none
-  it('clis: login unknown is ✓, logged out but unused is –', async () => {
+  it('clis: login unknown is ✗ when used, – when not; logged out but unused is –', async () => {
     const scan = (loggedIn) => async () => ['claude', 'codex'].map(cli => ({ cli, path: `/bin/${cli}`, accounts: [{ isDefault: true, loggedIn }] }));
     const [unknown] = await checkClis(probes({ scanAgents: scan(null) }), board());
-    expect(unknown).toMatchObject({ status: 'ok', text: expect.stringContaining('(version unknown)') });
-    expect(unknown.text).toContain('login not known');
+    expect(unknown).toMatchObject({ status: 'fail', text: expect.stringContaining('(version unknown)'), fix: 'claude auth status' });
+    expect(unknown.text).toContain('could not tell whether it is logged in');
+    const idle = await checkClis(probes({ scanAgents: scan(null), billionRuns: () => false }), board({ jobs: [] }));
+    expect(idle[0]).toMatchObject({ status: 'na', text: expect.stringContaining('login not known') });
     const unused = await checkClis(probes({ scanAgents: scan(false), billionRuns: () => false }), board({ jobs: [] }));
     expect(statuses(unused)).toEqual(['na', 'na']);
   });
@@ -284,7 +293,7 @@ describe('doctor review follow-ups', () => {
       git: async (a, t, env) => { if (a.includes('ls-remote')) envs.push(env); return 'x'; },
     });
     expect((await checkRepos(p, board(), origin))[1].status).toBe('ok');
-    expect(envs).toEqual([{}]);
+    expect(envs).toEqual([{ GCM_INTERACTIVE: 'never' }]);
   });
 
   // Value: protects=one account walk per repo shared by GitHub and Repos; fails_when=each check walks again; why_new=the walk asks GitHub per account; seam=none
@@ -330,5 +339,36 @@ describe('doctor review follow-ups', () => {
     expect(await telegramGetMe(env)).toBeNull();
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('fetch failed for https://api.telegram.org/bot123:SECRET/getMe'); }));
     expect(await telegramGetMe(env)).toBeNull();
+  });
+
+  // Value: protects=gh not needed without a GitHub repo; fails_when=a GitLab-only board fails on a signed-out gh; why_new=reviewers found it; seam=none
+  it('gh: signed out is – when no board repo is on GitHub', async () => {
+    const lines = await checkGh(probes({ ghAccounts: async () => [] }), board(), async () => 'git@gitlab.com:acme/app.git');
+    expect(lines).toEqual([{ status: 'na', text: 'gh installed (no GitHub repo on the board)' }]);
+  });
+
+  // Value: protects=local-only repos pass unless a PR card needs a remote; fails_when=every local repo fails doctor; why_new=reviewers found it; seam=none
+  it('repos: no origin is – unless a card on it needs a pull request', async () => {
+    const none = async () => null;
+    expect((await checkRepos(probes(), board({ jobs: [{ state: 'todo', repoPath: '/r/app', requiresPr: false }] }), none))[1].status).toBe('na');
+    expect((await checkRepos(probes(), board({ jobs: [{ state: 'todo', repoPath: '/r/app' }] }), none))[1]).toMatchObject({ status: 'fail', text: expect.stringContaining('needs a pull request') });
+  });
+
+  // Value: protects=fix lines that paste into a shell, and the right place to remove a repo; fails_when=a spaced path splits, or a card-only repo points at the Explorer; why_new=reviewers found it; seam=none
+  it('repos: fix lines quote a path with spaces; a repo only cards name points at the cards', async () => {
+    const spaced = '/r/My Project';
+    const [, line] = await checkRepos(probes({ git: async (a) => { if (a.includes('rev-parse')) throw new Error('no'); return ''; } }), board({ repos: [spaced] }), origin);
+    expect(line.fix).toBe(`git -C "${spaced}" status`);
+    const gone = probes({ exists: () => false });
+    expect((await checkRepos(gone, board({ explorer: new Set(['/r/app']) }), origin))[1].fix).toMatch(/Explorer/);
+    expect((await checkRepos(gone, board({ explorer: new Set() }), origin))[1].fix).toMatch(/board cards that name it/);
+  });
+
+  // Value: protects=no config.json text in the report; fails_when=V8's quoted snippet is printed; why_new=both adversarial reviews; seam=none
+  it('a broken config.json is named by position only, never its text', async () => {
+    const results = await runDoctor({ probes: probes({ files: { [CONFIG]: '{"token": ghp_SECRETSECRET' } }) });
+    const report = formatReport(results);
+    expect(report).toMatch(/config\.json does not parse: not valid JSON/);
+    expect(report).not.toContain('SECRET');
   });
 });
