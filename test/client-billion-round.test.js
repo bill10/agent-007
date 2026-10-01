@@ -139,7 +139,7 @@ describe('the status line', () => {
       .toMatch(/^Working: reviewing PR #120 · 3 workers running · next round \d{1,2}:30 (am|pm)$/);
     expect(statusLine({ running: true, working: true, workers: 1 }, { on: true }, now)).toBe('Thinking… · 1 worker running');
     expect(statusLine({ running: true, working: false }, { on: false }, now)).toBe('Idle');
-    expect(statusLine({ running: true, working: false, awaitingReply: true, text: 'x' }, {}, now)).toBe('Billion is working on your message…');
+    expect(statusLine({ running: true, working: false, awaitingReply: true, text: 'x' }, {}, now)).toBe('Waiting for Billion to reply…');
     expect(statusLine({ running: false }, {}, now)).toBe('Billion is not running');
   });
 
@@ -152,6 +152,9 @@ describe('the status line', () => {
     const dot = line.querySelector('.billion-status-dot');
     renderBillionStatus();
     expect(line.querySelector('.billion-status-dot')).toBe(dot);
+    setBillionStatus({ running: true, working: false, awaitingReply: true, pending: ['m1'] });
+    renderBillionStatus();
+    expect([line.dataset.mood, line.textContent]).toEqual(['idle', 'Waiting for Billion to reply…']);
   });
 });
 
@@ -190,21 +193,96 @@ describe('Start the round now', () => {
 });
 
 describe('the progress box', () => {
-  it('marks the owner\'s unanswered messages pending and shows what Billion is doing below them, until the reply', () => {
-    setChatMessages([{ id: 'm1', at: new Date().toISOString(), from: 'owner', via: 'app', text: 'How is the launch?' }]);
-    setBillionStatus({ running: true, working: true, awaitingReply: true, pending: ['m1'], text: 'checking the launch metrics', steps: ['Bash gh pr view 178', 'Read sheet.csv'] });
+  const owner = id => ({ id, at: new Date().toISOString(), from: 'owner', text: `Question ${id}?` });
+  const row = id => document.querySelector(`.chat-msg[data-id="${id}"]`);
+  it('shows pending → live summaries → collapsed Work details when the answer binds, even before the status arrives', () => {
+    setChatMessages([owner('m1')]);
+    setBillionStatus({ running: true, working: true, pending: ['m1'], progress: { m1: [] } });
     renderWaiting();
-    expect(document.querySelector('.chat-msg[data-id="m1"]').classList.contains('pending')).toBe(true);
-    const box = document.querySelector('#waiting-list .chat-progress');
-    expect(box.querySelector('.chat-progress-head').textContent).toBe('Billion is working on your message…');
-    expect([...box.querySelectorAll('li')].map(l => l.textContent)).toEqual(['checking the launch metrics', 'Bash gh pr view 178', 'Read sheet.csv']);
-    expect(document.querySelector('#waiting-list').lastElementChild).toBe(box);
-
-    setChatMessages([{ id: 'm1', at: new Date().toISOString(), from: 'owner', via: 'app', text: 'How is the launch?' },
-      { id: 'm2', at: new Date().toISOString(), from: 'billion', text: 'Going well.', replyTo: 'm1' }]);
-    setBillionStatus({ running: true, working: false, awaitingReply: false, pending: [], steps: [] });
+    expect(row('m1').querySelector('.chat-progress').textContent).toContain('Working…');
+    setBillionStatus({ running: true, working: true, pending: ['m1'], progress: { m1: ['Checking launch metrics', 'Found two missing runs'] } });
+    renderWaiting();
+    expect(row('m1').querySelectorAll('li').length).toBe(2);
+    setChatMessages([owner('m1'), { id: 'a1', from: 'billion', text: 'Two runs need recovery.', replyTo: 'm1', workDetails: ['Checking launch metrics', 'Found two missing runs'] }]);
     renderWaiting();
     expect(document.querySelector('.chat-progress')).toBeNull();
-    expect(document.querySelector('.chat-msg[data-id="m1"]').classList.contains('pending')).toBe(false);
+    expect(row('m1').classList.contains('pending')).toBe(false);
+    const details = row('a1').querySelector('details');
+    expect(details.open).toBe(false);
+    expect(details.querySelector('summary').textContent).toBe('Work details');
+    details.open = true;
+    renderWaiting();
+    expect(row('a1').querySelector('details')).toBe(details);
+    expect(details.open).toBe(true);
+  });
+
+  it('associates rapid messages separately and ignores agent updates and legacy raw steps', () => {
+    setChatMessages([owner('m1'), owner('m2'), { id: 'notice', from: 'billion', text: 'Worker finished.', notice: true }]);
+    setBillionStatus({ running: true, working: true, pending: ['m1', 'm2'], text: 'Global status', steps: ['SECRET_RAW_TOOL_OUTPUT'], progress: { m1: ['Checking first'], m2: [] } });
+    renderWaiting();
+    expect(row('notice').textContent).toContain('System update');
+    expect(row('m1').textContent).toContain('Checking first');
+    expect(row('m2').textContent).not.toContain('Checking first');
+    expect(row('m2').textContent).toContain('Waiting for the earlier reply');
+    expect(document.body.textContent).not.toContain('SECRET_RAW_TOOL_OUTPUT');
+    expect(document.querySelectorAll('.chat-progress.active')).toHaveLength(1);
+    setChatMessages([owner('m1'), owner('m2'), { id: 'a1', from: 'billion', text: 'First answer', replyTo: 'm1' }]);
+    setBillionStatus({ running: true, working: false, pending: ['m2'], progress: { m2: ['Checking second'] } });
+    renderWaiting();
+    expect(row('m1').querySelector('.chat-progress')).toBeNull();
+    expect(row('m2').textContent).toContain('Checking second');
+    expect(document.querySelectorAll('.chat-progress.active')).toHaveLength(0);
+    expect(row('a1').querySelector('details')).toBeNull();
+  });
+
+  it('does not claim to work on a newer message while an expired earlier request still owns the reply', () => {
+    setChatMessages([owner('m1'), owner('m2')]);
+    setBillionStatus({ running: true, working: true, pending: ['m2'], currentRequest: 'm1', progress: { m1: ['Checking first'], m2: [] } });
+    renderWaiting();
+    expect(row('m1').querySelector('.chat-progress')).toBeNull();
+    expect(row('m2').textContent).toContain('Waiting for the earlier reply');
+    expect(document.querySelector('.chat-progress.active')).toBeNull();
+  });
+
+  it('removes active progress when stopped and restores persisted request summaries after reconnect', () => {
+    const saved = { ...owner('m1'), workDetails: ['Evidence found'] };
+    setChatMessages([saved]);
+    setBillionStatus({ running: true, working: true, pending: ['m1'], currentRequest: 'm1', progress: { m1: ['Evidence found'] } });
+    renderWaiting();
+    expect(row('m1').querySelector('.chat-progress.active')).not.toBeNull();
+    setBillionStatus({ running: false, working: false, pending: [], currentRequest: 'm1', progress: { m1: ['Evidence found'] } });
+    renderWaiting();
+    expect(document.querySelector('.chat-progress')).toBeNull();
+    setBillionStatus(null);
+    renderWaiting();
+    expect(document.querySelector('.chat-progress')).toBeNull();
+    setBillionStatus({ running: true, working: false, pending: ['m1'], currentRequest: 'm1' });
+    renderWaiting();
+    expect(row('m1').querySelector('li').textContent).toBe('Evidence found');
+    expect(row('m1').querySelector('.chat-progress.active')).toBeNull();
+  });
+
+  it('drops blank and non-text summary entries without creating empty answer details', () => {
+    setChatMessages([owner('m1'), { id: 'a2', from: 'billion', replyTo: 'm2', text: 'Done', workDetails: [null, '', '  ', 42] }]);
+    setBillionStatus({ running: true, working: false, pending: ['m1'], progress: { m1: [null, '', '  ', 42] } });
+    renderWaiting();
+    expect(row('m1').querySelector('li').textContent).toBe('Waiting to start…');
+    expect(row('a2').querySelector('details')).toBeNull();
+  });
+
+  it('reconstructs saved details on reconnect, escapes HTML and omits empty details', () => {
+    const text = '<img src=x onerror=alert(1)>';
+    setChatMessages([owner('m1'), { id: 'a1', from: 'billion', text: 'Done', replyTo: 'm1', workDetails: [text] }, { id: 'a2', from: 'billion', text: 'Done', replyTo: 'm2', workDetails: [] }]);
+    setBillionStatus({ running: false, pending: [], progress: {} });
+    renderWaiting();
+    expect(row('a1').querySelector('details').open).toBe(false);
+    expect(row('a1').querySelector('li').textContent).toBe(text);
+    expect(row('a1').querySelector('img')).toBeNull();
+    expect(row('a2').querySelector('details')).toBeNull();
+    setChatMessages([owner('m3')]);
+    setBillionStatus({ running: true, working: true, pending: ['m3'], progress: { m3: [text] } });
+    renderWaiting();
+    expect(row('m3').querySelector('li').textContent).toBe(text);
+    expect(row('m3').querySelector('img')).toBeNull();
   });
 });

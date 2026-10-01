@@ -531,7 +531,9 @@ export const SET_STATUS_TOOL = {
     `Say in one line (up to ${MAX_STATUS_CHARS} characters) what you are doing now, e.g. "reviewing PR #120". It shows `
     + 'at the top of the owner\'s Billion tab beside what the server knows (workers running, the next round), so a '
     + 'slow reply is never a blank screen; while the owner waits on a reply it heads the progress box under their message, '
-    + `beside the steps the server reads off your screen. Cheap: call it when you start something that takes a while. It fades after ${STATUS_TTL_MS / 60000} `
+    + 'and folds into Work details when tell_owner answers it. Use concise, user-facing summaries: current step, findings, '
+    + 'uncertainty or blocker, and next check. Never include private reasoning, raw analysis, tool output, command arguments or secrets. '
+    + `Update it while working; only the oldest unanswered owner message receives the summary. It fades after ${STATUS_TTL_MS / 60000} `
     + 'minutes without an update; "" clears it.',
   inputSchema: {
     type: 'object',

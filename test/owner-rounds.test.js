@@ -10,13 +10,13 @@ import { join } from 'path';
 import {
   notifyOwner, tellOwner, ownerSays, waitingItems, waitingPayload, chatMessages, answerWaiting, reopenQuestion,
   releaseRound, roundTick, migrateToRounds, roundQueue, dropQueued, NOTIFY_LIMIT, NOTIFY_WINDOW_MS, setOwnerChannel,
-  startRoundNow, doneNumbers, markDone, handleUpdate, roundView, START_ROUND_RE,
+  addChat, pendingOwnerMessages, startRoundNow, doneNumbers, markDone, handleUpdate, roundView, START_ROUND_RE,
 } from '../server/owner.js';
 import {
   roundSettings, nextRound, lastRound, byPriority, roundState, roundPayload, setRoundBrief, appLink, DEFAULT_ROUNDS, MAX_BRIEF_CHARS,
 } from '../server/rounds.js';
 import {
-  setBillionStatus, statusPayload, publishStatus, setStatusFacts, _resetStatus, STATUS_TTL_MS, MAX_STATUS_CHARS, screenSteps,
+  setBillionStatus, statusPayload, publishStatus, setStatusFacts, _resetStatus, STATUS_TTL_MS, MAX_STATUS_CHARS, AWAIT_REPLY_MS,
 } from '../server/billion-status.js';
 import { comingRound } from '../server/rounds.js';
 import { handleMcpMessage } from '../server/mcp.js';
@@ -312,7 +312,7 @@ describe('the status line', () => {
     const b = { state: 'WORKING', exited: false };
     setStatusFacts(() => ({ billion: b, workers: 3, nextRoundAt: 123 }));
     expect(setBillionStatus('  reviewing   PR #120 ', 1000)).toEqual({ ok: true, cleared: false });
-    expect(statusPayload(1000)).toEqual({ type: 'billion-status', text: 'reviewing PR #120', running: true, working: true, workers: 3, nextRoundAt: 123, awaitingReply: false, pending: [], steps: [] });
+    expect(statusPayload(1000)).toEqual({ type: 'billion-status', text: 'reviewing PR #120', running: true, working: true, workers: 3, nextRoundAt: 123, awaitingReply: false, pending: [], currentRequest: null, steps: [], progress: {} });
     expect(statusPayload(1000 + STATUS_TTL_MS).text).toBe('');
     expect(setBillionStatus('x'.repeat(MAX_STATUS_CHARS + 1)).error).toMatch(/140/);
     expect(setBillionStatus('').cleared).toBe(true);
@@ -337,6 +337,13 @@ describe('the status line', () => {
       { session: { isBillion: true }, setStatus: (t) => setBillionStatus(t) });
     expect(res.result.content[0].text).toBe('Status shown in the owner\'s Billion tab.');
     expect(statusPayload().text).toBe('reviewing PR #120');
+    const listed = handleMcpMessage({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, { session: { isBillion: true } });
+    const description = listed.result.tools.find(tool => tool.name === 'set_status').description;
+    expect(description).toContain('current step, findings');
+    expect(description).toContain('uncertainty or blocker, and next check');
+    expect(description).toContain('Never include private reasoning, raw analysis, tool output, command arguments or secrets');
+    expect(description).toContain('Work details');
+    expect(description).not.toContain('reads off your screen');
   });
 });
 
@@ -444,24 +451,88 @@ describe('the owner\'s messages wait for replies of their own', () => {
     expect(statusPayload()).toMatchObject({ pending: [], awaitingReply: false });
   });
 
-  it('lists the last steps on Billion\'s screen while it works on one', async () => {
-    const raw = '⏺ Read(sheet.csv)\r\n  ⎿ Read 40 lines\n⏺ Bash(gh pr merge 178 --squash --delete-branch --admin --body "a long body here")\n'
-      + '⏺ agent-007-board - list_jobs (MCP)()\n• Ran npm test\nplain text\n⏺ I will merge it now.\n';
-    expect(screenSteps(raw)).toEqual(['Bash gh pr merge 178 --squash --delete-branch --admin --bod…', 'agent-007-board - list_jobs', 'Ran npm test']);
-    expect(screenSteps(raw, 5)[0]).toBe('Read sheet.csv');
-    // The bot token never reaches the owner's screen, even cut short.
-    const env = process.env.TELEGRAM_BOT_TOKEN;
-    process.env.TELEGRAM_BOT_TOKEN = TOKEN;
-    try { expect(screenSteps(`⏺ Bash(curl https://api.telegram.org/bot${TOKEN}/getMe)\n`, 3)).toEqual(['Bash curl https://api.telegram.org/bot<token>/getMe']); } finally {
-      if (env === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = env;
-    }
-    const b = { ...billion, state: 'WORKING', ringBuffer: { getAll: () => [raw] } };
-    setStatusFacts(() => ({ billion: b }));
-    expect(statusPayload().steps).toEqual([]);   // nothing pending: no box
-    sessions.set(billion.id, b);
+  it('retains unanswered requests through chat pruning, then releases answered records', async () => {
+    await ownerSays('First?', { env: {} });
+    const first = chatMessages().at(-1).id;
+    setBillionStatus('Checking first');
+    const saved = chatMessages();
+    for (let i = 0; i < 499; i++) saved.push({ id: `notice-${i}`, from: 'billion', notice: true, text: 'System update' });
+    writeFileSync(join(CONFIG_DIR, 'chat.json'), JSON.stringify(saved));
+    await ownerSays('Second?', { env: {} });
+    const second = chatMessages().at(-1).id;
+    _resetStatus();
+    expect(chatMessages()).toHaveLength(500);
+    expect(pendingOwnerMessages().map(m => m.id)).toEqual([first, second]);
+    await tellOwner('First answer.', { env: {}, now: now() });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: first, workDetails: ['Checking first'] });
+    expect(chatMessages().some(m => m.id === first)).toBe(false);
+    await tellOwner('Second answer.', { env: {}, now: now() });
+    expect(chatMessages().at(-1).replyTo).toBe(second);
+    expect(pendingOwnerMessages()).toEqual([]);
+    // Once answered, pruning the answer cannot reopen a retained owner record.
+    const secondMessage = chatMessages().find(m => m.id === second);
+    expect(secondMessage.awaitsReply).toBe(false);
+    writeFileSync(join(CONFIG_DIR, 'chat.json'), JSON.stringify([secondMessage]));
+    addChat({ from: 'billion', text: 'Later update', notice: true });
+    expect(pendingOwnerMessages()).toEqual([]);
+  });
+
+  it('accepts only explicit status summaries, never reading raw analysis, tool calls or secrets off the screen', async () => {
+    const getAll = vi.fn(() => ['private analysis\n• Ran echo SECRET_COMMAND_OUTPUT\n⏺ Bash(secret)']);
+    setStatusFacts(() => ({ billion: { ...billion, state: 'WORKING', ringBuffer: { getAll } } }));
+    await ownerSays('Check it.', { env: {} });
+    const id = chatMessages().at(-1).id;
+    expect(statusPayload()).toMatchObject({ steps: [], progress: { [id]: [] } });
+    vi.stubEnv('TELEGRAM_BOT_TOKEN', TOKEN);
     try {
-      await ownerSays('Merged yet?', { env: {} });
-      expect(statusPayload().steps).toEqual(['Bash gh pr merge 178 --squash --delete-branch --admin --bod…', 'agent-007-board - list_jobs', 'Ran npm test']);
-    } finally { sessions.set(billion.id, billion); }
+      setBillionStatus(`Checking evidence ${TOKEN}`);
+      expect(statusPayload().progress[id]).toEqual(['Checking evidence <token>']);
+      expect(readFileSync(join(CONFIG_DIR, 'chat.json'), 'utf8')).not.toContain(TOKEN);
+    } finally { vi.unstubAllEnvs(); }
+    expect(getAll).not.toHaveBeenCalled();
+    expect(JSON.stringify(statusPayload())).not.toMatch(/SECRET_COMMAND_OUTPUT|private analysis|Bash/);
+  });
+
+  it('keeps progress intact when a status is cleared or refused, and never copies pre-request status', async () => {
+    setStatusFacts(() => ({ billion }));
+    setBillionStatus('Earlier background work');
+    await ownerSays('New question?', { env: {} });
+    const id = chatMessages().at(-1).id;
+    expect(statusPayload().progress[id]).toEqual([]);
+    setBillionStatus('Checking evidence');
+    expect(setBillionStatus(null)).toHaveProperty('error');
+    expect(setBillionStatus('x'.repeat(MAX_STATUS_CHARS + 1))).toHaveProperty('error');
+    expect(setBillionStatus('  ')).toEqual({ ok: true, cleared: true });
+    expect(statusPayload()).toMatchObject({ text: '', progress: { [id]: ['Checking evidence'] } });
+    await tellOwner('Answer.', { env: {}, now: now() });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: id, workDetails: ['Checking evidence'] });
+  });
+
+  it('persists distinct summaries and oldest-first bindings across a server restart, without stale activity', async () => {
+    setStatusFacts(() => ({ billion }));
+    await ownerSays('First?', { env: {} });
+    const first = chatMessages().at(-1).id;
+    for (const text of ['Starting', 'Found evidence', 'Checking uncertainty', 'Next: verify', 'Next: verify']) setBillionStatus(text);
+    await ownerSays('Second?', { env: {} });
+    const second = chatMessages().at(-1).id;
+    _resetStatus();
+    expect(statusPayload()).toMatchObject({ running: false, pending: [], awaitingReply: false });
+    setStatusFacts(() => ({ billion }));
+    expect(statusPayload()).toMatchObject({ pending: [first, second], progress: { [first]: ['Found evidence', 'Checking uncertainty', 'Next: verify'], [second]: [] } });
+    expect(statusPayload(Date.now() + AWAIT_REPLY_MS)).toMatchObject({ pending: [], awaitingReply: false });
+    const saved = chatMessages();
+    saved[0].at = new Date(Date.now() - AWAIT_REPLY_MS - 1).toISOString();
+    writeFileSync(join(CONFIG_DIR, 'chat.json'), JSON.stringify(saved));
+    expect(statusPayload()).toMatchObject({ pending: [second], currentRequest: first });
+    await tellOwner('Worker finished.', { env: {}, now: now(), notice: true });
+    expect(statusPayload().pending).toEqual([second]);
+    await tellOwner('First answer.', { env: {}, now: now() });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: first, workDetails: ['Found evidence', 'Checking uncertainty', 'Next: verify'] });
+    setBillionStatus('Checking second');
+    await tellOwner('Second answer.', { env: {}, now: now() });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: second, workDetails: ['Checking second'] });
+    _resetStatus();
+    setStatusFacts(() => ({ billion }));
+    expect(statusPayload()).toMatchObject({ pending: [], progress: {} });
   });
 });
