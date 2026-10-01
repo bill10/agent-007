@@ -18,6 +18,7 @@ import { statusPayload } from './billion-status.js';
 import { roundView, startRoundNow, markDone } from './owner.js';
 import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
+import { savedAttemptRetirement } from '../lib/saved-attempts.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
@@ -135,6 +136,7 @@ export function broadcastOrphansList() {
 export async function respawnOrphan(orphanId, { recreate = false, requester = null } = {}) {
   const orphan = orphans.get(orphanId);
   if (!orphan) return { error: 'Orphan not found' };
+  if (savedAttemptRetirement(config, orphan)) return { error: 'This saved attempt was retired; its worktree is preserved but cannot be resumed.' };
   if (adoptingOrphans.has(orphanId)) return { error: 'Orphan is already being re-adopted' };
   adoptingOrphans.add(orphanId);
   try {
@@ -175,6 +177,8 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
     const spawnedBy = card ? 'board' : 'user';
     const autoTrust = autoTrusts({ spawnedBy, worktreePath: orphan.worktreePath, command });
     if (autoTrust && sessionAgentFromCommand(command) === 'claude') trustClaudeFolder(orphan.worktreePath);
+    const ghEnv = card ? await ghEnvForRepo(orphan.repoPath) : {};
+    if (savedAttemptRetirement(config, orphan)) return { error: 'This saved attempt was retired while recovery was preparing.' };
     const result = createSessionFromConfig({
       sessionId: nextSessionId(),
       name: orphan.name,
@@ -195,7 +199,7 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
       origin: orphan.origin === 'board' ? 'board' : 'user',
       spawnedBy, jobId: card?.id || null, autoTrust,
       approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
-      ghEnv: card ? await ghEnvForRepo(orphan.repoPath) : {},
+      ghEnv,
     }, broadcast);
     if (result.error) return { error: result.error, command };
     const session = result.session;
@@ -267,7 +271,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 export async function respawnBoardWorkers({ paceMs = RESPAWN_PACE_MS, env = process.env } = {}) {
   if (env.RESPAWN_BOARD_WORKERS === '0') return [];
-  const due = (o) => orphans.has(o.id) && o.reason === 'server-restart'
+  const due = (o) => !savedAttemptRetirement(config, o) && orphans.has(o.id) && o.reason === 'server-restart'
     && billionCardOf(o)?.state === 'in-progress' && existsSync(join(o.worktreePath, '.git'));
   const back = [];
   const ready = (o) => due(o) && !repoAtCap(o.repoPath);

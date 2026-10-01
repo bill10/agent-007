@@ -19,6 +19,7 @@ import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
 import { liveBillion } from './billion.js';
 import { authEnabled } from './auth.js';
+import { savedAttemptToken, sameAttemptResource, savedAttemptRetirement } from '../lib/saved-attempts.js';
 import {
   createJob, selectDispatchableJobs, countInFlightByRepo, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr, prCiViewArgs, parsePrCi,
@@ -121,6 +122,8 @@ export function jobsPayload() {
     const session = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
     return {
       ...job,
+      savedAttemptRetiredAt: savedAttemptRetirement(config, { jobId: job.id })?.retiredAt || null,
+      savedAttemptRetirementReason: savedAttemptRetirement(config, { jobId: job.id })?.reason || null,
       // Resolved rather than raw: cards written before scheduled jobs existed
       // carry no type at all, and the client should not have to know that.
       type: jobType(job),
@@ -510,10 +513,8 @@ function jobSummary(job) {
     nextRunAt: job.nextRunAt || null,
     once: !!job.once,
     scheduleId: job.scheduleId || null,
-    interruptedAt: job.interruptedAt || null,
-    interruptedBy: job.interruptedBy || null,
-    recoveryJobId: job.recoveryJobId || null,
-    interruptionReason: job.interruptionReason || null,
+    savedAttemptRetiredAt: savedAttemptRetirement(config, { jobId: job.id })?.retiredAt || null,
+    savedAttemptRetirementReason: savedAttemptRetirement(config, { jobId: job.id })?.reason || null,
     archivedReason: job.archivedReason || null,
     lastSkipReason: job.lastSkipReason || null,
     repo: basename(job.repoPath || ''),
@@ -569,6 +570,12 @@ export function readJobForAgent(jobId) {
     job: {
       ...jobSummary(job),
       detail: job.detail || '',
+      // Compare token binds a later retirement to the complete saved record,
+      // not just a name/body assertion. The record itself is never exposed.
+      savedAttemptToken: (() => {
+        const records = (config.activeSessions || []).filter(r => r.jobId === job.id);
+        return records.length === 1 ? savedAttemptToken(records[0]) : null;
+      })(),
       // Basename only, deliberately — resolveRepoRef reports repos the same
       // way. An absolute repo or worktree path is the layout of the user's
       // disk, and this reply goes to whatever agent called the tool, about
@@ -994,62 +1001,68 @@ export function retireJobForAgent({ session, id, reason }, broadcast) {
   return result.error ? result : { job: jobSummary(result.job) };
 }
 
-// Explicit handoff of a gone scheduled run. No PTY/worktree operations and no
-// await between validation and persistence: a revived worker cannot race this.
-export function reconcileJobForAgent({ session, id, replacementId, reason }, broadcast) {
-  if (session?.isBillion !== true) return { error: 'Only Billion can reconcile cards.' };
-  // Jobs are shared, not tenant-scoped, and do not store a Billion principal.
-  // This control is only safe in the existing single-player Billion model.
-  // Recheck auth dynamically: users can be added while Billion is running.
+// Retire only the durable restart intent, never a process or the work itself.
+// No await from validation through atomic persistence: adoption and dispatch
+// cannot interleave with the snapshot check and receipt write.
+export function retireSavedAttemptForAgent({ session, id, attemptToken, reason, externalWorkVerified }, broadcast, { save = saveConfig } = {}) {
   const billions = [...sessions.values()].filter(s => s.isBillion && !s.exited);
-  if (authEnabled() || session.ownerId !== null || sessions.get(session.id) !== session
-      || billions.length !== 1 || billions[0] !== session) {
-    return { error: 'Reconciliation requires the sole live, unowned Billion with user accounts disabled.' };
+  if (session?.isBillion !== true || authEnabled() || session.ownerId !== null
+      || sessions.get(session.id) !== session || billions.length !== 1 || billions[0] !== session) {
+    return { error: 'Only the sole registered live, unowned Billion with user accounts disabled can retire a saved attempt.' };
   }
   const job = allJobs().find(j => j.id === id);
-  const replacement = allJobs().find(j => j.id === replacementId);
-  if (!job || !replacement || job === replacement) return { error: 'Name two distinct existing cards.' };
-  if (job.postedByBillion !== true || replacement.postedByBillion !== true
-      || job.postedBy !== null || replacement.postedBy !== null) {
-    return { error: 'Both cards must belong to Billion.' };
+  const schedule = job && allJobs().find(j => j.id === job.scheduleId && isScheduled(j));
+  if (!job || job.state !== 'in-progress' || jobRequiresPr(job) || job.prUrl
+      || job.postedByBillion !== true || job.postedBy !== null
+      || !schedule || schedule.postedByBillion !== true || schedule.postedBy !== null || schedule.repoPath !== job.repoPath) {
+    return { error: 'Requires a gone no-PR run of a Billion-posted schedule, with neither card owned by a user.' };
   }
-  if (job.state !== 'in-progress' || jobRequiresPr(job) || job.prUrl || !job.scheduleId
-      || job.interruptedAt || job.recoveryJobId != null || job.recoversJobId != null) {
-    return { error: 'Only an unreconciled In progress no-PR schedule run can be interrupted.' };
+  const binding = { jobId: job.id, repoPath: job.repoPath, branchName: job.branchName, worktreePath: job.worktreePath };
+  if (savedAttemptRetirement(config, binding)) return { error: 'This saved attempt is already retired; read its audit record.' };
+  const records = (config.activeSessions || []).filter(r => sameAttemptResource(r, binding));
+  const record = records[0];
+  if (records.length !== 1 || record.jobId !== job.id || record.repoPath !== job.repoPath
+      || !job.branchName || record.branchName !== job.branchName
+      || !job.worktreePath || record.worktreePath !== job.worktreePath
+      || !record.name || record.name !== job.agentName || record.ownerId !== null || record.origin !== 'board'
+      || record.agent !== jobAgent(job) || !record.savedAt || !Number.isFinite(Date.parse(record.savedAt))
+      || typeof attemptToken !== 'string' || savedAttemptToken(record) !== attemptToken) {
+    return { error: 'The exact saved job/repository/branch/worktree/attempt binding is missing, ambiguous, or changed; read_job again.' };
   }
-  const schedule = allJobs().find(j => j.id === job.scheduleId && isScheduled(j));
-  if (!schedule || schedule.postedByBillion !== true || schedule.postedBy !== null || schedule.repoPath !== job.repoPath) return { error: 'The original schedule is missing or mismatched.' };
-  // Check all sessions, not just the saved id, including a re-adopted worker.
-  const matches = entry => entry.id === job.agentSessionId || entry.jobId === job.id
-    || (entry.repoPath === job.repoPath && job.branchName && entry.branchName === job.branchName);
-  if ([...sessions.values()].some(s => !s.exited && matches(s))
-      || [...orphans.values()].some(matches)) {
-    return { error: 'The original worker is live or recoverable; reconcile only a gone card without an orphan.' };
+  const matches = entry => entry.id === job.agentSessionId || sameAttemptResource(entry, binding);
+  // Includes exited/parked sessions: they still have a supported lifecycle.
+  // An adoption whose entry disappeared is ambiguous, so defer all retirement
+  // while any adoption is in flight rather than guessing its identity.
+  if ([...sessions.values()].some(matches) || [...orphans.values()].some(matches)
+      || (config.orphans || []).some(matches) || adoptingOrphans.size) {
+    return { error: 'A live, parked, orphaned, or adopting worker may own this attempt; no retirement performed.' };
   }
-  const worker = sessions.get(replacement.agentSessionId);
-  if (replacement.state !== 'in-progress' || !worker || worker.exited
-      || worker.jobId !== replacement.id || worker.repoPath !== replacement.repoPath || worker.isBillion
-      || (worker.ownerId || null) !== (session.ownerId || null)
-      || replacement.repoPath !== job.repoPath || jobRequiresPr(replacement) || replacement.prUrl
-      || isScheduled(replacement) || replacement.scheduleId || replacement.interruptedAt
-      || replacement.recoveryJobId != null || replacement.recoversJobId != null
-      || !String(replacement.detail || '').includes(job.id)) {
-    return { error: 'Replacement must be a live standalone no-PR card in the same repository and owner scope, explicitly naming the original card in its instructions.' };
+  if (allJobs().some(j => j !== job && sameAttemptResource({ ...j, jobId: j.id }, binding))) {
+    return { error: 'Another card shares this attempt resource; no retirement performed.' };
   }
   const why = typeof reason === 'string' ? reason.trim() : '';
-  if (!why) return { error: 'Say why the original was interrupted and how recovery was verified.' };
-  const now = new Date().toISOString();
-  job.state = 'review';
-  job.reviewAt = now;
-  job.interruptedAt = now;
-  job.interruptedBy = session.id;
-  job.recoveryJobId = replacement.id;
-  job.interruptionReason = why.slice(0, 2000);
-  // Preserve any earlier result, branch, attachments, and original worker id.
-  replacement.scheduleId = job.scheduleId;
-  replacement.recoversJobId = job.id;
-  persist(broadcast);
-  return { job: jobSummary(job), replacement: jobSummary(replacement), hold: scheduleHold(schedule, allJobs()) };
+  if (externalWorkVerified !== true || !why) {
+    return { error: 'Verify external processes, production lock and completion/send state first, then attest external_work_verified and record the evidence in reason.' };
+  }
+  const receipt = {
+    token: attemptToken, retiredAt: new Date().toISOString(), retiredBy: session.id,
+    reason: why.slice(0, 2000), externalWorkVerified: true,
+    record: structuredClone(record),
+  };
+  const beforeActive = config.activeSessions;
+  const beforeRetired = config.retiredSavedAttempts;
+  config.activeSessions = beforeActive.filter(r => r !== record);
+  config.retiredSavedAttempts = [...(beforeRetired || []), receipt];
+  if (!save(broadcast, { atomic: true })) {
+    config.activeSessions = beforeActive;
+    if (beforeRetired === undefined) delete config.retiredSavedAttempts;
+    else config.retiredSavedAttempts = beforeRetired;
+    return { error: 'Could not persist retirement; the saved attempt remains active.' };
+  }
+  codenamePool.addUsed(record.name);
+  codenamePool.addUsed(basename(record.worktreePath));
+  broadcastJobs(broadcast);
+  return { job: jobSummary(job), retiredAt: receipt.retiredAt };
 }
 
 // On a server start: archive every one-date schedule ("0 10 24 9 *") that has
@@ -1147,9 +1160,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
-  if (job.interruptedAt && (state === 'todo' || state === 'in-progress')) {
-    return { error: 'This interrupted attempt has a replacement; follow its recovery card instead of redispatching.' };
-  }
+  if (savedAttemptRetirement(config, { jobId: job.id })) return { error: 'This attempt was retired without completing its work; preserve this card and post follow-up work separately.' };
   // Done is terminal. A finished card is the record of work that shipped, and
   // the only thing that can happen to it is deletion.
   //
@@ -1386,6 +1397,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   });
   const dispatched = [];
   for (const job of candidates) {
+    if (savedAttemptRetirement(config, { ...job, jobId: job.id })) continue;
     const command = buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) });
     // Kept so the recheck below can tell whether the card still dispatches
     // into the same repo as the session it is about to be handed.
@@ -1563,7 +1575,7 @@ export function resumeCommandForOrphan(orphan, homes) {
 }
 
 export function relinkSessionToJob(session, broadcast) {
-  if (!session) return null;
+  if (!session || savedAttemptRetirement(config, session)) return null;
   const job = findJobForBranch(session);
   if (!job) return null;
   job.agentSessionId = session.id;

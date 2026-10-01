@@ -484,10 +484,10 @@ function renderCard(job) {
 
   // What the agent reported through finish_job. On a card that opens no PR
   // this is the result itself, so it is shown in full rather than clipped.
-  if (job.interruptedAt) {
+  if (job.savedAttemptRetiredAt) {
     const note = document.createElement('div');
     note.className = 'job-card-result';
-    note.textContent = `Interrupted — recovery ${job.recoveryJobId}: ${job.interruptionReason}`;
+    note.textContent = `Saved attempt retired; work not completed. ${job.savedAttemptRetirementReason}`;
     card.appendChild(note);
   }
   if (job.resultSummary) {

@@ -1,61 +1,84 @@
-# Reconciling a gone schedule run
+# Retiring a stale saved attempt
 
-The single-player Billion's `reconcile_job(id, replacement_id, reason)` records an interruption,
-not successful completion. Use it only after verifying that external work and
-any exclusive producer guard have safely transferred to the replacement. This
-control does not inspect, acquire, release, or remove external locks or processes.
+A worker can be absent from live sessions and the orphan registry while its
+`activeSessions` record remains saved. At restart that record becomes a
+`server-restart` orphan and its unfinished card can automatically resume. Retiring
+the parent schedule alone does not prevent that adoption.
 
-The original must be a Billion-owned, In progress, no-PR schedule run with no
-live session (including a re-adopted session) and no orphan record. Its schedule
-must also belong to Billion. The replacement must be an already-running,
-standalone, no-PR Billion card in the same repository and owner scope. Its
-instructions must explicitly name the original card ID; unrelated cards,
-self-links, and previously linked recovery cards are refused.
+`retire_saved_attempt` addresses this exact case. It retires the persisted restart
+intent, **not the work**. It never stops a process, completes/requeues the original
+card, changes the recovery worker, deletes a worktree, or posts another run.
 
-The call synchronously rechecks both cards and records the original in Review
-with an interruption timestamp, actor session ID, reason, and replacement ID.
-It preserves original instructions, partial summary, branch, worker reference,
-and attachments. The replacement joins the original schedule and records the
-reverse reference. Neither worker is stopped and no run is dispatched by this
-operation. The original attempt cannot be requeued.
+## Authority and evidence
 
-The schedule remains held while recovery runs, stalls, disappears, or reaches
-Review (including a reported failure or skip). Billion must inspect the result
-and accept it with `close_job`, or the owner can accept it on the board. Only a
-Done recovery with a result summary and its worker reference retired releases
-that hold. Rejecting the recovery for more work keeps the hold. Missing or
-detached recovery cards fail closed. An archived To do recovery does not count
-as accepted. Interrupted and recovery cards are retained rather than automatically
-superseded or pruned.
+The board is shared, not tenant-scoped. Only the actual registered, sole live
+Billion session with `ownerId: null` can call the tool, and user accounts must be
+disabled at call time. The original must remain an In progress no-PR run; it and
+its parent schedule must have `postedBy: null` and `postedByBillion: true`.
 
-After acceptance, inspect the schedule and its next firing. Reconciliation does
-not replay missed firings, bypass pause/cap controls, or prove that external
-production has finished. Deployment and a live reconciliation are separate from
-preparing a code change.
+1. Independently verify original/recovery processes, exclusive producer lock,
+   accepted recovery results and durable publish/send/tracker state. An absent
+   board session or PID alone does not prove all external work is stopped.
+2. Call `read_job` for the original and obtain `saved_attempt_token`. This digest
+   binds the operation to the entire saved record, including its saved timestamp,
+   rather than trusting a name or card-body assertion.
+3. Call `retire_saved_attempt` with `id`, `attempt_token`, a factual `reason`, and
+   `external_work_verified: true`. This is an explicit operator attestation;
+   the server does not verify external PIDs, locks, provider jobs or send receipts.
 
-| Original | Recovery | Schedule eligibility |
-| --- | --- | --- |
-| In progress, gone | Standalone, running | Existing original-run hold |
-| Interrupted Review | In progress, running or stalled | Held |
-| Interrupted Review | Worker gone / failed | Held |
-| Interrupted Review | Review, success / failure / skip | Held pending reviewer acceptance |
-| Interrupted Review | Requeued To do | Held |
-| Interrupted Review | Done, retirement pending or failed | Held |
-| Interrupted Review | Done, summary present, worker retired | Eligible under normal due/pause/cap rules |
-| Interrupted Review | Missing / detached / archived without running | Held |
+The server requires exactly one matching saved attempt with identical job ID,
+repository, branch, worktree, agent/name, null owner and board origin. It rejects
+stale tokens, another card sharing the resource, matching live **or exited/parked**
+sessions, in-memory or persisted orphans, and any adoption in flight (including
+one whose orphan record has disappeared). Validation and persistence have no
+asynchronous gap. Other sessions and saved records are left unchanged.
 
-`allJobs()` is a shared board, not a tenant-filtered store. Cards contain
-`postedBy` and the server-set `postedByBillion` flag, but no per-Billion principal.
-Billion currently has one server-wide identity and is disabled with user accounts;
-this operation also enforces that boundary at call time. It requires user accounts
-to be disabled, a null-owner caller that is the sole live Billion session, and
-null `postedBy` plus `postedByBillion` on the original, replacement, and schedule.
-Any original recovery link is rejected directly. There is no claim of tenant
-ownership inferred from replacement worker equality: that equality is an additional
-check on the exact worker/job/repository binding. A future per-user Billion would
-require a separate durable principal model before this control could support it. The
-original ID in replacement instructions corroborates intent; it does not grant
-permission by itself. The server derives and persists both directions of the
-binding after validation. The caller's reason is an auditable operator assertion
-about external recovery, not PID verification. This adds one restricted Billion
-control and does not give workers access or widen control over owner-posted cards.
+## Audit and recovery behavior
+
+One atomic config replacement moves the complete saved record from active restart
+intent to `retiredSavedAttempts`, with its digest, actor session ID, timestamp,
+reason and external-verification assertion. A write failure reports failure and
+rolls back the in-memory transition. The receipt is independent of the card and
+survives even if a card is subsequently deleted; ordinary card-history pruning
+does not remove receipts. There is no tool to erase or reverse retirement.
+
+Startup conversion ignores a retired resource even if a stale active record is
+replayed. Worktree discovery also ignores it. Automatic and manual orphan
+adoption check the receipt, including immediately before spawning after awaited
+preparation. Requeue/move of the retired original is refused, dispatch skips it,
+and relinking cannot reactivate it. The preserved worktree retains its codename.
+The suppression also matches the normalized worktree path or repository/branch,
+so discovery without the original job ID cannot bypass it. Intentional reuse of
+that preserved resource is refused; use a separate worktree/card for follow-up.
+
+The original stays In progress (gone) with a visible “Saved attempt retired; work
+not completed” note. Its instructions, partial summary, branch and history stay
+intact. Its existing schedule remains held. This operation alone does **not**
+repair schedule eligibility.
+
+## Follow-on schedule replacement after approved deployment
+
+Do not deploy, restart or invoke this authority without the required security and
+owner approval. This procedure is separate from preparing the PR.
+
+After verified retirement, reread the original and confirm its retirement note,
+and check there are no queued/active Producer runs or other eligible orphan
+attempts. Use existing `retire_job` on the old **To do schedule only**, with a
+reason identifying the recovery and replacement intent. Read it back archived;
+retirement does not cancel already queued child runs. Then post exactly one new
+recurring schedule using its full current body, repository, agent/model, cadence,
+no-PR setting and recurring (`once: false`) setting. Preserve the external single
+producer guard, daily budget ledger and send deduplication rules.
+
+Read back the new card and its next firing, confirm only one active Producer
+schedule, and observe actual due-run eligibility before claiming repair. Creation
+arms the next cron match strictly after now, not a missed-run replay. If posting
+fails, check whether a card was created before retrying. MCP posting inherits board
+permission defaults and does not clone attachments; check parity before retirement
+if either matters (retired schedule attachments may later be cleaned up).
+
+The new schedule has a separate ID and run counter. Old runs keep their original
+schedule ID/history; new runs cannot auto-supersede them. Existing cleanup still
+operates within each old schedule's Review/Done group, never on the gone original.
+No Falcon reopening, retrospective completion receipt, raw config edit or fake
+original success is needed.

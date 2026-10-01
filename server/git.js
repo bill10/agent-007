@@ -13,6 +13,7 @@ import {
   GIT_AUTO_TIMEOUT, GIT_USER_TIMEOUT, WORKTREE_DIR,
 } from './state.js';
 import { saveConfig, syncOrphansToConfig } from './config.js';
+import { savedAttemptRetirement } from '../lib/saved-attempts.js';
 import { parseGitStatus, buildFileTree, repoDirName } from '../lib/helpers.js';
 
 // Deleted worktrees wait here, under WORKTREE_DIR, until emptyTrash removes them.
@@ -513,6 +514,7 @@ export async function scanForOrphanedWorktrees(broadcast) {
       if (repoDir.startsWith('.')) continue; // .trash: deleted worktrees on their way out
       for (const agentDir of readdirSync(repoWorktreePath)) {
         const worktreePath = join(repoWorktreePath, agentDir);
+        if (savedAttemptRetirement(config, { worktreePath })) continue;
         try { if (!statSync(worktreePath).isDirectory()) continue; } catch { continue; }
         if ([...orphans.values()].some(o => o.worktreePath === worktreePath)) continue;
         if ([...sessions.values()].some(s => s.worktreePath === worktreePath)) continue;
@@ -528,6 +530,8 @@ export async function scanForOrphanedWorktrees(broadcast) {
           const head = await gitExec(['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD']);
           branchName = head.trim();
         } catch { branchName = 'unknown'; }
+        // Git probes await: recheck retirement immediately before publishing.
+        if (savedAttemptRetirement(config, { repoPath, worktreePath, branchName })) continue;
         const orphanId = `orphan-${Date.now()}-${agentDir}`;
         const orphan = {
           id: orphanId, name: agentDir, repoPath, repoSlug: basename(repoPath),

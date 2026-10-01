@@ -352,18 +352,18 @@ export const ADD_REPO_TOOL = {
   },
 };
 
-// A verified recovery handoff, without claiming the original succeeded.
-export const RECONCILE_JOB_TOOL = {
-  name: 'reconcile_job',
-  description: 'Record a gone no-PR schedule run as interrupted in Review and link an already-running recovery card. Single-player only: the sole live, unowned Billion with user accounts disabled; only Billion-posted cards, with no live original worker or orphan. Preserves history and holds the schedule through recovery Review until explicit acceptance and worker retirement. Verify external production ownership first; this does not touch processes or locks.',
+export const RETIRE_SAVED_ATTEMPT_TOOL = {
+  name: 'retire_saved_attempt',
+  description: 'Retire the exact stale persisted restart attempt of a gone no-PR schedule run, preserving its card/worktree/history without marking work complete. Single-player sole registered Billion only. Refuses live, parked, orphaned or adopting workers. Read the saved_attempt_token from read_job; verify external processes, production lock and send/completion state independently first. Does not retire its schedule or dispatch replacement work.',
   inputSchema: {
     type: 'object',
     properties: {
-      id: { type: 'string', description: 'The gone scheduled run.' },
-      replacement_id: { type: 'string', description: 'The live standalone recovery card in the same repository.' },
-      reason: { type: 'string', description: 'Evidence of interruption and verified recovery ownership.' },
+      id: { type: 'string', description: 'Original gone schedule run card id.' },
+      attempt_token: { type: 'string', description: 'Exact saved_attempt_token just read from read_job; stale/ambiguous records are refused.' },
+      reason: { type: 'string', description: 'External verification evidence and why this saved attempt must never resume.' },
+      external_work_verified: { type: 'boolean', description: 'Must be true: explicit operator attestation, not server proof of PID/lock/send state.' },
     },
-    required: ['id', 'replacement_id', 'reason'],
+    required: ['id', 'attempt_token', 'reason', 'external_work_verified'],
     additionalProperties: false,
   },
 };
@@ -681,7 +681,7 @@ export const SET_NEXT_WAKE_TOOL = {
 };
 
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL, WITHDRAW_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, RETIRE_JOB_TOOL, RECONCILE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, RETIRE_JOB_TOOL, RETIRE_SAVED_ATTEMPT_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
   LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
@@ -828,7 +828,8 @@ const CALLS = {
       job.agentName ? `agent: ${job.agentName}, started ${when(job.startedAt)}` : null,
       job.branchName ? `branch: ${job.branchName}` : null,
       job.prUrl ? `pull request: ${job.prUrl}${job.prMergedAt ? ` (merged ${when(job.prMergedAt)})` : job.prClosedAt ? ` (closed without merging ${when(job.prClosedAt)})` : ''}` : null,
-      job.interruptedAt ? `interrupted: ${job.interruptedAt} — recovery ${job.recoveryJobId} — ${job.interruptionReason}` : null,
+      job.savedAttemptToken ? `saved_attempt_token: ${job.savedAttemptToken}` : null,
+      job.savedAttemptRetiredAt ? `saved attempt retired: ${job.savedAttemptRetiredAt} — ${job.savedAttemptRetirementReason} (work not marked complete)` : null,
       job.resultSummary ? `result: ${job.resultSummary}` : null,
       job.attachments.length ? `attachments: ${job.attachments.join(', ')}` : null,
       // Whoever last changed the text, so a card an agent rewrote never reads
@@ -899,11 +900,12 @@ const CALLS = {
         + (result.oldPrUrl ? ` Its old pull request is still open: close ${result.oldPrUrl}.` : ''));
   },
 
-  [RECONCILE_JOB_TOOL.name]: (args, ctx) => {
-    const result = ctx.reconcileJob?.({ id: args.id, replacementId: args.replacement_id, reason: args.reason })
-      || { error: 'Only Billion can reconcile cards.' };
+  [RETIRE_SAVED_ATTEMPT_TOOL.name]: (args, ctx) => {
+    const result = ctx.retireSavedAttempt?.({ id: args.id, attemptToken: args.attempt_token,
+      reason: args.reason, externalWorkVerified: args.external_work_verified })
+      || { error: 'Saved-attempt retirement is unavailable.' };
     if (result.error) return toolText(result.error, true);
-    return toolText(`Interrupted ${result.job.id}; recovery: ${result.replacement.id}. Original history preserved, no completion recorded. Schedule hold: ${result.hold || 'none'}.`);
+    return toolText(`Saved attempt for ${result.job.id} retired at ${result.retiredAt}. Original work is not completed; card, history and worktree preserved. Its schedule remains held until separately retired/replaced.`);
   },
 
   [RETIRE_JOB_TOOL.name]: (args, ctx) => {

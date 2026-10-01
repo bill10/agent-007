@@ -1,11 +1,12 @@
 // Config persistence — load, save, orphan tracking, crash recovery
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
 import { basename } from 'path';
 import {
   config, setConfig, orphans, codenamePool,
   CONFIG_DIR, CONFIG_PATH,
 } from './state.js';
+import { savedAttemptRetirement } from '../lib/saved-attempts.js';
 import { nextCronIso } from '../lib/cron.js';
 import { isScheduled, jobRequiresPr, sessionAgentFromCommand, isValidJobAgent, permissionFlagsFromCommand, recordedPermissionFlags } from '../lib/jobs.js';
 
@@ -65,6 +66,10 @@ export function loadConfig() {
         continue;
       }
       if (job.state !== 'in-progress') continue;
+      if (savedAttemptRetirement(config, { jobId: job.id })) {
+        job.lastError = 'Saved attempt retired; work not marked complete. Preserve this card and use separate follow-up work.';
+        continue;
+      }
       // agentName is history, not a live link — "Phantom did this work" stays
       // true across a restart, and it is the credit the card exists to show.
       if (!job.branchName) {
@@ -91,13 +96,20 @@ export function loadConfig() {
   }
 }
 
-export function saveConfig(broadcast) {
+export function saveConfig(broadcast, { atomic = false } = {}) {
+  const temporary = `${CONFIG_PATH}.${process.pid}.retirement.tmp`;
   try {
     mkdirSync(CONFIG_DIR, { recursive: true });
-    writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+    if (atomic) {
+      writeFileSync(temporary, JSON.stringify(config, null, 2));
+      renameSync(temporary, CONFIG_PATH);
+    } else writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2));
+    return true;
   } catch (err) {
+    if (atomic) { try { unlinkSync(temporary); } catch {} }
     console.error('Failed to save config:', err.message);
     if (broadcast) broadcast({ type: 'notification', level: 'error', message: 'Failed to save config: ' + err.message });
+    return false;
   }
 }
 
@@ -156,9 +168,17 @@ export function removeActiveSession(worktreePath, broadcast) {
 }
 
 export function recoverCrashedSessions(broadcast) {
+  // Preserved directories still own their names, even though they no longer
+  // appear in the recoverable-orphan list.
+  for (const receipt of config.retiredSavedAttempts || []) {
+    if (!existsSync(receipt.record.worktreePath)) continue;
+    codenamePool.addUsed(receipt.record.name);
+    codenamePool.addUsed(basename(receipt.record.worktreePath));
+  }
   const crashed = config.activeSessions || [];
   if (crashed.length === 0) return;
   for (const s of crashed) {
+    if (savedAttemptRetirement(config, s)) continue;
     if (!existsSync(s.worktreePath)) continue;
     if ([...orphans.values()].some(o => o.worktreePath === s.worktreePath)) continue;
     const orphanId = `orphan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

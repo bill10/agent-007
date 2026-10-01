@@ -662,11 +662,11 @@ describe('job form', () => {
 });
 
 describe('cards that need no pull request', () => {
-  it('shows interruption separately from preserved partial results as plain text', () => {
-    handleJobsList({ jobs: [JOB({ id: 'interrupted', state: 'review', interruptedAt: '2026-10-01',
-      recoveryJobId: 'recovery', interruptionReason: '<b>Worker gone</b>', resultSummary: 'Partial evidence' })], settings: {} });
-    const [card] = columnCards('review');
-    expect(card.textContent).toContain('Interrupted — recovery recovery: <b>Worker gone</b>');
+  it('labels saved-attempt retirement without hiding partial results or claiming completion', () => {
+    handleJobsList({ jobs: [JOB({ id: 'retired', state: 'in-progress', savedAttemptRetiredAt: '2026-10-01',
+      savedAttemptRetirementReason: '<b>verified stale</b>', resultSummary: 'Partial evidence' })], settings: {} });
+    const [card] = columnCards('in-progress');
+    expect(card.textContent).toContain('Saved attempt retired; work not completed. <b>verified stale</b>');
     expect(card.textContent).toContain('Partial evidence');
     expect(card.querySelector('.job-card-result b')).toBeNull();
   });
