@@ -1,6 +1,6 @@
 // One-time schedules: `once` / `run_at`, archiving after the single run, the
 // restart sweep of spent one-date schedules, and archiving by hand (the
-// owner's Archive, Billion's retire_job is in billion-board-tools.test.js).
+// owner's Archive, Billion's close_job on a To do card is in billion-board-tools.test.js).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';

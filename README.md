@@ -282,7 +282,7 @@ server/
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment and Billion chat file downloads, /mcp, origin + auth gates)
   agent-accounts.js  Installed agent CLIs and the accounts each is logged in with (Settings panel; read-only)
-  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message, withdraw_message; Billion also gets billion_ready, add_repo, close_job, retire_job, answer_permission, read_approval, notify_owner, read_agent_screen)
+  mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message, withdraw_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
   account-rotation.js   Persistent account pool, cooldowns, refreshed logins and recovery
