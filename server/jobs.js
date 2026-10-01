@@ -1310,20 +1310,29 @@ function availableRepos() {
 // invisibly — a PTY with no tab, which is precisely the thing the user must be
 // able to reach to answer a question.
 export async function dispatchOnce(createSession, broadcast, { onSessionCreated, killSession } = {}) {
-  const settings = boardSettings();
+  // Snapshot the queue, not reservations: a failed spawn must leave room for
+  // the next card in this pass. A finite snapshot also tries each card at most
+  // once, even if it fails or is edited while its spawn is in flight.
   const candidates = selectDispatchableJobs(allJobs(), {
-    maxPerRepo: settings.maxPerRepo,
+    maxPerRepo: Infinity,
     availableRepos: availableRepos(),
     liveSessionIds: liveSessionIds(),
   });
   const dispatched = [];
+  const blockedRepos = new Set();
+  let attempted = false;
   for (const job of candidates) {
+    // Earlier awaits can change both eligibility and live capacity.
+    if (!allJobs().includes(job) || job.state !== 'todo' || isScheduled(job)
+      || !isJobDue(job) || !availableRepos().has(job.repoPath)
+      || repoAtCap(job.repoPath) || blockedRepos.has(job.repoPath)) continue;
+    attempted = true;
     const command = buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) });
     // Kept so the recheck below can tell whether the card still dispatches
     // into the same repo as the session it is about to be handed.
     const spawnedRepo = job.repoPath;
     // Branch named after the job, not a cocktail, so `git branch` reads like
-    // the board. Two jobs can share a title, so collisions take a -2 suffix
+    // the board. Two jobs can share a title, so collisions take a unique suffix
     // rather than failing the dispatch.
     const branch = branchSlugFromTitle(job.title);
     // spawnedBy:'board' rides along on the session so the client can open the
@@ -1369,13 +1378,18 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // a schedule claimed as In progress could never move again.
     const stillQueued = allJobs().includes(job) && job.state === 'todo' && !isScheduled(job)
       && buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) }) === command
-      && job.repoPath === spawnedRepo;
+      && job.repoPath === spawnedRepo && isJobDue(job)
+      && availableRepos().has(spawnedRepo) && !repoAtCap(spawnedRepo);
     if (!stillQueued) {
+      let cleaned = false;
       if (killSession) {
-        try { await killSession(session.id); } catch (err) {
+        try { await killSession(session.id); cleaned = true; } catch (err) {
           console.error(`Failed to clean up agent for vanished job "${job.title}":`, err.message);
         }
       }
+      // An unclaimed worker may still be alive when cleanup is unavailable or
+      // fails. Do not fill its slot with another worker in this pass.
+      if (!cleaned) blockedRepos.add(spawnedRepo);
       continue;
     }
 
@@ -1393,7 +1407,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
 
     dispatched.push({ job, session });
   }
-  if (dispatched.length > 0 || candidates.length > 0) persist(broadcast);
+  if (attempted) persist(broadcast);
   return dispatched;
 }
 

@@ -263,6 +263,139 @@ describe('dispatchOnce', () => {
     expect(job.lastError).toMatch(/disk on fire/);
   });
 
+  it('reuses a failed reservation for the next card in the same pass, at the live cap', async () => {
+    boardSettings().maxPerRepo = 2;
+    const create = fakeCreateSession([]);
+    const live = addJob({ title: 'live', repoPath: REPO }, noopBroadcast).job;
+    await dispatchOnce(create, noopBroadcast);
+    const a = addJob({ title: 'A', repoPath: REPO, postedBy: 'owner-a' }, noopBroadcast).job;
+    const b = addJob({ title: 'B', repoPath: REPO, postedBy: 'owner-b' }, noopBroadcast).job;
+    const c = addJob({ title: 'C', repoPath: REPO }, noopBroadcast).job;
+    const attempted = [];
+    const result = await dispatchOnce(async (...args) => {
+      attempted.push(args[5].jobId);
+      if (args[5].jobId === a.id) return { error: 'branch collision' };
+      expect(args[4]).toBe('owner-b');
+      return create(...args);
+    }, noopBroadcast);
+    expect(attempted).toEqual([a.id, b.id]);
+    expect(result.map(r => r.job.id)).toEqual([b.id]);
+    expect(a.state).toBe('todo');
+    expect(a.lastError).toBe('branch collision');
+    expect(Date.parse(a.lastErrorAt)).not.toBeNaN();
+    expect(c.state).toBe('todo');
+    expect([live, b].every(j => j.state === 'in-progress')).toBe(true);
+    expect(sessions.size).toBe(2);
+  });
+
+  it('tries every failing candidate once and leaves arrivals for the next pass', async () => {
+    boardSettings().maxPerRepo = 1;
+    for (let i = 0; i < 5; i++) addJob({ title: `fail${i}`, repoPath: REPO }, noopBroadcast);
+    const expected = allJobs().map(j => j.id);
+    const attempted = [];
+    expect(await dispatchOnce(async (...args) => {
+      attempted.push(args[5].jobId);
+      addJob({ title: 'arrival', repoPath: REPO }, noopBroadcast);
+      return { error: 'unavailable' };
+    }, noopBroadcast)).toEqual([]);
+    expect(attempted).toEqual(expected);
+    expect(allJobs().slice(0, 5).every(j => j.state === 'todo' && j.lastError === 'unavailable')).toBe(true);
+  });
+
+  it('rechecks queued candidates and a live worker adopted during a failed spawn', async () => {
+    boardSettings().maxPerRepo = 1;
+    const a = addJob({ title: 'A', repoPath: REPO }, noopBroadcast).job;
+    const b = addJob({ title: 'B', repoPath: REPO }, noopBroadcast).job;
+    const other = addJob({ title: 'other repo', repoPath: REPO2 }, noopBroadcast).job;
+    const calls = [];
+    await dispatchOnce(async (...args) => {
+      calls.push(args[5].jobId);
+      b.state = 'in-progress';
+      b.agentSessionId = 'adopted';
+      sessions.set('adopted', { id: 'adopted', exited: false });
+      other.paused = true;
+      return { error: 'failed' };
+    }, noopBroadcast);
+    expect(calls).toEqual([a.id]);
+  });
+
+  it.each(['deleted', 'paused', 'held', 'cap'])('abandons a spawn when %s, then advances only if eligible', async (change) => {
+    boardSettings().maxPerRepo = 1;
+    const a = addJob({ title: 'A', repoPath: REPO }, noopBroadcast).job;
+    const b = addJob({ title: 'B', repoPath: REPO }, noopBroadcast).job;
+    const create = fakeCreateSession([]);
+    const calls = [], killed = [];
+    await dispatchOnce(async (...args) => {
+      calls.push(args[5].jobId);
+      const result = await create(...args);
+      if (args[5].jobId === a.id) {
+        if (change === 'deleted') config.jobs = allJobs().filter(j => j !== a);
+        if (change === 'paused') a.paused = true;
+        if (change === 'held') a.holdUntil = new Date(Date.now() + 60000).toISOString();
+        if (change === 'cap') {
+          b.state = 'in-progress'; b.agentSessionId = 'adopted';
+          sessions.set('adopted', { id: 'adopted', exited: false });
+        }
+      }
+      return result;
+    }, noopBroadcast, { killSession: async id => { killed.push(id); sessions.delete(id); } });
+    expect(killed).toEqual(['session-1']);
+    expect(calls).toEqual(change === 'cap' ? [a.id] : [a.id, b.id]);
+    expect(sessions.size).toBe(1);
+    expect(a.agentSessionId).toBeNull();
+  });
+
+  it.each([false, true])('keeps the reservation when aborted cleanup fails or is absent (%s)', async (throws) => {
+    boardSettings().maxPerRepo = 1;
+    const a = addJob({ title: 'A', repoPath: REPO }, noopBroadcast).job;
+    addJob({ title: 'B', repoPath: REPO }, noopBroadcast);
+    const calls = [];
+    const create = fakeCreateSession(calls);
+    await dispatchOnce(async (...args) => {
+      const result = await create(...args);
+      a.title = 'edited';
+      return result;
+    }, noopBroadcast, throws ? { killSession: async () => { throw new Error('cleanup failed'); } } : {});
+    expect(calls).toHaveLength(1);
+    expect(sessions.size).toBe(1);
+    expect(allJobs().every(j => j.state === 'todo')).toBe(true);
+  });
+
+  it('abandons a spawn into a removed repo, skips its remaining cards, and advances another repo', async () => {
+    boardSettings().maxPerRepo = 1;
+    const a = addJob({ title: 'A', repoPath: REPO }, noopBroadcast).job;
+    const b = addJob({ title: 'B', repoPath: REPO }, noopBroadcast).job;
+    const c = addJob({ title: 'C', repoPath: REPO2 }, noopBroadcast).job;
+    const create = fakeCreateSession([]);
+    const attempted = [], killed = [];
+    const result = await dispatchOnce(async (...args) => {
+      attempted.push(args[5].jobId);
+      const spawned = await create(...args);
+      if (args[5].jobId === a.id) config.repos = [{ path: REPO2 }];
+      return spawned;
+    }, noopBroadcast, { killSession: async id => { killed.push(id); sessions.delete(id); } });
+    expect(attempted).toEqual([a.id, c.id]);
+    expect(killed).toEqual(['session-1']);
+    expect(result.map(r => r.job.id)).toEqual([c.id]);
+    expect([a, b].every(j => j.state === 'todo' && j.agentSessionId === null)).toBe(true);
+    expect(sessions.size).toBe(1);
+  });
+
+  it('does not persist or broadcast when every snapshot candidate is blocked by the live cap', async () => {
+    boardSettings().maxPerRepo = 1;
+    addJob({ title: 'live', repoPath: REPO }, noopBroadcast);
+    const create = fakeCreateSession([]);
+    await dispatchOnce(create, noopBroadcast);
+    const queued = addJob({ title: 'queued', repoPath: REPO }, noopBroadcast).job;
+    const before = readFileSync(join(process.env.AGENT007_CONFIG_DIR, 'config.json'), 'utf8');
+    const broadcasts = [], attempted = [];
+    expect(await dispatchOnce(fakeCreateSession(attempted), event => broadcasts.push(event))).toEqual([]);
+    expect(attempted).toEqual([]);
+    expect(broadcasts).toEqual([]);
+    expect(readFileSync(join(process.env.AGENT007_CONFIG_DIR, 'config.json'), 'utf8')).toBe(before);
+    expect(queued.state).toBe('todo');
+  });
+
   it('clears a stale error once the job starts', async () => {
     addJob({ title: 'flaky', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([], { fail: true }), noopBroadcast);
