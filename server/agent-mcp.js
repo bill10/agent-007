@@ -122,9 +122,14 @@ export const CHANNEL_PLUGINS = ['telegram', 'discord', 'imessage', 'fakechat'].m
 const noChannelPlugins = () => Object.fromEntries(CHANNEL_PLUGINS.map(id => [id, false]));
 
 // The --settings every Claude Code board worker gets; withApprovalHook adds to it.
+// A board worker never changes gh's signed-in account: that is machine-wide,
+// and it already has its repo's account in GH_TOKEN (server/jobs.js,
+// ghEnvForRepo). Deny rules hold in every permission mode, bypass included.
+export const GH_AUTH_DENY = ['switch', 'login', 'logout'].flatMap(sub => [`Bash(gh auth ${sub})`, `Bash(gh auth ${sub}:*)`]);
+
 export function withBoardWorkerSettings(file, args) {
   if (agentName(file) !== 'claude' || args.includes('--settings')) return args;
-  return ['--settings', JSON.stringify({ enabledPlugins: noChannelPlugins() }), ...args];
+  return ['--settings', JSON.stringify({ enabledPlugins: noChannelPlugins(), permissions: { deny: GH_AUTH_DENY } }), ...args];
 }
 
 export function withApprovalHook(file, args, configPath) {
@@ -132,7 +137,7 @@ export function withApprovalHook(file, args, configPath) {
   if (!configPath || agentName(file) !== 'claude' || args.includes('--settings')) return args;
   const settings = {
     enabledPlugins: noChannelPlugins(),
-    permissions: { allow: WORKER_BOARD_TOOLS.map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`) },
+    permissions: { allow: WORKER_BOARD_TOOLS.map(tool => `mcp__${MCP_SERVER_NAME}__${tool}`), deny: GH_AUTH_DENY },
     hooks: {
       PermissionRequest: [{
         matcher: '*',

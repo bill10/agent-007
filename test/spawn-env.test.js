@@ -58,7 +58,7 @@ describe('the environment a spawned agent gets', () => {
     expect(users).toEqual(['pty.js']);
     const calls = readFileSync('server/pty.js', 'utf8').match(/spawnPty\([^]*?\}\);/g);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain('env: { ...ptyEnv(process.env), ...hookEnv }');
+    expect(calls[0]).toContain('env: { ...ptyEnv(process.env), ...ghEnv, ...hookEnv }');
   });
 });
 
@@ -94,6 +94,21 @@ describe('channel plugins', () => {
     expect(settingsOf(spawnWith(PATHS['the + Agent form']).args)).toBeNull();
     expect(settingsOf(spawnWith(PATHS['Billion (and a Billion switch)']).args)).toBeNull();
     expect(spawnWith({ ...PATHS['a board dispatch'], command: 'codex' }).args).not.toContain('--settings');
+  });
+});
+
+describe('gh accounts', () => {
+  it('reach the agent as the GH_TOKEN it was given, and only then', () => {
+    expect(spawnWith({ ...PATHS['a board dispatch'], ghEnv: { GH_TOKEN: 'tok-a' } }).env.GH_TOKEN).toBe('tok-a');
+    delete process.env.GH_TOKEN;
+    expect(spawnWith(PATHS['a board dispatch']).env).not.toHaveProperty('GH_TOKEN');
+  });
+
+  it('cannot be switched, logged into or out of by a Claude Code board worker', () => {
+    for (const fields of [PATHS['a board dispatch'], PATHS["a dispatch of Billion's card"], PATHS['a re-spawned board worker']]) {
+      const deny = settingsOf(spawnWith(fields).args).permissions.deny;
+      for (const sub of ['switch', 'login', 'logout']) expect(deny).toContain(`Bash(gh auth ${sub}:*)`);
+    }
   });
 });
 

@@ -22,7 +22,7 @@ import { billionRuns } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused, releaseJobHold,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
-  orphanResumePlan, findJobForBranch, repoAtCap, boardSettings,
+  orphanResumePlan, findJobForBranch, repoAtCap, boardSettings, ghEnvForRepo,
 } from './jobs.js';
 
 export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Continue your card where you left off.';
@@ -192,6 +192,7 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
       origin: orphan.origin === 'board' ? 'board' : 'user',
       spawnedBy, jobId: card?.id || null, autoTrust,
       approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
+      ghEnv: card ? await ghEnvForRepo(orphan.repoPath) : {},
     }, broadcast);
     if (result.error) return { error: result.error, command };
     const session = result.session;

@@ -221,7 +221,7 @@ function answerTrustDialog(session, data, now) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, rotationRestart = false }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, ghEnv = {}, rotationRestart = false }, broadcast) {
   const { file, args } = parseCommand(command);
   const isClaude = sessionAgentFromCommand(command) === 'claude';
   if (isClaude && claudeSpawnBlocked && !rotationRestart) return { error: 'Claude accounts are switching; try again shortly.' };
@@ -290,7 +290,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
       cols: 120,
       rows: 30,
       cwd,
-      env: { ...ptyEnv(process.env), ...hookEnv },
+      env: { ...ptyEnv(process.env), ...ghEnv, ...hookEnv },
     });
   } catch (err) {
     removeMcpConfig(sessionId);   // nothing will ever read it now
@@ -362,6 +362,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     isBillion: !!isBillion,     // the one agent you talk to (server/billion.js)
     answersTrust: !!(isBillion || (autoTrust && !codexTrust)),   // see answerTrustDialog; Codex's flag leaves nothing to answer
     approvalsToBillion: hooked, // its permission dialogs go to Billion first
+    ghEnv,                      // its repo's GitHub account (server/jobs.js ghEnvForRepo), kept for a rotation restart; never sent or saved
     exited: false,
     stateCheckInterval: null,
     repoPath,
