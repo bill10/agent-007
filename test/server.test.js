@@ -41,8 +41,12 @@ afterAll(async () => {
 // --- Cross-origin check (HTTP + WS integration) ---
 
 describe('cross-origin origin check', () => {
+  // Only the Origin header is under test: an empty folder, not tmpdir(),
+  // whose listing grows with every test run (seconds once it holds 100k+).
+  const browsed = mkdtempSync(join(tmpdir(), 'a007-origin-'));
+
   it('rejects an HTTP request from a disallowed origin with 403', async () => {
-    const res = await fetch(`${baseUrl}/api/browse?path=${tmpdir()}`, {
+    const res = await fetch(`${baseUrl}/api/browse?path=${browsed}`, {
       headers: { Origin: 'http://evil.example.com' },
     });
     expect(res.status).toBe(403);
@@ -51,7 +55,7 @@ describe('cross-origin origin check', () => {
   });
 
   it('allows an HTTP request from a localhost origin', async () => {
-    const res = await fetch(`${baseUrl}/api/browse?path=${tmpdir()}`, {
+    const res = await fetch(`${baseUrl}/api/browse?path=${browsed}`, {
       headers: { Origin: 'http://localhost:3000' },
     });
     expect(res.status).toBe(200);
