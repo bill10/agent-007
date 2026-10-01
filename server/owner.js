@@ -674,7 +674,8 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
     console.error('Could not save the Waiting list:', err.message);
   }
   const n = item ? ` as Q${item.n}` : '';
-  if (!(telegram ?? urgency === 'blocking')) {
+  // Held back only once it is safely filed: a question the tab lost still goes to the phone.
+  if (item && !(telegram ?? urgency === 'blocking')) {
     return { ok: true, n: item?.n, telegram: false, held: telegram === false ? 'telegram: false' : `urgency ${urgency}` };
   }
   const { token, chatId } = telegramSettings(env);
