@@ -5,6 +5,13 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.40.1.0] - 2026-10-01
+
+### Fixed
+
+- **Queued jobs advance past failed worker spawns.** Each scan tries a card at most once and rechecks live repository capacity before starting the next eligible card, while retaining failures on their cards.
+- **Repeated job titles no longer exhaust 50 branch names.** Worker branches use collision-checked random suffixes after a taken name, with bounded retries and existing branches preserved.
+
 ## [0.40.0.0] - 2026-10-01
 
 ### Changed
