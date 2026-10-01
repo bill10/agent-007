@@ -1546,7 +1546,7 @@ function runGh(args, { cwd, token, timeout = 15_000 } = {}) {
 }
 
 // Every account gh is signed in to, active one first.
-async function ghAccounts() {
+export async function ghAccounts() {
   try {
     const parsed = JSON.parse(await runGh(['auth', 'status', '--json', 'hosts'], { timeout: 10_000 }));
     const found = [];

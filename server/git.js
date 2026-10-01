@@ -30,7 +30,7 @@ export function gitExec(args, opts = {}) {
   // of blocking on a prompt nobody can answer. Only the pre-spawn fetch talks to
   // a network today, but a server must never be one auth prompt away from
   // hanging, so it is set for every git call.
-  const env = { ...process.env, LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0' };
+  const env = { ...process.env, ...opts.env, LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0' };
   return new Promise((resolve, reject) => {
     execFileCb('git', args, { timeout, maxBuffer: 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
       if (err) {

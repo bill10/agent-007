@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync, spawn } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
 import { createServer } from 'net';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
@@ -67,6 +67,7 @@ describe('settings', () => {
   it('--help lists init and every setting .env.example documents', () => {
     const { out } = run(['--help']);
     expect(out).toMatch(/agent-007 init/);
+    expect(out).toMatch(/agent-007 doctor/);
     const keys = [...readFileSync('.env.example', 'utf8').matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map(m => m[1]);
     expect(keys.length).toBeGreaterThan(5);
     for (const key of keys) expect(out).toContain(key);
@@ -127,5 +128,27 @@ describe('settings', () => {
     }
     expect(out).toMatch(new RegExp(`Settings: \\S*a007-cwd-\\S+\\.env, ~[\\\\/]\\.agent-007[\\\\/]\\.env\\n`));
     expect(out).toContain(`http://127.0.0.1:${port}`);
+  }, 30000);
+  // A PATH holding only a fake git (never run: there are no repos), so no
+  // real CLI and no network: npm, claude, codex and gh are all missing.
+  it('doctor exits 1 on a ✗ with its fix, 0 when nothing is ✗', async () => {
+    const port = await new Promise((res) => { const s = createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
+    const bin = mkdtempSync(join(tmpdir(), 'a007-bin-'));
+    writeFileSync(join(bin, process.platform === 'win32' ? 'git.cmd' : 'git'), '#!/bin/sh\nexit 0\n');
+    if (process.platform !== 'win32') chmodSync(join(bin, 'git'), 0o755);
+    const doctor = (extra) => {
+      try {
+        return { code: 0, out: execFileSync(process.execPath, [join(ROOT, 'bin/agent-007.js'), 'doctor', '--port', String(port)], { cwd, env: env({ PATH: bin, CLAUDE_CONFIG_DIR: join(home, '.claude'), ...extra }), encoding: 'utf8', stdio: 'pipe' }) };
+      } catch (err) {
+        return { code: err.status, out: err.stdout + err.stderr };
+      }
+    };
+    const broken = doctor({});
+    expect(broken.code).toBe(1);
+    expect(broken.out).toMatch(/✗ claude is not installed; Billion runs on it\n {4}fix: /);
+    const fine = doctor({ BILLION: '0' });
+    expect(fine.out).not.toContain('✗');
+    expect(fine.out).toContain('– claude not installed (nothing uses it)');
+    expect(fine.code).toBe(0);
   }, 30000);
 });
