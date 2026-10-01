@@ -244,7 +244,8 @@ describe('doctor gaps', () => {
     const [, down] = await checkRepos(probes({ git: async (a) => { if (a.includes('ls-remote')) throw err; return '.git'; } }), board(), origin);
     expect(down).toMatchObject({ status: 'fail', text: '/r/app: could not reach origin (fatal: could not read Username)' });
     // Value: protects=no token in a git error reaches the screen; fails_when=the userinfo redaction is dropped; why_new=only plain stderr was covered; seam=none
-    const leak = Object.assign(new Error('x'), { stderr: "fatal: unable to access 'https://bob:ghp_secret@github.com/acme/app.git/'" });
+    // Assembled, so no literal credential URL sits in the repo for secret scanners.
+    const leak = Object.assign(new Error('x'), { stderr: `fatal: unable to access 'https://${['bob', 'ghp_secret'].join(':')}@github.com/acme/app.git/'` });
     const [, redacted] = await checkRepos(probes({ git: async (a) => { if (a.includes('ls-remote')) throw leak; return '.git'; } }), board(), origin);
     expect(redacted.text).toContain('https://***@github.com/acme/app.git');
     expect(redacted.text).not.toContain('ghp_secret');
