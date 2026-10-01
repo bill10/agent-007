@@ -70,6 +70,17 @@ describe('a once schedule', () => {
     expect(Math.abs(Date.parse(r.job.nextRunAt) - at.getTime())).toBeLessThan(60_000);
   });
 
+  it('is what the + Job form builds: runAtToSchedule\'s cron with once, via addJob and updateJob', () => {
+    const at = new Date(Date.now() + 3600_000);
+    const { schedule } = runAtToSchedule(at.toISOString());
+    const r = addJob({ title: 'Form once', repoPath: REPO, type: 'scheduled', schedule, once: true }, noop);
+    expect(r.job).toMatchObject({ type: 'scheduled', once: true, schedule });
+    const later = runAtToSchedule(new Date(Date.now() + 2 * 3600_000).toISOString()).schedule;
+    expect(updateJob(r.job.id, { type: 'scheduled', schedule: later, once: true }, noop).job.schedule).toBe(later);
+    // switching to Recurring sends once:false
+    expect(updateJob(r.job.id, { type: 'scheduled', schedule: '0 9 * * 1', once: false }, noop).job.once).toBe(false);
+  });
+
   it('refuses run_at with a schedule, once on a card with no schedule, and a non-boolean once', () => {
     const later = new Date(Date.now() + 86_400_000).toISOString();
     expect(postJobForAgent({ title: 'x', repo: REPO, runAt: later, schedule: '0 9 * * *' }, noop).error).toMatch(/not both/);

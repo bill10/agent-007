@@ -42,11 +42,15 @@ const BOARD_HTML = `
         <input type="text" id="job-title">
         <select id="job-repo"></select>
         <select id="job-type">
-          <option value="one-time">One-time</option>
-          <option value="scheduled">Scheduled</option>
+          <option value="one-time">Now</option>
+          <option value="once">Once at…</option>
+          <option value="scheduled">Recurring</option>
         </select>
         <div id="job-schedule-field" style="display:none">
           <input type="text" id="job-schedule">
+        </div>
+        <div id="job-run-at-field" style="display:none">
+          <input type="datetime-local" id="job-run-at">
         </div>
         <select id="job-agent">
           <option value="claude">Claude Code</option>
@@ -1259,6 +1263,40 @@ describe('the job form and schedules', () => {
     expect(send).toHaveBeenCalledWith(expect.objectContaining({
       type: 'job-create', title: 'Daily digest', jobType: 'scheduled', schedule: '0 9 * * 1-5',
     }));
+  });
+
+  it('Once at… shows a time box instead of the cron box and posts runAt as an instant', () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Follow up';
+    type().value = 'once';
+    type().dispatchEvent(new Event('change'));
+    expect(field().style.display).toBe('none');
+    expect(document.getElementById('job-run-at-field').style.display).toBe('flex');
+    expect(document.getElementById('job-requires-pr').value).toBe('yes');
+    const at = new Date(Date.now() + 3600_000);
+    const p = n => String(n).padStart(2, '0');
+    // the box holds local wall-clock time; the request carries the same instant
+    document.getElementById('job-run-at').value = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}T${p(at.getHours())}:${p(at.getMinutes())}`;
+    document.getElementById('btn-job-save').click();
+    const msg = send.mock.calls.map(c => c[0]).find(m => m.type === 'job-create');
+    expect(msg).toMatchObject({ jobType: 'scheduled', once: true });
+    expect(Math.abs(Date.parse(msg.runAt) - at.getTime())).toBeLessThan(60_000);
+  });
+
+  it('Once at… needs a time that is in the future and within a year', () => {
+    document.getElementById('btn-new-job').click();
+    document.getElementById('job-title').value = 'Follow up';
+    type().value = 'once';
+    const err = () => document.getElementById('job-form-error').textContent;
+    document.getElementById('btn-job-save').click();
+    expect(err()).toMatch(/Pick the date/);
+    document.getElementById('job-run-at').value = '2020-01-01T09:00';
+    document.getElementById('btn-job-save').click();
+    expect(err()).toMatch(/future/);
+    document.getElementById('job-run-at').value = '2099-01-01T09:00';
+    document.getElementById('btn-job-save').click();
+    expect(err()).toMatch(/within the next year/);
+    expect(send).not.toHaveBeenCalledWith(JOB_SAVE);
   });
 
   it('catches an obviously wrong cron while the form is still open', () => {
