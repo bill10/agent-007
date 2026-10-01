@@ -14,6 +14,8 @@ import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
+import { roundPayload } from './rounds.js';
+import { statusPayload } from './billion-status.js';
 import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
@@ -33,8 +35,9 @@ const clients = new Set();
 export function broadcast(message) {
   // The owner's chat with Billion (server/owner.js) is theirs alone: their
   // browser, and nobody's while user accounts are on.
-  // So are Telegram's chat offers: a chat id and who sent it.
-  if (message.type === 'chat-message' || message.type === 'telegram-state') {
+  // So are Telegram's chat offers: a chat id and who sent it, and the tab's
+  // round (its brief) and status line, which are Billion's words to the owner.
+  if (['chat-message', 'telegram-state', 'round-state', 'billion-status'].includes(message.type)) {
     if (mayAnswerOwner()) broadcastToBrowsers(message);
     return;
   }
@@ -404,6 +407,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     // So is their chat with Billion.
     if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(chatPayload()));
     if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(telegramPayload()));
+    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(roundPayload()));
+    if (mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(statusPayload()));
 
     broadcastPresence();
 

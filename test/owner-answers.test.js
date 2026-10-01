@@ -442,7 +442,7 @@ describe('type', () => {
 
   it('is in the MCP schema, reaches notifyOwner, is kept on the item and its bubble, and old items get one once, saved', async () => {
     expect(NOTIFY_OWNER_TOOL.inputSchema.properties.type.enum).toEqual(QUESTION_TYPES);
-    expect(NOTIFY_OWNER_TOOL.description).toMatch(/Pass type/);
+    expect(NOTIFY_OWNER_TOOL.description).toMatch(/Pass project .* and type/);
     const notify = vi.fn(async () => ({ ok: true, n: 1 }));
     await handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'Merge?', type: 'engineering' } } },
       { session: { isBillion: true }, notifyOwner: notify });

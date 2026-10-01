@@ -71,7 +71,7 @@ describe('the owner typing in the Billion tab', () => {
   });
 
   it('delivers a long answer whole with its line breaks', async () => {
-    await notifyOwner('Which listing?', { env: {}, now: now() });
+    await notifyOwner('Which listing?', { env: {}, now: now(), queue: false });
     const [q] = waitingItems();
     const listing = Array.from({ length: 60 }, (_, i) => `Line ${i} of the pasted listing`).join('\n');
     expect(await ownerSays(listing, { answers: q.id })).toMatchObject({ ok: true });
@@ -81,7 +81,7 @@ describe('the owner typing in the Billion tab', () => {
 
   it('answers the question it names, as a typed answer: the question collapses and the words show as the owner\'s', async () => {
     const broadcast = vi.fn();
-    await notifyOwner('Merge #12?', { env: {}, now: now(), choices: ['yes', 'no'], recommended: 'yes', broadcast });
+    await notifyOwner('Merge #12?', { env: {}, now: now(), choices: ['yes', 'no'], recommended: 'yes', broadcast, queue: false });
     const [q] = waitingItems();
     expect(await ownerSays('yes, after CI', { answers: q.id, broadcast })).toMatchObject({ ok: true });
     expect(typed()).toContain(`${APP_PREFIX} Q1: yes, after CI (re: "Merge #12?")`);
@@ -118,7 +118,7 @@ describe('Billion\'s side of the thread', () => {
   });
 
   it('opens a thread that does not exist yet on the questions already asked', async () => {
-    await notifyOwner('Asked before the chat', { env: {}, now: now() });
+    await notifyOwner('Asked before the chat', { env: {}, now: now(), queue: false });
     rmSync(join(CONFIG_DIR, 'chat.json'));
     expect(chatMessages()).toEqual([expect.objectContaining({ from: 'billion', text: 'Asked before the chat', q: expect.objectContaining({ n: 1, status: 'open' }) })]);
   });
@@ -143,7 +143,7 @@ describe('Billion\'s side of the thread', () => {
   });
 
   it('redacts the token from a question too, in the Waiting list the strip shows', async () => {
-    await notifyOwner(`use ${TOKEN}?`, { env: ENV, now: now() });
+    await notifyOwner(`use ${TOKEN}?`, { env: ENV, now: now(), queue: false });
     expect(waitingItems()[0].text).toBe('use <token>?');
     expect(chatMessages()[0].text).toBe('use <token>?');
   });
@@ -202,7 +202,7 @@ describe('attachments in the Billion tab', () => {
   });
 
   it('answers a question with them, the paths on the same turn', async () => {
-    await notifyOwner('Which logo?', { env: {}, now: now() });
+    await notifyOwner('Which logo?', { env: {}, now: now(), queue: false });
     const [q] = waitingItems();
     expect(await ownerSays('this one', { answers: q.id, files: [file('logo.svg', '<svg/>', 'image/svg+xml')] })).toMatchObject({ ok: true });
     const answer = chatMessages().at(-1);

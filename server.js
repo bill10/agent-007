@@ -33,7 +33,7 @@ import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, r
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
-import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand } from './lib/jobs.js';
+import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand, deriveJobStatus } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
@@ -48,7 +48,9 @@ import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
 import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
-import { startTelegram, stopTelegram, notifyOwner, tellOwner } from './server/owner.js';
+import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
+import { nextRound } from './server/rounds.js';
+import { setStatusFacts, publishStatus } from './server/billion-status.js';
 import { startModelRefresh } from './server/models.js';
 import { refreshAgentAccounts } from './server/agent-accounts.js';
 
@@ -534,6 +536,35 @@ function startBillionWakes() {
   wakeTimer.unref?.();
 }
 
+// Rounds (server/rounds.js) and the Billion tab's status line
+// (server/billion-status.js): whether or not Billion runs, a round still
+// comes due and the line still says so.
+let roundTimer = null;
+const sessionForJob = (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null);
+function startRounds() {
+  setStatusFacts(() => ({
+    billion: liveBillion(),
+    workers: allJobs().filter(job => job.postedByBillion && job.state === 'in-progress'
+      && deriveJobStatus(job, sessionForJob(job)) === 'running').length,
+    nextRoundAt: nextRound()?.at ?? null,
+  }));
+  clearInterval(roundTimer);
+  let ticking = false;
+  roundTimer = setInterval(async () => {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await roundTick({ broadcast });
+      publishStatus(broadcast);
+    } catch (err) {
+      console.error('Rounds: tick failed:', err.message);
+    } finally {
+      ticking = false;
+    }
+  }, WAKE_TICK_MS);
+  roundTimer.unref?.();
+}
+
 // --- WebSocket ---
 setupWebSocket(wss, { createSession, killSession, startBillion: startBillionUnlessSwitching, switchBillion, accountAction, accountState: accountStatePayload });
 
@@ -593,6 +624,7 @@ async function startup() {
   }
   // After Billion, so a reply waiting in Telegram finds it running.
   startTelegram({ broadcast });
+  startRounds();
   server.listen(PORT, HOST, () => {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
     const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
@@ -612,6 +644,7 @@ function gracefulShutdown() {
   stopDispatcher();
   stopTelegram();
   clearInterval(wakeTimer);
+  clearInterval(roundTimer);
   const killPromises = [];
   for (const [, session] of sessions) {
     clearInterval(session.stateCheckInterval);

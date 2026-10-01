@@ -24,6 +24,8 @@ import { APPROVAL_WAIT_MS, READ_APPROVAL_BYTES } from './agent-mcp.js';
 import { SCREEN_LINES_DEFAULT, SCREEN_LINES_MAX, quoteLines, oneLine } from './messages.js';
 import { MAX_CHOICES, MAX_CHOICE_CHARS, QUESTION_TYPES } from './owner.js';
 import { WAKE_MIN_MIN, WAKE_MAX_MIN, WAKE_QUIET_MIN, WAKE_BUSY_MIN } from './billion-wake.js';
+import { MAX_BRIEF_CHARS } from './rounds.js';
+import { MAX_STATUS_CHARS, STATUS_TTL_MS } from './billion-status.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -380,15 +382,19 @@ export const READ_APPROVAL_TOOL = {
 export const NOTIFY_OWNER_TOOL = {
   name: 'notify_owner',
   description:
-    'Put a question or a decision in front of the owner when they may be away '
-    + 'from the terminal: it goes in the "Billion" chat tab of the owner\'s '
-    + 'browser, numbered (Q3), and to their phone over Telegram only when it is '
-    + 'blocking (or you pass telegram: true); normal and low questions wait in the tab. One short message: the question, why, and what you recommend. When the '
-    + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the '
-    + 'one you recommend: the owner answers with one tap. Their answer arrives in '
-    + 'this terminal as "[Owner via app] Q3: <answer>" or "[Owner via Telegram] Q3: '
-    + '<answer>". Pass project, the repo it is about, so the owner sees it under that project. '
-    + `Pass type, what kind of question it is (${QUESTION_TYPES.join(', ')}), so the owner can group by it. At most a few per minute.`,
+    'Queue a question or a decision for the owner. The owner is come to in rounds, twice a day (by default 08:30 and '
+    + '15:30 their time): at each round the server shows the top two queued questions of each project (the department) '
+    + 'in the "Billion" tab, numbered (Q3), and everything the previous round left open is consolidated (closed as '
+    + 'history; you are told which, and re-queue one only if it is still among its project\'s top two). Queued '
+    + 'questions beyond two per project wait for a later round; see them with list_round_queue, drop one with '
+    + 'drop_queued, or order them with rank. One short message: the question, why, and what you recommend. When the '
+    + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the one you recommend: the owner '
+    + 'answers with one tap. Their answer arrives in this terminal as "[Owner via app] Q3: <answer>" or '
+    + '"[Owner via Telegram] Q3: <answer>". Pass project (the repo it is about) and type ('
+    + `${QUESTION_TYPES.join(', ')}). `
+    + 'EMERGENCIES ONLY: urgency "blocking" or telegram: true skips the round and reaches the owner at once, on '
+    + 'their phone too. Use it only when something is stopped until they answer and it cannot wait for the next '
+    + 'round; everything else waits for the round. At most a few of those per minute.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -401,22 +407,86 @@ export const NOTIFY_OWNER_TOOL = {
       recommended: { type: 'string', description: 'The choice you recommend; must be one of choices.' },
       urgency: {
         type: 'string', enum: ['blocking', 'normal', 'low'],
-        description: 'blocking: a worker or a merge is stopped until the owner answers. '
-          + 'normal (the default): a decision you work around meanwhile. low: optional.',
+        description: 'blocking: a true emergency, something is stopped until the owner answers and it cannot wait '
+          + 'for the next round; it goes out at once, to their phone too. normal (the default): queued for the next '
+          + 'round, a decision you work around meanwhile. low: queued, optional, goes after normal ones.',
+      },
+      rank: {
+        type: 'integer', minimum: 1, maximum: 99,
+        description: 'Optional. Your order among this project\'s queued questions of the same urgency: 1 goes first; '
+          + 'a ranked question goes before an unranked one, and among unranked the newest goes first.',
       },
       project: {
         type: 'string', maxLength: 200,
-        description: 'Pass the repo the question is about, by its folder name on the board (e.g. "agent-007"), or "general"; the owner\'s tab groups questions by it.',
+        description: 'Pass the repo the question is about, by its folder name on the board (e.g. "agent-007"), or "general". It is the department: each gets at most two questions a round.',
       },
       type: {
         type: 'string', enum: QUESTION_TYPES,
-        description: 'What kind of question it is; left out, it is read off the text. The owner\'s tab can group questions by it.',
+        description: 'What kind of question it is; left out, it is read off the text.',
       },
       telegram: {
         type: 'boolean',
-        description: 'Whether to push it to the owner\'s phone over Telegram. Left out: yes when urgency is blocking, '
-          + 'no otherwise. Pass true only for a non-blocking question that is super urgent; false keeps even a blocking one in the tab.',
+        description: 'true: an emergency that skips the round and goes to the owner\'s phone now, even when not '
+          + 'blocking. false: keep it off the phone; a blocking one then waits for the round, first in its project. '
+          + 'Left out: a blocking question goes out at once, anything else waits for the round.',
       },
+    },
+    required: ['text'],
+    additionalProperties: false,
+  },
+};
+
+export const LIST_ROUND_QUEUE_TOOL = {
+  name: 'list_round_queue',
+  description:
+    'List the questions you queued with notify_owner that the owner has not seen yet, by project, in the order the '
+    + 'next round takes them (it shows the top two of each). Use it to re-rank (ask again with rank, then '
+    + 'drop_queued the old one) or to drop what no longer matters.',
+  inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+};
+
+export const DROP_QUEUED_TOOL = {
+  name: 'drop_queued',
+  description: 'Take a queued question out of the round queue before the owner sees it. Name it by number (3 for Q3) or id.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      number: { type: 'integer', minimum: 1, description: 'The question\'s number: 3 for Q3.' },
+      id: { type: 'string', description: 'The question\'s id, instead of number.' },
+    },
+    additionalProperties: false,
+  },
+};
+
+export const SET_ROUND_BRIEF_TOOL = {
+  name: 'set_round_brief',
+  description:
+    `Set the brief shown at the top of a round in the owner's Billion tab, up to ${MAX_BRIEF_CHARS} characters: `
+    + 'what happened since the last round and what the questions below are about, in two or three sentences. '
+    + 'It also goes in the round\'s one Telegram message. For the next round by default; round: "current" '
+    + 'changes the round on screen now. "" clears it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', maxLength: MAX_BRIEF_CHARS, description: 'The brief, written to be read on a phone.' },
+      round: { type: 'string', enum: ['next', 'current'], description: 'Which round: next (the default) or current.' },
+    },
+    required: ['text'],
+    additionalProperties: false,
+  },
+};
+
+export const SET_STATUS_TOOL = {
+  name: 'set_status',
+  description:
+    `Say in one line (up to ${MAX_STATUS_CHARS} characters) what you are doing now, e.g. "reviewing PR #120". It shows `
+    + 'at the top of the owner\'s Billion tab beside what the server knows (workers running, the next round), so a '
+    + `slow reply is never a blank screen. Cheap: call it when you start something that takes a while. It fades after ${STATUS_TTL_MS / 60000} `
+    + 'minutes without an update; "" clears it.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      text: { type: 'string', maxLength: MAX_STATUS_CHARS, description: 'What you are doing, as a short phrase.' },
     },
     required: ['text'],
     additionalProperties: false,
@@ -543,7 +613,8 @@ export const SET_NEXT_WAKE_TOOL = {
 };
 
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL, WITHDRAW_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
+  LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
 export function toolsFor(session, models) {
@@ -561,6 +632,9 @@ export function toolsFor(session, models) {
     },
   } : tool));
 }
+
+// "the 15:30 round", as notify_owner and list_round_queue name it.
+const roundName = (round) => (round ? `the ${round.id.split(' ')[1]} round (${round.label})` : 'the next round (rounds are off)');
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -779,11 +853,50 @@ const CALLS = {
 
   [NOTIFY_OWNER_TOOL.name]: async (args, ctx) => {
     const result = ctx.notifyOwner
-      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency, project: args.project, type: args.type, telegram: args.telegram })
+      ? await ctx.notifyOwner(args.text, { choices: args.choices, recommended: args.recommended, urgency: args.urgency, project: args.project, type: args.type, telegram: args.telegram, rank: args.rank })
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
+    if (result.queued) {
+      const round = roundName(result.nextRound);
+      return toolText(result.position <= result.max
+        ? `Queued as Q${result.n} for ${round}, position ${result.position} of ${result.max} in ${result.project}. The owner sees it then, not before; their answer arrives here as [Owner via app] Q${result.n}: …. Keep working on everything else.`
+        : `Queued as Q${result.n}, position ${result.position} in ${result.project}: behind the top ${result.max}, so it is not in ${round} unless you drop or out-rank one ahead of it (list_round_queue, drop_queued, rank).`);
+    }
     const where = result.telegram === false ? `; not sent to Telegram (${result.held})` : ' and sent on Telegram';
     return toolText(`Put in the owner's Billion tab as Q${result.n}${where}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
+  },
+
+  [LIST_ROUND_QUEUE_TOOL.name]: (args, ctx) => {
+    const result = ctx.listRoundQueue ? ctx.listRoundQueue() : { error: 'Only Billion has a round queue.' };
+    if (result.error) return toolText(result.error, true);
+    const head = `${result.open} question(s) open on the owner's screen now. Next: ${roundName(result.nextRound)}, taking the top ${result.max} of each project.`;
+    if (!result.projects.length) return toolText(`${head}\nNothing queued.`);
+    const lines = result.projects.map(({ project, items }) => `${project} (${items.length})\n${items.map((q, i) => {
+      const bits = [q.urgency !== 'normal' ? q.urgency : null, q.rank != null ? `rank ${q.rank}` : null, i < result.max ? 'next round' : 'later'];
+      return `  ${i + 1}. Q${q.n} [${bits.filter(Boolean).join(', ')}] ${oneLine(q.text).slice(0, 120)}`;
+    }).join('\n')}`);
+    return toolText(`${head}\n\n${lines.join('\n\n')}`);
+  },
+
+  [DROP_QUEUED_TOOL.name]: (args, ctx) => {
+    if (args.number === undefined && !args.id) return toolText('Name the question by number or id.', true);
+    const result = ctx.dropQueued ? ctx.dropQueued({ number: args.number, id: args.id }) : { error: 'Only Billion has a round queue.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(`Dropped Q${result.item.n} from the round queue; the owner will not see it.`);
+  },
+
+  [SET_ROUND_BRIEF_TOOL.name]: (args, ctx) => {
+    const which = args.round ?? 'next';
+    const result = ctx.setRoundBrief ? ctx.setRoundBrief(args.text, which) : { error: 'Only Billion writes the round brief.' };
+    if (result.error) return toolText(result.error, true);
+    const round = which === 'current' ? 'the round on screen' : 'the next round';
+    return toolText(result.cleared ? `Cleared the brief for ${round}.` : `The brief is set for ${round}.`);
+  },
+
+  [SET_STATUS_TOOL.name]: (args, ctx) => {
+    const result = ctx.setStatus ? ctx.setStatus(args.text) : { error: 'Only Billion has a status line.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(result.cleared ? 'Status cleared.' : 'Status shown in the owner\'s Billion tab.');
   },
 
   [TELL_OWNER_TOOL.name]: async (args, ctx) => {

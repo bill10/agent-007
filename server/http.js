@@ -17,7 +17,9 @@ import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
-import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath } from './owner.js';
+import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath, roundQueue, dropQueued } from './owner.js';
+import { nextRound, setRoundBrief, roundPayload } from './rounds.js';
+import { setBillionStatus, publishStatus } from './billion-status.js';
 import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
 import { setBillionNotice } from './billion.js';
@@ -139,9 +141,27 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         readApproval: (id) => (req.agentSession.isBillion
           ? readApproval(id)
           : { error: 'Only Billion can read approval requests.' }),
-        notifyOwner: (text, { choices, recommended, urgency, project, type, telegram } = {}) => (req.agentSession.isBillion
-          ? notifyOwner(text, { choices, recommended, urgency, project, type, telegram, broadcast })
+        notifyOwner: async (text, { choices, recommended, urgency, project, type, telegram, rank } = {}) => (req.agentSession.isBillion
+          ? { ...await notifyOwner(text, { choices, recommended, urgency, project, type, telegram, rank, broadcast }), nextRound: nextRound() }
           : { error: 'Only Billion can notify the owner.' }),
+        listRoundQueue: () => (req.agentSession.isBillion
+          ? { ...roundQueue(), nextRound: nextRound() }
+          : { error: 'Only Billion has a round queue.' }),
+        dropQueued: (ref) => (req.agentSession.isBillion
+          ? dropQueued(ref)
+          : { error: 'Only Billion has a round queue.' }),
+        setRoundBrief: (text, which) => {
+          if (!req.agentSession.isBillion) return { error: 'Only Billion writes the round brief.' };
+          const result = setRoundBrief(text, which);
+          if (result.ok && which === 'current') broadcast(roundPayload());
+          return result;
+        },
+        setStatus: (text) => {
+          if (!req.agentSession.isBillion) return { error: 'Only Billion has a status line.' };
+          const result = setBillionStatus(text);
+          if (result.ok) publishStatus(broadcast);
+          return result;
+        },
         tellOwner: (text) => (req.agentSession.isBillion
           ? tellOwner(text, { broadcast })
           : { error: 'Only Billion can message the owner.' }),
