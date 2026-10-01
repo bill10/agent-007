@@ -1,6 +1,6 @@
 # Reconciling a gone schedule run
 
-Billion's `reconcile_job(id, replacement_id, reason)` records an interruption,
+The single-player Billion's `reconcile_job(id, replacement_id, reason)` records an interruption,
 not successful completion. Use it only after verifying that external work and
 any exclusive producer guard have safely transferred to the replacement. This
 control does not inspect, acquire, release, or remove external locks or processes.
@@ -44,8 +44,16 @@ preparing a code change.
 | Interrupted Review | Done, summary present, worker retired | Eligible under normal due/pause/cap rules |
 | Interrupted Review | Missing / detached / archived without running | Held |
 
-The authority is the authenticated Billion session controlling its own two cards
-and schedule, with an exact replacement worker job/repository/owner match. The
+`allJobs()` is a shared board, not a tenant-filtered store. Cards contain
+`postedBy` and the server-set `postedByBillion` flag, but no per-Billion principal.
+Billion currently has one server-wide identity and is disabled with user accounts;
+this operation also enforces that boundary at call time. It requires user accounts
+to be disabled, a null-owner caller that is the sole live Billion session, and
+null `postedBy` plus `postedByBillion` on the original, replacement, and schedule.
+Any original recovery link is rejected directly. There is no claim of tenant
+ownership inferred from replacement worker equality: that equality is an additional
+check on the exact worker/job/repository binding. A future per-user Billion would
+require a separate durable principal model before this control could support it. The
 original ID in replacement instructions corroborates intent; it does not grant
 permission by itself. The server derives and persists both directions of the
 binding after validation. The caller's reason is an auditable operator assertion

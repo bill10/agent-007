@@ -355,7 +355,7 @@ export const ADD_REPO_TOOL = {
 // A verified recovery handoff, without claiming the original succeeded.
 export const RECONCILE_JOB_TOOL = {
   name: 'reconcile_job',
-  description: 'Record a gone no-PR schedule run as interrupted in Review and link an already-running recovery card. Only your own cards, with no live original worker or orphan. Preserves history and holds the schedule through recovery Review until explicit acceptance and worker retirement. Verify external production ownership first; this does not touch processes or locks.',
+  description: 'Record a gone no-PR schedule run as interrupted in Review and link an already-running recovery card. Single-player only: the sole live, unowned Billion with user accounts disabled; only Billion-posted cards, with no live original worker or orphan. Preserves history and holds the schedule through recovery Review until explicit acceptance and worker retirement. Verify external production ownership first; this does not touch processes or locks.',
   inputSchema: {
     type: 'object',
     properties: {

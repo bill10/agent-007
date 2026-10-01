@@ -18,6 +18,7 @@ import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
 import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
 import { liveBillion } from './billion.js';
+import { authEnabled } from './auth.js';
 import {
   createJob, selectDispatchableJobs, countInFlightByRepo, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr, prCiViewArgs, parsePrCi,
@@ -996,18 +997,28 @@ export function retireJobForAgent({ session, id, reason }, broadcast) {
 // Explicit handoff of a gone scheduled run. No PTY/worktree operations and no
 // await between validation and persistence: a revived worker cannot race this.
 export function reconcileJobForAgent({ session, id, replacementId, reason }, broadcast) {
-  if (!session?.isBillion) return { error: 'Only Billion can reconcile cards.' };
+  if (session?.isBillion !== true) return { error: 'Only Billion can reconcile cards.' };
+  // Jobs are shared, not tenant-scoped, and do not store a Billion principal.
+  // This control is only safe in the existing single-player Billion model.
+  // Recheck auth dynamically: users can be added while Billion is running.
+  const billions = [...sessions.values()].filter(s => s.isBillion && !s.exited);
+  if (authEnabled() || session.ownerId !== null || sessions.get(session.id) !== session
+      || billions.length !== 1 || billions[0] !== session) {
+    return { error: 'Reconciliation requires the sole live, unowned Billion with user accounts disabled.' };
+  }
   const job = allJobs().find(j => j.id === id);
   const replacement = allJobs().find(j => j.id === replacementId);
   if (!job || !replacement || job === replacement) return { error: 'Name two distinct existing cards.' };
-  if (!job.postedByBillion || !replacement.postedByBillion || job.postedBy || replacement.postedBy) {
+  if (job.postedByBillion !== true || replacement.postedByBillion !== true
+      || job.postedBy !== null || replacement.postedBy !== null) {
     return { error: 'Both cards must belong to Billion.' };
   }
-  if (job.state !== 'in-progress' || jobRequiresPr(job) || job.prUrl || !job.scheduleId || job.interruptedAt) {
+  if (job.state !== 'in-progress' || jobRequiresPr(job) || job.prUrl || !job.scheduleId
+      || job.interruptedAt || job.recoveryJobId != null || job.recoversJobId != null) {
     return { error: 'Only an unreconciled In progress no-PR schedule run can be interrupted.' };
   }
   const schedule = allJobs().find(j => j.id === job.scheduleId && isScheduled(j));
-  if (!schedule || !schedule.postedByBillion || schedule.postedBy || schedule.repoPath !== job.repoPath) return { error: 'The original schedule is missing or mismatched.' };
+  if (!schedule || schedule.postedByBillion !== true || schedule.postedBy !== null || schedule.repoPath !== job.repoPath) return { error: 'The original schedule is missing or mismatched.' };
   // Check all sessions, not just the saved id, including a re-adopted worker.
   const matches = entry => entry.id === job.agentSessionId || entry.jobId === job.id
     || (entry.repoPath === job.repoPath && job.branchName && entry.branchName === job.branchName);
@@ -1021,7 +1032,7 @@ export function reconcileJobForAgent({ session, id, replacementId, reason }, bro
       || (worker.ownerId || null) !== (session.ownerId || null)
       || replacement.repoPath !== job.repoPath || jobRequiresPr(replacement) || replacement.prUrl
       || isScheduled(replacement) || replacement.scheduleId || replacement.interruptedAt
-      || replacement.recoveryJobId || replacement.recoversJobId
+      || replacement.recoveryJobId != null || replacement.recoversJobId != null
       || !String(replacement.detail || '').includes(job.id)) {
     return { error: 'Replacement must be a live standalone no-PR card in the same repository and owner scope, explicitly naming the original card in its instructions.' };
   }

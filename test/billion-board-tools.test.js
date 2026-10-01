@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import express from 'express';
 import { createServer } from 'http';
-import { mkdtempSync, realpathSync } from 'fs';
+import { mkdtempSync, realpathSync, writeFileSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -17,8 +17,8 @@ execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q'
 
 const { config, sessions, orphans } = await import('../server/state.js');
 const { setupRoutes } = await import('../server/http.js');
-const { addJob, allJobs, boardSettings, fireSchedules, moveJob } = await import('../server/jobs.js');
-const { mintAgentToken } = await import('../server/auth.js');
+const { addJob, allJobs, boardSettings, fireSchedules, moveJob, reconcileJobForAgent } = await import('../server/jobs.js');
+const { mintAgentToken, USERS_PATH } = await import('../server/auth.js');
 const { BILLION_NAME, scheduleHold, supersededRuns, runsToPrune } = await import('../lib/jobs.js');
 
 const BILLION_TOKEN = mintAgentToken();
@@ -38,6 +38,7 @@ const baseUrl = `http://127.0.0.1:${server.address().port}`;
 afterAll(() => server.close());
 
 beforeEach(() => {
+  rmSync(USERS_PATH, { force: true });
   config.repos = [{ path: REPO }];
   config.jobs = [];
   config.jobBoard = null;
@@ -221,8 +222,8 @@ describe('reconcile_job', () => {
     expect(scheduleHold(schedule, allJobs())).toMatch(/missing or detached/);
   });
 
-  it.each(['live', 'orphan', 'replacement gone', 'wrong repo', 'PR', 'linked', 'owner', 'reason', 'unrelated', 'cross owner', 'self'])('refuses unsafe handoff: %s', async mode => {
-    const { old, replacement, args } = recovery();
+  it.each(['live', 'orphan', 'replacement gone', 'wrong repo', 'PR', 'linked', 'owner', 'reason', 'unrelated', 'cross owner', 'self', 'original owner', 'schedule owner', 'original recovers', 'original recovery', 'caller owner', 'second Billion', 'empty original link', 'empty replacement link'])('refuses unsafe handoff: %s', async mode => {
+    const { schedule, old, replacement, args } = recovery();
     if (mode === 'live') sessions.set('revived', { jobId: old.id, exited: false });
     if (mode === 'orphan') orphans.set('parked', { jobId: old.id });
     if (mode === 'replacement gone') sessions.delete('s-worker');
@@ -234,6 +235,14 @@ describe('reconcile_job', () => {
     if (mode === 'unrelated') replacement.detail = 'Unrelated task';
     if (mode === 'cross owner') sessions.get('s-worker').ownerId = 'other';
     if (mode === 'self') args.replacement_id = old.id;
+    if (mode === 'original owner') old.postedBy = 'other-owner';
+    if (mode === 'schedule owner') schedule.postedBy = 'other-owner';
+    if (mode === 'original recovers') old.recoversJobId = 'earlier';
+    if (mode === 'original recovery') old.recoveryJobId = 'existing';
+    if (mode === 'caller owner') sessions.get('s-billion').ownerId = 'another-owner';
+    if (mode === 'empty original link') old.recoveryJobId = '';
+    if (mode === 'empty replacement link') replacement.recoversJobId = '';
+    if (mode === 'second Billion') sessions.set('other-billion', { id: 'other-billion', isBillion: true, exited: false });
     expect((await call('reconcile_job', args)).isError).toBe(true);
     expect(old.state).toBe('in-progress');
     expect(old.interruptedAt).toBeUndefined();
@@ -260,6 +269,32 @@ describe('reconcile_job', () => {
     await retiring;
     expect(scheduleHold(schedule, allJobs())).toBeNull();
     expect(old.interruptedAt).toBeTruthy();
+  });
+
+  it.each(['impostor', 'unregistered', 'exited'])('refuses a non-current Billion identity: %s', mode => {
+    const { old, replacement, args } = recovery();
+    let session = sessions.get('s-billion');
+    if (mode === 'impostor') session = { ...session };
+    if (mode === 'unregistered') sessions.delete(session.id);
+    if (mode === 'exited') session.exited = true;
+    const result = reconcileJobForAgent({ session, id: old.id, replacementId: replacement.id, reason: args.reason }, () => {});
+    expect(result.error).toMatch(/sole live/);
+    expect(old.state).toBe('in-progress');
+    expect(replacement.scheduleId).toBeFalsy();
+  });
+
+  it('refuses a running Billion after user accounts are enabled', () => {
+    const { old, replacement, args } = recovery();
+    try {
+      writeFileSync(USERS_PATH, JSON.stringify([{ id: 'another-owner', tokenHash: 'unused' }]));
+      const result = reconcileJobForAgent({ session: sessions.get('s-billion'), id: old.id,
+        replacementId: replacement.id, reason: args.reason }, () => {});
+      expect(result.error).toMatch(/user accounts disabled/);
+      expect(old.state).toBe('in-progress');
+      expect(replacement.scheduleId).toBeFalsy();
+    } finally {
+      rmSync(USERS_PATH, { force: true });
+    }
   });
 
   it('keeps the schedule held when retirement fails', async () => {
