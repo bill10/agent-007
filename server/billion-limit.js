@@ -107,7 +107,7 @@ export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: n
  * One look at Billion's screen. Returns what it did: 'warned', 'switched',
  * 'paused', 'migrated', 'migration-failed' or null. The actions come in so
  * the tests need no CLI: switchTo(agent, reason), notify(text) (a Waiting
- * item and Telegram), tell(text) (Telegram only), ready(agent) (cliReady),
+ * item, pushed to Telegram too), tell(text) (Telegram only), ready(agent) (cliReady),
  * and migration { armed(), run(hit) }: the owner's armed Claude account
  * switch, which needs no BILLION_AUTO_SWITCH and applies to a Claude Billion.
  */
