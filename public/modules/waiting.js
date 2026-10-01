@@ -15,6 +15,7 @@ import { send } from './ws.js';
 import { hideJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
 import { renderRound, renderBillionStatus, initSubTabs, subTab } from './round.js';
+import { patchChildren, rev, atBottom } from './dom-patch.js';
 import {
   readAloudSupported, speakableText, toggleSpeak, readNew, speakingMessage, stopReading,
   autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
@@ -445,6 +446,9 @@ function bubble(m) {
   const mine = m.from === 'owner';
   const row = el('div', `chat-msg ${mine ? 'mine' : 'theirs'}`);
   row.dataset.id = m.id;
+  // Keyed, so a redraw keeps an unchanged bubble (and its own scroll) as it is.
+  row.dataset.key = m.id;
+  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id)]);
   const box = el('div', 'chat-bubble');
   if (m.q) {
     row.dataset.q = m.q.id;
@@ -755,7 +759,6 @@ function dropTarget(board) {
   });
 }
 
-const atBottom = (list) => list.scrollHeight - list.scrollTop - list.clientHeight < 40;
 
 export function renderComposer() {
   const input = document.getElementById('chat-input');
@@ -928,6 +931,8 @@ function questionSection(name, items) {
     document.querySelector(`.chat-questions-project[data-name="${CSS.escape(name)}"]`)?.focus({ preventScroll: true });
   };
   head.dataset.name = name;
+  section.dataset.key = name;
+  section.dataset.rev = rev([open, items, items.map(q => [pending.get(q.id), errors.get(q.id)])]);
   section.append(el('h3', 'chat-questions-heading'), body);
   section.firstChild.appendChild(head);
   if (open) for (const q of items) body.appendChild(questionRow(q));
@@ -942,11 +947,8 @@ function renderPanel() {
   document.getElementById('waiting-board').classList.toggle('questions-open', shown);
   for (const b of panel.querySelectorAll('.chat-questions-by button')) b.setAttribute('aria-pressed', String(b.value === groupBy));
   const body = document.getElementById('chat-questions-body');
-  const keep = body.scrollTop;
-  body.innerHTML = '';
-  if (!shown) return;
-  for (const { name, items } of groups) body.appendChild(questionSection(name, items));
-  body.scrollTop = keep;
+  // In place, never emptied, so the reader keeps their place in a long list.
+  patchChildren(body, shown ? groups.map(({ name, items }) => questionSection(name, items)) : []);
 }
 
 function questionsPanel() {
@@ -997,15 +999,18 @@ export function renderWaiting({ toBottom = false } = {}) {
   if (!list) return;
   const follow = toBottom || atBottom(list);
   const keep = list.scrollTop;
-  list.innerHTML = '';
   clearTimeout(undoTimer);
   undoSoonest = Infinity;
+  // Updated in place rather than emptied and refilled, so a broadcast never
+  // moves a reader who has scrolled up the thread.
+  const nodes = chatMessages.map(bubble);
   if (!chatMessages.length) {
     const empty = el('p', 'waiting-empty', 'Nothing here yet. Say something to Billion.');
+    empty.dataset.key = 'empty';
     empty.hidden = !!noticeText();
-    list.appendChild(empty);
+    nodes.push(empty);
   }
-  for (const m of chatMessages) list.appendChild(bubble(m));
+  patchChildren(list, nodes);
   // Drawn again when an Undo link's minute is up, so it goes.
   if (undoSoonest < Infinity) undoTimer = setTimeout(() => renderWaiting(), Math.min(undoSoonest, UNDO_MS) + 50);
   const jump = document.getElementById('chat-jump');

@@ -84,7 +84,23 @@ export const POST_JOB_TOOL = {
           + '@hourly, @daily, @weekly, @monthly, @yearly. Its runs report a summary '
           + 'unless requires_pr is true. A schedule holds off while its last run is '
           + 'still going or its PR is open, and a newer no-PR run replaces the last '
-          + 'one in Review. Omit this for ordinary work that should happen once.',
+          + 'one in Review. Omit this for ordinary work that should happen once now. '
+          + 'For work due once on a set date, pass run_at (or schedule with once: true) '
+          + 'so the card is archived after it runs instead of recurring every year.',
+      },
+      once: {
+        type: 'boolean',
+        description:
+          'Optional, with schedule. true: run a single time, at the schedule\'s next match, '
+          + 'then archive the schedule (its run card lives on). Use it for anything tied '
+          + 'to one date, such as a follow-up on 24 September.',
+      },
+      run_at: {
+        type: 'string',
+        description:
+          'Optional, instead of schedule: an ISO date-time ("2026-10-24T10:00", the '
+          + "server's local time unless it carries an offset) to run a single time, then "
+          + 'archive. Same as a one-date schedule with once: true. At most a year ahead.',
       },
       agent: {
         type: 'string',
@@ -189,6 +205,20 @@ export const EDIT_JOB_TOOL = {
         description:
           'Replaces the cron schedule (five fields, or an @shorthand). Pass an empty '
           + 'string to turn a scheduled card back into one that runs once.',
+      },
+      once: {
+        type: 'boolean',
+        description:
+          'true: the schedule runs a single time, at the schedule\'s next match, '
+          + 'then archive the schedule (its run card lives on). Use it for anything tied '
+          + 'to one date, such as a follow-up on 24 September.',
+      },
+      run_at: {
+        type: 'string',
+        description:
+          'Instead of schedule: an ISO date-time ("2026-10-24T10:00", the '
+          + "server's local time unless it carries an offset) to run a single time, then "
+          + 'archive. Same as a one-date schedule with once: true. At most a year ahead.',
       },
       model: {
         type: 'string',
@@ -318,6 +348,25 @@ export const ADD_REPO_TOOL = {
       path: { type: 'string', description: 'Absolute path to the repository on this machine (~/ is allowed).' },
     },
     required: ['path'],
+    additionalProperties: false,
+  },
+};
+
+// Billion's own To do cards, schedule or not, filed away without running.
+export const RETIRE_JOB_TOOL = {
+  name: 'retire_job',
+  description:
+    'Archive one of your own cards that is still in To do, without running it: a '
+    + 'schedule whose date has passed or that is no longer wanted, or a card the '
+    + 'plan moved past. It goes to the Finished archive with your reason as its '
+    + 'note; nothing is deleted. For a card in Review use close_job.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      id: { type: 'string', description: 'The card id, as list_jobs reports it.' },
+      reason: { type: 'string', description: 'Why it is retired; kept on the archived card.' },
+    },
+    required: ['id', 'reason'],
     additionalProperties: false,
   },
 };
@@ -613,7 +662,7 @@ export const SET_NEXT_WAKE_TOOL = {
 };
 
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL, WITHDRAW_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, RETIRE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
   LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
@@ -653,7 +702,7 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : null);
 // The cron and its next firing, built once: four builders used to spell this
 // out with three different separators, so the same fact read three ways.
 const scheduleText = (job, sep = ', next ') =>
-  `${job.schedule}${job.nextRunAt ? `${sep}${when(job.nextRunAt)}` : ''}`;
+  `${job.schedule}${job.once ? ' (once, then archived)' : ''}${job.nextRunAt ? `${sep}${when(job.nextRunAt)}` : ''}`;
 
 // One line per card: what it is, and the id needed to read or edit it. Kept
 // lean deliberately — who posted it and the whole detail body are what read_job
@@ -683,6 +732,8 @@ const CALLS = {
       detail: args.detail,
       repo: args.repo,
       schedule: args.schedule,
+      once: args.once,
+      runAt: args.run_at,
       agent: args.agent,
       model: args.model,
       requiresPr: args.requires_pr,
@@ -765,6 +816,7 @@ const CALLS = {
       job.editedByAgent ? `edited by ${job.editedByAgent}${job.editedAt ? ` on ${when(job.editedAt)}` : ''}` : null,
       // Surfaced, not swallowed: a card that failed to dispatch looks identical
       // to one waiting its turn unless the reason is said out loud.
+      job.archivedReason ? `archived: ${job.archivedReason}` : null,
       job.lastError ? `last error: ${job.lastError}` : null,
       job.prCheckError ? `pull request check: ${job.prCheckError}` : null,
       // Kept in step by hand with editableInPlace in server/jobs.js and with
@@ -783,6 +835,8 @@ const CALLS = {
       detail: args.detail,
       repo: args.repo,
       schedule: args.schedule,
+      once: args.once,
+      runAt: args.run_at,
       model: args.model,
       requiresPr: args.requires_pr,
     });
@@ -823,6 +877,14 @@ const CALLS = {
       ? `"${result.job.title}" is Done and its worker is closed.`
       : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`
         + (result.oldPrUrl ? ` Its old pull request is still open: close ${result.oldPrUrl}.` : ''));
+  },
+
+  [RETIRE_JOB_TOOL.name]: (args, ctx) => {
+    const result = ctx.retireJob
+      ? ctx.retireJob({ id: args.id, reason: args.reason })
+      : { error: 'Only Billion can retire cards.' };
+    if (result.error) return toolText(result.error, true);
+    return toolText(`"${result.job.title}" is archived in Finished with your note; it will not run.`);
   },
 
   [ANSWER_PERMISSION_TOOL.name]: (args, ctx) => {

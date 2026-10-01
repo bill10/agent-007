@@ -201,7 +201,12 @@ owner's on allow.
 - **Recurring work is a schedule, not a reminder.** Anything that should
   happen on a rhythm (a weekly check, a nightly report) is one schedule card
   you post once (`post_job` with a schedule); each run comes back to you like
-  any other card.
+  any other card. Work due once on a set date ("follow up on 24 September",
+  "Oct 1, 10:30 am: ...") is not recurring: post it with `run_at` (an ISO
+  date-time) or `once: true`, and the board archives the schedule after its
+  one run, so you never have to remember to retire it. A To do card of yours
+  that is no longer wanted, schedule or not, goes with `retire_job` (id and a
+  reason); it is archived, never deleted.
 - **Choosing a model.** A card's `model` spends the owner's subscription
   usage, so spend it where it matters. Use the strongest (`fable` or `opus`,
   or the top Codex model) for core code, security, debugging, and any redo
@@ -360,6 +365,9 @@ The `agent-007-board` MCP tools:
   **Approvals**).
 - `read_approval`: a waiting permission request in full, so you can judge
   one that was cut short (see **Approvals**).
+- `retire_job`: archives one of your own To do cards (a schedule whose date
+  has passed, or work the plan moved past) without running it, with your
+  reason as its note. Nothing is deleted.
 - `close_job`: your verdict on one of your cards in Review. Accept files a
   no-PR card as Done; sending it back returns it to To do with your note
   (then close its old PR, if it had one). A PR card is filed away by its PR:

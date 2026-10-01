@@ -28,6 +28,7 @@ import {
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
   BILLION_NAME, envPermissionMode, resolveJobModel, REQUEUE_HOLD_MS,
+  runAtToSchedule, spentOneDateSchedules,
 } from '../lib/jobs.js';
 import { availableModels } from './models.js';
 import { nextCronIso } from '../lib/cron.js';
@@ -319,8 +320,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
+export function addJob({ title, detail, repoPath, type, schedule, once, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, once, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -395,7 +396,23 @@ function scheduleTypeError(schedule) {
     : null;
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, type, agent, model, requiresPr, session, user }, broadcast) {
+// run_at and once, the two ways to say "a single time on a date": run_at is
+// turned into that minute's one-date cron, with once set. Shared by post_job
+// and edit_job. Returns { schedule, once } to apply (either can be undefined:
+// left alone), or { error }.
+function onceFields({ schedule, once, runAt }) {
+  if (once != null && typeof once !== 'boolean') return { error: 'once must be true or false' };
+  if (runAt == null) return { schedule, once };
+  if (schedule != null && String(schedule).trim()) {
+    return { error: 'Pass schedule or run_at, not both: run_at is the schedule for a single date.' };
+  }
+  if (once === false) return { error: 'run_at always runs once; leave once out, or pass a schedule instead.' };
+  const at = runAtToSchedule(runAt);
+  if (at.error) return at;
+  return { schedule: at.schedule, once: true };
+}
+
+export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, requiresPr, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -407,6 +424,9 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, mo
   // input here is answered with a message the caller can act on.
   const badSchedule = scheduleTypeError(schedule);
   if (badSchedule) return { error: badSchedule };
+  const single = onceFields({ schedule, once, runAt });
+  if (single.error) return { error: single.error };
+  schedule = single.schedule;
   if (type != null && typeof type !== 'string') {
     return { error: 'type must be a string — "one-time" or "scheduled"' };
   }
@@ -429,6 +449,7 @@ export function postJobForAgent({ title, detail, repo, schedule, type, agent, mo
     // the calling agent can act on rather than a card that never fires.
     type: typeof type === 'string' ? type : undefined,
     schedule: typeof schedule === 'string' ? schedule : '',
+    once: single.once,
     // Unnamed, the card runs on the same CLI as the agent posting it; a person
     // at the HTTP door with no session gets the board default.
     agent: agent || (session ? jobAgentFromCommand(session.command) : undefined),
@@ -486,7 +507,9 @@ function jobSummary(job) {
     requiresPr: jobRequiresPr(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
+    once: !!job.once,
     scheduleId: job.scheduleId || null,
+    archivedReason: job.archivedReason || null,
     lastSkipReason: job.lastSkipReason || null,
     repo: basename(job.repoPath || ''),
     editedByAgent: job.editedByAgent || null,
@@ -576,7 +599,7 @@ export function readJobForAgent(jobId) {
 // land says so out loud and leaves its name on the card, because the whole
 // hazard is an edit nobody sees. Reading stays board-wide — every browser
 // already sees every card — but writing does not.
-export function editJobForAgent({ id, title, detail, repo, schedule, model, requiresPr, session, user }, broadcast) {
+export function editJobForAgent({ id, title, detail, repo, schedule, once, runAt, model, requiresPr, session, user }, broadcast) {
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No job with id "${id}" — list the board to see the ids.` };
   const gate = editableInPlace(job);
@@ -599,6 +622,9 @@ export function editJobForAgent({ id, title, detail, repo, schedule, model, requ
 
   const fields = {};
   const changed = [];
+  const single = onceFields({ schedule, once, runAt });
+  if (single.error) return { error: single.error };
+  schedule = single.schedule;
   if (title !== undefined) {
     if (typeof title !== 'string' || !title.trim()) {
       return { error: 'Title must be a non-empty string — omit it to leave the title alone.' };
@@ -626,6 +652,11 @@ export function editJobForAgent({ id, title, detail, repo, schedule, model, requ
     fields.type = text ? 'scheduled' : 'one-time';
     if (text !== (job.schedule || '')) changed.push('schedule');
   }
+  if (single.once !== undefined) {
+    // updateJob refuses it on a card that ends up with no schedule.
+    fields.once = single.once;
+    if (single.once !== !!job.once) changed.push('once');
+  }
   if (model !== undefined && (model || null) !== (job.model || null)) {
     // updateJob validates it against the card's agent.
     fields.model = model;
@@ -640,7 +671,7 @@ export function editJobForAgent({ id, title, detail, repo, schedule, model, requ
   }
 
   if (!changed.length) {
-    return { error: 'Nothing to change — pass a new title, detail, repo, schedule, model or requires_pr.' };
+    return { error: 'Nothing to change — pass a new title, detail, repo, schedule, run_at, once, model or requires_pr.' };
   }
   const result = updateJob(job.id, fields, broadcast);
   if (result.error) return result;
@@ -877,6 +908,11 @@ export function updateJob(jobId, fields, broadcast) {
     changes = resolved.type !== jobType(job)
       || (resolved.schedule || null) !== (job.schedule || null);
   }
+  if (fields.once != null && typeof fields.once !== 'boolean') return { error: 'once must be true or false' };
+  const endsScheduled = resolved ? resolved.type === 'scheduled' : isScheduled(job);
+  if (fields.once === true && !endsScheduled) {
+    return { error: 'once needs a schedule (or run_at): a card with no schedule already runs once' };
+  }
   // The disk write is the last thing that can fail, and it happens before the
   // first field changes.
   const written = plan ? applyAttachments(job, plan) : null;
@@ -905,8 +941,64 @@ export function updateJob(jobId, fields, broadcast) {
   // a no-PR setting that only ever meant "its runs".
   if (typeof fields.requiresPr === 'boolean') job.requiresPr = fields.requiresPr;
   else if (typeChanged) job.requiresPr = defaultRequiresPr(job.type);
+  if (typeof fields.once === 'boolean') job.once = fields.once;
+  if (!isScheduled(job)) job.once = false;
   persist(broadcast);
   return { job };
+}
+
+// --- Archiving ---
+//
+// Files a To do card away as finished without running it: a one-time schedule
+// that has fired (fireSchedules), a one-date schedule a restart finds spent
+// (retireSpentSchedules), Billion's retire_job and the owner's Archive. Never a
+// delete: the card goes to the Finished archive with the reason on it, and its
+// files and run history stay. Only from To do, where no agent is attached.
+export function archiveJob(jobId, { reason, by } = {}, broadcast) {
+  const job = allJobs().find(j => j.id === jobId);
+  if (!job) return { error: 'Job not found' };
+  if (job.state !== 'todo') {
+    return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; only a To do card can be archived.` };
+  }
+  const now = new Date().toISOString();
+  job.state = 'done';
+  job.doneAt = now;
+  job.archivedAt = now;
+  job.archivedBy = by || null;
+  job.archivedReason = String(reason || '').trim().slice(0, ARCHIVE_REASON_CHARS) || null;
+  job.nextRunAt = null;
+  job.holdUntil = null;
+  persist(broadcast);
+  return { job };
+}
+const ARCHIVE_REASON_CHARS = 500;
+
+// Billion's retire_job: one of its own To do cards, schedule or not, archived
+// without running. The owner does the same for any card from the Jobs tab.
+export function retireJobForAgent({ session, id, reason }, broadcast) {
+  if (!session?.isBillion) return { error: 'Only Billion can retire cards.' };
+  const job = allJobs().find(j => j.id === id);
+  if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
+  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to retire. Ask the owner.` };
+  if (job.state !== 'todo') {
+    return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; retire_job only takes To do cards (close_job is for Review).` };
+  }
+  const why = typeof reason === 'string' ? reason.trim() : '';
+  if (!why) return { error: 'Say why it is retired (reason): it is the note the archive keeps.' };
+  const result = archiveJob(job.id, { reason: why, by: BILLION_NAME }, broadcast);
+  return result.error ? result : { job: jobSummary(result.job) };
+}
+
+// On a server start: archive every one-date schedule ("0 10 24 9 *") that has
+// already run, and log which, so cards written before `once` existed stop
+// sitting in To do showing next year's date.
+export function retireSpentSchedules(broadcast, { log = console.log } = {}) {
+  const spent = spentOneDateSchedules(allJobs());
+  for (const job of spent) {
+    archiveJob(job.id, { reason: `One-date schedule (${job.schedule}) that has already run: archived on restart`, by: 'Agent 007' }, broadcast);
+    log(`  Archived one-date schedule "${job.title}" (${job.id}, ${job.schedule}): it has already run`);
+  }
+  return spent;
 }
 
 // Pause / resume. Deliberately NOT routed through updateJob: that gate refuses
@@ -2153,7 +2245,9 @@ export function fireSchedules(broadcast, { now = Date.now() } = {}) {
   for (const schedule of allJobs().filter(j => isScheduled(j) && j.state === 'todo')) {
     if (!isJobDue(schedule, now)) continue;
     changed = true;
-    schedule.nextRunAt = schedule.schedule ? nextCronIso(schedule.schedule, now) : null;
+    // A one-time schedule stays due until its single run goes out, so a hold
+    // or an error delays it rather than moving it to next year.
+    if (!schedule.once) schedule.nextRunAt = schedule.schedule ? nextCronIso(schedule.schedule, now) : null;
     const hold = scheduleHold(schedule, allJobs());
     if (hold) {
       schedule.lastSkipAt = new Date(now).toISOString();
@@ -2184,6 +2278,14 @@ export function fireSchedules(broadcast, { now = Date.now() } = {}) {
     schedule.lastError = null;
     schedule.lastErrorAt = null;
     fired.push(result.job);
+    // Its one run is out, and lives on as its own card: the schedule is done.
+    if (schedule.once) {
+      schedule.state = 'done';
+      schedule.doneAt = schedule.archivedAt = new Date(now).toISOString();
+      schedule.archivedBy = 'Agent 007';
+      schedule.archivedReason = 'One-time schedule: its run was posted, so it was archived';
+      schedule.nextRunAt = null;
+    }
   }
   if (changed) persist(broadcast);
   return fired;

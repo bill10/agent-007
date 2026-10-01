@@ -133,3 +133,34 @@ describe('close_job', () => {
     expect(job.state).toBe('review');
   });
 });
+
+describe('retire_job', () => {
+  const todoCard = (fields = {}) => addJob({ title: 'Oct 1, 10:30 am: check in', repoPath: REPO, schedule: '30 10 1 10 *', postedByAgent: BILLION_NAME, postedByBillion: true, ...fields }, () => {}).job;
+
+  it('archives one of Billion\'s To do cards without running it, with the reason as its note', async () => {
+    const job = todoCard();
+    const r = await call('retire_job', { id: job.id, reason: 'Done by hand already.' });
+    expect(r.isError).toBe(false);
+    expect(r.text).toMatch(/archived in Finished/);
+    expect(job.state).toBe('done');
+    expect(job.archivedReason).toBe('Done by hand already.');
+    expect(job.archivedBy).toBe(BILLION_NAME);
+    expect(allJobs()).toContain(job);
+  });
+
+  it('wants a reason, its own card, and a card still in To do', async () => {
+    const job = todoCard();
+    expect((await call('retire_job', { id: job.id, reason: ' ' })).text).toMatch(/Say why/);
+    const theirs = todoCard({ postedByAgent: 'Viper', postedByBillion: false });
+    expect((await call('retire_job', { id: theirs.id, reason: 'x' })).text).toMatch(/not posted by you/);
+    const review = reviewCard();
+    expect((await call('retire_job', { id: review.id, reason: 'x' })).text).toMatch(/close_job is for Review/);
+    expect(allJobs().map(j => j.state)).toEqual(['todo', 'todo', 'review']);
+  });
+
+  it('is not a tool any other agent has', async () => {
+    const job = todoCard();
+    expect((await call('retire_job', { id: job.id, reason: 'x' }, WORKER_TOKEN)).error).toMatch(/Unknown tool/);
+    expect(job.state).toBe('todo');
+  });
+});
