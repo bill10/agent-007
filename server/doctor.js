@@ -4,34 +4,43 @@
 // account or uninstalls anything, and no token is ever printed. Each check
 // returns lines of { status: 'ok' | 'fail' | 'na', text, fix? }. Everything
 // that touches the machine comes in through `probes`, so the tests run no real
-// CLI and no network; the defaults reuse the probes the app already has.
+// CLI and no network. The defaults are the app's own: the Settings panel's CLI
+// scan, the board's gh account walk, gitExec, Telegram's Bot API call. Only the
+// port probe and the npm registry read are new here.
 //
 // Imported only after the settings files are loaded: state.js reads PORT when
 // it loads.
 
-import { execFile } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { createServer } from 'net';
 import { homedir } from 'os';
 import { join, resolve, sep } from 'path';
 import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
-import { scanAgents } from './agent-accounts.js';
-import { commandPath } from './command-path.js';
+import { refreshAgentAccounts } from './agent-accounts.js';
+import { commandPath, INSTALL_HINTS } from './command-path.js';
 import { billionAgent, billionRuns } from './billion.js';
-import { ghAccounts, ghAccountFor, ghEnvForRepo, parseGithubRemote } from './jobs.js';
+import { ghAccounts, ghAccountFor, ghAgentEnv, parseGithubRemote } from './jobs.js';
+import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
 import { tilde } from './settings.js';
-import { jobAgent } from '../lib/jobs.js';
+import { jobAgent, JOB_AGENTS } from '../lib/jobs.js';
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const VERSION = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 const LOGIN = { claude: 'claude auth login', codex: 'codex login' };
-const INSTALL = { claude: 'see https://docs.anthropic.com/en/docs/claude-code/setup', codex: 'npm install -g @openai/codex' };
+// Local git calls, and the one that asks the remote.
+const LOCAL_GIT_MS = 3000;
+const REMOTE_GIT_MS = 10_000;
+const NET_MS = 5000;
+const PORT_PAGE_MS = 1000;
 
 const ok = (text) => ({ status: 'ok', text });
 const na = (text) => ({ status: 'na', text });
 const fail = (text, fix) => ({ status: 'fail', text, fix });
 const firstLine = (s) => String(s ?? '').trim().split('\n')[0].slice(0, 200);
+// A URL's user:token@ never reaches the screen.
+const redact = (s) => String(s).replace(/\/\/[^@\s/]+@/g, '//***@');
 
 // "a.b.c" >= "x.y.z", numerically; missing parts are 0.
 export function versionAtLeast(have, want) {
@@ -45,23 +54,16 @@ export function versionAtLeast(have, want) {
 
 // --- Probes: the real machine ---
 
-function run(file, args, { timeout = 5000, env = process.env } = {}) {
-  return new Promise((done) => {
-    const win = process.platform === 'win32';
-    execFile(win ? `"${file}"` : file, args, { timeout, env, shell: win, windowsHide: true },
-      (err, stdout, stderr) => done({ code: err ? (typeof err.code === 'number' ? err.code : -1) : 0, stdout, stderr }));
-  });
-}
-
-// 'free', 'agent-007' (answers with our page title) or 'other'.
-function portState(port, host) {
+// 'free', 'agent-007' (answers with our page title), 'other', or the error
+// code when the port cannot be listened on at all (EACCES, EADDRNOTAVAIL).
+export function portState(port, host) {
   return new Promise((done) => {
     const probe = createServer();
     probe.once('error', async (err) => {
-      if (err.code !== 'EADDRINUSE') return done('other');
+      if (err.code !== 'EADDRINUSE') return done(err.code || 'error');
       const at = WILDCARD_BIND_HOSTS.includes(host) ? '127.0.0.1' : host.includes(':') ? `[${host}]` : host;
       try {
-        const html = await (await fetch(`http://${at}:${port}/`, { signal: AbortSignal.timeout(1000) })).text();
+        const html = await (await fetch(`http://${at}:${port}/`, { signal: AbortSignal.timeout(PORT_PAGE_MS) })).text();
         done(/<title>Agent 007<\/title>/.test(html) ? 'agent-007' : 'other');
       } catch { done('other'); }
     });
@@ -69,18 +71,12 @@ function portState(port, host) {
   });
 }
 
+// What `npm view <name> version` answers, read from the registry directly:
+// npm itself writes a log and its cache under ~/.npm, and this only reports.
 async function npmLatest() {
-  const r = await run('npm', ['view', PKG.name, 'version'], { timeout: 5000 });
-  return r.code === 0 ? firstLine(r.stdout) || null : null;
-}
-
-// { username } when the bot answers, { rejected } when Telegram says no, null
-// when it could not be reached. The token is in the URL, so no error text
-// from here is ever passed on.
-async function telegramGetMe(token) {
   try {
-    const body = await (await fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: AbortSignal.timeout(5000) })).json();
-    return body?.ok ? { username: body.result?.username } : { rejected: true };
+    const res = await fetch(`https://registry.npmjs.org/${PKG.name.replace('/', '%2F')}/latest`, { signal: AbortSignal.timeout(NET_MS) });
+    return res.ok ? (await res.json())?.version || null : null;
   } catch { return null; }
 }
 
@@ -89,17 +85,18 @@ export function defaultProbes({ env = process.env, settingsLine = null } = {}) {
     env,
     nodeVersion: process.versions.node,
     engines: PKG.engines?.node || '',
-    version: PKG.version,
+    version: VERSION,
     loadPty: () => import('node-pty'),
     which: (cmd) => commandPath(cmd, env),
-    scanAgents: (clis) => scanAgents({ env, clis, timeoutMs: 4000 }),
+    // The server's own scan: one run serves this check and the Settings panel.
+    scanAgents: () => refreshAgentAccounts().then(s => s.agents),
     billionAgent: () => billionAgent(env),
     billionRuns: () => billionRuns(env),
     ghAccounts,
     ghAccountFor: (repoPath) => ghAccountFor(repoPath),
     git: (args, timeout, env) => gitExec(args, { timeout, env }),
-    // The account a board worker on that repo pushes as (GH_TOKEN and git's helper).
-    repoEnv: (repoPath) => ghEnvForRepo(repoPath),
+    // What a board worker on a repo pushes with, for the account found for it.
+    repoEnv: (account) => ghAgentEnv(account?.token),
     baseBranch: resolveBaseBranch,
     exists: existsSync,
     readFile: (p) => readFileSync(p, 'utf8'),
@@ -111,7 +108,7 @@ export function defaultProbes({ env = process.env, settingsLine = null } = {}) {
     claudeDir: env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : join(homedir(), '.claude'),
     settingsLine,
     npmLatest,
-    telegramGetMe,
+    telegramGetMe: () => telegramGetMe(env),
   };
 }
 
@@ -136,7 +133,16 @@ function readBoard(p) {
 // origin's URL per repo, asked once and shared by the gh and repo checks.
 function originOf(p, cache) {
   return (repo) => {
-    if (!cache.has(repo)) cache.set(repo, p.exists(repo) ? p.git(['-C', repo, 'remote', 'get-url', 'origin'], 3000).then(s => s.trim() || null, () => null) : Promise.resolve(null));
+    if (!cache.has(repo)) cache.set(repo, p.exists(repo) ? p.git(['-C', repo, 'remote', 'get-url', 'origin'], LOCAL_GIT_MS).then(s => s.trim() || null, () => null) : Promise.resolve(null));
+    return cache.get(repo);
+  };
+}
+
+// The gh account the walk finds per repo, asked once and shared by the gh and
+// repo checks (null when none can see it).
+function accountOf(p, cache) {
+  return (repo) => {
+    if (!cache.has(repo)) cache.set(repo, Promise.resolve().then(() => p.ghAccountFor(repo)).catch(() => null));
     return cache.get(repo);
   };
 }
@@ -155,8 +161,8 @@ export async function checkNode(p) {
 }
 
 export async function checkClis(p, board) {
-  const scanned = await p.scanAgents(['claude', 'codex']);
-  return ['claude', 'codex'].map((cli) => {
+  const scanned = await p.scanAgents();
+  return JOB_AGENTS.map((cli) => {
     const uses = [
       p.billionRuns() && p.billionAgent() === cli && 'Billion runs on it',
       board.jobs.some(j => jobAgent(j) === cli) && 'a board card uses it',
@@ -164,7 +170,7 @@ export async function checkClis(p, board) {
     const needed = uses.length > 0;
     const why = needed ? `; ${uses.join(' and ')}` : '';
     const found = scanned.find(a => a.cli === cli);
-    if (!found) return needed ? fail(`${cli} is not installed${why}`, INSTALL[cli]) : na(`${cli} not installed (nothing uses it)`);
+    if (!found) return needed ? fail(`${cli} is not installed${why}`, INSTALL_HINTS[cli]) : na(`${cli} not installed (nothing uses it)`);
     const account = found.accounts.find(a => a.isDefault);
     const where = `${cli} ${found.version || '(version unknown)'} at ${tilde(found.path)}`;
     if (account?.loggedIn) return ok(`${where}, logged in${account.plan ? ` (${account.plan})` : ''}`);
@@ -174,51 +180,51 @@ export async function checkClis(p, board) {
 }
 
 // fast: installed only. `gh auth status` and the account walk ask GitHub.
-export async function checkGh(p, board, origin, { fast = false } = {}) {
-  const github = [];
-  for (const repo of board.repos) {
+export async function checkGh(p, board, origin, { fast = false, account = accountOf(p, new Map()) } = {}) {
+  const gh = p.which('gh');
+  // fast: installed only. `gh auth status` and the account walk ask GitHub.
+  if (gh && fast) return [ok('gh installed')];
+  const github = (await Promise.all(board.repos.map(async (repo) => {
     const slug = parseGithubRemote(await origin(repo));
-    if (slug) github.push({ repo, slug: `${slug.owner}/${slug.name}` });
-  }
-  if (!p.which('gh')) {
+    return slug && { repo, slug: `${slug.owner}/${slug.name}` };
+  }))).filter(Boolean);
+  if (!gh) {
     return [github.length
-      ? fail(`gh is not installed; the board finds pull requests with it (${github.length} GitHub repo${github.length === 1 ? '' : 's'})`, 'Install GitHub CLI from https://cli.github.com, then run gh auth login')
+      ? fail(`gh is not installed; the board finds pull requests with it (${github.length} GitHub repo${github.length === 1 ? '' : 's'})`, INSTALL_HINTS.gh)
       : na('gh not installed (no GitHub repo on the board)')];
   }
-  if (fast) return [ok('gh installed')];
   const accounts = await p.ghAccounts();
-  const lines = [accounts.length
-    ? ok(`gh signed in as ${[...new Set(accounts)].join(', ')}`)
-    : fail('gh is installed but signed in to no account', 'gh auth login')];
-  for (const { repo, slug } of github) {
-    const found = accounts.length ? await p.ghAccountFor(repo).catch(() => null) : null;
-    lines.push(found
-      ? ok(`${slug}: reachable as ${found.login}`)
-      : fail(`${slug}: no signed-in gh account can see it`, 'gh auth login (with an account that can see it; never gh auth switch)'));
-  }
-  return lines;
+  if (!accounts.length) return [fail('gh is installed but signed in to no account', 'gh auth login')];
+  // The walk takes an account named like the repo's owner on trust; the repo
+  // check's ls-remote, run as that account, is what proves it can reach it.
+  return [ok(`gh signed in as ${[...new Set(accounts)].join(', ')}`), ...await Promise.all(github.map(async ({ repo, slug }) => {
+    const found = await account(repo);
+    return found
+      ? ok(`${slug}: board workers use ${found.login}`)
+      : fail(`${slug}: no signed-in gh account can see it`, 'gh auth login (with an account that can see it; never gh auth switch)');
+  }))];
 }
 
-export async function checkRepos(p, board, origin) {
+export async function checkRepos(p, board, origin, account = accountOf(p, new Map())) {
   if (!p.which('git')) return [fail('git is not installed', 'Install git from https://git-scm.com')];
   const lines = [ok('git installed')];
   if (!board.repos.length) return [...lines, na('no repos on the board')];
   return [...lines, ...await Promise.all(board.repos.map(async (repo) => {
     const name = tilde(repo);
     if (!p.exists(repo)) return fail(`${name} does not exist`, 'Remove it from the Explorer, or put the repo back at that path');
-    try { await p.git(['-C', repo, 'rev-parse', '--git-dir'], 3000); } catch {
+    try { await p.git(['-C', repo, 'rev-parse', '--git-dir'], LOCAL_GIT_MS); } catch {
       return fail(`${name} is not a git repository`, `git -C ${name} status`);
     }
     if (!await origin(repo)) return fail(`${name} has no origin remote`, `git -C ${name} remote add origin <url>`);
     const base = (await p.baseBranch(repo).catch(() => null)) || 'main';
     try {
-      const env = parseGithubRemote(await origin(repo)) && p.which('gh') ? await p.repoEnv(repo) : {};
-      const heads = await p.git(['-C', repo, 'ls-remote', '--heads', 'origin', base], 10_000, env);
+      const env = parseGithubRemote(await origin(repo)) && p.which('gh') ? p.repoEnv(await account(repo)) : {};
+      const heads = await p.git(['-C', repo, 'ls-remote', '--heads', 'origin', base], REMOTE_GIT_MS, env);
       return heads.trim()
         ? ok(`${name}: origin has ${base}`)
         : fail(`${name}: origin has no ${base} branch`, `git -C ${name} push -u origin ${base}`);
     } catch (err) {
-      return fail(`${name}: could not reach origin (${firstLine(err.stderr || err.message)})`, `git -C ${name} ls-remote origin`);
+      return fail(`${name}: could not reach origin (${redact(firstLine(err.stderr || err.message))})`, `git -C ${name} ls-remote origin`);
     }
   }))];
 }
@@ -232,7 +238,8 @@ export async function checkPort(p, { starting = false } = {}) {
       ? fail(`port ${p.port} is held by another Agent 007, already running`, `Open that one, or start this one with --port ${Number(p.port) + 1}`)
       : ok(`port ${p.port} is held by this Agent 007 (it is running)`)];
   }
-  return [fail(`port ${p.port} is in use by another program`, `Stop it, or start Agent 007 with --port ${Number(p.port) + 1} (or PORT=)`)];
+  if (state === 'other') return [fail(`port ${p.port} is in use by another program`, `Stop it, or start Agent 007 with --port ${Number(p.port) + 1} (or PORT=)`)];
+  return [fail(`cannot listen on ${p.host} port ${p.port} (${state})`, 'Pick another PORT (one over 1024), or a HOST this machine has')];
 }
 
 export function checkSettings(p, board) {
@@ -244,19 +251,22 @@ export function checkSettings(p, board) {
   return lines;
 }
 
+// VERSION is A.B.C.D; npm carries A.B.(C*1000+D) (CONTRIBUTING.md "Versions").
+export const toNpm = (v) => { const [a, b, c, d = 0] = String(v).split('.').map(Number); return `${a}.${b}.${c * 1000 + d}`; };
+export const fromNpm = (v) => { const [a, b, c] = String(v).split('.').map(Number); return `${a}.${b}.${Math.floor(c / 1000)}.${c % 1000}`; };
+
 // Being behind is not a fault, so never ✗: the newer version is named.
 export async function checkVersion(p) {
   const latest = await p.npmLatest();
   if (!latest) return [na(`version ${p.version} (npm not reachable, latest unknown)`)];
-  return [ok(versionAtLeast(p.version, latest)
+  return [ok(versionAtLeast(toNpm(p.version), latest)
     ? `version ${p.version}, the latest`
-    : `version ${p.version}; ${latest} is out (npx @bill10/agent-007@latest, or git pull in a clone)`)];
+    : `version ${p.version}; ${fromNpm(latest)} is out (npx ${PKG.name}@latest, or git pull in a clone)`)];
 }
 
 export async function checkTelegram(p) {
-  const token = (p.env.TELEGRAM_BOT_TOKEN || '').trim();
-  if (!token) return [na('Telegram not configured')];
-  const me = await p.telegramGetMe(token);
+  if (!(p.env.TELEGRAM_BOT_TOKEN || '').trim()) return [na('Telegram not configured')];
+  const me = await p.telegramGetMe();
   if (!me) return [na('Telegram configured; api.telegram.org not reachable')];
   if (me.rejected) return [fail('Telegram rejects TELEGRAM_BOT_TOKEN', 'Copy the token again from @BotFather into ~/.agent-007/.env')];
   return [ok(`Telegram bot @${me.username} answers`)];
@@ -273,8 +283,10 @@ export function checkPlugins(p) {
       if (e?.scope !== 'local' || typeof e.projectPath !== 'string') continue;
       const gone = !p.exists(e.projectPath);
       if (!gone && !inside(p.worktreeDir, e.projectPath)) continue;
-      lines.push(fail(`stray local plugin ${name} registered for ${tilde(e.projectPath)}${gone ? ' (folder no longer exists)' : ' (a board worktree)'}`,
-        `claude plugin uninstall ${name} --scope local (run in ${tilde(e.projectPath)}; README "Troubleshooting")`));
+      // The uninstall applies to the folder it runs in, so a gone one comes back first.
+      const where = tilde(e.projectPath);
+      lines.push(fail(`stray local plugin ${name} registered for ${where}${gone ? ' (folder no longer exists)' : ' (a board worktree)'}`,
+        `${gone ? `mkdir -p ${where} && ` : ''}cd ${where} && claude plugin uninstall ${name} --scope local${gone ? ` && rmdir ${where}` : ''} (README "Troubleshooting")`));
     }
   }
   return lines.length ? lines : [ok('no stray local plugin registrations')];
@@ -288,8 +300,8 @@ function checks(fast) {
   const all = [
     ['Node', (c) => checkNode(c.p)],
     ['Agent CLIs', (c) => checkClis(c.p, c.board)],
-    ['GitHub', (c) => checkGh(c.p, c.board, c.origin, { fast })],
-    ['Repos', (c) => checkRepos(c.p, c.board, c.origin), 'slow'],
+    ['GitHub', (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account })],
+    ['Repos', (c) => checkRepos(c.p, c.board, c.origin, c.account), 'slow'],
     ['Port', (c) => checkPort(c.p, { starting: fast })],
     ['Settings', (c) => checkSettings(c.p, c.board)],
     ['Version', (c) => checkVersion(c.p), 'slow'],
@@ -304,11 +316,11 @@ function checks(fast) {
 // says so as one ✗.
 export async function runDoctor({ probes, fast = false, budgetMs = Infinity } = {}) {
   const p = probes || defaultProbes();
-  const c = { p, board: readBoard(p), origin: originOf(p, new Map()) };
+  const c = { p, board: readBoard(p), origin: originOf(p, new Map()), account: accountOf(p, new Map()) };
   let timer;
   const late = Number.isFinite(budgetMs) ? new Promise(r => { timer = setTimeout(() => r(null), budgetMs); }) : null;
   const results = await Promise.all(checks(fast).map(async ([title, check]) => {
-    const done = Promise.resolve().then(() => check(c)).catch(err => [fail(`${title} check failed: ${firstLine(err?.message)}`)]);
+    const done = Promise.resolve().then(() => check(c)).catch(err => [fail(`${title} check failed: ${redact(firstLine(err?.message))}`)]);
     const lines = await (late ? Promise.race([done, late]) : done);
     return lines && { title, lines };
   }));

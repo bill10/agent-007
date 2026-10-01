@@ -130,7 +130,7 @@ export function commandPath(file, env = process.env, platform = process.platform
 }
 
 // Where to get the CLIs the + Agent presets and the board start.
-const INSTALL_HINTS = {
+export const INSTALL_HINTS = {
   claude: 'Install Claude Code: https://docs.anthropic.com/en/docs/claude-code/setup',
   codex: 'Install Codex: npm install -g @openai/codex',
   gemini: 'Install Gemini CLI: npm install -g @google/gemini-cli',

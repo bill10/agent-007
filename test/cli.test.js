@@ -129,6 +129,30 @@ describe('settings', () => {
     expect(out).toMatch(new RegExp(`Settings: \\S*a007-cwd-\\S+\\.env, ~[\\\\/]\\.agent-007[\\\\/]\\.env\\n`));
     expect(out).toContain(`http://127.0.0.1:${port}`);
   }, 30000);
+  // Value: protects=a start prints the fast check's ✗ lines and the doctor command; fails_when=bin stops awaiting or printing them; why_new=only formatStartup was unit-tested; seam=none
+  it('a start prints the quick check\'s problems, ending with the doctor command', async () => {
+    const held = createServer();
+    const port = await new Promise((res) => held.listen(0, '127.0.0.1', () => res(held.address().port)));
+    const bin = mkdtempSync(join(tmpdir(), 'a007-bin-'));
+    const child = spawn(process.execPath, [join(ROOT, 'bin/agent-007.js'), '--port', String(port)], { cwd, env: env({ PATH: bin, BILLION: '0' }) });
+    let out = '';
+    try {
+      await new Promise((res, rej) => {
+        const timer = setTimeout(() => rej(new Error(`no doctor block:\n${out}`)), 20000);
+        const onData = (d) => { out += d; if (out.includes('for details.')) { clearTimeout(timer); res(); } };
+        child.stdout.on('data', onData);
+        child.stderr.on('data', onData);
+        child.on('exit', () => { clearTimeout(timer); out.includes('for details.') ? res() : rej(new Error(`exited:\n${out}`)); });
+      });
+    } finally {
+      child.kill();
+      held.close();
+    }
+    expect(out).toContain(`  ✗ port ${port} is in use by another program\n      Stop it, or start Agent 007 with --port ${port + 1}`);
+    expect(out).toMatch(/ {2}Run `[^`]*doctor` for details\./);
+    expect(out).not.toContain('✓');
+  }, 30000);
+
   // A PATH holding only a fake git (never run: there are no repos), so no
   // real CLI and no network: npm, claude, codex and gh are all missing.
   it('doctor exits 1 on a ✗ with its fix, 0 when nothing is ✗', async () => {

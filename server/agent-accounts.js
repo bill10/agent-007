@@ -79,7 +79,7 @@ export function geminiEmail(folder, read = readFileSync) {
  */
 export async function scanAgents({
   env = process.env, home = homedir(), platform = process.platform,
-  which = (c) => commandPath(c, env, platform), run = runCli, timeoutMs = TIMEOUT_MS, clis = CLIS,
+  which = (c) => commandPath(c, env, platform), run = runCli, timeoutMs = TIMEOUT_MS,
 } = {}) {
   const exec = (file, args, extraEnv = {}) => {
     // The same environment an agent gets: none of the server's own secrets.
@@ -119,7 +119,7 @@ export async function scanAgents({
     }),
   };
 
-  const found = await Promise.all(clis.map(async (cli) => {
+  const found = await Promise.all(CLIS.map(async (cli) => {
     const path = which(cli);
     if (!path) return null;
     const [v, accts] = await Promise.all([

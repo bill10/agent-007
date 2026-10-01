@@ -113,6 +113,17 @@ async function call(method, params, { env = process.env, signal } = {}) {
   return body.result;
 }
 
+// Whether the bot token answers, for `agent-007 doctor`: { username }, or
+// { rejected } when Telegram refuses the token (401/404), or null when it could
+// not be reached or said anything else. Nothing from the error is passed on.
+export async function telegramGetMe(env = process.env) {
+  try {
+    return { username: (await call('getMe', {}, { env, signal: AbortSignal.timeout(5000) }))?.username };
+  } catch (err) {
+    return err.status === 401 || err.status === 404 ? { rejected: true } : null;
+  }
+}
+
 // Consecutive pieces of at most `limit` characters (code points) that join back
 // into `text`, cut at a newline, else a space, else mid-word, so nothing is lost.
 export function splitForTelegram(text, limit = TG_MESSAGE_CHARS) {

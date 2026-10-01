@@ -1,11 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createServer as createHttpServer } from 'http';
+import { createServer } from 'net';
+import { telegramGetMe } from '../server/owner.js';
 import {
-  runDoctor, failed, formatReport, formatStartup, versionAtLeast,
-  checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins,
+  portState, runDoctor, failed, formatReport, formatStartup, versionAtLeast,
+  checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins, toNpm, fromNpm,
 } from '../server/doctor.js';
 
 // A machine where everything passes; each test breaks one thing. No real CLI,
-// git, port or network is touched.
+// git or network is touched; only the portState tests open loopback sockets.
 const CONFIG = '/cfg/config.json';
 function probes(over = {}) {
   const files = {
@@ -17,16 +20,16 @@ function probes(over = {}) {
     env: {},
     nodeVersion: '22.1.0',
     engines: '>=20.12',
-    version: '0.40.0',
+    version: '0.40.1.0',
     loadPty: async () => ({}),
     which: (c) => `/bin/${c}`,
-    scanAgents: async (clis) => clis.map(cli => ({ cli, version: '1.0', path: `/bin/${cli}`, accounts: [{ isDefault: true, loggedIn: true }] })),
+    scanAgents: async () => ['claude', 'codex'].map(cli => ({ cli, version: '1.0', path: `/bin/${cli}`, accounts: [{ isDefault: true, loggedIn: true }] })),
     billionAgent: () => 'claude',
     billionRuns: () => true,
     ghAccounts: async () => ['alice', 'bob'],
     ghAccountFor: async () => ({ login: 'bob', token: 'ghp_secret' }),
     git: async (args) => (args.includes('get-url') ? 'git@github.com:acme/app.git\n' : args.includes('ls-remote') ? 'abc\trefs/heads/main\n' : '.git'),
-    repoEnv: async () => ({ GH_TOKEN: 'ghp_secret' }),
+    repoEnv: (account) => ({ GH_TOKEN: account.token }),
     baseBranch: async () => 'main',
     exists: (p) => p in files || p.startsWith('/r/') || p.startsWith('/home/'),
     readFile: (p) => { if (!(p in files)) throw new Error('ENOENT'); return files[p]; },
@@ -70,7 +73,7 @@ describe('doctor checks', () => {
   });
 
   it('a logged-out CLI that is used is ✗ with its login command', async () => {
-    const scan = async (clis) => clis.map(cli => ({ cli, version: '1', path: `/bin/${cli}`, accounts: [{ isDefault: true, loggedIn: false }] }));
+    const scan = async () => ['claude', 'codex'].map(cli => ({ cli, version: '1', path: `/bin/${cli}`, accounts: [{ isDefault: true, loggedIn: false }] }));
     const [claude, codex] = await checkClis(probes({ scanAgents: scan }), board());
     expect(claude).toMatchObject({ status: 'fail', fix: 'claude auth login' });
     expect(codex).toMatchObject({ status: 'fail', fix: 'codex login' });
@@ -79,7 +82,7 @@ describe('doctor checks', () => {
   it('gh: per-repo account, ✗ when none can see it, never a token', async () => {
     const lines = await checkGh(probes(), board(), origin);
     expect(statuses(lines)).toEqual(['ok', 'ok']);
-    expect(lines[1].text).toBe('acme/app: reachable as bob');
+    expect(lines[1].text).toBe('acme/app: board workers use bob');
     expect(JSON.stringify(lines)).not.toContain('ghp_secret');
     const none = await checkGh(probes({ ghAccountFor: async () => null }), board(), origin);
     expect(none[1].status).toBe('fail');
@@ -128,8 +131,12 @@ describe('doctor checks', () => {
   });
 
   it('version: latest, behind (named, not ✗), offline (–)', async () => {
-    expect((await checkVersion(probes()))[0].status).toBe('ok');
-    expect((await checkVersion(probes({ npmLatest: async () => '0.41.0' })))[0]).toMatchObject({ status: 'ok', text: expect.stringContaining('0.41.0 is out') });
+    // Value: protects=VERSION compared in npm's A.B.(C*1000+D) form; fails_when=0.40.1.0 reads as behind npm's 0.40.1000; why_new=release encoding; seam=none
+    expect(toNpm('0.40.1.0')).toBe('0.40.1000');
+    expect(fromNpm('0.40.1002')).toBe('0.40.1.2');
+    expect((await checkVersion(probes({ npmLatest: async () => '0.40.1000' })))[0].text).toBe('version 0.40.1.0, the latest');
+    expect((await checkVersion(probes({ npmLatest: async () => '0.41.0' })))[0]).toMatchObject({ status: 'ok', text: expect.stringContaining('0.41.0.0 is out') });
+    expect((await checkVersion(probes({ npmLatest: async () => '0.40.1001' })))[0].text).toContain('0.40.1.1 is out');
     expect((await checkVersion(probes({ npmLatest: async () => null })))[0].status).toBe('na');
   });
 
@@ -147,12 +154,15 @@ describe('doctor checks', () => {
 
   it('plugins: local registrations in a board worktree or a gone folder are ✗', () => {
     const files = { '/home/.claude/plugins/installed_plugins.json': JSON.stringify({ plugins: {
-      'tg@x': [{ scope: 'local', projectPath: '/home/.agent-007/worktrees/app-1' }, { scope: 'local', projectPath: '/gone' }, { scope: 'local', projectPath: '/r/app' }],
+      // worktrees-old sits beside the worktree folder, not in it.
+      'tg@x': [{ scope: 'local', projectPath: '/home/.agent-007/worktrees/app-1' }, { scope: 'local', projectPath: '/gone' }, { scope: 'local', projectPath: '/r/app' }, { scope: 'local', projectPath: '/home/.agent-007/worktrees-old/app' }],
       'p@x': [{ scope: 'user' }],
     } }) };
     const lines = checkPlugins(probes({ files }));
     expect(statuses(lines)).toEqual(['fail', 'fail']);
-    expect(lines[0].fix).toMatch(/^claude plugin uninstall tg@x --scope local/);
+    expect(lines[0].fix).toMatch(/^cd \/home\/\.agent-007\/worktrees\/app-1 && claude plugin uninstall tg@x --scope local/);
+    // A gone folder is made again for the uninstall, which applies where it runs.
+    expect(lines[1].fix).toMatch(/^mkdir -p \/gone && cd \/gone && claude plugin uninstall tg@x --scope local && rmdir \/gone/);
     expect(checkPlugins(probes())[0].status).toBe('ok');
   });
 });
@@ -183,7 +193,7 @@ describe('runDoctor', () => {
 
   it('fast keeps to its budget and drops a check that hangs', async () => {
     const started = Date.now();
-    const results = await runDoctor({ fast: true, budgetMs: 100, probes: probes({ portState: () => new Promise(() => {}) }) });
+    const results = await runDoctor({ fast: true, budgetMs: 300, probes: probes({ portState: () => new Promise(() => {}) }) });
     expect(Date.now() - started).toBeLessThan(1000);
     expect(results.map(r => r.title)).not.toContain('Port');
     expect(results.map(r => r.title)).toContain('Node');
@@ -192,5 +202,133 @@ describe('runDoctor', () => {
   it('a check that throws is one ✗, not a crash', async () => {
     const results = await runDoctor({ probes: probes({ portState: async () => { throw new Error('boom'); } }) });
     expect(formatReport(results)).toContain('✗ Port check failed: boom');
+  });
+});
+
+describe('doctor gaps', () => {
+  // Value: protects=readBoard (done cards ignored, card repos merged and deduped, broken JSON is ✗ not a crash); fails_when=the done filter, dedupe or parse catch is dropped; why_new=checkSettings was only fed hand-built boards; seam=none
+  it('reads config.json: done cards ignored, card repos merged, broken JSON is a Settings ✗', async () => {
+    const files = { [CONFIG]: JSON.stringify({
+      repos: [{ path: '/r/app' }],
+      jobs: [{ state: 'todo', agent: 'codex', repoPath: '/r/app' }, { state: 'todo', agent: 'codex', repoPath: '/r/lib' }, { state: 'done', agent: 'claude', repoPath: '/r/old' }],
+    }) };
+    const ok = await runDoctor({ probes: probes({ files, billionRuns: () => false }) });
+    const by = (rs, t) => rs.find(r => r.title === t).lines;
+    expect(by(ok, 'Settings')[1].text).toMatch(/parses \(2 repos, 2 open cards\)/);
+    expect(by(ok, 'Agent CLIs')[0].status).toBe('ok');
+    const noClaude = await runDoctor({ probes: probes({ files, billionRuns: () => false, scanAgents: async () => [] }) });
+    expect(statuses(by(noClaude, 'Agent CLIs'))).toEqual(['na', 'fail']);
+    const broken = await runDoctor({ probes: probes({ files: { [CONFIG]: '{nope' } }) });
+    expect(by(broken, 'Settings')[1]).toMatchObject({ status: 'fail', text: expect.stringContaining('does not parse') });
+    expect(failed(broken)).toBe(true);
+  });
+
+  // Value: protects=fast run passes starting=true to checkPort; fails_when=a start no longer warns that another Agent 007 holds the port (or doctor wrongly ✗s its own server); why_new=checkPort was only called directly; seam=none
+  it('another Agent 007 on the port is ✗ at start, ✓ under doctor', async () => {
+    const p = probes({ portState: async () => 'agent-007' });
+    const start = await runDoctor({ fast: true, probes: p });
+    expect(formatStartup(start, 'agent-007 doctor')).toContain('held by another Agent 007');
+    expect(failed(await runDoctor({ probes: p }))).toBe(false);
+  });
+
+  // Value: protects=checkRepos unreachable-origin branch, non-GitHub remote skipping gh env, base-branch fallback; fails_when=stderr is dropped, gh token is asked for a non-GitHub remote, or a baseBranch error crashes the check; why_new=no test hit the catch or the non-GitHub path; seam=none
+  it('repos: unreachable origin shows stderr; non-GitHub remote runs without gh env; base falls back to main', async () => {
+    const err = Object.assign(new Error('Command failed'), { stderr: 'fatal: could not read Username\nmore' });
+    const [, down] = await checkRepos(probes({ git: async (a) => { if (a.includes('ls-remote')) throw err; return '.git'; } }), board(), origin);
+    expect(down).toMatchObject({ status: 'fail', text: '/r/app: could not reach origin (fatal: could not read Username)' });
+    // Value: protects=no token in a git error reaches the screen; fails_when=the userinfo redaction is dropped; why_new=only plain stderr was covered; seam=none
+    const leak = Object.assign(new Error('x'), { stderr: "fatal: unable to access 'https://bob:ghp_secret@github.com/acme/app.git/'" });
+    const [, redacted] = await checkRepos(probes({ git: async (a) => { if (a.includes('ls-remote')) throw leak; return '.git'; } }), board(), origin);
+    expect(redacted.text).toContain('https://***@github.com/acme/app.git');
+    expect(redacted.text).not.toContain('ghp_secret');
+    const envs = []; const heads = [];
+    const plain = probes({
+      repoEnv: () => { throw new Error('asked gh for a non-GitHub repo'); },
+      baseBranch: async () => { throw new Error('no base'); },
+      git: async (a, t, env) => { if (a.includes('ls-remote')) { envs.push(env); heads.push(a.at(-1)); } return 'x'; },
+    });
+    const [, line] = await checkRepos(plain, board(), async () => 'git@gitlab.com:acme/app.git');
+    expect(line).toMatchObject({ status: 'ok', text: '/r/app: origin has main' });
+    expect(envs).toEqual([{}]);
+    expect(heads).toEqual(['main']);
+  });
+
+  // Value: protects=checkClis unknown-login and unused-logged-out branches; fails_when=an unknown login turns into ✗ or an unused logged-out CLI fails the run; why_new=only loggedIn true/false-and-used were covered; seam=none
+  it('clis: login unknown is ✓, logged out but unused is –', async () => {
+    const scan = (loggedIn) => async () => ['claude', 'codex'].map(cli => ({ cli, path: `/bin/${cli}`, accounts: [{ isDefault: true, loggedIn }] }));
+    const [unknown] = await checkClis(probes({ scanAgents: scan(null) }), board());
+    expect(unknown).toMatchObject({ status: 'ok', text: expect.stringContaining('(version unknown)') });
+    expect(unknown.text).toContain('login not known');
+    const unused = await checkClis(probes({ scanAgents: scan(false), billionRuns: () => false }), board({ jobs: [] }));
+    expect(statuses(unused)).toEqual(['na', 'na']);
+  });
+
+  // Value: protects=checkGh catch on ghAccountFor and checkPlugins unreadable-file path; fails_when=a rejecting gh lookup crashes the GitHub check or a missing plugins file becomes ✗; why_new=neither error path was exercised; seam=none
+  it('gh: a lookup that rejects is a per-repo ✗; plugins: no registrations file is –', async () => {
+    const lines = await checkGh(probes({ ghAccountFor: async () => { throw new Error('rate limited'); } }), board(), origin);
+    expect(statuses(lines)).toEqual(['ok', 'fail']);
+    expect(lines[1].text).toBe('acme/app: no signed-in gh account can see it');
+    expect(checkPlugins(probes({ claudeDir: '/elsewhere' }))).toEqual([{ status: 'na', text: 'no Claude Code plugin registrations' }]);
+  });
+});
+
+describe('doctor review follow-ups', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Value: protects=no gh credentials asked for when gh is absent; fails_when=the which('gh') guard goes; why_new=only gh-present was covered; seam=none
+  it('repos: a GitHub remote without gh runs ls-remote with no gh env', async () => {
+    const envs = [];
+    const p = probes({
+      which: (c) => (c === 'gh' ? null : `/bin/${c}`),
+      repoEnv: () => { throw new Error('asked gh without gh'); },
+      git: async (a, t, env) => { if (a.includes('ls-remote')) envs.push(env); return 'x'; },
+    });
+    expect((await checkRepos(p, board(), origin))[1].status).toBe('ok');
+    expect(envs).toEqual([{}]);
+  });
+
+  // Value: protects=one account walk per repo shared by GitHub and Repos; fails_when=each check walks again; why_new=the walk asks GitHub per account; seam=none
+  it('the account walk runs once per repo across checks', async () => {
+    const walked = [];
+    await runDoctor({ probes: probes({ ghAccountFor: async (r) => { walked.push(r); return { login: 'bob', token: 't' }; } }) });
+    expect(walked).toEqual(['/r/app']);
+  });
+
+  // Value: protects=a port that cannot be listened on is named as such; fails_when=EACCES reads as "in use"; why_new=new state; seam=none
+  it('port: a listen error other than in-use says so', async () => {
+    const [line] = await checkPort(probes({ portState: async () => 'EACCES' }));
+    expect(line).toMatchObject({ status: 'fail', text: 'cannot listen on 127.0.0.1 port 7007 (EACCES)' });
+  });
+
+  // Value: protects=the real port probe (free / ours by page title / other); fails_when=the title match or the in-use branch changes; why_new=every other test stubs it; seam=none
+  it('portState tells free, Agent 007 and another program apart on loopback', async () => {
+    const listen = (srv) => new Promise(r => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
+    const ours = createHttpServer((req, res) => res.end('<html><title>Agent 007</title></html>'));
+    const sockets = [];
+    const other = createServer((sock) => sockets.push(sock));
+    const [a, b] = [await listen(ours), await listen(other)];
+    try {
+      expect(await portState(a, '127.0.0.1')).toBe('agent-007');
+      expect(await portState(b, '127.0.0.1')).toBe('other');
+    } finally {
+      ours.closeAllConnections();
+      sockets.forEach(sock => sock.destroy());
+      await Promise.all([new Promise(r => ours.close(r)), new Promise(r => other.close(r))]);
+    }
+    expect(await portState(b, '127.0.0.1')).toBe('free');
+  });
+
+  // Value: protects=only 401/404 count as a rejected token; fails_when=a 429 or 5xx fails the doctor run; why_new=getMe was stubbed everywhere; seam=none
+  it('telegramGetMe: answers, rejected on 401/404, unknown otherwise, never the token', async () => {
+    const env = { TELEGRAM_BOT_TOKEN: '123:SECRET' };
+    const reply = (status, body) => vi.stubGlobal('fetch', vi.fn(async () => ({ status, json: async () => body })));
+    reply(200, { ok: true, result: { username: 'my_bot' } });
+    expect(await telegramGetMe(env)).toEqual({ username: 'my_bot' });
+    reply(401, { ok: false, error_code: 401, description: 'Unauthorized' });
+    expect(await telegramGetMe(env)).toEqual({ rejected: true });
+    reply(429, { ok: false, error_code: 429, description: 'Too Many Requests' });
+    expect(await telegramGetMe(env)).toBeNull();
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('fetch failed for https://api.telegram.org/bot123:SECRET/getMe'); }));
+    expect(await telegramGetMe(env)).toBeNull();
   });
 });

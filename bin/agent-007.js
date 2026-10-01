@@ -149,9 +149,9 @@ if (positionals[0] === 'init') {
 } else if (positionals[0] === 'doctor') {
   const { runDoctor, defaultProbes, formatReport, failed } = await import('../server/doctor.js');
   const results = await runDoctor({ probes: defaultProbes({ settingsLine: settingsLine(settingsFiles, initCommand()) }) });
-  console.log(formatReport(results));
-  // exit, not exitCode: a timed-out probe may still hold the loop open.
-  process.exit(failed(results) ? 1 : 0);
+  // Exit once written (a pipe on macOS is asynchronous), not on its own: a
+  // probe that has not timed out yet would hold the loop open.
+  process.stdout.write(`${formatReport(results)}\n`, () => process.exit(failed(results) ? 1 : 0));
 } else {
   // Said out loud: run from inside another project, its .env (a HOST=0.0.0.0,
   // say) would otherwise change this server without a word.
