@@ -741,7 +741,10 @@ is hidden. A late answer still binds to its original request; an activity
 timeout never shifts an answer to a newer message. A waiting CLI shows no
 animated activity dot. Worker updates and server notices do not close a request.
 
-![A pending message and the progress box](img/billion-chat-progress.png)
+![Earlier progress layout, before per-message summaries and Work details](img/billion-chat-progress.png)
+
+*Earlier layout shown above: progress now sits inside each pending message,
+uses explicit summaries, and folds under the answer as Work details.*
 
 **Status line.** One line at the top of both views: what Billion is doing and
 what is running, "Working: reviewing PR #120 · 3 workers running · next round
@@ -749,10 +752,11 @@ what is running, "Working: reviewing PR #120 · 3 workers running · next round
 gone after 30 minutes without an update); the server adds "Thinking…" while
 Billion's terminal is mid-turn, the number of running workers on Billion's
 cards and the next round. From the moment the owner sends a message (in the
-tab or on Telegram) until Billion's next `tell_owner`, it says "Billion is
-working on your message…" (for at most an hour), so a slow reply is never a
-blank screen. It is the owner's, like the chat: sent to the owner's browser
-only.
+tab or on Telegram) until its `tell_owner` reply, it says "Billion is
+working on your message…" while the CLI is working, or "Waiting for Billion
+to reply…" while it waits (for at most an hour). A disconnected browser says
+"Reconnecting…" and clears active progress until the connection returns. It is
+the owner's, like the chat: sent to the owner's browser only.
 
 ## Telegram
 
@@ -827,7 +831,8 @@ paths: `[Owner via app] <text> (attached: /path/a.png, /path/b.pdf)`, or
 `[Owner via app] Q3: <text> (re: "...") (attached: ...)` for an answer. Your
 bubble shows images as thumbnails that open full size and other files as
 download links; they are served only from that folder, never while user
-accounts are on, and deleted when their message falls out of the last 500.
+accounts are on, and deleted when their message leaves chat history.
+Unanswered owner requests stay past the 500-message cap.
 
 With rounds on (the default, see [Rounds](#rounds)) a normal or low question
 waits in Billion's queue until a round releases it, and the round sends one
