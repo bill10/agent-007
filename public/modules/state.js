@@ -42,6 +42,12 @@ export function upsertChatMessage(message) {
   if (at === -1) chatMessages.push(message);
   else chatMessages[at] = message;
 }
+// The round on the Billion tab (server/rounds.js roundPayload) and its status
+// line (server/billion-status.js statusPayload).
+export let roundInfo = { on: true, max: 2, current: null, next: null };
+export function setRoundInfo(info) { roundInfo = info && typeof info === 'object' ? info : roundInfo; }
+export let billionStatus = null;
+export function setBillionStatus(status) { billionStatus = status && typeof status === 'object' ? status : null; }
 export let waitingActive = false;
 export function setWaitingActive(on) { waitingActive = !!on; }
 

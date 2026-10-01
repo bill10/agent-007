@@ -187,10 +187,10 @@ describe('charterChanges', () => {
 
   it('quotes the paragraphs that changed, under their sections, then nothing once seen', () => {
     const f = file();
-    writeFileSync(f, charter.replace('How to ask: say it in your terminal', 'How to ask: say it in your terminal only'));
+    writeFileSync(f, charter.replace('How to ask: one short message', 'How to ask: one long message'));
     const notice = charterChanges(f, charter);
     expect(notice).toMatch(/^Your charter changed; these rules replace what you did before\./);
-    expect(notice).toContain('From "Escalate":\nHow to ask: say it in your terminal, and put it');
+    expect(notice).toContain('From "Escalate":\nHow to ask: one short message with the question');
     expect(notice).not.toContain('Every question to the owner');
     expect(readFileSync(f, 'utf8')).toBe(charter);
     expect(charterChanges(f, charter)).toBe('');

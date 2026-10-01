@@ -53,10 +53,10 @@ describe('notify_owner', () => {
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'waiting-list' }));
   });
 
-  it('pushes only blocking questions by default; telegram overrides it either way', async () => {
+  it('with rounds off, pushes only blocking questions by default; telegram overrides it either way', async () => {
     const broadcast = vi.fn();
-    expect(await notifyOwner('Name the repo?', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, n: 1, telegram: false, held: 'urgency normal' });
-    expect(await notifyOwner('Rename later?', { urgency: 'low', env: ENV, now: now() })).toEqual({ ok: true, n: 2, telegram: false, held: 'urgency low' });
+    expect(await notifyOwner('Name the repo?', { env: ENV, now: now(), broadcast, queue: false })).toEqual({ ok: true, n: 1, telegram: false, held: 'urgency normal' });
+    expect(await notifyOwner('Rename later?', { urgency: 'low', env: ENV, now: now(), queue: false })).toEqual({ ok: true, n: 2, telegram: false, held: 'urgency low' });
     expect(fetchMock).not.toHaveBeenCalled();
     // Still filed in the tab: the open-questions strip, the badge, the thread.
     expect(waitingItems().map(i => i.text)).toEqual(['Name the repo?', 'Rename later?']);
@@ -65,7 +65,7 @@ describe('notify_owner', () => {
 
     expect(await notifyOwner('Merge #12?', { urgency: 'blocking', env: ENV, now: now() })).toEqual({ ok: true, n: 3, telegram: true });
     expect(await notifyOwner('Domain expires tonight, renew?', { env: ENV, now: now(), telegram: true })).toEqual({ ok: true, n: 4, telegram: true });
-    expect(await notifyOwner('Deploy now?', { urgency: 'blocking', telegram: false, env: ENV, now: now() })).toEqual({ ok: true, n: 5, telegram: false, held: 'telegram: false' });
+    expect(await notifyOwner('Deploy now?', { urgency: 'blocking', telegram: false, env: ENV, now: now(), queue: false })).toEqual({ ok: true, n: 5, telegram: false, held: 'telegram: false' });
     expect(calls().map(c => c.body.text)).toEqual(['! Q3: Merge #12?', 'Q4: Domain expires tonight, renew?']);
     expect((await notifyOwner('x', { telegram: 'yes', env: ENV, now: now() })).error).toBe('telegram must be true or false.');
   });
@@ -78,7 +78,7 @@ describe('notify_owner', () => {
   });
 
   it('a non-blocking question without Telegram settings is simply filed', async () => {
-    expect(await notifyOwner('Which logo?', { env: {}, now: now() })).toEqual({ ok: true, n: 1, telegram: false, held: 'urgency normal' });
+    expect(await notifyOwner('Which logo?', { env: {}, now: now(), queue: false })).toEqual({ ok: true, n: 1, telegram: false, held: 'urgency normal' });
   });
 
   it('is off without Telegram settings: pins it, says so, and never calls fetch', async () => {
@@ -102,7 +102,7 @@ describe('notify_owner', () => {
   it('allows a burst, then refuses until the minute has passed', async () => {
     const t = now();
     for (let i = 0; i < NOTIFY_LIMIT; i++) expect(await notifyOwner(`q${i}`, { telegram: true, env: ENV, now: t + i })).toEqual({ ok: true, n: i + 1, telegram: true });
-    const refused = await notifyOwner('one more', { env: ENV, now: t + 10 });
+    const refused = await notifyOwner('one more', { env: ENV, now: t + 10, queue: false });
     expect(refused.error).toMatch(/last minute/);
     expect(fetchMock).toHaveBeenCalledTimes(NOTIFY_LIMIT);
     expect(waitingItems()).toHaveLength(NOTIFY_LIMIT);
@@ -189,7 +189,7 @@ describe('tell_owner', () => {
     for (let i = 0; i < NOTIFY_LIMIT - 1; i++) expect((await notifyOwner(`q${i}`, { telegram: true, env: ENV, now: t + i })).ok).toBe(true);
     expect(await tellOwner('ok', { env: ENV, now: t + 5 })).toEqual({ ok: true, telegram: true });
     expect((await tellOwner('again', { env: ENV, now: t + 6 })).error).toMatch(/last minute/);
-    expect((await notifyOwner('more', { env: ENV, now: t + 7 })).error).toMatch(/last minute/);
+    expect((await notifyOwner('more', { env: ENV, now: t + 7, queue: false })).error).toMatch(/last minute/);
     expect(fetchMock).toHaveBeenCalledTimes(NOTIFY_LIMIT);
   });
 
@@ -210,8 +210,8 @@ describe('tell_owner', () => {
 
 describe('the Waiting on you list', () => {
   it('persists in the config dir and dismisses one item', async () => {
-    await notifyOwner('first', { env: {}, now: now() });
-    await notifyOwner('second', { env: {}, now: now() });
+    await notifyOwner('first', { env: {}, now: now(), queue: false });
+    await notifyOwner('second', { env: {}, now: now(), queue: false });
     const onDisk = JSON.parse(readFileSync(join(CONFIG_DIR, 'waiting.json'), 'utf8'));
     expect(onDisk.map(i => i.text)).toEqual(['first', 'second']);
     const broadcast = vi.fn();

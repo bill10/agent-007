@@ -239,7 +239,14 @@
           </div>
         </div>
         <!-- The Billion tab: the owner's chat with Billion (public/modules/waiting.js) -->
-        <div class="waiting-board" id="waiting-board" style="display:none">
+        <div class="waiting-board" id="waiting-board" data-sub="round" style="display:none">
+          <!-- One line on what Billion is doing, over both views (public/modules/round.js) -->
+          <div class="billion-status" id="billion-status" role="status" aria-live="polite"></div>
+          <div class="billion-subtabs" id="billion-subtabs" role="tablist" aria-label="Billion">
+            <button type="button" role="tab" id="billion-sub-round" data-sub="round" aria-selected="true" aria-controls="round-view">This round</button>
+            <button type="button" role="tab" id="billion-sub-chat" data-sub="chat" aria-selected="false" aria-controls="waiting-list">Chat</button>
+          </div>
+          <div class="round-view" id="round-view" role="tabpanel" aria-labelledby="billion-sub-round"></div>
           <div class="waiting-list" id="waiting-list" role="log" aria-label="Chat with Billion"></div>
         </div>
         <div class="voice-indicator" id="voice-indicator" aria-hidden="true" style="display:none">

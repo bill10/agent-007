@@ -1,5 +1,6 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive, setChatMessages } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive, setChatMessages, setRoundInfo, setBillionStatus } from './modules/state.js';
+import { renderRound, renderBillionStatus, handleRoundError } from './modules/round.js';
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
@@ -551,7 +552,9 @@ function onMessage(msg) {
     case 'full-tree': handleFullTree(msg); break;
     case 'orphans-list': handleOrphansList(msg); break;
     case 'waiting-list': setWaitingItems(msg.items); renderWaiting(); updateTabs(); break;
-    case 'waiting-error': handleWaitingError(msg); break;
+    case 'waiting-error': handleWaitingError(msg); handleRoundError(msg); break;
+    case 'round-state': setRoundInfo(msg); renderRound(); renderBillionStatus(); break;
+    case 'billion-status': setBillionStatus(msg); renderBillionStatus(); renderWaiting(); break;
     case 'chat-list': setChatMessages(msg.messages); renderWaiting(); break;
     case 'chat-message': handleChatMessage(msg.message); break;
     case 'chat-sent': handleChatSent(msg); break;
