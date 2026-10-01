@@ -218,6 +218,14 @@ diff, check CI is green, and check the PR's base branch (`gh pr view <n>
 first when it isn't. Merge on your own unless the change is on the
 **Escalate** list, in which case ask first.
 
+**GitHub accounts.** The owner may be signed in to several gh accounts, each
+seeing only its own repos. Never run `gh auth switch`, `gh auth login` or
+`gh auth logout`: the active account is machine-wide, so switching it breaks
+every other agent and the owner's shell. Pick the account per command instead,
+named like the repo's owner: `GH_TOKEN=$(gh auth token -u <account>) gh …`
+(`gh auth status` lists the accounts). Workers already get their repo's account
+in GH_TOKEN.
+
 ## Escalate
 
 Decide everything yourself except these. Ask the owner first for anything that:

@@ -1549,6 +1549,83 @@ async function isQueryableRepo(repoPath, branchName) {
   } catch { return false; }
 }
 
+// --- A spawned agent's GitHub account ---
+//
+// The owner may be signed in to several gh accounts, each seeing only its own
+// repos. An agent that needed another one used to run `gh auth switch`, which
+// flips the active account for the whole machine: the owner's shell, Billion
+// and every other worker. Instead each agent is spawned with GH_TOKEN for the
+// account that can see its repo (gh honours it over the active account), and
+// nothing ever writes hosts.yml.
+
+// owner/name from a github.com remote, https or ssh; null for anything else.
+export function parseGithubRemote(url) {
+  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(String(url || '').trim());
+  return m ? { owner: m[1], name: m[2] } : null;
+}
+
+async function originUrl(repoPath) {
+  try { return (await gitExec(['-C', repoPath, 'remote', 'get-url', 'origin'])).trim(); } catch { return null; }
+}
+
+async function ghRepoVisible(slug, token) {
+  try { await runGh(['api', `repos/${slug}`, '--silent'], { token, timeout: 10_000 }); return true; } catch { return false; }
+}
+
+// The account for repoPath: the one remembered for it (the same memory the PR
+// walk keeps, so the two never disagree) while it can still see the repo, else
+// the account named like the repo's owner, else the first that can see it.
+// null when the repo is not on github.com or no account can see it, and the
+// agent gets whatever gh is signed in as, as before.
+export async function ghAccountFor(repoPath, {
+  remoteUrl = originUrl, listAccounts = ghAccountsCached, tokenFor = ghTokenCached, visible = ghRepoVisible,
+} = {}) {
+  const repo = repoPath && parseGithubRemote(await remoteUrl(repoPath));
+  if (!repo) return null;
+  const slug = `${repo.owner}/${repo.name}`;
+  const remembered = ghAccountForRepo.get(repoPath);
+  if (remembered) {
+    const token = await tokenFor(remembered);
+    // Re-checked, not trusted: a 404 means access changed, so choose again.
+    if (token && await visible(slug, token)) return { login: remembered, token };
+    ghAccountForRepo.delete(repoPath);
+  }
+  const accounts = await listAccounts();
+  const owner = accounts.find(a => a.toLowerCase() === repo.owner.toLowerCase());
+  if (owner) {
+    const token = await tokenFor(owner);
+    if (token) { ghAccountForRepo.set(repoPath, owner); return { login: owner, token }; }
+  }
+  for (const login of accounts) {
+    if (login === owner) continue;
+    const token = await tokenFor(login);
+    if (token && await visible(slug, token)) { ghAccountForRepo.set(repoPath, login); return { login, token }; }
+  }
+  return null;
+}
+
+// What goes into the agent's environment for that account: GH_TOKEN for gh,
+// and git's credential helper for github.com reset to gh's own (which reads
+// GH_TOKEN), so `git push` over https uses the same account. Appended after any
+// GIT_CONFIG_* the owner's environment already has. The token sits in the
+// agent's process environment, the same exposure as before, when the agent
+// could run `gh auth token` itself; it is never logged.
+export function ghAgentEnv(token, env = process.env) {
+  if (!token) return {};
+  const n = Number(env.GIT_CONFIG_COUNT) || 0;
+  const key = 'credential.https://github.com.helper';
+  return {
+    GH_TOKEN: token,
+    GIT_CONFIG_COUNT: String(n + 2),
+    [`GIT_CONFIG_KEY_${n}`]: key, [`GIT_CONFIG_VALUE_${n}`]: '',   // empty drops helpers set earlier (the keychain's)
+    [`GIT_CONFIG_KEY_${n + 1}`]: key, [`GIT_CONFIG_VALUE_${n + 1}`]: '!gh auth git-credential',
+  };
+}
+
+export async function ghEnvForRepo(repoPath, opts) {
+  try { return ghAgentEnv((await ghAccountFor(repoPath, opts))?.token); } catch { return {}; }
+}
+
 // The account walk, shared by every gh lookup.
 //
 // Tries EVERY signed-in gh account before giving up. One machine can hold

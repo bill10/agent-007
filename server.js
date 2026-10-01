@@ -29,7 +29,7 @@ import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktre
 import { createSessionFromConfig, killSessionProcesses, blockClaudeSpawns } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
-import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch } from './server/jobs.js';
+import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch, ghEnvForRepo } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
@@ -123,6 +123,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     repoSlug, cocktail, ownerId: ownerId || null,
     spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
     approvalsToBillion: !!meta.approvalsToBillion, autoTrust,
+    ghEnv: await ghEnvForRepo(resolvedRepoPath),
   }, broadcast);
 
   if (result.error) {

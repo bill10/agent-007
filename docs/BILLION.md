@@ -518,6 +518,30 @@ cycle: start agent-cost; drop the browser-extension idea
   note), or Review fills with idle workers.
 - Recurring work → a schedule card Billion posts once.
 
+## GitHub accounts
+
+The owner may be signed in to more than one gh account (say one for personal
+repos and one for an organisation's), each unable to see the other's repos.
+`gh auth switch` changes the active account for the whole machine, so one
+agent switching it breaks every other agent and the owner's shell until someone
+switches back. Nothing in Agent 007 switches it:
+
+- A worker spawned into a repo with a github.com remote gets `GH_TOKEN` for the
+  account that can see it (the account named like the repo's owner, else the
+  first whose token can read `repos/<owner>/<name>`), remembered per repo for
+  the server's lifetime and re-checked at each spawn. Git's credential helper
+  for github.com is pointed at `gh auth git-credential` through
+  `GIT_CONFIG_*`, so `git push` uses the same account. The token is in the
+  worker's process environment, the same exposure as before (a worker could
+  always run `gh auth token`), and is never logged. hosts.yml is never written.
+- Claude Code workers are spawned with deny rules for `gh auth switch`,
+  `gh auth login` and `gh auth logout`, which hold in every permission mode;
+  every worker's card prompt says never to run them (Codex has no deny rules).
+- The board's own gh calls (PR lookups, CI notices) pass each account's token
+  per call and remember which one answered for each repo.
+- Billion works across repos, so its charter says to pick the account per
+  command: `GH_TOKEN=$(gh auth token -u <account>) gh …`.
+
 ## Claude Code or Codex
 
 Billion runs on Claude Code by default, or on Codex with `BILLION_AGENT=codex`.

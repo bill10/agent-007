@@ -262,6 +262,8 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 
 **A job card says `"gh" is not installed`.** The board finds pull requests with the GitHub CLI: install it from https://cli.github.com and run `gh auth login`. A job that ends in a pull request also needs a repo with a GitHub remote to push to.
 
+**gh is signed in to several GitHub accounts.** Leave the active one alone: each agent gets the account that owns its repo in `GH_TOKEN` (see [BILLION.md](docs/BILLION.md#github-accounts)), and board workers are not allowed to run `gh auth switch`.
+
 **A repo's local plugin (e.g. Telegram) shows up in every board worker's worktree.** If a repo's `.claude/settings.local.json` enables a local-scope plugin, Claude Code registers it for every git worktree or subfolder a session starts in, including board workers' worktrees. Board workers themselves run with channel plugins disabled, so they don't act on it, but the registrations pile up in `~/.claude/plugins/installed_plugins.json`, and a plain `claude` started by hand in one of those worktrees will load the plugin (for Telegram: it steals the bot's updates from your real session). Fix: register such plugins outside any repo you run board cards in, or uninstall the local registration (`claude plugin uninstall <plugin> --scope local`) in the repo and in each worktree that got one.
 
 ## Architecture
