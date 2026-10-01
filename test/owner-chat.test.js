@@ -158,12 +158,12 @@ describe('Telegram in the same thread', () => {
   });
 
   it('a Telegram reply to a question shows as a typed answer; a button tap only collapses it', async () => {
-    await notifyOwner('Rename the repo?', { env: ENV, now: now(), choices: ['yes', 'no'] });
+    await notifyOwner('Rename the repo?', { env: ENV, now: now(), choices: ['yes', 'no'], telegram: true });
     const [q] = waitingItems();
     expect(await handleUpdate({ update_id: 2, message: { chat: { id: 42 }, text: 'not yet', reply_to_message: { message_id: q.tgMessageId } } }, { env: ENV })).toBe('answered');
     expect(chatMessages().map(m => [m.from, m.text])).toEqual([['billion', 'Rename the repo?'], ['owner', 'not yet']]);
 
-    await notifyOwner('Tag v2?', { env: ENV, now: now(), choices: ['yes', 'no'] });
+    await notifyOwner('Tag v2?', { env: ENV, now: now(), choices: ['yes', 'no'], telegram: true });
     const q2 = waitingItems().at(-1);
     await handleUpdate({ update_id: 3, callback_query: { id: 'c', data: `${q2.id}:0`, message: { chat: { id: 42 } } } }, { env: ENV });
     const thread = chatMessages();

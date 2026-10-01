@@ -45,7 +45,7 @@ afterEach(() => {
 describe('notify_owner', () => {
   it('sends "Q<n>: <text>", no "Billion" prefix, to the owner\'s chat and pins it', async () => {
     const broadcast = vi.fn();
-    expect(await notifyOwner('Spend $20 on a domain? I recommend yes.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, n: 1 });
+    expect(await notifyOwner('Spend $20 on a domain? I recommend yes.', { env: ENV, now: now(), broadcast, telegram: true })).toEqual({ ok: true, n: 1, telegram: true });
     const [c] = calls();
     expect(c.url).toBe(`https://api.telegram.org/bot${TOKEN}/sendMessage`);
     expect(c.body).toEqual({ chat_id: '42', text: 'Q1: Spend $20 on a domain? I recommend yes.' });
@@ -53,8 +53,36 @@ describe('notify_owner', () => {
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'waiting-list' }));
   });
 
+  it('pushes only blocking questions by default; telegram overrides it either way', async () => {
+    const broadcast = vi.fn();
+    expect(await notifyOwner('Name the repo?', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, n: 1, telegram: false, held: 'urgency normal' });
+    expect(await notifyOwner('Rename later?', { urgency: 'low', env: ENV, now: now() })).toEqual({ ok: true, n: 2, telegram: false, held: 'urgency low' });
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Still filed in the tab: the open-questions strip, the badge, the thread.
+    expect(waitingItems().map(i => i.text)).toEqual(['Name the repo?', 'Rename later?']);
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'waiting-list' }));
+    expect(chatMessages().filter(m => m.q).slice(-2).map(m => m.text)).toEqual(['Name the repo?', 'Rename later?']);
+
+    expect(await notifyOwner('Merge #12?', { urgency: 'blocking', env: ENV, now: now() })).toEqual({ ok: true, n: 3, telegram: true });
+    expect(await notifyOwner('Domain expires tonight, renew?', { env: ENV, now: now(), telegram: true })).toEqual({ ok: true, n: 4, telegram: true });
+    expect(await notifyOwner('Deploy now?', { urgency: 'blocking', telegram: false, env: ENV, now: now() })).toEqual({ ok: true, n: 5, telegram: false, held: 'telegram: false' });
+    expect(calls().map(c => c.body.text)).toEqual(['! Q3: Merge #12?', 'Q4: Domain expires tonight, renew?']);
+    expect((await notifyOwner('x', { telegram: 'yes', env: ENV, now: now() })).error).toBe('telegram must be true or false.');
+  });
+
+  it('says in the tool result whether it went to Telegram', async () => {
+    const text = async (result) => (await handleMcpMessage({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'notify_owner', arguments: { text: 'hi', telegram: true } } },
+      { session: { isBillion: true }, notifyOwner: async (_, opts) => { expect(opts.telegram).toBe(true); return result; } })).result.content[0].text;
+    expect(await text({ ok: true, n: 12, telegram: false, held: 'urgency normal' })).toMatch(/^Put in the owner's Billion tab as Q12; not sent to Telegram \(urgency normal\)\. /);
+    expect(await text({ ok: true, n: 3, telegram: true })).toMatch(/^Put in the owner's Billion tab as Q3 and sent on Telegram\. /);
+  });
+
+  it('a non-blocking question without Telegram settings is simply filed', async () => {
+    expect(await notifyOwner('Which logo?', { env: {}, now: now() })).toEqual({ ok: true, n: 1, telegram: false, held: 'urgency normal' });
+  });
+
   it('is off without Telegram settings: pins it, says so, and never calls fetch', async () => {
-    const result = await notifyOwner('Which name?', { env: {}, now: now() });
+    const result = await notifyOwner('Which name?', { urgency: 'blocking', env: {}, now: now() });
     expect(result.error).toMatch(/Telegram is not configured/);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(waitingItems().map(i => i.text)).toEqual(['Which name?']);
@@ -63,7 +91,7 @@ describe('notify_owner', () => {
 
   it('turns a failed send into an error Billion reads, with the token redacted', async () => {
     fetchMock.mockRejectedValueOnce(new Error(`connect failed for https://api.telegram.org/bot${TOKEN}/sendMessage`));
-    const result = await notifyOwner('hi', { env: ENV, now: now() });
+    const result = await notifyOwner('hi', { urgency: 'blocking', env: ENV, now: now() });
     expect(result.error).toMatch(/Telegram send failed/);
     expect(result.error).not.toContain(TOKEN);
     fetchMock.mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false, description: 'Bad Request: chat not found' }) });
@@ -73,12 +101,12 @@ describe('notify_owner', () => {
 
   it('allows a burst, then refuses until the minute has passed', async () => {
     const t = now();
-    for (let i = 0; i < NOTIFY_LIMIT; i++) expect(await notifyOwner(`q${i}`, { env: ENV, now: t + i })).toEqual({ ok: true, n: i + 1 });
+    for (let i = 0; i < NOTIFY_LIMIT; i++) expect(await notifyOwner(`q${i}`, { telegram: true, env: ENV, now: t + i })).toEqual({ ok: true, n: i + 1, telegram: true });
     const refused = await notifyOwner('one more', { env: ENV, now: t + 10 });
     expect(refused.error).toMatch(/last minute/);
     expect(fetchMock).toHaveBeenCalledTimes(NOTIFY_LIMIT);
     expect(waitingItems()).toHaveLength(NOTIFY_LIMIT);
-    expect(await notifyOwner('later', { env: ENV, now: t + NOTIFY_WINDOW_MS + 1 })).toEqual({ ok: true, n: NOTIFY_LIMIT + 1 });
+    expect(await notifyOwner('later', { telegram: true, env: ENV, now: t + NOTIFY_WINDOW_MS + 1 })).toMatchObject({ ok: true, n: NOTIFY_LIMIT + 1 });
   });
 
   it('refuses empty text', async () => {
@@ -158,7 +186,7 @@ describe('tell_owner', () => {
 
   it('shares notify_owner\'s rate limit', async () => {
     const t = now();
-    for (let i = 0; i < NOTIFY_LIMIT - 1; i++) expect((await notifyOwner(`q${i}`, { env: ENV, now: t + i })).ok).toBe(true);
+    for (let i = 0; i < NOTIFY_LIMIT - 1; i++) expect((await notifyOwner(`q${i}`, { telegram: true, env: ENV, now: t + i })).ok).toBe(true);
     expect(await tellOwner('ok', { env: ENV, now: t + 5 })).toEqual({ ok: true, telegram: true });
     expect((await tellOwner('again', { env: ENV, now: t + 6 })).error).toMatch(/last minute/);
     expect((await notifyOwner('more', { env: ENV, now: t + 7 })).error).toMatch(/last minute/);
@@ -363,7 +391,7 @@ describe('long text to Telegram is split, never cut', () => {
     const b = billion();
     sessions.set(b.id, b);
     fetchMock.mockImplementation(async () => reply({ message_id: 900 }));
-    await notifyOwner('Which listing?', { env: ENV, now: now(), choices: ['a', 'b'] });
+    await notifyOwner('Which listing?', { env: ENV, now: now(), choices: ['a', 'b'], telegram: true });
     const long = 'answer text '.repeat(600);
     const { answerWaiting } = await import('../server/owner.js');
     fetchMock.mockClear();

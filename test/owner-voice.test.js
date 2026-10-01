@@ -99,7 +99,7 @@ describe('when Billion speaks', () => {
 
   it('sends voice as multipart sendVoice with the text as its caption, the text never on a command line', async () => {
     setMode('voice');
-    expect(await notifyOwner('Buy the domain? See https://x.co/d for the price, I recommend yes.', { env: ENV, now: now(), platform: 'darwin' })).toMatchObject({ ok: true });
+    expect(await notifyOwner('Buy the domain? See https://x.co/d for the price, I recommend yes.', { env: ENV, now: now(), platform: 'darwin', telegram: true })).toMatchObject({ ok: true });
     const [[url, init]] = fetchMock.mock.calls;
     expect(url).toBe(`https://api.telegram.org/bot${TOKEN}/sendVoice`);
     expect(init.headers).toBeUndefined();   // fetch sets the multipart boundary itself

@@ -75,7 +75,7 @@ describe('the sender\'s name', () => {
   it('tags a typed answer, and the question shows who answered', async () => {
     const b = billion();
     sessions.set(b.id, b);
-    await notifyOwner('Merge #12?', { env: ENV, now: now() });
+    await notifyOwner('Merge #12?', { env: ENV, now: now(), telegram: true });
     const answer = text(GROUP, ALICE, 'Merge', { reply_to_message: { message_id: 7 } });
     expect(await handleUpdate(answer, { env: ENV })).toBe('answered');
     expect(typedInto(b)).toContain('[Owner via Telegram (Alice Liddell)] Q1: Merge (re: "Merge #12?")');
@@ -87,7 +87,7 @@ describe('the sender\'s name', () => {
   it('tags a button tap in a group', async () => {
     const b = billion();
     sessions.set(b.id, b);
-    const { n } = await notifyOwner('Merge?', { env: ENV, now: now(), choices: ['Merge', 'Wait'] });
+    const { n } = await notifyOwner('Merge?', { env: ENV, now: now(), choices: ['Merge', 'Wait'], telegram: true });
     const [item] = waitingItems();
     const tap = (chat) => ({ update_id: 2, callback_query: { id: 'cb', from: ALICE, data: `${item.id}:0`, message: { chat } } });
     expect(await handleUpdate(tap(GROUP), { env: ENV })).toBe('answered');
@@ -97,7 +97,7 @@ describe('the sender\'s name', () => {
   it('leaves a button tap in a private chat untagged', async () => {
     const b = billion();
     sessions.set(b.id, b);
-    const { n } = await notifyOwner('Again?', { env: ENV, now: now(), choices: ['Yes', 'No'] });
+    const { n } = await notifyOwner('Again?', { env: ENV, now: now(), choices: ['Yes', 'No'], telegram: true });
     const [item] = waitingItems();
     await handleUpdate({ update_id: 3, callback_query: { id: 'cb2', from: ALICE, data: `${item.id}:0`, message: { chat: PRIVATE } } }, { env: ENV });
     expect(typedInto(b)).toContain(`[Owner via Telegram] Q${n}: Yes`);
