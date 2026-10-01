@@ -14,6 +14,7 @@ import { switchToSession } from './terminal.js';
 import { send } from './ws.js';
 import { hideJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
+import { renderRound, renderBillionStatus, initSubTabs, subTab } from './round.js';
 import {
   readAloudSupported, speakableText, toggleSpeak, readNew, speakingMessage, stopReading,
   autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
@@ -400,6 +401,7 @@ function questionFoot(q) {
     return foot;
   }
   if (q.status === 'dismissed') return el('p', 'chat-answered', 'dismissed');
+  if (q.status === 'consolidated') return el('p', 'chat-answered', 'consolidated: the next round came first');
   const foot = el('div', 'chat-q-foot');
   if (Array.isArray(q.choices) && q.choices.length) foot.appendChild(choiceButtons(q));
   foot.appendChild(replyButton(q, () => replyToQuestion(q.id)));
@@ -1021,4 +1023,7 @@ export function renderWaiting({ toBottom = false } = {}) {
   renderPanel();
   renderComposer();
   renderReadHead();
+  initSubTabs(() => renderWaiting({ toBottom: true }));
+  renderRound();
+  renderBillionStatus();
 }
