@@ -6,7 +6,7 @@ import { rm } from 'fs/promises';
 import { mkdirSync } from 'fs';
 import { basename, isAbsolute, join, resolve, sep } from 'path';
 import { realpathSync } from 'fs';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import {
   config, orphans, sessions, knownConflictKeys,
   codenamePool, cocktailPool, colorCycler,
@@ -235,7 +235,7 @@ const BRANCH_EXISTS_RE = /a branch named .* already exists|cannot lock ref '[^']
 // non-fast-forward (or, worse, force-pushes over someone's open PR).
 //
 // Best-effort: on a timeout, no remote, or no network this returns null and the
-// caller falls back to local-only checking, which is what it did before.
+// caller uses a fresh random name and still checks local collisions atomically.
 async function remoteBranchNames(repoPath) {
   try {
     const out = await gitExec(['-C', repoPath, 'ls-remote', '--heads', 'origin']);
@@ -289,15 +289,16 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
     // suffixOnCollision is for names DERIVED from something else — the job
     // board builds a branch from the job title, and two jobs may reasonably
     // share a title ("fix flaky test"). A hard failure there would strand the
-    // job forever, so walk -2, -3, ... the same way the cocktail pool does.
+    // job forever. After the readable base, use a fresh per-attempt suffix
+    // rather than a fixed ordinal namespace that recurring jobs can exhaust.
     //
     // A name the USER typed still fails loudly: they asked for that specific
     // branch, so a collision is something to report, not to silently rename.
     if (suffixOnCollision) {
-      const MAX_SUFFIX = 50;
+      const MAX_TRIES = 10;
       const remote = await remoteBranchNames(repoPath);
-      for (let n = 1; n <= MAX_SUFFIX; n++) {
-        const candidate = n === 1 ? customBranch : `${customBranch}-${n}`;
+      for (let n = 0; n < MAX_TRIES; n++) {
+        const candidate = n === 0 && remote !== null ? customBranch : `${customBranch}-${randomUUID()}`;
         // Skip names already taken on the remote, not just locally.
         if (remote && remote.has(`${gitUser}/${candidate}`)) continue;
         const result = await attempt(candidate);

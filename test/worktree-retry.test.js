@@ -83,6 +83,30 @@ describe('createWorktree finds a free branch by trying', () => {
     expect(readdirSync(dirname(r.worktreePath))).toEqual(['agent1']);  // one dir, not one per attempt
   });
 
+  it('finds a safe unused name past 50 historical job branches without deleting any', async () => {
+    const names = Array.from({ length: 65 }, (_, i) => `bill-slung/repeated-job${i ? `-${i + 1}` : ''}`);
+    for (const name of names) await gitExec(['-C', repo, 'branch', name]);
+    const result = await createWorktree(repo, 'board1', 'repeated-job', { suffixOnCollision: true });
+    expect(result.error).toBeUndefined();
+    expect(result.branchName).toMatch(/^bill-slung\/repeated-job-[a-f0-9-]{36}$/);
+    await gitExec(['check-ref-format', '--branch', result.branchName]);
+    const branches = (await gitExec(['-C', repo, 'branch', '--format=%(refname:short)'])).split('\n');
+    for (const name of names) expect(branches).toContain(name);
+  });
+
+  it('gives concurrent jobs with the same title unique branches', async () => {
+    const results = await Promise.all(Array.from({ length: 6 }, (_, i) =>
+      createWorktree(repo, `board${i}`, 'same-job', { suffixOnCollision: true })));
+    expect(results.every(r => !r.error)).toBe(true);
+    expect(new Set(results.map(r => r.branchName)).size).toBe(6);
+  });
+
+  it('returns non-collision errors without consuming a namespace', async () => {
+    const result = await createWorktree(repo, 'invalid', 'bad..name', { suffixOnCollision: true });
+    expect(result.error).toMatch(/Failed to create worktree/);
+    expect(result.error).not.toMatch(/Could not find a free/);
+  });
+
   // --- custom branch: report the collision, never silently rename ---
 
   it('uses a custom name verbatim', async () => {
