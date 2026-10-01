@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.40.0.0] - 2026-10-01
+
+### Changed
+
+- **Billion closes any finished card with one tool: `retire_job` folds into `close_job`.** On a card in Review, `close_job` is still the verdict on the work (accept files a no-PR card as Done, send back returns it to To do with the note). On one of Billion's own To do cards, accept with a note drops it unrun: archived to Finished jobs with the note as the reason, the same path as the Jobs tab's Archive. Send back on a To do card is refused, and an In progress card is refused with what to do instead. Billion now has 24 tools, not 25.
+
 ## [0.39.0.0] - 2026-10-01
 
 ### Added
