@@ -719,6 +719,7 @@ function summaryLine(job) {
   if (job.model) bits.push(`model ${job.model}`);
   if (job.type === 'scheduled') {
     bits.push(`schedule ${scheduleText(job)}`);
+    if (job.scheduleStatus) bits.push(job.scheduleStatus.label);
   }
   if (job.scheduleId) bits.push('a scheduled run');
   // The live state of the agent working it, when there is one, is the part a
@@ -808,6 +809,7 @@ const CALLS = {
           + `${job.lastSkipReason ? ` — last held off: ${job.lastSkipReason}` : ''}`
         : `schedule: runs once${job.requiresPr ? '' : ', no pull request'}`
           + `${job.scheduleId ? ` (a run of schedule ${job.scheduleId})` : ''}`,
+      job.scheduleStatus ? `schedule status: ${JSON.stringify(job.scheduleStatus)}` : null,
       `posted: ${when(job.postedAt)}`
         + `${job.postedByName ? ` by ${job.postedByName}` : ''}`
         + `${job.postedByAgent ? ` (typed by ${job.postedByAgent})` : ''}`,
