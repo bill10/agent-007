@@ -805,14 +805,29 @@ function addAttachments(files, fallbackName) {
 // get. Its default follows the type (see jobRequiresPr in lib/jobs.js), so a
 // new card switched to scheduled flips to Not required unless picked by hand.
 function syncScheduleField() {
-  const scheduled = document.getElementById('job-type').value === 'scheduled';
-  document.getElementById('job-schedule-field').style.display = scheduled ? 'flex' : 'none';
+  const type = document.getElementById('job-type').value;
+  document.getElementById('job-schedule-field').style.display = type === 'scheduled' ? 'flex' : 'none';
+  document.getElementById('job-run-at-field').style.display = type === 'once' ? 'flex' : 'none';
+  if (type === 'once') {
+    // The browser's own picker enforces these bounds; saveForm checks them again.
+    const runAt = document.getElementById('job-run-at');
+    runAt.min = localInputValue(new Date());
+    runAt.max = localInputValue(new Date(Date.now() + MAX_RUN_AT_MS));
+  }
 }
 
+// <input type="datetime-local"> speaks local time as "YYYY-MM-DDTHH:mm".
+const MAX_RUN_AT_MS = 365 * 24 * 60 * 60 * 1000;   // matches lib/jobs.js
+function localInputValue(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+let initialRunAt = '';   // the run-at a card opened with, so a retitle does not re-validate it
 let prPicked = false;   // the user touched the PR select on this form
 function syncPrDefault() {
   if (prPicked) return;
-  document.getElementById('job-requires-pr').value = document.getElementById('job-type').value === 'scheduled' ? 'no' : 'yes';
+  document.getElementById('job-requires-pr').value = document.getElementById('job-type').value === 'scheduled' ? 'no' : 'yes';  // Now and Once at… default to a PR
 }
 
 // A Codex card is offered "board default", auto and bypassPermissions, so the
@@ -929,7 +944,10 @@ function openForm(jobId) {
   titleEl.value = job ? job.title : '';
   detailEl.value = job ? job.detail : '';
   if (job) repoEl.value = job.repoPath;
-  typeEl.value = job && isScheduled(job) ? 'scheduled' : 'one-time';
+  typeEl.value = job && isScheduled(job) ? (job.once ? 'once' : 'scheduled') : 'one-time';
+  const runAtEl = document.getElementById('job-run-at');
+  runAtEl.value = job && job.once && job.nextRunAt ? localInputValue(new Date(job.nextRunAt)) : '';
+  initialRunAt = runAtEl.value;
   scheduleEl.value = job && job.schedule ? job.schedule : '';
   // '' is the "Board default" option, and it is what a card with no mode of
   // its own goes back to — never pre-filled with the board's current value,
@@ -986,12 +1004,28 @@ function saveForm() {
   if (jobType === 'scheduled' && !looksLikeCron(schedule)) {
     return showFormError('That does not look like a cron schedule — five fields (minute hour day month weekday), or @daily / @hourly / @weekly.');
   }
+  const runAtText = document.getElementById('job-run-at').value;
+  let timing = {};
+  if (jobType === 'once') {
+    if (!runAtText) return showFormError('Pick the date and time this job should run.');
+    if (editingJobId && runAtText === initialRunAt) {
+      // Unchanged: keep the stored schedule, so saving a card whose time has
+      // just gone by is still possible.
+      timing = { jobType: 'scheduled', schedule: jobs.get(editingJobId).schedule, once: true };
+    } else {
+      const at = new Date(runAtText);
+      if (at.getTime() <= Date.now()) return showFormError('Pick a time in the future.');
+      if (at.getTime() - Date.now() > MAX_RUN_AT_MS) return showFormError('Pick a time within the next year.');
+      // An absolute instant: the server turns it into its own local-time schedule.
+      timing = { jobType: 'scheduled', runAt: at.toISOString(), once: true };
+    }
+  } else if (jobType === 'scheduled') timing = { once: false };
   if (pendingAttachments.some(a => a.reading)) return showFormError('Still reading an attached file — try again in a moment.');
   // The form always holds the complete list; an empty one on an edit means
   // "none left".
   const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
   const model = document.getElementById('job-model')?.value || '';
-  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, requiresPr, attachments };
+  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, requiresPr, attachments, ...timing };
   // An edit that leaves the model alone does not send it, so a card whose
   // model discovery no longer lists can still be retitled.
   if (!editingJobId || model !== formModel) fields.model = model;

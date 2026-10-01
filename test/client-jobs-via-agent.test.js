@@ -30,11 +30,15 @@ const BOARD_HTML = `
         <input type="text" id="job-title">
         <select id="job-repo"></select>
         <select id="job-type">
-          <option value="one-time">One-time</option>
-          <option value="scheduled">Scheduled</option>
+          <option value="one-time">Now</option>
+          <option value="once">Once at…</option>
+          <option value="scheduled">Recurring</option>
         </select>
         <div id="job-schedule-field" style="display:none">
           <input type="text" id="job-schedule">
+        </div>
+        <div id="job-run-at-field" style="display:none">
+          <input type="datetime-local" id="job-run-at">
         </div>
         <textarea id="job-detail"></textarea>
         <button id="btn-job-save"></button>
