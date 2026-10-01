@@ -1554,7 +1554,7 @@ async function isQueryableRepo(repoPath, branchName) {
 // The owner may be signed in to several gh accounts, each seeing only its own
 // repos. An agent that needed another one used to run `gh auth switch`, which
 // flips the active account for the whole machine: the owner's shell, Billion
-// and every other worker. Instead each agent is spawned with GH_TOKEN for the
+// and every other worker. Instead each board worker is spawned with GH_TOKEN for the
 // account that can see its repo (gh honours it over the active account), and
 // nothing ever writes hosts.yml.
 

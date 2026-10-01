@@ -192,7 +192,7 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
       origin: orphan.origin === 'board' ? 'board' : 'user',
       spawnedBy, jobId: card?.id || null, autoTrust,
       approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
-      ghEnv: await ghEnvForRepo(orphan.repoPath),
+      ghEnv: card ? await ghEnvForRepo(orphan.repoPath) : {},
     }, broadcast);
     if (result.error) return { error: result.error, command };
     const session = result.session;

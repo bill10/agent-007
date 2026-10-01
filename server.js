@@ -123,7 +123,8 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     repoSlug, cocktail, ownerId: ownerId || null,
     spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
     approvalsToBillion: !!meta.approvalsToBillion, autoTrust,
-    ghEnv: await ghEnvForRepo(resolvedRepoPath),
+    // A board worker gets its repo's GitHub account (server/jobs.js).
+    ghEnv: meta.spawnedBy === 'board' ? await ghEnvForRepo(resolvedRepoPath) : {},
   }, broadcast);
 
   if (result.error) {

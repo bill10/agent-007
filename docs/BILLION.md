@@ -526,7 +526,7 @@ repos and one for an organisation's), each unable to see the other's repos.
 agent switching it breaks every other agent and the owner's shell until someone
 switches back. Nothing in Agent 007 switches it:
 
-- A worker spawned into a repo with a github.com remote gets `GH_TOKEN` for the
+- A board worker spawned (or re-spawned onto its card) in a repo with a github.com remote gets `GH_TOKEN` for the
   account that can see it (the account named like the repo's owner, else the
   first whose token can read `repos/<owner>/<name>`), remembered per repo for
   the server's lifetime and re-checked at each spawn. Git's credential helper
