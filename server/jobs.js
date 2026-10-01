@@ -805,6 +805,8 @@ export function notifyBillion(job) {
 // Billion's verdict on one of its own cards in Review (docs/BILLION.md, part 3).
 // Accept files it as Done and retires its agent; send it back returns it to To
 // do with the reason added to its detail, so the next worker knows what to fix.
+// On one of its own To do cards it drops the card unrun: archived to Finished
+// jobs with the note as the reason, as the owner's Archive does.
 //
 // Only Billion, only its own cards, only from Review: this is the owner's
 // "Done" button handed to one agent, not to every agent on the board. A card
@@ -816,9 +818,17 @@ export async function closeJobForAgent({ session, id, accept, note }, broadcast,
   if (!session?.isBillion) return { error: 'Only Billion can close cards.' };
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
-  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to close.` };
-  if (job.state !== 'review') return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; only a card in Review can be closed.` };
+  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to close. Ask the owner.` };
   const reason = typeof note === 'string' ? note.trim() : '';
+  if (job.state === 'todo') {
+    if (!accept) return { error: 'A To do card has nothing to send back; close it (accept: true) to archive it.' };
+    if (!reason) return { error: 'Say why it is dropped (note): it is the reason the archive keeps.' };
+    const result = archiveJob(job.id, { reason, by: BILLION_NAME }, broadcast);
+    return result.error ? result : { job: jobSummary(result.job), archived: true };
+  }
+  if (job.state !== 'review') {
+    return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; only a card in Review or To do can be closed. Wait for its worker to finish_job, or read_agent_screen to see where it is.` };
+  }
   if (accept) {
     if (job.prUrl) return { error: `"${job.title}" has a pull request (${job.prUrl}). Merge it, or close it to drop the work: either way the board files the card away on its own.` };
     const result = await moveJob(job.id, 'done', broadcast, { killSession });
@@ -954,7 +964,8 @@ export function updateJob(jobId, fields, broadcast) {
 //
 // Files a To do card away as finished without running it: a one-time schedule
 // that has fired (fireSchedules), a one-date schedule a restart finds spent
-// (retireSpentSchedules), Billion's retire_job and the owner's Archive. Never a
+// (retireSpentSchedules), Billion's close_job on a To do card and the owner's
+// Archive. Never a
 // delete: the card goes to the Finished archive with the reason on it, and its
 // files and run history stay. Only from To do, where no agent is attached.
 export function archiveJob(jobId, { reason, by } = {}, broadcast) {
@@ -975,22 +986,6 @@ export function archiveJob(jobId, { reason, by } = {}, broadcast) {
   return { job };
 }
 const ARCHIVE_REASON_CHARS = 500;
-
-// Billion's retire_job: one of its own To do cards, schedule or not, archived
-// without running. The owner does the same for any card from the Jobs tab.
-export function retireJobForAgent({ session, id, reason }, broadcast) {
-  if (!session?.isBillion) return { error: 'Only Billion can retire cards.' };
-  const job = allJobs().find(j => j.id === id);
-  if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
-  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to retire. Ask the owner.` };
-  if (job.state !== 'todo') {
-    return { error: `"${job.title}" is in ${STATE_LABELS[job.state] || job.state}; retire_job only takes To do cards (close_job is for Review).` };
-  }
-  const why = typeof reason === 'string' ? reason.trim() : '';
-  if (!why) return { error: 'Say why it is retired (reason): it is the note the archive keeps.' };
-  const result = archiveJob(job.id, { reason: why, by: BILLION_NAME }, broadcast);
-  return result.error ? result : { job: jobSummary(result.job) };
-}
 
 // On a server start: archive every one-date schedule ("0 10 24 9 *") that has
 // already run, and log which, so cards written before `once` existed stop

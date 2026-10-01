@@ -352,39 +352,24 @@ export const ADD_REPO_TOOL = {
   },
 };
 
-// Billion's own To do cards, schedule or not, filed away without running.
-export const RETIRE_JOB_TOOL = {
-  name: 'retire_job',
-  description:
-    'Archive one of your own cards that is still in To do, without running it: a '
-    + 'schedule whose date has passed or that is no longer wanted, or a card the '
-    + 'plan moved past. It goes to the Finished archive with your reason as its '
-    + 'note; nothing is deleted. For a card in Review use close_job.',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      id: { type: 'string', description: 'The card id, as list_jobs reports it.' },
-      reason: { type: 'string', description: 'Why it is retired; kept on the archived card.' },
-    },
-    required: ['id', 'reason'],
-    additionalProperties: false,
-  },
-};
-
 export const CLOSE_JOB_TOOL = {
   name: 'close_job',
   description:
-    'Close one of your own cards that is in Review. accept: true files a card with '
-    + 'no pull request as Done (a card with a PR is filed away when you merge the '
-    + 'PR, or close it to drop the work). accept: false sends it back to To do '
-    + 'with your note added to its detail, for a fresh worker to redo; if it had a '
-    + 'pull request, close that one afterwards. Either way its worker is closed.',
+    'Close one of your own cards, finished one way or the other. On a card in '
+    + 'Review it is your verdict on the work: accept: true files a card with no '
+    + 'pull request as Done (a card with a PR is filed away when you merge the PR, '
+    + 'or close it to drop the work); accept: false sends it back to To do with '
+    + 'your note added to its detail, for a fresh worker to redo (if it had a pull '
+    + 'request, close that one afterwards); either way its worker is closed. On a '
+    + 'card still in To do (a schedule whose date has passed or is no longer '
+    + 'wanted, a card the plan moved past) it drops it unrun: accept: true with a '
+    + 'note archives it to Finished jobs with the note as its reason; nothing is deleted.',
   inputSchema: {
     type: 'object',
     properties: {
       id: { type: 'string', description: 'The card id, as list_jobs reports it.' },
-      accept: { type: 'boolean', description: 'true: Done. false: back to To do.' },
-      note: { type: 'string', description: 'Required when sending it back: what the next worker must do differently.' },
+      accept: { type: 'boolean', description: 'Review card: true is Done, false is back to To do. To do card: true archives it.' },
+      note: { type: 'string', description: 'Required when sending a card back (what the next worker must do differently) and when archiving a To do card (why it is dropped).' },
     },
     required: ['id', 'accept'],
     additionalProperties: false,
@@ -667,7 +652,7 @@ export const SET_NEXT_WAKE_TOOL = {
 };
 
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL, WITHDRAW_MESSAGE_TOOL];
-const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, RETIRE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
+const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
   LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
@@ -880,18 +865,11 @@ const CALLS = {
   [CLOSE_JOB_TOOL.name]: async (args, ctx) => {
     const result = await ctx.closeJob({ id: args.id, accept: args.accept === true, note: args.note });
     if (result.error) return toolText(result.error, true);
+    if (result.archived) return toolText(`"${result.job.title}" is archived in Finished with your note; it will not run.`);
     return toolText(result.accepted
       ? `"${result.job.title}" is Done and its worker is closed.`
       : `"${result.job.title}" is back in To do with your note; a fresh worker picks it up on the next dispatch.`
         + (result.oldPrUrl ? ` Its old pull request is still open: close ${result.oldPrUrl}.` : ''));
-  },
-
-  [RETIRE_JOB_TOOL.name]: (args, ctx) => {
-    const result = ctx.retireJob
-      ? ctx.retireJob({ id: args.id, reason: args.reason })
-      : { error: 'Only Billion can retire cards.' };
-    if (result.error) return toolText(result.error, true);
-    return toolText(`"${result.job.title}" is archived in Finished with your note; it will not run.`);
   },
 
   [ANSWER_PERMISSION_TOOL.name]: (args, ctx) => {

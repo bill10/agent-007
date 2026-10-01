@@ -1,4 +1,5 @@
-// Billion's board tools (docs/BILLION.md, part 3): add_repo and close_job,
+// Billion's board tools (docs/BILLION.md, part 3): add_repo and close_job
+// (a Review card's verdict, or a To do card archived),
 // through the real /mcp route, so the "Billion only" checks are the ones that
 // run in production.
 
@@ -134,12 +135,12 @@ describe('close_job', () => {
   });
 });
 
-describe('retire_job', () => {
+describe('close_job on a To do card', () => {
   const todoCard = (fields = {}) => addJob({ title: 'Oct 1, 10:30 am: check in', repoPath: REPO, schedule: '30 10 1 10 *', postedByAgent: BILLION_NAME, postedByBillion: true, ...fields }, () => {}).job;
 
-  it('archives one of Billion\'s To do cards without running it, with the reason as its note', async () => {
+  it('archives one of Billion\'s To do cards without running it, with the note as its reason', async () => {
     const job = todoCard();
-    const r = await call('retire_job', { id: job.id, reason: 'Done by hand already.' });
+    const r = await call('close_job', { id: job.id, accept: true, note: 'Done by hand already.' });
     expect(r.isError).toBe(false);
     expect(r.text).toMatch(/archived in Finished/);
     expect(job.state).toBe('done');
@@ -148,19 +149,22 @@ describe('retire_job', () => {
     expect(allJobs()).toContain(job);
   });
 
-  it('wants a reason, its own card, and a card still in To do', async () => {
+  it('wants a reason, its own card, and accept rather than send back', async () => {
     const job = todoCard();
-    expect((await call('retire_job', { id: job.id, reason: ' ' })).text).toMatch(/Say why/);
+    expect((await call('close_job', { id: job.id, accept: true, note: ' ' })).text).toMatch(/Say why/);
+    expect((await call('close_job', { id: job.id, accept: false, note: 'x' })).text).toMatch(/nothing to send back/);
     const theirs = todoCard({ postedByAgent: 'Viper', postedByBillion: false });
-    expect((await call('retire_job', { id: theirs.id, reason: 'x' })).text).toMatch(/not posted by you/);
-    const review = reviewCard();
-    expect((await call('retire_job', { id: review.id, reason: 'x' })).text).toMatch(/close_job is for Review/);
-    expect(allJobs().map(j => j.state)).toEqual(['todo', 'todo', 'review']);
+    expect((await call('close_job', { id: theirs.id, accept: true, note: 'x' })).text).toMatch(/not posted by you/);
+    expect(allJobs().map(j => j.state)).toEqual(['todo', 'todo']);
   });
+});
 
-  it('is not a tool any other agent has', async () => {
-    const job = todoCard();
-    expect((await call('retire_job', { id: job.id, reason: 'x' }, WORKER_TOKEN)).error).toMatch(/Unknown tool/);
-    expect(job.state).toBe('todo');
+describe('Billion\'s tool list', () => {
+  it('has close_job and no retire_job: 24 tools', async () => {
+    const { toolsFor } = await import('../server/mcp.js');
+    const names = toolsFor({ isBillion: true }).map(t => t.name);
+    expect(names).toContain('close_job');
+    expect(names).not.toContain('retire_job');
+    expect(names).toHaveLength(24);
   });
 });
