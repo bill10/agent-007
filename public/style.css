@@ -2652,3 +2652,16 @@ select.job-mode-danger {
 @media (max-width: 700px) {
   .rotation-toggle { min-height: 44px; }
 }
+
+/* Passive schedule evidence uses the existing card and run navigation. */
+.job-schedule-status {
+  font-size: 11px;
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
+.job-schedule-status strong { color: var(--text); }
+.job-schedule-attention strong { color: var(--state-message); }
+.job-schedule-status summary { cursor: pointer; padding-block: 6px; }
+.job-schedule-status summary:focus-visible,
+.job-schedule-status button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.job-schedule-evidence { white-space: pre-line; }

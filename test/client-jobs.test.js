@@ -1151,6 +1151,13 @@ describe('scheduled cards', () => {
     expect(document.querySelector('.job-card-schedule').textContent).not.toMatch(/latest run/);
   });
 
+  it('keeps a legacy held timestamp when new firing evidence was never recorded', () => {
+    handleJobsList({ jobs: [SCHEDULED({ lastSkipReason: 'the previous run is still going', lastSkipAt: new Date().toISOString(),
+      scheduleStatus: { label: 'Held: prior worker gone', attention: true, observedAt: null, graceMs: 300000, timeZone: 'UTC' },
+    })], settings: {} });
+    expect(document.querySelector('[data-job-id="job-sched"]').textContent).toMatch(/held off .*the previous run is still going/);
+  });
+
   it('does not say it held off while it is paused', () => {
     handleJobsList({ jobs: [SCHEDULED({ paused: true, lastSkipReason: 'the previous run is still going', lastSkipAt: new Date().toISOString() })], settings: {} });
     expect(document.querySelector('[data-job-id="job-sched"]').textContent).not.toMatch(/held off/);

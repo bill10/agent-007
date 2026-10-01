@@ -32,6 +32,7 @@ import {
 } from '../lib/jobs.js';
 import { availableModels } from './models.js';
 import { nextCronIso } from '../lib/cron.js';
+import { scheduleStatus } from '../lib/schedule-status.js';
 import { commandExists, missingCommandMessage } from './command-path.js';
 
 // --- Board settings ---
@@ -124,6 +125,7 @@ export function jobsPayload() {
       // carry no type at all, and the client should not have to know that.
       type: jobType(job),
       status: deriveJobStatus(job, session),
+      scheduleStatus: scheduleStatus(job, allJobs(), sessions, boardSettings()),
       agentState: session ? session.state : null,
       agentAlive: !!(session && !session.exited),
       // Only a card that has to open a pull request cares.
@@ -515,6 +517,7 @@ function jobSummary(job) {
     editedByAgent: job.editedByAgent || null,
     // Derived fresh, never stored: it describes a PTY that exists right now.
     status: deriveJobStatus(job, session),
+    scheduleStatus: scheduleStatus(job, allJobs(), sessions, boardSettings()),
     agentName: job.agentName || null,
     prUrl: job.prUrl || null,
     postedByName: job.postedByName || null,
@@ -2245,11 +2248,19 @@ export function fireSchedules(broadcast, { now = Date.now() } = {}) {
   for (const schedule of allJobs().filter(j => isScheduled(j) && j.state === 'todo')) {
     if (!isJobDue(schedule, now)) continue;
     changed = true;
+    // Bounded audit evidence, saved with this existing scan's result. Capture
+    // the due cursor BEFORE re-arming; never manufacture intermediate runs.
+    const observation = {
+      cron: schedule.schedule, expectedAt: schedule.nextRunAt || null,
+      observedAt: new Date(now).toISOString(), outcome: 'error',
+    };
+    schedule.lastScheduleObservation = observation;
     // A one-time schedule stays due until its single run goes out, so a hold
     // or an error delays it rather than moving it to next year.
     if (!schedule.once) schedule.nextRunAt = schedule.schedule ? nextCronIso(schedule.schedule, now) : null;
     const hold = scheduleHold(schedule, allJobs());
     if (hold) {
+      observation.outcome = 'held';
       schedule.lastSkipAt = new Date(now).toISOString();
       schedule.lastSkipReason = hold;
       continue;
@@ -2270,6 +2281,7 @@ export function fireSchedules(broadcast, { now = Date.now() } = {}) {
       continue;
     }
     allJobs().push(result.job);
+    observation.outcome = 'posted';
     schedule.runCount = (Number(schedule.runCount) || 0) + 1;
     schedule.lastRunAt = new Date(now).toISOString();
     schedule.lastRunJobId = result.job.id;
@@ -2401,6 +2413,9 @@ export async function runScan(createSession, broadcast, { onSessionCreated, kill
     return { skipped: false };
   } finally {
     scanInFlight = false;
+    // Age-based status can change even on an otherwise unchanged or failed
+    // scan. Refresh the passive snapshot on this existing cadence, no writes.
+    broadcastJobs(broadcast);
   }
 }
 

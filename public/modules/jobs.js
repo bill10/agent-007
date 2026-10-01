@@ -19,6 +19,7 @@ import { send } from './ws.js';
 import { escapeHtml, getToken } from './auth.js';
 import { switchToSession } from './terminal.js';
 import { patchChildren, rev } from './dom-patch.js';
+import { renderScheduleStatus } from './schedule-status.js';
 
 // The columns, in board order. `done` deliberately has none: a job whose PR
 // merged is finished work, and a Review column that accumulates it stops
@@ -58,6 +59,7 @@ let pendingAttachments = [];
 // list share the same space rather than stacking, so the finished archive can
 // never push the live work off the screen.
 let showingFinished = false;
+const openScheduleEvidence = new Set();
 
 // --- Helpers ---
 
@@ -419,9 +421,21 @@ function renderCard(job) {
       card.appendChild(link);
     }
 
+    const status = renderScheduleStatus(job.scheduleStatus, (id) => {
+      const run = jobs.get(id);
+      if (!run) return;
+      if (run.agentSessionId && agents.has(run.agentSessionId)) return switchToSession(run.agentSessionId);
+      if (run.state === 'done' && !showingFinished) { showingFinished = true; renderBoard(); }
+      document.querySelector(`[data-job-id="${CSS.escape(run.id)}"]`)?.scrollIntoView({ block: 'nearest' });
+    }, {
+      expanded: openScheduleEvidence.has(job.id),
+      onToggle: open => open ? openScheduleEvidence.add(job.id) : openScheduleEvidence.delete(job.id),
+    });
+    if (status) card.appendChild(status);
+
     // A firing it held off (see scheduleHold), said out loud: a schedule that
     // quietly stops posting runs is the failure this is here to prevent.
-    if (job.lastSkipReason && !job.paused) {
+    if (job.lastSkipReason && !job.paused && !job.scheduleStatus?.observedAt) {
       const skip = document.createElement('div');
       skip.className = 'job-card-held';
       skip.textContent = `held off ${relativeTime(job.lastSkipAt)}: ${job.lastSkipReason}`;
