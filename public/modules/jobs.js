@@ -484,6 +484,12 @@ function renderCard(job) {
 
   // What the agent reported through finish_job. On a card that opens no PR
   // this is the result itself, so it is shown in full rather than clipped.
+  if (job.interruptedAt) {
+    const note = document.createElement('div');
+    note.className = 'job-card-result';
+    note.textContent = `Interrupted — recovery ${job.recoveryJobId}: ${job.interruptionReason}`;
+    card.appendChild(note);
+  }
   if (job.resultSummary) {
     const result = document.createElement('div');
     result.className = 'job-card-result';

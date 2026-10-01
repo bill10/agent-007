@@ -662,6 +662,15 @@ describe('job form', () => {
 });
 
 describe('cards that need no pull request', () => {
+  it('shows interruption separately from preserved partial results as plain text', () => {
+    handleJobsList({ jobs: [JOB({ id: 'interrupted', state: 'review', interruptedAt: '2026-10-01',
+      recoveryJobId: 'recovery', interruptionReason: '<b>Worker gone</b>', resultSummary: 'Partial evidence' })], settings: {} });
+    const [card] = columnCards('review');
+    expect(card.textContent).toContain('Interrupted — recovery recovery: <b>Worker gone</b>');
+    expect(card.textContent).toContain('Partial evidence');
+    expect(card.querySelector('.job-card-result b')).toBeNull();
+  });
+
   it('chips a no-PR card, shows its result in full, and leaves a plain card unchipped', () => {
     handleJobsList({
       jobs: [

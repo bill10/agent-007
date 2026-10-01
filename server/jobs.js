@@ -509,6 +509,10 @@ function jobSummary(job) {
     nextRunAt: job.nextRunAt || null,
     once: !!job.once,
     scheduleId: job.scheduleId || null,
+    interruptedAt: job.interruptedAt || null,
+    interruptedBy: job.interruptedBy || null,
+    recoveryJobId: job.recoveryJobId || null,
+    interruptionReason: job.interruptionReason || null,
     archivedReason: job.archivedReason || null,
     lastSkipReason: job.lastSkipReason || null,
     repo: basename(job.repoPath || ''),
@@ -989,6 +993,54 @@ export function retireJobForAgent({ session, id, reason }, broadcast) {
   return result.error ? result : { job: jobSummary(result.job) };
 }
 
+// Explicit handoff of a gone scheduled run. No PTY/worktree operations and no
+// await between validation and persistence: a revived worker cannot race this.
+export function reconcileJobForAgent({ session, id, replacementId, reason }, broadcast) {
+  if (!session?.isBillion) return { error: 'Only Billion can reconcile cards.' };
+  const job = allJobs().find(j => j.id === id);
+  const replacement = allJobs().find(j => j.id === replacementId);
+  if (!job || !replacement || job === replacement) return { error: 'Name two distinct existing cards.' };
+  if (!job.postedByBillion || !replacement.postedByBillion || job.postedBy || replacement.postedBy) {
+    return { error: 'Both cards must belong to Billion.' };
+  }
+  if (job.state !== 'in-progress' || jobRequiresPr(job) || job.prUrl || !job.scheduleId || job.interruptedAt) {
+    return { error: 'Only an unreconciled In progress no-PR schedule run can be interrupted.' };
+  }
+  const schedule = allJobs().find(j => j.id === job.scheduleId && isScheduled(j));
+  if (!schedule || !schedule.postedByBillion || schedule.postedBy || schedule.repoPath !== job.repoPath) return { error: 'The original schedule is missing or mismatched.' };
+  // Check all sessions, not just the saved id, including a re-adopted worker.
+  const matches = entry => entry.id === job.agentSessionId || entry.jobId === job.id
+    || (entry.repoPath === job.repoPath && job.branchName && entry.branchName === job.branchName);
+  if ([...sessions.values()].some(s => !s.exited && matches(s))
+      || [...orphans.values()].some(matches)) {
+    return { error: 'The original worker is live or recoverable; reconcile only a gone card without an orphan.' };
+  }
+  const worker = sessions.get(replacement.agentSessionId);
+  if (replacement.state !== 'in-progress' || !worker || worker.exited
+      || worker.jobId !== replacement.id || worker.repoPath !== replacement.repoPath || worker.isBillion
+      || (worker.ownerId || null) !== (session.ownerId || null)
+      || replacement.repoPath !== job.repoPath || jobRequiresPr(replacement) || replacement.prUrl
+      || isScheduled(replacement) || replacement.scheduleId || replacement.interruptedAt
+      || replacement.recoveryJobId || replacement.recoversJobId
+      || !String(replacement.detail || '').includes(job.id)) {
+    return { error: 'Replacement must be a live standalone no-PR card in the same repository and owner scope, explicitly naming the original card in its instructions.' };
+  }
+  const why = typeof reason === 'string' ? reason.trim() : '';
+  if (!why) return { error: 'Say why the original was interrupted and how recovery was verified.' };
+  const now = new Date().toISOString();
+  job.state = 'review';
+  job.reviewAt = now;
+  job.interruptedAt = now;
+  job.interruptedBy = session.id;
+  job.recoveryJobId = replacement.id;
+  job.interruptionReason = why.slice(0, 2000);
+  // Preserve any earlier result, branch, attachments, and original worker id.
+  replacement.scheduleId = job.scheduleId;
+  replacement.recoversJobId = job.id;
+  persist(broadcast);
+  return { job: jobSummary(job), replacement: jobSummary(replacement), hold: scheduleHold(schedule, allJobs()) };
+}
+
 // On a server start: archive every one-date schedule ("0 10 24 9 *") that has
 // already run, and log which, so cards written before `once` existed stop
 // sitting in To do showing next year's date.
@@ -1084,6 +1136,9 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (!JOB_STATES.includes(state)) return { error: `Unknown state "${state}"` };
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
+  if (job.interruptedAt && (state === 'todo' || state === 'in-progress')) {
+    return { error: 'This interrupted attempt has a replacement; follow its recovery card instead of redispatching.' };
+  }
   // Done is terminal. A finished card is the record of work that shipped, and
   // the only thing that can happen to it is deletion.
   //
