@@ -340,3 +340,14 @@ it('keeps a queued question past the closed-items cap, like an open one', async 
   await ask('one more', { project: 'a' });
   expect(JSON.parse(readFileSync(join(CONFIG_DIR, 'waiting.json'), 'utf8')).filter(i => i.status === 'queued').map(i => i.id)).toContain('q');
 });
+
+it('caps queued questions on their own, so a long queue never pushes an open question out', async () => {
+  const open = Array.from({ length: 50 }, (_, i) => ({ id: `o${i}`, n: i + 1, text: `open ${i}`, at: '2026-09-01T00:00:00Z', status: 'open', project: 'a' }));
+  const queued = Array.from({ length: 50 }, (_, i) => ({ id: `q${i}`, n: 100 + i, text: `queued ${i}`, at: '2026-09-01T00:00:00Z', status: 'queued', project: 'a' }));
+  writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify([...open, ...queued]));
+  await ask('one more', { project: 'a' });
+  const saved = JSON.parse(readFileSync(join(CONFIG_DIR, 'waiting.json'), 'utf8'));
+  expect(saved.filter(i => i.status === 'open')).toHaveLength(50);
+  expect(saved.filter(i => i.status === 'queued').map(i => i.text)).not.toContain('queued 0');
+  expect(saved.filter(i => i.status === 'queued').map(i => i.text)).toContain('one more');
+});

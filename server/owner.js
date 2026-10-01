@@ -275,11 +275,12 @@ export function waitingItems() {
 }
 
 function saveWaiting(items) {
-  // The newest open (and queued) questions, and of the rest the newest few.
-  const live = (item) => item.status === 'open' || item.status === 'queued';
-  let open = items.filter(live).length - WAITING_CAP;
-  let closed = items.length - (open + WAITING_CAP) - CLOSED_KEPT;
-  const kept = items.filter(item => (live(item) ? open-- <= 0 : closed-- <= 0));
+  // The newest open questions, the newest queued ones (a cap of their own, so
+  // a long queue never pushes an open question out), and of the rest the newest few.
+  const over = { open: 0, queued: 0 };
+  for (const status of ['open', 'queued']) over[status] = items.filter(item => item.status === status).length - WAITING_CAP;
+  let closed = items.filter(item => !(item.status in over)).length - CLOSED_KEPT;
+  const kept = items.filter(item => (item.status in over ? over[item.status]-- <= 0 : closed-- <= 0));
   const tmp = `${waitingPath()}.tmp`;
   writeFileSync(tmp, JSON.stringify(kept, null, 2));
   renameSync(tmp, waitingPath());
