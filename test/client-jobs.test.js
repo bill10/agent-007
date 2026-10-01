@@ -172,6 +172,27 @@ describe('board rendering', () => {
   });
 });
 
+describe('a redraw keeps the reader\'s place', () => {
+  it('updates the To do column in place: same scroller, unchanged cards kept, scroll kept', () => {
+    const many = Array.from({ length: 30 }, (_, i) => JOB({ id: `job-${i}`, title: `Card ${i}`, postedAt: new Date(Date.now() - (30 - i) * 1000).toISOString() }));
+    handleJobsList({ jobs: many, settings: { running: true } });
+    const scroller = document.querySelector('.job-column[data-state="todo"] .job-cards');
+    const container = document.getElementById('job-columns');
+    const first = columnCards('todo')[0];
+    scroller.scrollTop = 400;
+    container.scrollTop = 250;   // the phone, where the stacked columns scroll
+    // A broadcast with one card edited, then the 30s clock tick.
+    handleJobsList({ jobs: many.map(j => j.id === 'job-5' ? { ...j, title: 'Edited' } : j), settings: { running: true } });
+    renderBoard();
+    expect(document.querySelector('.job-column[data-state="todo"] .job-cards')).toBe(scroller);
+    expect(scroller.scrollTop).toBe(400);
+    expect(container.scrollTop).toBe(250);
+    expect(columnCards('todo')[0]).toBe(first);
+    expect(columnCards('todo')[5].querySelector('.job-card-title').textContent).toContain('Edited');
+    expect(columnCards('todo')).toHaveLength(30);
+  });
+});
+
 describe('live status badge', () => {
   const inProgress = (agentState, lastOutputAt = Date.now()) => {
     agents.set('s1', { name: 'Viper', state: agentState, lastOutputAt, termEl: document.createElement('div') });
@@ -736,6 +757,30 @@ describe('card actions', () => {
     window.confirm = vi.fn(() => true);
     del.click();
     expect(send).toHaveBeenCalledWith({ type: 'job-delete', jobId: 'job-1' });
+  });
+});
+
+describe('archiving a To do card', () => {
+  const button = (label) => [...document.querySelectorAll('.job-card-btn')].find(b => b.textContent === label);
+
+  it('offers Archive on a To do card, asks first, then sends job-archive', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '0 10 24 9 *' })], settings: {} });
+    window.confirm = vi.fn(() => false);
+    button('Archive').click();
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'job-archive' }));
+    window.confirm = vi.fn(() => true);
+    button('Archive').click();
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'job-archive', jobId: 'job-1' }));
+  });
+
+  it('shows an archived schedule in Finished with its note and no Pause or Archive', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '0 10 24 9 *', once: true, state: 'done', archivedAt: new Date().toISOString(), archivedBy: 'Billion', archivedReason: 'Ran once' })], settings: {} });
+    document.getElementById('btn-finished-jobs').click();
+    const card = document.querySelector('#job-finished-cards .job-card');
+    expect(card.querySelector('.job-card-finished').textContent).toMatch(/archived .* by Billion: Ran once/);
+    expect(card.querySelector('.job-card-type').textContent).toBe('once');
+    expect(button('Pause')).toBeUndefined();
+    expect(button('Archive')).toBeUndefined();
   });
 });
 

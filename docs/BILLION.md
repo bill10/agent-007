@@ -364,7 +364,7 @@ statement into a plan and the plan into cards.
   `list_jobs`, and messages only the workers of its own cards. Agents you start
   by hand are yours. Throughput is capped by the board's `maxPerRepo`.
 - **Tools and limits:** as in #92, plus Billion's own `billion_ready`,
-  `add_repo`, `close_job` and `answer_permission`, and `read_agent_screen`:
+  `add_repo`, `close_job`, `retire_job` and `answer_permission`, and `read_agent_screen`:
   the last lines (default 40, at most 200) of a worker's terminal, ANSI
   stripped, with its status. Narrower than `send_message`: only workers on
   Billion's own cards, never an agent started by hand, since a screen can show
@@ -928,7 +928,12 @@ anywhere but Telegram, and there is no paid transcription.
    `close_job` (accept a no-PR card → Done; send any card back → To do with
    the note appended to its detail; a PR card is filed Done by its merge, so
    accept refuses it). Billion only, its own cards only, Review only; both
-   listed only for Billion and checked again in the route. Verified live end
+   listed only for Billion and checked again in the route. `retire_job` (id,
+   reason) is the To do counterpart: it archives one of Billion's own To do
+   cards, schedule or not, to Finished without running it, with the reason as
+   the card's note (`archiveJob` in `server/jobs.js`, the same path as the
+   owner's **Archive** button). Work due once on a date is posted with
+   `run_at` or `once: true` and archives itself after its single run. Verified live end
    to end: Billion added a repo, posted a no-PR card, the worker finished,
    the `[Job board]` notice woke Billion, it read the result and accepted
    the card — Done in 41 s.

@@ -18,6 +18,7 @@ import { hideWaiting } from './waiting.js';
 import { send } from './ws.js';
 import { escapeHtml, getToken } from './auth.js';
 import { switchToSession } from './terminal.js';
+import { patchChildren, rev } from './dom-patch.js';
 
 // The columns, in board order. `done` deliberately has none: a job whose PR
 // merged is finished work, and a Review column that accumulates it stops
@@ -163,20 +164,32 @@ export function renderBoard() {
   byState.get('in-progress').sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
   byState.get('review').sort((a, b) => String(b.reviewAt || '').localeCompare(String(a.reviewAt || '')));
 
-  container.innerHTML = '';
+  // Updated in place, never emptied: emptying a scroller drops its scroll to
+  // the top, and this runs on every broadcast and every 30s tick. On a wide
+  // screen each column's cards scroll; on a phone the stacked columns do.
+  for (const child of [...container.children]) if (!child.classList.contains('job-column')) child.remove();
+  for (const child of [...container.childNodes]) if (child.nodeType !== 1) child.remove();
   for (const col of COLUMNS) {
     const list = byState.get(col.state);
-    const colEl = document.createElement('div');
-    colEl.className = 'job-column';
-    colEl.dataset.state = col.state;
-
-    const header = document.createElement('div');
-    header.className = 'job-column-header';
-    header.innerHTML = `<span class="job-column-label">${escapeHtml(col.label)}</span><span class="job-column-count">${list.length}</span>`;
-    colEl.appendChild(header);
+    let colEl = container.querySelector(`:scope > .job-column[data-state="${col.state}"]`);
+    if (!colEl) {
+      colEl = document.createElement('div');
+      colEl.className = 'job-column';
+      colEl.dataset.state = col.state;
+      const header = document.createElement('div');
+      header.className = 'job-column-header';
+      header.innerHTML = `<span class="job-column-label">${escapeHtml(col.label)}</span><span class="job-column-count"></span>`;
+      const cards = document.createElement('div');
+      cards.className = 'job-cards';
+      colEl.append(header, cards);
+      container.appendChild(colEl);
+    }
+    colEl.querySelector('.job-column-count').textContent = String(list.length);
+    const cards = colEl.querySelector('.job-cards');
 
     // A stopped board holds every card in To do with nothing on the card saying
     // why; the toolbar's Start is easy to miss, so the column says it.
+    colEl.querySelector(':scope > .job-board-stopped')?.remove();
     if (col.state === 'todo' && list.length && !boardSettings.running) {
       const stopped = document.createElement('div');
       stopped.className = 'job-board-stopped';
@@ -186,21 +199,24 @@ export function renderBoard() {
       start.textContent = 'Start';
       start.onclick = () => send({ type: 'job-settings', running: true });
       stopped.appendChild(start);
-      colEl.appendChild(stopped);
+      colEl.insertBefore(stopped, cards);
     }
 
-    const cards = document.createElement('div');
-    cards.className = 'job-cards';
+    const nodes = list.map(renderCard);
     if (list.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'job-column-empty';
+      empty.dataset.key = 'empty';
       empty.textContent = col.state === 'todo' ? 'No jobs queued' : '—';
-      cards.appendChild(empty);
+      nodes.push(empty);
     }
-    for (const job of list) cards.appendChild(renderCard(job));
-    colEl.appendChild(cards);
-    container.appendChild(colEl);
+    patchChildren(cards, nodes);
   }
+  // In board order; only moved when they are not, since a move resets scroll.
+  COLUMNS.forEach((col, i) => {
+    const colEl = container.querySelector(`:scope > .job-column[data-state="${col.state}"]`);
+    if (container.children[i] !== colEl) container.insertBefore(colEl, container.children[i] || null);
+  });
 }
 
 // Newest first: the thing that just merged is the one you are most likely to be
@@ -212,15 +228,15 @@ function renderFinishedList(finished) {
   const sorted = [...finished].sort((a, b) =>
     String(b.doneAt || b.prMergedAt || '').localeCompare(String(a.doneAt || a.prMergedAt || '')));
   if (count) count.textContent = String(sorted.length);
-  cards.innerHTML = '';
   if (sorted.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'job-column-empty';
+    empty.dataset.key = 'empty';
     empty.textContent = 'No finished jobs yet — a card lands here once its pull request merges or is closed, or you mark it done.';
-    cards.appendChild(empty);
+    patchChildren(cards, [empty]);
     return;
   }
-  for (const job of sorted) cards.appendChild(renderCard(job));
+  patchChildren(cards, sorted.map(renderCard));
 }
 
 // The title and aria-pressed move with the label: a tooltip still describing the
@@ -245,6 +261,10 @@ function renderCard(job) {
   const status = liveStatus(job);
   card.className = 'job-card' + (status ? ` status-${status}` : '');
   card.dataset.jobId = job.id;
+  // patchChildren keeps a card whose markup is unchanged, handlers and all; the
+  // record's fingerprint makes sure that only happens when the job is unchanged.
+  card.dataset.key = job.id;
+  card.dataset.rev = rev(job);
 
   // A card whose agent is still around is a jump target — In progress, and
   // Review, where the agent is kept until the card is done. The badge below
@@ -264,8 +284,10 @@ function renderCard(job) {
     // from the glance that the three columns exist to give.
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
-    chip.textContent = 'scheduled';
-    chip.title = 'Posts a run card each time it comes due; the runs are the cards that move';
+    chip.textContent = job.once ? 'once' : 'scheduled';
+    chip.title = job.once
+      ? 'Posts a single run card when it comes due, then is archived'
+      : 'Posts a run card each time it comes due; the runs are the cards that move';
     title.appendChild(chip);
   }
   if (job.scheduleId) {
@@ -359,7 +381,9 @@ function renderCard(job) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
     const bits = [`<span class="job-card-cron">${escapeHtml(job.schedule || '')}</span>`];
-    if (job.paused) {
+    if (job.state === 'done') {
+      // Archived: it will not fire again, and its note below says why.
+    } else if (job.paused) {
       // The stored nextRunAt is not shown: it is the due time the pause is
       // holding, and resuming re-arms from that moment instead of running it.
       bits.push('<span class="job-card-next job-card-paused">paused</span>');
@@ -493,7 +517,13 @@ function renderCard(job) {
     card.appendChild(note);
   }
 
-  if (job.state === 'done') {
+  if (job.state === 'done' && job.archivedAt) {
+    const fin = document.createElement('div');
+    fin.className = 'job-card-finished';
+    fin.textContent = `archived ${relativeTime(job.archivedAt)}${job.archivedBy ? ` by ${job.archivedBy}` : ''}`
+      + `${job.archivedReason ? `: ${job.archivedReason}` : ''}`;
+    card.appendChild(fin);
+  } else if (job.state === 'done') {
     const fin = document.createElement('div');
     fin.className = 'job-card-finished';
     fin.textContent = job.prMergedAt
@@ -593,7 +623,7 @@ function renderCardActions(job) {
   }
   // Pause holds the schedule's next firing; a run already posted is its own
   // card and is left alone.
-  if (isScheduled(job)) {
+  if (isScheduled(job) && job.state === 'todo') {
     actions.appendChild(job.paused
       ? mk('Resume', 'Resume this schedule. The next run is set from now, so a firing missed while paused is not replayed.',
         () => send({ type: 'job-pause', jobId: job.id, paused: false }))
@@ -623,6 +653,17 @@ function renderCardActions(job) {
         : '';
       if (confirm(`File "${job.title}" away as finished?\n\n${agentNote}The card leaves the board for Finished jobs and cannot be moved back — follow-up work needs a new job.`)) {
         send({ type: 'job-move', jobId: job.id, state: 'done' });
+      }
+    }));
+  }
+  // Filed to Finished without running, with a note; unlike Delete, the card and
+  // its history are kept. For a one-date schedule whose day has passed, or a
+  // card nobody needs any more.
+  if (job.state === 'todo') {
+    actions.appendChild(mk('Archive', 'Move this card to Finished jobs without running it. It is kept there, not deleted.', () => {
+      const what = isScheduled(job) ? 'The schedule posts no more runs; runs it already posted are left alone.' : 'It will not be dispatched.';
+      if (confirm(`Archive "${job.title}"?\n\n${what} The card moves to Finished jobs and cannot be moved back.`)) {
+        send({ type: 'job-archive', jobId: job.id, reason: 'Archived from the Jobs tab' });
       }
     }));
   }
