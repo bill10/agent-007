@@ -29,7 +29,7 @@ export function loadSettings() {
   return files;
 }
 
-const tilde = (p) => {
+export const tilde = (p) => {
   const home = homedir();
   return p.startsWith(home + '/') || p.startsWith(home + '\\') ? '~' + p.slice(home.length) : p;
 };

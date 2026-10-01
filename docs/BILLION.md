@@ -541,6 +541,8 @@ switches back. Nothing in Agent 007 switches it:
   per call and remember which one answered for each repo.
 - Billion works across repos, so its charter says to pick the account per
   command: `GH_TOKEN=$(gh auth token -u <account>) gh …`.
+- `agent-007 doctor` names the account board workers use for each GitHub repo
+  on the board, and marks ✗ a repo no signed-in account can see.
 
 ## Claude Code or Codex
 
@@ -905,6 +907,9 @@ Setup:
    for Billion?`. Check it is yours and press **Use this chat**. The bot answers
    "Connected to Agent 007." in that chat and the tab says *Telegram connected*;
    no restart.
+
+`agent-007 doctor` checks the token: it says whether the bot answers, or that
+Telegram rejects the token.
 
 Every chat that messages the bot is offered, one by one (up to 20 a run), and
 none is ever picked for you, so a stranger who finds the bot is just an offer

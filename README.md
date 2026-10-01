@@ -44,6 +44,14 @@ npm start
 
 Open [http://localhost:7007](http://localhost:7007). Click **+ Job** to queue work on the board, or **+ Agent** to start one by hand -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. Needs Node.js 20.12+ and Git ([full requirements](#requirements)).
 
+To check what it needs, at any time:
+
+```bash
+npx @bill10/agent-007 doctor   # or agent-007 doctor, or npm start -- doctor
+```
+
+One line per check (Node and node-pty, `claude` and `codex` installed and logged in, `gh` and which account reaches each repo on the board, each repo's path and remote, the port, the settings files and `config.json`, the version against npm, Telegram, stray local plugin registrations), ✓, ✗ or – (not needed), with a fix under each ✗. It changes nothing, and exits 1 when anything is ✗. Every start runs the quick, offline part of it and prints only what failed.
+
 ### Settings
 
 It works with no configuration. To change something, create a settings file:
@@ -252,6 +260,8 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 
 ## Troubleshooting
 
+Start with `agent-007 doctor` (`npx @bill10/agent-007 doctor`, or `npm start -- doctor` in a clone): it checks everything below and prints the fix for each problem it finds.
+
 **`npm install` fails building `node-pty`.** `node-pty` ships prebuilt binaries for macOS, Linux and Windows on x64 and arm64, so normally nothing compiles. Only if the install tries to build it from source and fails, install a C++ toolchain and run `npm install` again:
 
 - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
@@ -273,6 +283,7 @@ server.js          Entry point + orchestrators (createSession, killSession)
 server/
   state.js         Shared mutable state (sessions, orphans, pools, config)
   settings.js      Config dir and the settings files (./.env, ~/.agent-007/.env)
+  doctor.js        `agent-007 doctor` and the start's quick check (report only, never changes anything)
   config.js        Config persistence (load, save, crash recovery)
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)

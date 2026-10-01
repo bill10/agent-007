@@ -18,6 +18,7 @@ const HELP = `Usage: agent-007 [--port <n>]
        agent-007 init
        agent-007 adduser "Display Name"
        agent-007 handover
+       agent-007 doctor
 
 Starts Agent 007 at http://localhost:7007 (or --port).
 
@@ -26,6 +27,9 @@ Commands:
   adduser          Create a login user and turn on login for the server
   handover         Write Billion's HANDOVER.md now, from the conversation of
                    the CLI it runs on (a switch writes one by itself)
+  doctor           Check what Agent 007 needs (Node, claude/codex, gh, git,
+                   your repos, the port, settings, Telegram) and say how to
+                   fix what is missing. Changes nothing. Exits 1 on a problem
 
 Options:
   -p, --port <n>   Port to listen on (overrides PORT)
@@ -105,7 +109,7 @@ if (values.port !== undefined) {
   // Before the files load, which never overwrite a variable already set.
   process.env.PORT = String(port);
 }
-if (positionals.length && !['init', 'adduser', 'handover'].includes(positionals[0])) {
+if (positionals.length && !['init', 'adduser', 'handover', 'doctor'].includes(positionals[0])) {
   console.error(`Unknown command: ${positionals[0]}\n\n${HELP}`);
   process.exit(2);
 }
@@ -113,12 +117,13 @@ if (positionals.length && !['init', 'adduser', 'handover'].includes(positionals[
 const settingsFiles = loadSettings();
 
 // Said the way it was launched, so it can be pasted back.
-function initCommand() {
-  if (process.env.npm_command === 'exec') return 'npx @bill10/agent-007 init';
-  if (process.env.npm_lifecycle_event) return 'npm start -- init';
-  if (basename(process.argv[1] || '') === 'agent-007') return 'agent-007 init';
-  return 'npx @bill10/agent-007 init';
+function ownCommand(sub) {
+  if (process.env.npm_command === 'exec') return `npx @bill10/agent-007 ${sub}`;
+  if (process.env.npm_lifecycle_event) return `npm start -- ${sub}`;
+  if (basename(process.argv[1] || '') === 'agent-007') return `agent-007 ${sub}`;
+  return `npx @bill10/agent-007 ${sub}`;
 }
+const initCommand = () => ownCommand('init');
 
 if (positionals[0] === 'init') {
   const file = join(configDir(), '.env');
@@ -141,12 +146,27 @@ if (positionals[0] === 'init') {
   const { writeHandover } = await import('../server/billion-handover.js');
   const { path, messages } = writeHandover(billionDir(), { from: billionAgent() });
   console.log(`Wrote ${path} (${messages} messages)`);
+} else if (positionals[0] === 'doctor') {
+  const { runDoctor, defaultProbes, formatReport, failed } = await import('../server/doctor.js');
+  const results = await runDoctor({ probes: defaultProbes({ settingsLine: settingsLine(settingsFiles, initCommand()) }) });
+  // Exit once written (a pipe on macOS is asynchronous), not on its own: a
+  // probe that has not timed out yet would hold the loop open.
+  process.stdout.write(`${formatReport(results)}\n`, () => process.exit(failed(results) ? 1 : 0));
 } else {
   // Said out loud: run from inside another project, its .env (a HOST=0.0.0.0,
   // say) would otherwise change this server without a word.
   console.log(`  ${settingsLine(settingsFiles, initCommand())}`);
+  // The fast checks run while server.js loads, and the start waits for them
+  // no longer than STARTUP_CHECK_MS in all. Only problems are printed.
+  const STARTUP_CHECK_MS = 2000;
+  const doctor = import('../server/doctor.js').then(d => d.runDoctor({ fast: true, budgetMs: STARTUP_CHECK_MS })
+    // With --port, so doctor checks this port and not PORT's.
+    .then(results => d.formatStartup(results, ownCommand(values.port ? `doctor --port ${values.port}` : 'doctor'))))
+    .catch(() => '');
   // Imported only now: server/state.js reads PORT when it loads.
   const { startup, gracefulShutdown } = await import('../server.js');
+  const problems = await doctor;
+  if (problems) console.log(problems);
   startup();
   process.on('SIGINT', gracefulShutdown);
   process.on('SIGTERM', gracefulShutdown);

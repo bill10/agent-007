@@ -52,7 +52,7 @@ import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from '
 import { comingRound } from './server/rounds.js';
 import { setStatusFacts, publishStatus } from './server/billion-status.js';
 import { startModelRefresh } from './server/models.js';
-import { refreshAgentAccounts } from './server/agent-accounts.js';
+import { agentAccounts, refreshAgentAccounts } from './server/agent-accounts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -598,7 +598,8 @@ async function startup() {
   // running:true resumes dispatching without any extra wiring.
   // Before the dispatcher: a card's model is checked against this list.
   startModelRefresh();
-  refreshAgentAccounts();
+  // The scan the start's doctor check began (bin/agent-007.js), or a new one.
+  agentAccounts();
   // One-date schedules ("0 10 24 9 *") that have already run are done: archived
   // here, each one logged, rather than left showing next year's date.
   retireSpentSchedules(broadcast);

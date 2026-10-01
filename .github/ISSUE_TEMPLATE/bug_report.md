@@ -22,5 +22,8 @@ What actually happened.
 - Node.js version: [e.g., 20.11.0]
 - Browser: [e.g., Chrome 120]
 
+**`agent-007 doctor` output**
+Paste what `agent-007 doctor` (or `npx @bill10/agent-007 doctor`) prints. It never prints a token, but check it for account names or paths you would rather not share.
+
 **Screenshots**
 If applicable, add screenshots.
