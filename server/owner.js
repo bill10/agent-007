@@ -16,7 +16,7 @@ import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
-import { ownerAwaitsReply, billionReplied, publishStatus } from './billion-status.js';
+import { billionReplied, publishStatus, MAX_STEPS } from './billion-status.js';
 import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import {
   chooseMode, voiceSetting, speechUnavailable, synthesize, sayVoice, sayRate, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
@@ -388,9 +388,11 @@ export function chatMessages() {
 }
 
 function saveChat(messages) {
-  // The oldest go first, except open questions: their bubble is where they are answered.
+  // Keep open questions and unanswered requests until their answer arrives.
+  const answered = new Set(messages.filter(m => m.from === 'billion' && m.replyTo).map(m => m.replyTo));
+  for (const m of messages) if (m.from === 'owner' && answered.has(m.id)) m.awaitsReply = false;
   let over = messages.length - CHAT_CAP;
-  const kept = messages.filter(m => !(over > 0 && m.q?.status !== 'open' && over--));
+  const kept = messages.filter(m => !(over > 0 && m.q?.status !== 'open' && !(m.from === 'owner' && m.awaitsReply === true) && over--));
   for (const m of messages) if (m.files && !kept.includes(m)) removeChatFiles(m.id);
   try {
     writeFileSync(`${chatPath()}.tmp`, JSON.stringify(kept));
@@ -398,6 +400,22 @@ function saveChat(messages) {
   } catch (err) {
     console.error('Could not save the Billion chat:', err.message);
   }
+}
+
+// Only messages actually delivered to Billion enter the reply queue. Questions,
+// round commands and worker/server notifications never consume owner replies.
+export function pendingOwnerMessages() {
+  const messages = chatMessages();
+  const answered = new Set(messages.filter(m => m.from === 'billion' && m.replyTo).map(m => m.replyTo));
+  return messages.filter(m => m.from === 'owner' && m.awaitsReply === true && !answered.has(m.id));
+}
+
+export function updateOwnerProgress(id, text) {
+  const messages = chatMessages();
+  const message = messages.find(m => m.id === id && m.from === 'owner' && m.awaitsReply);
+  if (!message || message.workDetails?.at(-1) === text) return;
+  message.workDetails = [...(message.workDetails || []), text].slice(-MAX_STEPS);
+  saveChat(messages);
 }
 
 export const chatPayload = () => ({ type: 'chat-list', messages: chatMessages() });
@@ -607,9 +625,8 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel('app');
-  addChat({ id, from: 'owner', via: 'app', text: body, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: body, awaitsReply: true, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   // Pending, with the progress box under it, until a tell_owner answers it.
-  ownerAwaitsReply(id);
   publishStatus(broadcast);
   return { ok: true };
 }
@@ -772,7 +789,8 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
   sent.push(now);
   // Each of the owner's messages gets its own reply, oldest first.
   const replyTo = notice ? null : billionReplied();
-  addChat({ from: 'billion', text: body, ...(replyTo ? { replyTo } : {}) }, broadcast, env);
+  const workDetails = replyTo ? pendingOwnerMessages()[0]?.workDetails : null;
+  addChat({ from: 'billion', text: body, ...(notice ? { notice: true } : {}), ...(replyTo ? { replyTo, ...(workDetails?.length ? { workDetails } : {}) } : {}) }, broadcast, env);
   publishStatus(broadcast);
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) return { ok: true, telegram: false };
@@ -1142,8 +1160,7 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
     return 'full';
   }
-  const added = addChat(said, broadcast, env);
-  ownerAwaitsReply(added.id);
+  addChat({ ...said, awaitsReply: true }, broadcast, env);
   publishStatus(broadcast);
   return 'delivered';
 }

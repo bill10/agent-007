@@ -970,6 +970,12 @@ terminal panel on this tab.
   the left, the owner's on the right tinted with `--accent`, the corner nearest
   the speaker squared off. Time in `--text-dim` under the text; text is never
   rendered as HTML; Telegram voice notes are marked *(voice)*.
+- Each pending owner message contains its own progress box (`role="status"`,
+  `aria-live="polite"`); only the current request pulses while Billion is working.
+  Summaries wrap on narrow screens. Its answer keeps those summaries in a
+  closed **Work details** disclosure; manual expansion survives chat updates.
+  The disclosure has a visible keyboard focus ring, and reduced motion stops
+  the activity pulse.
 - An open question's bubble has an `--state-message` left stripe. Head: `Q3`
   in accent (a bold "!" before it when blocking, dimmed when low). Choices
   are outline buttons, the recommended one first with an accent border and a
