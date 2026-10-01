@@ -40,8 +40,8 @@ const na = (text) => ({ status: 'na', text });
 const fail = (text, fix) => ({ status: 'fail', text, fix });
 const firstLine = (s) => String(s ?? '').trim().split('\n')[0].slice(0, 200);
 // A path as a fix line types it: ~-short when the shell needs no quotes,
-// else the full path quoted (a ~ inside quotes is not expanded).
-const shellPath = (path) => (/^[\w@%+=:,./~-]+$/.test(tilde(path)) ? tilde(path) : JSON.stringify(path));
+// else the full path in single quotes, where nothing expands (nor would ~).
+const shellPath = (path) => (/^[\w@%+=:,./~-]+$/.test(tilde(path)) ? tilde(path) : `'${path.replace(/'/g, `'\\''`)}'`);
 // A URL's user:token@ never reaches the screen.
 const redact = (s) => String(s).replace(/\/\/[^@\s/]+@/g, '//***@');
 
@@ -241,12 +241,13 @@ export async function checkRepos(p, board, origin, account = accountOf(p, new Ma
     try {
       const env = {
         ...(parseGithubRemote(await origin(repo)) && p.which('gh') ? p.repoEnv(await account(repo)) : {}),
-        // GIT_TERMINAL_PROMPT stops only git's own prompts: ssh's (a new host
-        // key, a passphrase) and Git Credential Manager's sign-in would write
-        // or log in, so both are told not to ask. An ssh command set by the
-        // owner is left alone.
+        // GIT_TERMINAL_PROMPT stops only git's own prompts: an askpass helper
+        // (an editor's terminal sets one), ssh's (a new host key, a
+        // passphrase) and Git Credential Manager's sign-in would write or log
+        // in, so none is asked. An ssh the owner chose is left alone.
+        GIT_ASKPASS: '',
         GCM_INTERACTIVE: 'never',
-        ...(p.env.GIT_SSH_COMMAND || await p.git(['-C', repo, 'config', 'core.sshCommand'], LOCAL_GIT_MS).then(Boolean, () => false)
+        ...(p.env.GIT_SSH_COMMAND || p.env.GIT_SSH || await p.git(['-C', repo, 'config', 'core.sshCommand'], LOCAL_GIT_MS).then(Boolean, () => false)
           ? {} : { GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' }),
       };
       const heads = await p.git(['-C', repo, 'ls-remote', '--heads', 'origin', ...(base ? [base] : [])], REMOTE_GIT_MS, env);

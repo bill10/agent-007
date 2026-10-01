@@ -113,13 +113,14 @@ describe('doctor checks', () => {
   it('repos: ls-remote runs as the repo\'s gh account', async () => {
     const envs = [];
     await checkRepos(probes({ git: async (a, t, env) => { if (a.includes('ls-remote')) envs.push(env); return 'x'; } }), board(), origin);
-    expect(envs).toEqual([{ GH_TOKEN: 'ghp_secret', GCM_INTERACTIVE: 'never' }]);
+    expect(envs).toEqual([{ GH_TOKEN: 'ghp_secret', GIT_ASKPASS: '', GCM_INTERACTIVE: 'never' }]);
     // No ssh command of the owner's (core.sshCommand unset): ssh is told not to prompt.
     const batch = [];
     const unset = async (a, t, env) => { if (a.includes('config')) throw new Error('unset'); if (a.includes('ls-remote')) batch.push(env.GIT_SSH_COMMAND); return 'x'; };
     await checkRepos(probes({ git: unset }), board(), origin);
     await checkRepos(probes({ git: unset, env: { GIT_SSH_COMMAND: 'ssh -i k' } }), board(), origin);
-    expect(batch).toEqual(['ssh -o BatchMode=yes', undefined]);
+    await checkRepos(probes({ git: unset, env: { GIT_SSH: '/usr/bin/plink' } }), board(), origin);
+    expect(batch).toEqual(['ssh -o BatchMode=yes', undefined, undefined]);
   });
 
   it('port: free, held by Agent 007 (✗ only when starting), held by something else', async () => {
@@ -256,7 +257,7 @@ describe('doctor gaps', () => {
     const [, line] = await checkRepos(plain, board(), async () => 'git@gitlab.com:acme/app.git');
     // No base branch known: any branch on origin will do, as the board branches from HEAD.
     expect(line).toMatchObject({ status: 'ok', text: '/r/app: origin has branches' });
-    expect(envs).toEqual([{ GCM_INTERACTIVE: 'never' }]);
+    expect(envs).toEqual([{ GIT_ASKPASS: '', GCM_INTERACTIVE: 'never' }]);
     expect(heads).toEqual(['origin']);
   });
 
@@ -293,7 +294,7 @@ describe('doctor review follow-ups', () => {
       git: async (a, t, env) => { if (a.includes('ls-remote')) envs.push(env); return 'x'; },
     });
     expect((await checkRepos(p, board(), origin))[1].status).toBe('ok');
-    expect(envs).toEqual([{ GCM_INTERACTIVE: 'never' }]);
+    expect(envs).toEqual([{ GIT_ASKPASS: '', GCM_INTERACTIVE: 'never' }]);
   });
 
   // Value: protects=one account walk per repo shared by GitHub and Repos; fails_when=each check walks again; why_new=the walk asks GitHub per account; seam=none
@@ -358,7 +359,11 @@ describe('doctor review follow-ups', () => {
   it('repos: fix lines quote a path with spaces; a repo only cards name points at the cards', async () => {
     const spaced = '/r/My Project';
     const [, line] = await checkRepos(probes({ git: async (a) => { if (a.includes('rev-parse')) throw new Error('no'); return ''; } }), board({ repos: [spaced] }), origin);
-    expect(line.fix).toBe(`git -C "${spaced}" status`);
+    expect(line.fix).toBe(`git -C '${spaced}' status`);
+    // Nothing in a pasted path expands: $, backticks and quotes stay literal.
+    const odd = "/r/it's $HOME `x`";
+    const [, oddLine] = await checkRepos(probes({ git: async (a) => { if (a.includes('rev-parse')) throw new Error('no'); return ''; } }), board({ repos: [odd] }), origin);
+    expect(oddLine.fix).toBe("git -C '/r/it'\\''s $HOME `x`' status");
     const gone = probes({ exists: () => false });
     expect((await checkRepos(gone, board({ explorer: new Set(['/r/app']) }), origin))[1].fix).toMatch(/Explorer/);
     expect((await checkRepos(gone, board({ explorer: new Set() }), origin))[1].fix).toMatch(/board cards that name it/);
