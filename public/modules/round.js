@@ -81,8 +81,9 @@ export function statusLine(status = billionStatus, info = roundInfo, now = Date.
   const s = status || {};
   const waiting = Array.isArray(s.pending) ? s.pending.length : 0;
   const lead = !status ? 'Connecting…'
+    : s.disconnected ? 'Reconnecting…'
     : !s.running ? 'Billion is not running'
-      : s.awaitingReply ? (waiting > 1 ? `Billion is working on your ${waiting} messages…` : 'Billion is working on your message…')
+      : s.awaitingReply ? (s.working ? (waiting > 1 ? `Billion is working on your ${waiting} messages…` : 'Billion is working on your message…') : 'Waiting for Billion to reply…')
         : s.text ? (s.working ? `Working: ${s.text}` : s.text)
           : s.working ? 'Thinking…' : 'Idle';
   const next = s.nextRoundAt ?? info?.next?.at;
@@ -97,7 +98,7 @@ export function renderBillionStatus() {
   if (!line) return;
   const s = billionStatus || {};
   const text = statusLine();
-  const mood = !billionStatus ? 'idle' : !s.running ? 'off' : (s.working || s.awaitingReply) ? 'busy' : 'idle';
+  const mood = !billionStatus ? 'idle' : !s.running ? 'off' : s.working ? 'busy' : 'idle';
   if (line.dataset.text === text && line.dataset.mood === mood) return;
   line.dataset.text = text;
   line.dataset.mood = mood;

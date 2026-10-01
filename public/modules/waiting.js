@@ -328,25 +328,31 @@ function renderAttached() {
   }
 }
 
-// While Billion works on the owner's messages: a bounded box at the end of the
-// thread with what it is doing (its set_status line and the last steps on its
-// screen), replaced by the answer when its tell_owner lands. Updated in place
-// on each status; the reader's scroll is kept like any bubble's.
-function progressBox() {
+// Progress belongs to one owner request. Only allowlisted server summaries
+// enter here; textContent (el) keeps both live and saved details inert.
+function progressBox(m, first) {
   const s = billionStatus;
-  const count = waitingOnBillion().length;
-  if (!count) return null;
   const box = el('div', 'chat-progress');
-  box.dataset.key = 'progress';
   box.setAttribute('role', 'status');
   box.setAttribute('aria-live', 'polite');
-  box.append(el('p', 'chat-progress-head', count > 1 ? `Billion is working on your ${count} messages…` : 'Billion is working on your message…'));
-  const lines = [s.text, ...(s.steps || [])].filter(Boolean);
-  if (!lines.length) lines.push(s.working ? 'Thinking…' : 'Waiting to start…');
+  box.classList.toggle('active', first && !!s?.working);
+  box.append(el('p', 'chat-progress-head', first && s?.working ? 'Billion is working on your message…' : first ? 'Waiting for Billion…' : 'Waiting for the earlier reply…'));
+  const lines = (s?.progress?.[m.id] || m.workDetails || []).filter(line => typeof line === 'string' && line.trim());
   const list = el('ul', 'chat-progress-steps');
-  for (const line of lines) list.append(el('li', null, line));
+  for (const line of lines.length ? lines : [first && s?.working ? 'Working…' : 'Waiting to start…']) list.append(el('li', null, line));
   box.append(list);
   return box;
+}
+
+function workDetails(lines) {
+  const safe = Array.isArray(lines) ? lines.filter(line => typeof line === 'string' && line.trim()) : [];
+  if (!safe.length) return null;
+  const details = el('details', 'chat-work-details');
+  details.append(el('summary', null, 'Work details'));
+  const list = el('ul', 'chat-progress-steps');
+  for (const line of safe) list.append(el('li', null, line));
+  details.append(list);
+  return details;
 }
 
 // The owner's files in their bubble: images as thumbnails that open full size,
@@ -464,16 +470,19 @@ function replyButton(q, onclick) {
 }
 
 // The owner's messages still waiting for a reply of their own (server/billion-status.js).
-const waitingOnBillion = () => (Array.isArray(billionStatus?.pending) ? billionStatus.pending : []);
+const waitingOnBillion = () => {
+  const answered = new Set(chatMessages.filter(m => m.from === 'billion' && m.replyTo).map(m => m.replyTo));
+  return (Array.isArray(billionStatus?.pending) ? billionStatus.pending : []).filter(id => !answered.has(id));
+};
 
-function bubble(m) {
+function bubble(m, detailsOpen, pendingIds, currentRequest) {
   const mine = m.from === 'owner';
-  const unanswered = mine && waitingOnBillion().includes(m.id);
+  const unanswered = mine && pendingIds.has(m.id);
   const row = el('div', `chat-msg ${mine ? 'mine' : 'theirs'}${unanswered ? ' pending' : ''}`);
   row.dataset.id = m.id;
   // Keyed, so a redraw keeps an unchanged bubble (and its own scroll) as it is.
   row.dataset.key = m.id;
-  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id), unanswered]);
+  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id), unanswered, unanswered && [billionStatus?.progress?.[m.id], billionStatus?.working, currentRequest]]);
   const box = el('div', 'chat-bubble');
   if (m.q) {
     row.dataset.q = m.q.id;
@@ -483,7 +492,7 @@ function bubble(m) {
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
   if (m.text || !m.files?.length) box.appendChild(el('p', 'chat-text', m.text));
   if (m.files?.length) box.appendChild(sentFiles(m));
-  const meta = [m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), unanswered && 'waiting for Billion…'].filter(Boolean);
+  const meta = [m.notice && 'System update', m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), unanswered && 'waiting for Billion…'].filter(Boolean);
   const metaLine = el('span', 'chat-meta', meta.join(' · '));
   if (!mine && readAloudSupported()) {
     const foot = el('div', 'chat-meta-row');
@@ -491,6 +500,11 @@ function bubble(m) {
     box.appendChild(foot);
   } else box.appendChild(metaLine);
   if (m.q) box.appendChild(questionFoot(m.q));
+  if (unanswered) box.append(progressBox(m, currentRequest === m.id));
+  else if (!mine && m.replyTo) {
+    const details = workDetails(m.workDetails);
+    if (details) { details.open = detailsOpen; box.append(details); }
+  }
   row.appendChild(box);
   return row;
 }
@@ -1028,15 +1042,16 @@ export function renderWaiting({ toBottom = false } = {}) {
   undoSoonest = Infinity;
   // Updated in place rather than emptied and refilled, so a broadcast never
   // moves a reader who has scrolled up the thread.
-  const nodes = chatMessages.map(bubble);
+  const expanded = new Set([...list.children].filter(row => row.querySelector('.chat-work-details[open]')).map(row => row.dataset.id));
+  const pendingIds = new Set(waitingOnBillion());
+  const currentRequest = billionStatus?.currentRequest ?? pendingIds.values().next().value;
+  const nodes = chatMessages.map(m => bubble(m, expanded.has(m.id), pendingIds, currentRequest));
   if (!chatMessages.length) {
     const empty = el('p', 'waiting-empty', 'Nothing here yet. Say something to Billion.');
     empty.dataset.key = 'empty';
     empty.hidden = !!noticeText();
     nodes.push(empty);
   }
-  const box = progressBox();
-  if (box) nodes.push(box);
   patchChildren(list, nodes);
   // Drawn again when an Undo link's minute is up, so it goes.
   if (undoSoonest < Infinity) undoTimer = setTimeout(() => renderWaiting(), Math.min(undoSoonest, UNDO_MS) + 50);

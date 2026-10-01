@@ -719,14 +719,32 @@ queued: it reaches Billion at once. Each message stays *pending* ("waiting
 for Billion…") until a `tell_owner` answers it, oldest first, so two
 messages sent before a reply each get their own (the reply carries `replyTo`,
 the message it answered). A server notice (an account switch) answers none.
-Under the last pending message the thread shows a bounded **progress box**:
-"Billion is working on your message…", Billion's `set_status` line, and the
-last three steps read off the end of Billion's screen while it is mid-turn
-(Claude Code's `⏺ Bash(…)`, Codex's `• Ran …`, cut to 60 characters, the bot
-token redacted). It updates every ten seconds and goes when the reply lands.
-After an hour without one, a message stops counting as pending.
+Each pending message has its own bounded **progress box**. Only the oldest
+request receives Billion's `set_status` summaries; later messages wait for
+that reply. Use short, owner-facing summaries of the current step, evidence
+or findings, uncertainty or blockers, and the next check (140 characters per
+update). The last three summaries are kept; consecutive duplicates are ignored. Private reasoning,
+terminal output, tool calls/results and command arguments are never read by
+the progress stream. The configured Telegram token is redacted before storage.
 
-![A pending message and the progress box](img/billion-chat-progress.png)
+When `tell_owner` binds the answer, the live box disappears immediately and
+its summaries become a small, closed **Work details** disclosure under that
+answer. Empty progress adds no disclosure. The owner can expand it, and
+ordinary updates leave it expanded. The existing status stream updates the
+box; there is no separate polling or transcript stream.
+
+Request markers and summaries are stored with the chat so new requests keep
+their oldest-first reply bindings across reconnects and server restarts.
+Messages written before request markers existed are not guessed into the queue.
+After an hour without a reply, while Billion is stopped, or while the browser is disconnected, the active box
+is hidden. A late answer still binds to its original request; an activity
+timeout never shifts an answer to a newer message. A waiting CLI shows no
+animated activity dot. Worker updates and server notices do not close a request.
+
+![Earlier progress layout, before per-message summaries and Work details](img/billion-chat-progress.png)
+
+*Earlier layout shown above: progress now sits inside each pending message,
+uses explicit summaries, and folds under the answer as Work details.*
 
 **Status line.** One line at the top of both views: what Billion is doing and
 what is running, "Working: reviewing PR #120 · 3 workers running · next round
@@ -734,10 +752,11 @@ what is running, "Working: reviewing PR #120 · 3 workers running · next round
 gone after 30 minutes without an update); the server adds "Thinking…" while
 Billion's terminal is mid-turn, the number of running workers on Billion's
 cards and the next round. From the moment the owner sends a message (in the
-tab or on Telegram) until Billion's next `tell_owner`, it says "Billion is
-working on your message…" (for at most an hour), so a slow reply is never a
-blank screen. It is the owner's, like the chat: sent to the owner's browser
-only.
+tab or on Telegram) until its `tell_owner` reply, it says "Billion is
+working on your message…" while the CLI is working, or "Waiting for Billion
+to reply…" while it waits (for at most an hour). A disconnected browser says
+"Reconnecting…" and clears active progress until the connection returns. It is
+the owner's, like the chat: sent to the owner's browser only.
 
 ## Telegram
 
@@ -749,7 +768,8 @@ chat bubble and "Billion", the tab a page opens on, badged with the count of ope
 Telegram channel. Billion's `notify_owner` questions, its `tell_owner`
 replies and your messages, from the tab and from Telegram, are one
 conversation there, newest at the bottom; the last 500 messages are kept in
-`~/.agent-007/chat.json`. Open questions also pin to a strip at the top of
+`~/.agent-007/chat.json`, with open questions and unanswered owner requests
+retained until answered. Open questions also pin to a strip at the top of
 the tab ("7 open questions ▾", blocking first, then oldest). The strip is one
 button: tap it (or the tab's badge) and the **Open questions** panel slides
 over the thread, one section per project with its open count, the project
@@ -811,7 +831,8 @@ paths: `[Owner via app] <text> (attached: /path/a.png, /path/b.pdf)`, or
 `[Owner via app] Q3: <text> (re: "...") (attached: ...)` for an answer. Your
 bubble shows images as thumbnails that open full size and other files as
 download links; they are served only from that folder, never while user
-accounts are on, and deleted when their message falls out of the last 500.
+accounts are on, and deleted when their message leaves chat history.
+Unanswered owner requests stay past the 500-message cap.
 
 With rounds on (the default, see [Rounds](#rounds)) a normal or low question
 waits in Billion's queue until a round releases it, and the round sends one

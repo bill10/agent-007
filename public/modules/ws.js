@@ -27,6 +27,9 @@ export function connect(onMessage) {
   };
 
   ws.onclose = (event) => {
+    // Activity is unknown while disconnected. Clear live progress through the
+    // existing status handler; the reconnect snapshot restores saved details.
+    messageHandler?.({ type: 'billion-status', disconnected: true, running: false, working: false, awaitingReply: false, pending: [] });
     // 4401 = server requires auth and our token was missing/invalid. Don't
     // reconnect-loop; clear the bad token and prompt for a new one.
     if (event && event.code === WS_UNAUTHORIZED) {

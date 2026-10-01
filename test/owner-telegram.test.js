@@ -12,6 +12,7 @@ import {
 } from '../server/owner.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { dropMessages } from '../server/messages.js';
+import { _resetStatus } from '../server/billion-status.js';
 import { sessions, CONFIG_DIR } from '../server/state.js';
 
 const TOKEN = '123456:SECRET-token';
@@ -33,6 +34,8 @@ beforeEach(() => {
   fetchMock = vi.fn(async () => reply(true));
   vi.stubGlobal('fetch', fetchMock);
   rmSync(join(CONFIG_DIR, 'waiting.json'), { force: true });
+  rmSync(join(CONFIG_DIR, 'chat.json'), { force: true });
+  _resetStatus();
   setOwnerChannel(null);
 });
 afterEach(() => {
@@ -166,7 +169,7 @@ describe('tell_owner', () => {
     expect(await tellOwner('Got it, restart looks clean.', { env: ENV, now: now(), broadcast })).toEqual({ ok: true, telegram: true });
     expect(calls()).toEqual([{ url: `https://api.telegram.org/bot${TOKEN}/sendMessage`, body: { chat_id: '42', text: 'Got it, restart looks clean.' } }]);
     expect(waitingItems()).toEqual([]);
-    expect(broadcast.mock.calls.map(c => c[0].type)).toEqual(['chat-message']);
+    expect(broadcast.mock.calls.map(c => c[0].type)).toEqual(['chat-message', 'billion-status']);
     expect(chatMessages().at(-1)).toMatchObject({ from: 'billion', text: 'Got it, restart looks clean.' });
   });
 
