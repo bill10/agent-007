@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.38.1.0] - 2026-10-01
+
+### Fixed
+
+- **Billion's progress stays with your message.** Concise status summaries appear while you wait, then fold into expandable Work details beneath the answer. Rapid messages keep separate replies across reconnects and restarts. Terminal commands and private analysis never enter the progress stream.
+
 ## [0.38.0.0] - 2026-10-01
 
 ### Added
