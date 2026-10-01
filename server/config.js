@@ -49,7 +49,9 @@ export function loadConfig() {
         delete job.lastRunSessionId;
         delete job.lastRunAgentName;
       }
-      if (isScheduled(job) && job.state !== 'todo') {
+      // An archived schedule (state done: a once schedule that ran, or one
+      // retired by hand) stays in the archive.
+      if (isScheduled(job) && job.state !== 'todo' && job.state !== 'done') {
         if (job.branchName) {
           job.lastError = `Server restarted mid-run — that run's work is on ${job.branchName} (recover the worktree from the orphans list if you need it).`;
           job.lastErrorAt = new Date().toISOString();

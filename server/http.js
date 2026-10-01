@@ -10,7 +10,7 @@ import {
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
 import {
-  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, attachmentPath, allJobs,
+  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, retireJobForAgent, attachmentPath, allJobs,
 } from './jobs.js';
 import { addRepo } from './git.js';
 import { expandHome } from '../lib/helpers.js';
@@ -133,6 +133,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           return addRepo(expandHome(path), broadcast);
         },
         closeJob: (fields) => closeJobForAgent({ ...fields, session: req.agentSession }, broadcast, { killSession }),
+        retireJob: (fields) => retireJobForAgent({ ...fields, session: req.agentSession }, broadcast),
         answerPermission: ({ id, decision, reason }) => (req.agentSession.isBillion
           ? answerApproval(id, decision, reason)
           : { error: 'Only Billion answers permission requests.' }),
@@ -216,6 +217,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       repo: body.repo || body.repoPath,
       type: body.type,
       schedule: body.schedule,
+      once: body.once,
+      runAt: body.runAt ?? body.run_at,
       agent: body.agent,
       model: body.model,
       requiresPr: body.requiresPr ?? body.requires_pr,

@@ -20,7 +20,7 @@ import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
 import {
-  addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused, releaseJobHold,
+  addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused, releaseJobHold, archiveJob,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
   orphanResumePlan, findJobForBranch, repoAtCap, boardSettings, ghEnvForRepo,
 } from './jobs.js';
@@ -739,6 +739,15 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         }
         case 'job-pause': {
           const result = setJobPaused(msg.jobId, msg.paused, broadcast);
+          if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
+          break;
+        }
+        // The owner's Archive on a To do card: filed to Finished without running.
+        case 'job-archive': {
+          const result = archiveJob(msg.jobId, {
+            reason: typeof msg.reason === 'string' ? msg.reason : 'Archived from the Jobs tab',
+            by: ws.user?.displayName || 'the owner',
+          }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;
         }
