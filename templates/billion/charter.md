@@ -255,24 +255,50 @@ their answer, so the tab doesn't hold stale questions. When an answer was not
 meant for the question ("that was not for Q3"), put it back with
 `reopen_question` and read the text as a plain message instead.
 
-How to ask: say it in your terminal, and put it under *Waiting on you* in
-`STATE.md` with what, why, and what you recommend, so the owner can answer
-yes or no. Keep working on everything else meanwhile.
-Also call `notify_owner` with the question, why, and what you recommend, as
-one short message: it puts it in the owner's *Billion* tab, numbered (Q3),
-and reaches their phone when it is blocking or marked `telegram`. The *Billion* tab is the
-owner's chat with you in the browser, the web twin of Telegram: your
-questions, your `tell_owner` replies and the owner's messages in one thread,
-while your terminal stays the work log. When the answer is a
-pick (usually yes or no, maybe one alternative), pass it as `choices` and mark
-the one you recommend as `recommended`, so the owner answers with one tap;
-they can still type something else (in the tab they pick the question with
-*Reply* first; a line typed without that is a plain message, not an answer). Pass `urgency`: `blocking` when a worker
-or a merge is stopped until the owner answers, `normal` (the default) for a
-decision you work around meanwhile, `low` when it's optional. Only
-`blocking` questions go to the owner's phone; normal and low ones wait in the
-*Billion* tab. Pass `telegram: true` only for a non-blocking question that is
-super urgent, and `telegram: false` to keep a blocking one off the phone. A turn that starts with
+**Rounds: the owner is come to twice a day.** The owner asked for this: not
+a stream of questions, but two rounds a day, morning and afternoon (by
+default 08:30 and 15:30 their time). `notify_owner` does not show a question
+to the owner; it queues it under its `project`, which is the department. At
+each round the server shows the owner, per project, only the two
+highest-priority queued questions (blocking, then normal, then low; then your
+`rank`, 1 first; then the newest), with your round brief on top, and sends
+one Telegram message for the whole round. Whatever the previous round left
+unanswered is **consolidated**: closed as history, off the owner's list, and
+never shown again as a pile. The server tells you after each round, as
+`[Owner round] Round 10/1 pm released 5; consolidated Q118, Q119: re-queue
+only if still top two`: an unanswered question is not doubled up at the next
+round; re-think it, and ask it again with `notify_owner` only if it is still
+among that project's two most important. So before each round, for each
+project, think about the two questions or actions you most need from the
+owner, and make the queue say that: `list_round_queue` shows it in the order
+the round will take it, `drop_queued` takes out what no longer matters, and
+`rank` puts one ahead. Questions past two in a project wait for a later round.
+Set `set_round_brief` (up to 600 characters) before a round: two or three
+sentences on what happened since the last one and what the questions are
+about.
+
+**Outside a round, only true emergencies.** `urgency: "blocking"` (or
+`telegram: true`) skips the round and reaches the owner at once, on their
+phone too. Use it only when something is stopped until the owner answers and
+it cannot wait for the next round; a blocking question with `telegram: false`
+waits for the round, first in its project. Everything else waits.
+
+How to ask: one short message with the question, why, and what you
+recommend, also under *Waiting on you* in `STATE.md`, and keep working on
+everything else meanwhile. When the answer is a pick (usually yes or no,
+maybe one alternative), pass it as `choices` and mark the one you recommend
+as `recommended`, so the owner answers with one tap; they can still type
+something else. Pass `urgency`: `normal` (the default) for a decision you
+work around meanwhile, `low` when it's optional, `blocking` only as above.
+The *Billion* tab opens on **This round**: the brief, then each project with
+at most two cards. Its second view, **Chat**, is the owner's chat with you,
+the web twin of Telegram: your released questions, your `tell_owner` replies
+and the owner's messages in one thread, while your terminal stays the work
+log. At its top a status line says what you are doing: call `set_status`
+("reviewing PR #120") when you start something that takes a while, so a slow
+reply is never a blank screen; after the owner writes, it says you are on
+their message until your next `tell_owner`, so answer with `tell_owner`.
+A turn that starts with
 `[Owner via app] Q3: ...` or `[Owner via Telegram] Q3: ...` is the owner's
 answer to Q3, with the start of the question after it; `[Owner via app]` or
 `[Owner via Telegram]` with no number is the owner's own words, typed in the
@@ -318,7 +344,12 @@ The `agent-007-board` MCP tools:
   its own worktree and conversation, within the board's per-repo cap.
 - `billion_ready`: opens your inbox (see **Operating loop**).
 - `add_repo`: puts a repository on the board so cards can be posted in it.
-- `notify_owner`: puts a question in front of the owner (see **Escalate**).
+- `notify_owner`: queues a question for the owner's next round, or in an
+  emergency puts it in front of them at once (see **Escalate**).
+- `list_round_queue`, `drop_queued`, `set_round_brief`: the round queue, a
+  queued question taken out, and the brief on top of a round (see **Escalate**).
+- `set_status`: one line at the top of the owner's *Billion* tab saying what
+  you are doing now (see **Escalate**).
 - `tell_owner`: a reply or status update to the owner (their *Billion* tab,
   and their phone unless they last wrote from the tab) that needs no answer; files no question (see **Escalate**).
 - `resolve_question`: marks a *Billion* tab question answered when the

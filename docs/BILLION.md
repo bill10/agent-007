@@ -628,6 +628,85 @@ usage limit (below).
   eligible Claude login and then uses the normal conversation handover.
   Billion's repository and state files stay in the same place throughout.
 
+## Rounds
+
+The owner, 2026-10-01: too many questions, a chat that takes a long time to
+answer without saying what is going on. So Billion comes to the owner twice a
+day, not whenever a question occurs to it.
+
+**When.** Two rounds a day, 08:30 and 15:30 in the owner's time zone. In
+`~/.agent-007/config.json`: `rounds` (`["08:30", "15:30"]`; `[]` turns rounds
+off and every question shows at once, as before), `roundMaxPerProject` (2)
+and `roundsTimeZone` (an IANA name such as `"America/New_York"`; the server's
+own zone when unset). Read at startup.
+
+**Queue.** `notify_owner` no longer shows a question: it queues it under its
+`project`, which is the department. Its result says where it stands: "Queued
+as Q12 for the 15:30 round (10/1 pm), position 1 of 2 in agent-007", or
+"position 3 … behind the top 2" when two are ahead of it. Queued questions are
+never sent to a browser. Billion manages the queue with `list_round_queue`
+(per project, in the order the round takes them), `drop_queued` (number or
+id) and `notify_owner`'s optional `rank` (1 first).
+
+**Release.** At round time the server (`server/rounds.js` for the clock,
+`releaseRound` in `server/owner.js`) takes, per project, the two
+highest-priority queued questions: blocking, then normal, then low; then
+`rank`, a ranked one before an unranked one; then the newest. Those open in
+the tab and the thread. Every question the previous round released that is
+still open is **consolidated**: status `consolidated`, kept in history (the
+tab's *Earlier*), off the open list and the badge, and no longer answerable
+(Telegram buttons on it say so). Questions past two per project stay queued
+for a later round. A round that comes due while the server is down is
+released once when it starts. Billion hears it in its terminal as one line:
+`[Owner round] Round 10/1 pm released 5 (Q120, …); consolidated Q118, Q119:
+re-queue only if still top two; 3 still queued for later rounds
+(list_round_queue to re-rank or drop).` (kept in `rounds.json` until Billion
+runs). The owner's phone gets ONE Telegram message per round, "Afternoon
+round: 5 items across 3 departments", with Billion's brief and a link to the
+app (`APP_URL`, else the first `ALLOWED_ORIGINS` entry), never one per
+question.
+
+**Brief.** `set_round_brief` (up to 600 characters) is shown at the top of
+the round and in its Telegram message: for the next round by default, or
+`round: "current"` for the one on screen.
+
+**Emergencies.** `urgency: "blocking"` or `telegram: true` is the only way to
+the owner outside a round: it shows at once (in *Needs you now* at the top of
+the round) and goes to the phone as before, under the per-minute limit. A
+blocking question with `telegram: false` waits for the round, first in its
+project. The tool description says this is for true emergencies only.
+
+**First start.** The first time a server with rounds starts, every open
+question except blocking ones is consolidated and Billion is told which, so
+it can re-queue the ones that still matter; the round that already passed
+that day is not released on the spot (`rounds.json`: `migratedAt`, `lastAt`,
+the round on screen and its brief, a note waiting for Billion).
+
+**The tab.** The Billion tab opens on **This round**: a status line, the
+round's name and a counter ("3 of 7 done"), the brief, then one section per
+project with at most two cards. Each card is the question, its tap choices
+(recommended first), a reply box with Send, and *Skip* (dismiss). An answered
+card folds to one line where it stood ("✓ you answered: …", *Undo* for a
+minute). Nothing reorders or jumps while the owner reads or types: a card is
+updated in place, and when the set of cards changes the view keeps its
+scroll position, the drafts typed in reply boxes and the focus. *Earlier*
+(closed by default) lists what past rounds consolidated or got answered. The
+chat thread moved to the second view, **Chat**, unchanged; the browser
+remembers which view was last open.
+
+![This round on a phone](img/billion-round-dark.png)
+
+**Status line.** One line at the top of both views: what Billion is doing and
+what is running, "Working: reviewing PR #120 · 3 workers running · next round
+3:30 pm". Billion sets its part with `set_status` (up to 140 characters;
+gone after 30 minutes without an update); the server adds "Thinking…" while
+Billion's terminal is mid-turn, the number of running workers on Billion's
+cards and the next round. From the moment the owner sends a message (in the
+tab or on Telegram) until Billion's next `tell_owner`, it says "Billion is
+working on your message…" (for at most an hour), so a slow reply is never a
+blank screen. It is the owner's, like the chat: sent to the owner's browser
+only.
+
 ## Telegram
 
 Billion's terminal is its work log: board notices, worker messages and cycle
@@ -702,6 +781,10 @@ bubble shows images as thumbnails that open full size and other files as
 download links; they are served only from that folder, never while user
 accounts are on, and deleted when their message falls out of the last 500.
 
+With rounds on (the default, see [Rounds](#rounds)) a normal or low question
+waits in Billion's queue until a round releases it, and the round sends one
+Telegram message for all of them; what follows is how a question behaves
+once it is in the tab, and how every question behaves with rounds off.
 `notify_owner` puts each question in the tab. Only a **blocking** one also
 goes to your phone, when a Telegram bot is set up: normal and low questions
 wait in the tab (the thread, the open-questions strip and the badge) without
