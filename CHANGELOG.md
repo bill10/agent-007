@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.38.2.0] - 2026-10-01
+
+### Added
+
+- **See why a schedule has not posted its next run.** Jobs now distinguishes overdue posting, active or queued holds, and gone or stalled prior workers, with a link to the blocking run and timestamped firing evidence. Detection is passive: it never retries work or changes recovery decisions.
+
 ## [0.38.1.0] - 2026-10-01
 
 ### Fixed
