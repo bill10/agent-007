@@ -1,19 +1,22 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createServer as createHttpServer } from 'http';
 import { createServer } from 'net';
+import { join, posix, win32 } from 'path';
 import { telegramGetMe } from '../server/owner.js';
 import {
   portState, runDoctor, failed, formatReport, formatStartup, versionAtLeast,
-  checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins, toNpm, fromNpm,
+  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins, toNpm, fromNpm,
 } from '../server/doctor.js';
 
 // A machine where everything passes; each test breaks one thing. No real CLI,
 // git or network is touched; only the portState tests open loopback sockets.
 const CONFIG = '/cfg/config.json';
+// Joined as checkPlugins joins it (backslashes on Windows).
+const PLUGINS = join('/home/.claude', 'plugins', 'installed_plugins.json');
 function probes(over = {}) {
   const files = {
     [CONFIG]: JSON.stringify({ repos: [{ path: '/r/app' }], jobs: [{ state: 'todo', agent: 'codex', repoPath: '/r/app' }, { state: 'done', agent: 'claude' }] }),
-    '/home/.claude/plugins/installed_plugins.json': JSON.stringify({ plugins: {} }),
+    [PLUGINS]: JSON.stringify({ plugins: {} }),
     ...over.files,
   };
   return {
@@ -160,7 +163,7 @@ describe('doctor checks', () => {
   });
 
   it('plugins: local registrations in a board worktree or a gone folder are ✗', () => {
-    const files = { '/home/.claude/plugins/installed_plugins.json': JSON.stringify({ plugins: {
+    const files = { [PLUGINS]: JSON.stringify({ plugins: {
       // worktrees-old sits beside the worktree folder, not in it.
       'tg@x': [{ scope: 'local', projectPath: '/home/.agent-007/worktrees/app-1' }, { scope: 'local', projectPath: '/gone' }, { scope: 'local', projectPath: '/r/app' }, { scope: 'local', projectPath: '/home/.agent-007/worktrees-old/app' }],
       'p@x': [{ scope: 'user' }],
@@ -376,5 +379,18 @@ describe('doctor review follow-ups', () => {
     const report = formatReport(results);
     expect(report).toMatch(/config\.json does not parse: not valid JSON/);
     expect(report).not.toContain('SECRET');
+  });
+
+  // Value: protects=the worktree-folder test on Windows paths; fails_when=containment goes back to a case- and slash-sensitive prefix; why_new=Windows CI; seam=none
+  it('insideDir: inside, the folder itself, a sibling, and Windows case and slashes', () => {
+    expect(insideDir('/a/worktrees', '/a/worktrees/app-1', posix)).toBe(true);
+    expect(insideDir('/a/worktrees', '/a/worktrees', posix)).toBe(true);
+    expect(insideDir('/a/worktrees', '/a/worktrees-old/app', posix)).toBe(false);
+    expect(insideDir('/a/worktrees', '/a', posix)).toBe(false);
+    const wt = 'C:\\Users\\Me\\.agent-007\\worktrees';
+    expect(insideDir(wt, 'c:\\users\\me\\.agent-007\\worktrees\\app-1', win32)).toBe(true);
+    expect(insideDir(wt, 'C:/Users/Me/.agent-007/worktrees/app-1', win32)).toBe(true);
+    expect(insideDir(wt, 'C:\\Users\\Me\\.agent-007\\worktrees-old\\app', win32)).toBe(false);
+    expect(insideDir(wt, 'D:\\Users\\Me\\.agent-007\\worktrees\\app-1', win32)).toBe(false);
   });
 });

@@ -14,7 +14,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { createServer } from 'net';
 import { homedir } from 'os';
-import { join, resolve, sep } from 'path';
+import path, { join, resolve } from 'path';
 import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
 import { refreshAgentAccounts } from './agent-accounts.js';
 import { commandPath, INSTALL_HINTS } from './command-path.js';
@@ -304,17 +304,25 @@ export async function checkTelegram(p) {
   return [ok(`Telegram bot @${me.username} answers`)];
 }
 
+// Whether `child` is `dir` or inside it. path.relative, not a string prefix:
+// on Windows it ignores case and takes / for \, as Claude Code's recorded
+// projectPath may differ from WORKTREE_DIR in either. A sibling folder
+// (worktrees-old) or another drive is outside.
+export function insideDir(dir, child, api = path) {
+  const rel = api.relative(api.resolve(dir), api.resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !api.isAbsolute(rel));
+}
+
 export function checkPlugins(p) {
   const file = join(p.claudeDir, 'plugins', 'installed_plugins.json');
   let plugins;
   try { plugins = JSON.parse(p.readFile(file))?.plugins || {}; } catch { return [na('no Claude Code plugin registrations')]; }
-  const inside = (dir, path) => path === dir || path.startsWith(dir.endsWith(sep) ? dir : dir + sep);
   const lines = [];
   for (const [name, entries] of Object.entries(plugins)) {
     for (const e of Array.isArray(entries) ? entries : []) {
       if (e?.scope !== 'local' || typeof e.projectPath !== 'string') continue;
       const gone = !p.exists(e.projectPath);
-      if (!gone && !inside(p.worktreeDir, e.projectPath)) continue;
+      if (!gone && !insideDir(p.worktreeDir, e.projectPath)) continue;
       // The uninstall applies to the folder it runs in, so a gone one comes back first.
       const where = shellPath(e.projectPath);
       lines.push(fail(`stray local plugin ${name} registered for ${tilde(e.projectPath)}${gone ? ' (folder no longer exists)' : ' (a board worktree)'}`,
