@@ -590,7 +590,7 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   const item = waitingItems().find(i => i.id === id);
   if (!item || item.status === 'dismissed' || item.status === 'queued') return { error: 'That question is gone.' };
   if (item.status === 'answered') return { error: `Q${item.n} was answered already: ${item.answer}` };
-  if (item.status === 'consolidated') return { error: `Q${item.n} was consolidated when the next round came; Billion asks it again if it still needs it.` };
+  if (item.status === 'consolidated') return { error: `Q${item.n} was consolidated when the next briefing came; Billion asks it again if it still needs it.` };
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running' };
   const messageId = randomUUID();
@@ -694,7 +694,7 @@ export async function reopenQuestion({ number, id } = {}, { broadcast, owner = f
   if (!item) return { error: `There is no ${name}.` };
   if (item.status === 'open') return { error: `Q${item.n} is open already.` };
   if (item.status === 'dismissed') return { error: `Q${item.n} was dismissed.` };
-  if (item.status === 'queued') return { error: `Q${item.n} is queued for the next round, not answered.` };
+  if (item.status === 'queued') return { error: `Q${item.n} is queued for the next briefing, not answered.` };
   if (item.status === 'consolidated') return { error: `Q${item.n} was consolidated; ask it again with notify_owner if it still matters.` };
   if (owner) {
     if (!(now - Date.parse(item.answeredAt) <= UNDO_MS)) return { error: `Too late to undo Q${item.n}; tell Billion instead.` };
@@ -925,16 +925,16 @@ export async function releaseRound(round, { broadcast, env = process.env, settin
   broadcast?.(roundView(now, settings));
   const left = items.filter(i => i.status === 'queued').length;
   if (released.length || consolidated.length || left || early) {
-    noteForBillion(`[Owner round] Round ${round.label}${early ? ' (started early by the owner)' : ''} released ${released.length}${released.length ? ` (${released.map(i => `item ${i.num} = Q${i.n}`).join(', ')})` : ''}`
+    noteForBillion(`[Owner briefing] Briefing ${round.label}${early ? ' (started early by the owner)' : ''} released ${released.length}${released.length ? ` (${released.map(i => `item ${i.num} = Q${i.n}`).join(', ')})` : ''}`
       + `${consolidated.length ? `; consolidated ${qList(consolidated)}: re-queue only if still ${topWords(settings.max)}` : ''}`
-      + `${left ? `; ${left} still queued for later rounds (list_round_queue to re-rank or drop)` : ''}.`);
+      + `${left ? `; ${left} still queued for later briefings (list_round_queue to re-rank or drop)` : ''}.`);
   }
   // One message for the whole round, never one per question.
   if (released.length) {
     const link = appLink(env);
     const said = await sendTelegram(`${round.name}: ${plural(released.length, 'item')} across ${plural(taken.size, 'department')}`
       + `${brief ? `\n\n${brief}` : ''}${link ? `\n${link}` : ''}`, { env });
-    if (said.error && said.error !== 'Telegram is not configured') console.error('Telegram: could not announce the round:', said.error);
+    if (said.error && said.error !== 'Telegram is not configured') console.error('Telegram: could not announce the briefing:', said.error);
   }
   return { released, consolidated, left };
 }
@@ -955,7 +955,7 @@ export function migrateToRounds({ broadcast, now = Date.now(), settings = roundS
   saveRoundState({ ...state, migratedAt: iso, lastAt: state.lastAt || iso });
   if (moved.length) broadcast?.(waitingPayload());
   const next = comingRound(now, settings);
-  noteForBillion(`[Owner round] Rounds are on: from the first round${next ? ` (${next.label})` : ''} the owner sees your questions only at ${settings.slots.join(' and ')}, at most ${settings.max} per project; notify_owner queues them (see Escalate in CHARTER.md). Until then a question shows at once.`
+  noteForBillion(`[Owner briefing] Briefings are on: from the first briefing${next ? ` (${next.label})` : ''} the owner sees your questions only at ${settings.slots.join(' and ')}, at most ${settings.max} per project; notify_owner queues them (see Escalate in CHARTER.md). Until then a question shows at once.`
     + `${moved.length ? ` Consolidated ${plural(moved.length, 'open question')} (${qList(moved)}): re-queue only the ones still in a project's ${topWords(settings.max)}.` : ''}`);
   return moved;
 }
@@ -975,15 +975,15 @@ function itemNumber(items) {
 // round, released now under the same rules. Its time is then taken, so the
 // clock does not release it again. { ok, released, consolidated, left } or { error }.
 export async function startRoundNow({ broadcast, env = process.env, now = Date.now(), settings = roundSettings() } = {}) {
-  if (!settings.on) return { error: 'Rounds are off (rounds: [] in config.json), so every question already shows at once.' };
+  if (!settings.on) return { error: 'Briefings are off (rounds: [] in config.json), so every question already shows at once.' };
   migrateToRounds({ broadcast, now, settings });
   const next = comingRound(now, settings);
-  if (!next) return { error: 'No round is scheduled.' };
+  if (!next) return { error: 'No briefing is scheduled.' };
   return { ok: true, ...await releaseRound(next, { broadcast, env, settings, now, early: true }) };
 }
 
-// What the owner types to start it: "start the round now", "start round", "release the round".
-export const START_ROUND_RE = /^\s*(please\s+)?(start|begin|release|open)\s+(the\s+)?(next\s+)?round(\s+now)?(\s+please)?\s*[.!]?\s*$/i;
+// What the owner types to start it: "start the briefing now", "start the round now", "start briefing", "release the briefing".
+export const START_ROUND_RE = /^\s*(please\s+)?(start|begin|release|open)\s+(the\s+)?(next\s+)?(?:round|briefing)(\s+now)?(\s+please)?\s*[.!]?\s*$/i;
 
 // "1d", "1d 3d", "1d, 3d": the items of the round the owner marks done. The numbers, or null.
 export function doneNumbers(text) {
@@ -1001,7 +1001,7 @@ export async function markDone(nums, via = 'app', { broadcast, env = process.env
   const found = nums.map(n => [n, items.find(i => (i.numRound ?? null) === numRound && i.num === n && i.status === 'open')]);
   const done = found.filter(([, item]) => item).map(([, item]) => item);
   const missing = found.filter(([, item]) => !item).map(([n]) => n);
-  if (!done.length) return { error: `No open item ${missing.join(', ')} in this round.` };
+  if (!done.length) return { error: `No open item ${missing.join(', ')} in this briefing.` };
   const billion = liveBillion();
   if (!billion) return { error: 'Billion is not running' };
   const prefix = via === 'app' ? APP_PREFIX : telegramPrefix(name);
@@ -1168,7 +1168,7 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   if (nums || (typed && START_ROUND_RE.test(typed))) {
     const result = nums ? await markDone(nums, 'telegram', { broadcast, env, name }) : await startRoundNow({ broadcast, env });
     await sendTelegram(result.error || (nums ? `Done: ${result.done.map(i => `item ${i.num}`).join(', ')}${result.missing.length ? `; no open item ${result.missing.join(', ')}` : ''}.`
-      : `Round started: ${plural(result.released.length, 'item')}.`), { env });
+      : `Briefing started: ${plural(result.released.length, 'item')}.`), { env });
     addChat({ from: 'owner', via: 'telegram', ...(name ? { name } : {}), text: typed }, broadcast, env);
     return result.error ? 'refused' : nums ? 'done' : 'round';
   }
@@ -1211,7 +1211,7 @@ async function handleButton(query, { broadcast, env }) {
     .catch(err => console.error('Telegram: could not answer a button:', redact(err.message, env)));
   if (!choice || item.status !== 'open') {
     await ack(item?.status === 'answered' ? `Already answered: ${item.answer}`
-      : item?.status === 'consolidated' ? 'That question was consolidated into a later round.' : 'That question is gone.');
+      : item?.status === 'consolidated' ? 'That question was consolidated into a later briefing.' : 'That question is gone.');
     return 'stale';
   }
   const result = await answerWaiting(id, choice, 'telegram', { broadcast, env, name: senderName(query.message?.chat, query.from) });

@@ -416,19 +416,19 @@ export const READ_APPROVAL_TOOL = {
 export const NOTIFY_OWNER_TOOL = {
   name: 'notify_owner',
   description:
-    'Queue a question or a decision for the owner. The owner is come to in rounds, twice a day (by default 08:30 and '
-    + '15:30 their time): at each round the server shows the top two queued questions of each project (the department) '
-    + 'in the "Billion" tab, numbered (Q3), and everything the previous round left open is consolidated (closed as '
+    'Queue a question or a decision for the owner. The owner is come to in briefings, twice a day (by default 08:30 and '
+    + '15:30 their time): at each briefing the server shows the top two queued questions of each project (the department) '
+    + 'in the "Billion" tab, numbered (Q3), and everything the previous briefing left open is consolidated (closed as '
     + 'history; you are told which, and re-queue one only if it is still among its project\'s top two). Queued '
-    + 'questions beyond two per project wait for a later round; see them with list_round_queue, drop one with '
+    + 'questions beyond two per project wait for a later briefing; see them with list_round_queue, drop one with '
     + 'drop_queued, or order them with rank. One short message: the question, why, and what you recommend. When the '
     + 'answer is a pick, pass choices (yes/no, maybe one alternative) and mark the one you recommend: the owner '
     + 'answers with one tap. Their answer arrives in this terminal as "[Owner via app] Q3: <answer>" or '
     + '"[Owner via Telegram] Q3: <answer>". Pass project (the repo it is about) and type ('
     + `${QUESTION_TYPES.join(', ')}). `
-    + 'EMERGENCIES ONLY: urgency "blocking" or telegram: true skips the round and reaches the owner at once, on '
+    + 'EMERGENCIES ONLY: urgency "blocking" or telegram: true skips the briefing and reaches the owner at once, on '
     + 'their phone too. Use it only when something is stopped until they answer and it cannot wait for the next '
-    + 'round; everything else waits for the round. At most a few of those per minute.',
+    + 'briefing; everything else waits for the briefing. At most a few of those per minute.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -442,8 +442,8 @@ export const NOTIFY_OWNER_TOOL = {
       urgency: {
         type: 'string', enum: ['blocking', 'normal', 'low'],
         description: 'blocking: a true emergency, something is stopped until the owner answers and it cannot wait '
-          + 'for the next round; it goes out at once, to their phone too. normal (the default): queued for the next '
-          + 'round, a decision you work around meanwhile. low: queued, optional, goes after normal ones.',
+          + 'for the next briefing; it goes out at once, to their phone too. normal (the default): queued for the next '
+          + 'briefing, a decision you work around meanwhile. low: queued, optional, goes after normal ones.',
       },
       rank: {
         type: 'integer', minimum: 1, maximum: 99,
@@ -452,7 +452,7 @@ export const NOTIFY_OWNER_TOOL = {
       },
       project: {
         type: 'string', maxLength: 200,
-        description: 'Pass the repo the question is about, by its folder name on the board (e.g. "agent-007"), or "general". It is the department: each gets at most two questions a round.',
+        description: 'Pass the repo the question is about, by its folder name on the board (e.g. "agent-007"), or "general". It is the department: each gets at most two questions a briefing.',
       },
       type: {
         type: 'string', enum: QUESTION_TYPES,
@@ -460,9 +460,9 @@ export const NOTIFY_OWNER_TOOL = {
       },
       telegram: {
         type: 'boolean',
-        description: 'true: an emergency that skips the round and goes to the owner\'s phone now, even when not '
-          + 'blocking. false: keep it off the phone; a blocking one then waits for the round, first in its project. '
-          + 'Left out: a blocking question goes out at once, anything else waits for the round.',
+        description: 'true: an emergency that skips the briefing and goes to the owner\'s phone now, even when not '
+          + 'blocking. false: keep it off the phone; a blocking one then waits for the briefing, first in its project. '
+          + 'Left out: a blocking question goes out at once, anything else waits for the briefing.',
       },
     },
     required: ['text'],
@@ -474,14 +474,14 @@ export const LIST_ROUND_QUEUE_TOOL = {
   name: 'list_round_queue',
   description:
     'List the questions you queued with notify_owner that the owner has not seen yet, by project, in the order the '
-    + 'next round takes them (it shows the top two of each). Use it to re-rank (ask again with rank, then '
+    + 'next briefing takes them (it shows the top two of each). Use it to re-rank (ask again with rank, then '
     + 'drop_queued the old one) or to drop what no longer matters.',
   inputSchema: { type: 'object', properties: {}, additionalProperties: false },
 };
 
 export const DROP_QUEUED_TOOL = {
   name: 'drop_queued',
-  description: 'Take a queued question out of the round queue before the owner sees it. Name it by number (3 for Q3) or id.',
+  description: 'Take a queued question out of the briefing queue before the owner sees it. Name it by number (3 for Q3) or id.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -495,15 +495,15 @@ export const DROP_QUEUED_TOOL = {
 export const SET_ROUND_BRIEF_TOOL = {
   name: 'set_round_brief',
   description:
-    `Set the brief shown at the top of a round in the owner's Billion tab, up to ${MAX_BRIEF_CHARS} characters: `
-    + 'what happened since the last round and what the questions below are about, in two or three sentences. '
-    + 'It also goes in the round\'s one Telegram message. For the next round by default; round: "current" '
-    + 'changes the round on screen now. "" clears it.',
+    `Set the brief shown at the top of a briefing in the owner's Billion tab, up to ${MAX_BRIEF_CHARS} characters: `
+    + 'what happened since the last briefing and what the questions below are about, in two or three sentences. '
+    + 'It also goes in the briefing\'s one Telegram message. For the next briefing by default; round: "current" '
+    + 'changes the briefing on screen now. "" clears it.',
   inputSchema: {
     type: 'object',
     properties: {
       text: { type: 'string', maxLength: MAX_BRIEF_CHARS, description: 'The brief, written to be read on a phone.' },
-      round: { type: 'string', enum: ['next', 'current'], description: 'Which round: next (the default) or current.' },
+      round: { type: 'string', enum: ['next', 'current'], description: 'Which briefing: next (the default) or current.' },
     },
     required: ['text'],
     additionalProperties: false,
@@ -514,7 +514,7 @@ export const SET_STATUS_TOOL = {
   name: 'set_status',
   description:
     `Say in one line (up to ${MAX_STATUS_CHARS} characters) what you are doing now, e.g. "reviewing PR #120". It shows `
-    + 'at the top of the owner\'s Billion tab beside what the server knows (workers running, the next round), so a '
+    + 'at the top of the owner\'s Billion tab beside what the server knows (workers running, the next briefing), so a '
     + 'slow reply is never a blank screen; while the owner waits on a reply it heads the progress box under their message, '
     + 'and folds into Work details when tell_owner answers it. Use concise, user-facing summaries: current step, findings, '
     + 'uncertainty or blocker, and next check. Never include private reasoning, raw analysis, tool output, command arguments or secrets. '
@@ -695,8 +695,8 @@ export function toolsFor(session, models) {
   });
 }
 
-// "the 15:30 round", as notify_owner and list_round_queue name it.
-const roundName = (round) => (round ? `the ${round.id.split(' ')[1]} round (${round.label})` : 'the next round (rounds are off)');
+// "the 15:30 briefing", as notify_owner and list_round_queue name it.
+const roundName = (briefing) => (briefing ? `the ${briefing.id.split(' ')[1]} briefing (${briefing.label})` : 'the next briefing (briefings are off)');
 
 const ok = (id, result) => ({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message) => ({ jsonrpc: '2.0', id, error: { code, message } });
@@ -930,22 +930,22 @@ const CALLS = {
       : { error: 'Only Billion can notify the owner.' };
     if (result.error) return toolText(result.error, true);
     if (result.queued) {
-      const round = roundName(result.nextRound);
+      const briefing = roundName(result.nextRound);
       return toolText(result.position <= result.max
-        ? `Queued as Q${result.n} for ${round}, position ${result.position} of ${result.max} in ${result.project}. The owner sees it then, not before; their answer arrives here as [Owner via app] Q${result.n}: …. Keep working on everything else.`
-        : `Queued as Q${result.n}, position ${result.position} in ${result.project}: behind the top ${result.max}, so it is not in ${round} unless you drop or out-rank one ahead of it (list_round_queue, drop_queued, rank).`);
+        ? `Queued as Q${result.n} for ${briefing}, position ${result.position} of ${result.max} in ${result.project}. The owner sees it then, not before; their answer arrives here as [Owner via app] Q${result.n}: …. Keep working on everything else.`
+        : `Queued as Q${result.n}, position ${result.position} in ${result.project}: behind the top ${result.max}, so it is not in ${briefing} unless you drop or out-rank one ahead of it (list_round_queue, drop_queued, rank).`);
     }
     const where = result.telegram === false ? `; not sent to Telegram (${result.held})` : ' and sent on Telegram';
     return toolText(`Put in the owner's Billion tab as Q${result.n}${where}. Keep working on everything else; their answer, if any, arrives here as [Owner via app] Q${result.n}: … or [Owner via Telegram] Q${result.n}: ….`);
   },
 
   [LIST_ROUND_QUEUE_TOOL.name]: (args, ctx) => {
-    const result = ctx.listRoundQueue ? ctx.listRoundQueue() : { error: 'Only Billion has a round queue.' };
+    const result = ctx.listRoundQueue ? ctx.listRoundQueue() : { error: 'Only Billion has a briefing queue.' };
     if (result.error) return toolText(result.error, true);
     const head = `${result.open} question(s) open on the owner's screen now. Next: ${roundName(result.nextRound)}, taking the top ${result.max} of each project.`;
     if (!result.projects.length) return toolText(`${head}\nNothing queued.`);
     const lines = result.projects.map(({ project, items }) => `${project} (${items.length})\n${items.map((q, i) => {
-      const bits = [q.urgency !== 'normal' ? q.urgency : null, q.rank != null ? `rank ${q.rank}` : null, i < result.max ? 'next round' : 'later'];
+      const bits = [q.urgency !== 'normal' ? q.urgency : null, q.rank != null ? `rank ${q.rank}` : null, i < result.max ? 'next briefing' : 'later'];
       return `  ${i + 1}. Q${q.n} [${bits.filter(Boolean).join(', ')}] ${oneLine(q.text).slice(0, 120)}`;
     }).join('\n')}`);
     return toolText(`${head}\n\n${lines.join('\n\n')}`);
@@ -953,17 +953,17 @@ const CALLS = {
 
   [DROP_QUEUED_TOOL.name]: (args, ctx) => {
     if (args.number === undefined && !args.id) return toolText('Name the question by number or id.', true);
-    const result = ctx.dropQueued ? ctx.dropQueued({ number: args.number, id: args.id }) : { error: 'Only Billion has a round queue.' };
+    const result = ctx.dropQueued ? ctx.dropQueued({ number: args.number, id: args.id }) : { error: 'Only Billion has a briefing queue.' };
     if (result.error) return toolText(result.error, true);
-    return toolText(`Dropped Q${result.item.n} from the round queue; the owner will not see it.`);
+    return toolText(`Dropped Q${result.item.n} from the briefing queue; the owner will not see it.`);
   },
 
   [SET_ROUND_BRIEF_TOOL.name]: (args, ctx) => {
     const which = args.round ?? 'next';
-    const result = ctx.setRoundBrief ? ctx.setRoundBrief(args.text, which) : { error: 'Only Billion writes the round brief.' };
+    const result = ctx.setRoundBrief ? ctx.setRoundBrief(args.text, which) : { error: 'Only Billion writes the brief.' };
     if (result.error) return toolText(result.error, true);
-    const round = which === 'current' ? 'the round on screen' : 'the next round';
-    return toolText(result.cleared ? `Cleared the brief for ${round}.` : `The brief is set for ${round}.`);
+    const briefing = which === 'current' ? 'the briefing on screen' : 'the next briefing';
+    return toolText(result.cleared ? `Cleared the brief for ${briefing}.` : `The brief is set for ${briefing}.`);
   },
 
   [SET_STATUS_TOOL.name]: (args, ctx) => {

@@ -59,7 +59,7 @@ When `STATE.md` says `Status: not started`, your introduction isn't done. Do it
 before anything else, and don't start the operating loop until it's finished.
 
 The owner reads the *Billion* tab's chat, not your terminal, so say all of it
-with `tell_owner` (never `notify_owner`: these are not round questions). Their
+with `tell_owner` (never `notify_owner`: these are not briefing questions). Their
 answers come back as `[Owner via app]` (or `[Owner via Telegram]`) lines, the
 only mail that reaches you before `billion_ready`; an answer typed straight
 into your terminal counts the same.
@@ -287,45 +287,45 @@ their answer, so the tab doesn't hold stale questions. When an answer was not
 meant for the question ("that was not for Q3"), put it back with
 `reopen_question` and read the text as a plain message instead.
 
-**Rounds: the owner is come to twice a day.** The owner asked for this: not
-a stream of questions, but two rounds a day, morning and afternoon (by
+**Briefings: the owner is come to twice a day.** The owner asked for this: not
+a stream of questions, but two briefings a day, morning and afternoon (by
 default 08:30 and 15:30 their time). `notify_owner` does not show a question
 to the owner; it queues it under its `project`, which is the department. At
-each round the server shows the owner, per project, only the two
+each briefing the server shows the owner, per project, only the two
 highest-priority queued questions (blocking, then normal, then low; then your
-`rank`, 1 first; then the newest), with your round brief on top, and sends
-one Telegram message for the whole round. Whatever the previous round left
+`rank`, 1 first; then the newest), with your briefing brief on top, and sends
+one Telegram message for the whole briefing. Whatever the previous briefing left
 unanswered is **consolidated**: closed as history, off the owner's list, and
-never shown again as a pile. The server tells you after each round, as
-`[Owner round] Round 10/1 pm released 5; consolidated Q118, Q119: re-queue
+never shown again as a pile. The server tells you after each briefing, as
+`[Owner briefing] Briefing 10/1 pm released 5; consolidated Q118, Q119: re-queue
 only if still top two`: an unanswered question is not doubled up at the next
-round; re-think it, and ask it again with `notify_owner` only if it is still
-among that project's two most important. So before each round, for each
+briefing; re-think it, and ask it again with `notify_owner` only if it is still
+among that project's two most important. So before each briefing, for each
 project, think about the two questions or actions you most need from the
 owner, and make the queue say that: `list_round_queue` shows it in the order
-the round will take it, `drop_queued` takes out what no longer matters, and
-`rank` puts one ahead. Questions past two in a project wait for a later round.
-Set `set_round_brief` (up to 600 characters) before a round: two or three
+the briefing will take it, `drop_queued` takes out what no longer matters, and
+`rank` puts one ahead. Questions past two in a project wait for a later briefing.
+Set `set_round_brief` (up to 600 characters) before a briefing: two or three
 sentences on what happened since the last one and what the questions are
 about.
 
-**Numbered items, and rounds started early.** Within a round every item has a
-short number (1, 2, 3…), blockers sent outside the round included. The owner
+**Numbered items, and briefings started early.** Within a briefing every item has a
+short number (1, 2, 3…), blockers sent outside the briefing included. The owner
 clears one with *Done* or by typing `1d` (`1d 3d` for several), and you read
 `[Owner via app] item 1 done (Q12: "...")`: the item is done and dismissed,
 nothing to resolve. Act on it as the owner's go-ahead or "handled", whichever
-the item was. The round's notice maps numbers to questions (`item 1 = Q12`).
-The owner can also start the next round early (a button, or saying "start the
-round now"); you get the same round notice, marked "started early by the
-owner", and the round's time is then used up.
+the item was. The briefing's notice maps numbers to questions (`item 1 = Q12`).
+The owner can also start the next briefing early (a button, or saying "start the
+briefing now"); you get the same briefing notice, marked "started early by the
+owner", and the briefing's time is then used up.
 
-**Outside a round, only true emergencies.** `urgency: "blocking"` (or
-`telegram: true`) skips the round and reaches the owner at once, on their
-phone too, at the top of the round as *Needs you now*. Use it only when
+**Outside a briefing, only true emergencies.** `urgency: "blocking"` (or
+`telegram: true`) skips the briefing and reaches the owner at once, on their
+phone too, at the top of the briefing as *Needs you now*. Use it only when
 something is stopped until the owner answers and it cannot wait for the next
-round, above all a blocker they can clear on the spot (a 2FA code, a captcha,
+briefing, above all a blocker they can clear on the spot (a 2FA code, a captcha,
 a login); a blocking question with `telegram: false`
-waits for the round, first in its project. Everything else waits.
+waits for the briefing, first in its project. Everything else waits.
 
 How to ask: one short message with the question, why, and what you
 recommend, also under *Waiting on you* in `STATE.md`, and keep working on
@@ -334,7 +334,7 @@ maybe one alternative), pass it as `choices` and mark the one you recommend
 as `recommended`, so the owner answers with one tap; they can still type
 something else. Pass `urgency`: `normal` (the default) for a decision you
 work around meanwhile, `low` when it's optional, `blocking` only as above.
-The *Billion* tab opens on **This round**: the brief, then each project with
+The *Billion* tab opens on **Briefing**: the brief, then each project with
 at most two cards. Its second view, **Chat**, is the owner's chat with you,
 the web twin of Telegram: your released questions, your `tell_owner` replies
 and the owner's messages in one thread, while your terminal stays the work
@@ -342,7 +342,7 @@ log. At its top a status line says what you are doing: call `set_status`
 ("reviewing PR #120") when you start something that takes a while, so a slow
 reply is never a blank screen.
 
-**The owner's own messages are never held for a round.** What they type
+**The owner's own messages are never held for a briefing.** What they type
 reaches you at once, and the tab shows it as pending, with a progress box
 under it (your `set_status` line and the steps the server reads off your
 screen), until a `tell_owner` answers it. Each message gets its own reply,
@@ -402,10 +402,10 @@ The `agent-007-board` MCP tools:
   its own worktree and conversation, within the board's per-repo cap.
 - `billion_ready`: opens your inbox (see **Operating loop**).
 - `add_repo`: puts a repository on the board so cards can be posted in it.
-- `notify_owner`: queues a question for the owner's next round, or in an
+- `notify_owner`: queues a question for the owner's next briefing, or in an
   emergency puts it in front of them at once (see **Escalate**).
-- `list_round_queue`, `drop_queued`, `set_round_brief`: the round queue, a
-  queued question taken out, and the brief on top of a round (see **Escalate**).
+- `list_round_queue`, `drop_queued`, `set_round_brief`: the briefing queue, a
+  queued question taken out, and the brief on top of a briefing (see **Escalate**).
 - `set_status`: one line at the top of the owner's *Billion* tab saying what
   you are doing now (see **Escalate**).
 - `tell_owner`: a reply or status update to the owner (their *Billion* tab,

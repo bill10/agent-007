@@ -95,7 +95,7 @@ export function statusLine(status = billionStatus, info = roundInfo, now = Date.
   const next = s.nextRoundAt ?? info?.next?.at;
   const bits = [lead];
   if (s.workers) bits.push(`${s.workers} worker${s.workers === 1 ? '' : 's'} running`);
-  if (next && info?.on !== false) bits.push(`next round ${roundTime(next, now)}`);
+  if (next && info?.on !== false) bits.push(`next briefing ${roundTime(next, now)}`);
   return bits.join(' · ');
 }
 
@@ -161,7 +161,7 @@ export function doneNumbers(text) {
   return [...new Set(body.match(/\d{1,3}/g).map(Number))];
 }
 
-let starting = null;         // the round on screen when "Start the round now" was pressed
+let starting = null;         // the round on screen when "Start the briefing now" was pressed
 const pending = new Map();   // question id -> its status when tapped
 const errors = new Map();    // question id -> { error, status }
 const drafts = new Map();    // question id -> typed reply not sent yet
@@ -327,7 +327,7 @@ function heading(info, model) {
   const head = el('div', 'round-head');
   const current = info?.current;
   const title = info?.on === false ? 'Open questions'
-    : current ? `${current.name || 'Round'} · ${String(current.label || '').split(' ')[0]}` : 'No round yet';
+    : current ? `${current.name || 'Briefing'} · ${String(current.label || '').split(' ')[0]}` : 'No briefing yet';
   head.append(el('h2', 'round-title', title));
   if (model.total) {
     const count = el('span', 'round-count', `${model.done} of ${model.total} done`);
@@ -340,9 +340,9 @@ function heading(info, model) {
 // "Start the round now": the next round, released at once, when something waits for it.
 function startButton(info) {
   if (info?.on === false || !info?.queued) return null;
-  const btn = el('button', 'waiting-send chat-control round-start', `Start the round now (${info.queued} waiting)`);
+  const btn = el('button', 'waiting-send chat-control round-start', `Start the briefing now (${info.queued} waiting)`);
   btn.type = 'button';
-  btn.title = 'Show the next round now instead of at its time (same two per department)';
+  btn.title = 'Show the next briefing now instead of at its time (same two per department)';
   btn.disabled = starting !== null && starting === (info.current?.id ?? '');
   btn.onclick = () => {
     if (!send({ type: 'round-start' })) return;
@@ -392,9 +392,9 @@ export function renderRound() {
   const brief = info?.on !== false && info?.current?.brief;
   if (brief) page.append(el('p', 'round-brief', brief));
   if (!model.sections.length) {
-    const next = info?.next?.at ? ` Next round ${roundTime(info.next.at)}.` : '';
-    page.append(el('p', 'round-empty', info?.current ? `Nothing for you this round.${next}`
-      : `Billion's questions come in rounds, twice a day.${next} Until then they show here as soon as Billion asks.`));
+    const next = info?.next?.at ? ` Next briefing ${roundTime(info.next.at)}.` : '';
+    page.append(el('p', 'round-empty', info?.current ? `Nothing for you this briefing.${next}`
+      : `Billion's questions come in briefings, twice a day.${next} Until then they show here as soon as Billion asks.`));
   }
   for (const s of model.sections) {
     const section = el('section', `round-dept${s.urgent ? ' urgent' : ''}`);
