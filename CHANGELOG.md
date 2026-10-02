@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.49.3.0] - 2026-10-02
+
+### Changed
+
+- **Talk to Billion now starts from a phone button in the message box row, and the row becomes a call bar during a conversation.** The button sits between the mic and Send. In a call the row shows the state (Listening, Thinking, Speaking, Muted, Reconnecting), an elapsed timer, Mute and End; End or Esc restores the text box with focus in it. The old bar above the questions strip is gone; its notices now show above the row.
+
 ## [0.49.2.0] - 2026-10-02
 
 ### Changed
