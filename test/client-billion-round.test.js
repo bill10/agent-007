@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
-// The Billion tab's "This round" view and status line (public/modules/round.js):
+// The Billion tab's "Briefing" view and status line (public/modules/round.js):
 // the round's brief, one section per project with its cards, answered cards
 // folding where they stand, the "3 of 7 done" counter, Earlier closed by
-// default, a typed draft and the scroll kept through an update, the This
-// round / Chat switch, and the status line's words.
+// default, a typed draft and the scroll kept through an update, the Briefing
+// / Chat switch, and the status line's words.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
@@ -13,7 +13,7 @@ import { setWaitingItems, setRoundInfo, setBillionStatus, setWaitingActive, setC
 import { renderRound, renderBillionStatus, roundModel, statusLine, setSubTab, subTab, initSubTabs, handleRoundError, _resetRound, doneNumbers } from '../public/modules/round.js';
 import { renderWaiting } from '../public/modules/waiting.js';
 
-const ROUND = { id: '2026-10-01 15:30', label: '10/1 pm', name: 'Afternoon round', at: '2026-10-01T15:30:00Z', releasedAt: '2026-10-01T15:30:05Z' };
+const ROUND = { id: '2026-10-01 15:30', label: '10/1 pm', name: 'Afternoon briefing', at: '2026-10-01T15:30:00Z', releasedAt: '2026-10-01T15:30:05Z' };
 const INFO = { type: 'round-state', on: true, max: 2, current: { ...ROUND, brief: 'Billing fix shipped. Two pricing calls below.' }, next: { id: '2026-10-02 08:30', label: '10/2 am', at: Date.parse('2026-10-02T08:30:00Z') } };
 const q = (n, extra = {}) => ({ id: `q${n}`, n, text: `Question ${n}?`, at: `2026-10-01T10:0${n % 10}:00Z`, status: 'open', urgency: 'normal', project: 'general', round: ROUND.id, pos: n, ...extra });
 const cards = () => [...document.querySelectorAll('.round-card')].map(c => c.dataset.q);
@@ -31,11 +31,11 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe('This round', () => {
+describe('Briefing', () => {
   it('shows the brief, then one section per project with its cards, in the order the round released them', () => {
     show([q(1, { project: 'beta', pos: 1 }), q(2, { project: 'alpha', pos: 0 }), q(3, { project: 'beta', pos: 2 }),
       q(4, { round: '2026-10-01 08:30', status: 'consolidated' }), q(5, { status: 'queued', round: undefined })]);
-    expect(document.querySelector('.round-title').textContent).toBe('Afternoon round · 10/1');
+    expect(document.querySelector('.round-title').textContent).toBe('Afternoon briefing · 10/1');
     expect(document.querySelector('.round-brief').textContent).toBe('Billing fix shipped. Two pricing calls below.');
     expect([...document.querySelectorAll('.round-dept-title')].map(h => h.textContent)).toEqual(['alpha', 'beta']);
     expect(cards()).toEqual(['q2', 'q1', 'q3']);
@@ -104,10 +104,10 @@ describe('This round', () => {
     expect([...document.querySelectorAll('.round-earlier-what')].map(r => r.textContent)).toEqual(['consolidated', 'answered: ok']);
   });
 
-  it('says when the next round is when there is nothing for the owner', () => {
+  it('says when the next briefing is when there is nothing for the owner', () => {
     show([], { ...INFO, current: null });
-    expect(document.querySelector('.round-title').textContent).toBe('No round yet');
-    expect(document.querySelector('.round-empty').textContent).toMatch(/^Billion's questions come in rounds, twice a day\. Next round .* Until then they show here as soon as Billion asks\.$/);
+    expect(document.querySelector('.round-title').textContent).toBe('No briefing yet');
+    expect(document.querySelector('.round-empty').textContent).toMatch(/^Billion's questions come in briefings, twice a day\. Next briefing .* Until then they show here as soon as Billion asks\.$/);
   });
 
   it('before the first round, shows each question as Open questions rather than an emergency', () => {
@@ -152,9 +152,9 @@ describe('the switch between This round and Chat', () => {
 describe('the status line', () => {
   const next = Date.parse('2026-10-01T19:30:00Z');
   const now = Date.parse('2026-10-01T16:00:00Z');
-  it('says what Billion is doing, how many workers run and when the next round is', () => {
+  it('says what Billion is doing, how many workers run and when the next briefing is', () => {
     expect(statusLine({ running: true, working: true, text: 'reviewing PR #120', workers: 3, nextRoundAt: next }, { on: true }, now))
-      .toMatch(/^Working: reviewing PR #120 · 3 workers running · next round \d{1,2}:30 (am|pm)$/);
+      .toMatch(/^Working: reviewing PR #120 · 3 workers running · next briefing \d{1,2}:30 (am|pm)$/);
     expect(statusLine({ running: true, working: true, workers: 1 }, { on: true }, now)).toBe('Thinking… · 1 worker running');
     expect(statusLine({ running: true, working: false }, { on: false }, now)).toBe('Idle');
     expect(statusLine({ running: true, working: false, awaitingReply: true, text: 'x' }, {}, now)).toBe('Waiting for Billion to reply…');
@@ -196,12 +196,12 @@ describe('numbered items, Done and "1d"', () => {
 });
 
 describe('Start the round now', () => {
-  it('shows while questions wait for the next round, and asks the server to release it', () => {
+  it('shows while questions wait for the next briefing, and asks the server to release it', () => {
     show([q(1)], { ...INFO, queued: 0 });
     expect(document.querySelector('.round-start')).toBeNull();
     show([q(1)], { ...INFO, queued: 4 });
     const btn = document.querySelector('.round-start');
-    expect(btn.textContent).toBe('Start the round now (4 waiting)');
+    expect(btn.textContent).toBe('Start the briefing now (4 waiting)');
     btn.click();
     expect(send).toHaveBeenLastCalledWith({ type: 'round-start' });
     expect(document.querySelector('.round-start').disabled).toBe(true);

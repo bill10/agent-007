@@ -166,12 +166,12 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           : { error: 'Only Billion can notify the owner.' }),
         listRoundQueue: () => (req.agentSession.isBillion
           ? { ...roundQueue(), nextRound: comingRound() }
-          : { error: 'Only Billion has a round queue.' }),
+          : { error: 'Only Billion has a briefing queue.' }),
         dropQueued: (ref) => (req.agentSession.isBillion
           ? withView(dropQueued(ref))
-          : { error: 'Only Billion has a round queue.' }),
+          : { error: 'Only Billion has a briefing queue.' }),
         setRoundBrief: (text, which) => {
-          if (!req.agentSession.isBillion) return { error: 'Only Billion writes the round brief.' };
+          if (!req.agentSession.isBillion) return { error: 'Only Billion writes the brief.' };
           const result = setRoundBrief(text, which);
           if (result.ok && which === 'current') broadcast(roundView());
           return result;

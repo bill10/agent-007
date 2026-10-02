@@ -555,8 +555,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         case 'round-start':
         case 'round-done': {
           const nums = Array.isArray(msg.nums) ? msg.nums.filter(n => Number.isInteger(n) && n > 0 && n < 1000).slice(0, 50) : [];
-          const result = !mayAnswerOwner() ? { error: 'Only the owner runs the rounds, and with user accounts on nobody does.' }
-            : !ws.fromBrowser ? { error: 'Rounds are run from the browser only.' }
+          const result = !mayAnswerOwner() ? { error: 'Only the owner runs the briefings, and with user accounts on nobody does.' }
+            : !ws.fromBrowser ? { error: 'Briefings are run from the browser only.' }
             : msg.type === 'round-start' ? await startRoundNow({ broadcast })
             : nums.length ? await markDone(nums, 'app', { broadcast })
             : { error: 'Which item?' };

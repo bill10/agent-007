@@ -432,7 +432,7 @@ function questionFoot(q) {
     return foot;
   }
   if (q.status === 'dismissed') return el('p', 'chat-answered', 'dismissed');
-  if (q.status === 'consolidated') return el('p', 'chat-answered', 'consolidated: the next round came first');
+  if (q.status === 'consolidated') return el('p', 'chat-answered', 'consolidated: the next briefing came first');
   const foot = el('div', 'chat-q-foot');
   if (Array.isArray(q.choices) && q.choices.length) foot.appendChild(choiceButtons(q));
   foot.appendChild(replyButton(q, () => replyToQuestion(q.id)));

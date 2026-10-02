@@ -81,7 +81,7 @@ const roundOf = ({ at, slot, y, mo, d, h }) => ({
   at,
   // "10/1 am": what Billion and the round's heading call it.
   label: `${mo}/${d} ${h < 12 ? 'am' : 'pm'}`,
-  name: h < 12 ? 'Morning round' : h < 17 ? 'Afternoon round' : 'Evening round',
+  name: h < 12 ? 'Morning briefing' : h < 17 ? 'Afternoon briefing' : 'Evening briefing',
 });
 
 // The first round strictly after `now`, or null with rounds off.
@@ -173,7 +173,7 @@ export function setRoundBrief(text, which = 'next') {
   if (which !== 'next' && which !== 'current') return { error: 'round must be "next" or "current".' };
   const state = roundState();
   if (which === 'current') {
-    if (!state.current) return { error: 'No round has been released yet; set the brief for the next one.' };
+    if (!state.current) return { error: 'No briefing has been released yet; set the brief for the next one.' };
     state.current = { ...state.current, brief: body || undefined };
   } else {
     state.brief = body || undefined;

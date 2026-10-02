@@ -77,9 +77,9 @@ describe('round settings and times', () => {
   });
 
   it('finds the next and the last round in the owner\'s zone, named for the owner and for Billion', () => {
-    expect(nextRound(at('2026-10-01T09:00:00Z'), UTC)).toEqual({ id: '2026-10-01 15:30', at: at('2026-10-01T15:30:00Z'), label: '10/1 pm', name: 'Afternoon round' });
+    expect(nextRound(at('2026-10-01T09:00:00Z'), UTC)).toEqual({ id: '2026-10-01 15:30', at: at('2026-10-01T15:30:00Z'), label: '10/1 pm', name: 'Afternoon briefing' });
     expect(nextRound(at('2026-10-01T15:30:00Z'), UTC).id).toBe('2026-10-02 08:30');
-    expect(nextRound(at('2026-12-31T20:00:00Z'), UTC)).toMatchObject({ id: '2027-01-01 08:30', label: '1/1 am', name: 'Morning round' });
+    expect(nextRound(at('2026-12-31T20:00:00Z'), UTC)).toMatchObject({ id: '2027-01-01 08:30', label: '1/1 am', name: 'Morning briefing' });
     expect(lastRound(at('2026-10-01T15:30:00Z'), UTC).id).toBe('2026-10-01 15:30');
     expect(lastRound(at('2026-10-01T07:00:00Z'), UTC).id).toBe('2026-09-30 15:30');
     // New York is UTC-4 in October and UTC-5 in December.
@@ -150,7 +150,7 @@ describe('notify_owner queues for the round', () => {
 });
 
 describe('a round', () => {
-  const round = (id = '2026-10-01 15:30', label = '10/1 pm') => ({ id, label, name: 'Afternoon round', at: at('2026-10-01T15:30:00Z') });
+  const round = (id = '2026-10-01 15:30', label = '10/1 pm') => ({ id, label, name: 'Afternoon briefing', at: at('2026-10-01T15:30:00Z') });
 
   it('releases the top two of each project, consolidates the last round\'s open ones, and keeps the rest queued', async () => {
     const broadcast = vi.fn();
@@ -185,14 +185,14 @@ describe('a round', () => {
     expect(chatMessages().find(m => m.text === 'A1').q.status).toBe('consolidated');
     // Numbered for the owner: the emergency first, then the round's question.
     expect(waitingItems().filter(i => i.status === 'open').map(i => [i.text, i.num])).toEqual([['A2', 2], ['Now!', 1]]);
-    expect(billionHeard()).toEqual([`[Owner round] Round 10/1 pm released 1 (item 2 = Q${waitingItems().find(i => i.text === 'A2').n}); consolidated Q1, Q4: re-queue only if still top two.`]);
+    expect(billionHeard()).toEqual([`[Owner briefing] Briefing 10/1 pm released 1 (item 2 = Q${waitingItems().find(i => i.text === 'A2').n}); consolidated Q1, Q4: re-queue only if still top two.`]);
   });
 
   it('sends one Telegram message for the round, with the brief and a link, never one per question', async () => {
     for (const p of ['a', 'b', 'c']) { await ask(`${p}1`, { project: p }); await ask(`${p}2`, { project: p }); }
     expect(setRoundBrief('Shipped the billing fix; three choices below.')).toEqual({ ok: true, which: 'next', cleared: false });
     await releaseRound(round(), { env: { ...ENV, APP_URL: 'https://mini:7007' }, settings: UTC });
-    expect(sent()).toEqual([{ method: 'sendMessage', body: { chat_id: '42', text: 'Afternoon round: 6 items across 3 departments\n\nShipped the billing fix; three choices below.\nhttps://mini:7007' } }]);
+    expect(sent()).toEqual([{ method: 'sendMessage', body: { chat_id: '42', text: 'Afternoon briefing: 6 items across 3 departments\n\nShipped the billing fix; three choices below.\nhttps://mini:7007' } }]);
     expect(roundState().current).toMatchObject({ id: '2026-10-01 15:30', brief: 'Shipped the billing fix; three choices below.' });
     expect(roundState().brief).toBeUndefined();
   });
@@ -225,7 +225,7 @@ describe('the server\'s round tick and the first start', () => {
     ]));
     expect(await roundTick({ now: at('2026-10-01T09:00:00Z'), env: {}, settings: UTC })).toBeNull();
     expect(waitingItems().map(i => i.status)).toEqual(['consolidated', 'open', 'answered']);
-    expect(billionHeard()).toEqual(['[Owner round] Rounds are on: from the first round (10/1 pm) the owner sees your questions only at 08:30 and 15:30, at most 2 per project; notify_owner queues them (see Escalate in CHARTER.md). Until then a question shows at once. Consolidated 1 open question (Q1): re-queue only the ones still in a project\'s top two.']);
+    expect(billionHeard()).toEqual(['[Owner briefing] Briefings are on: from the first briefing (10/1 pm) the owner sees your questions only at 08:30 and 15:30, at most 2 per project; notify_owner queues them (see Escalate in CHARTER.md). Until then a question shows at once. Consolidated 1 open question (Q1): re-queue only the ones still in a project\'s top two.']);
     expect(migrateToRounds({ settings: UTC })).toBeNull();
     // Day one: the introduction's and the first cycle's questions do not wait for 15:30.
     expect(await ask('Day one', { project: 'a' })).toMatchObject({ ok: true, telegram: false });
@@ -251,7 +251,7 @@ describe('the server\'s round tick and the first start', () => {
     const result = await roundTick({ now: at('2026-10-03T10:00:00Z'), env: {}, settings: UTC });
     expect(result.released.map(i => i.text)).toEqual(['Waiting']);
     expect(roundState().current.id).toBe('2026-10-03 08:30');
-    expect(roundState().note).toMatch(/Rounds are on[\s\S]*Round 10\/3 am released 1/);
+    expect(roundState().note).toMatch(/Briefings are on[\s\S]*Briefing 10\/3 am released 1/);
     sessions.set(billion.id, billion);
     await roundTick({ now: at('2026-10-03T10:00:10Z'), env: {}, settings: UTC });
     expect(roundState().note).toBeUndefined();
@@ -281,16 +281,16 @@ describe('Billion\'s round tools over MCP', () => {
   it('notify_owner says which round and where in the project\'s queue, and passes rank', async () => {
     const notify = vi.fn(async () => ({ ok: true, queued: true, n: 7, project: 'agent-007', position: 1, of: 1, max: 2, nextRound: next }));
     expect(text(await call('notify_owner', { text: 'Ship?', rank: 2 }, { notifyOwner: notify })))
-      .toBe('Queued as Q7 for the 15:30 round (10/1 pm), position 1 of 2 in agent-007. The owner sees it then, not before; their answer arrives here as [Owner via app] Q7: …. Keep working on everything else.');
+      .toBe('Queued as Q7 for the 15:30 briefing (10/1 pm), position 1 of 2 in agent-007. The owner sees it then, not before; their answer arrives here as [Owner via app] Q7: …. Keep working on everything else.');
     expect(notify).toHaveBeenCalledWith('Ship?', expect.objectContaining({ rank: 2 }));
     const behind = vi.fn(async () => ({ ok: true, queued: true, n: 8, project: 'agent-007', position: 3, of: 3, max: 2, nextRound: next }));
-    expect(text(await call('notify_owner', { text: 'And?' }, { notifyOwner: behind }))).toMatch(/^Queued as Q8, position 3 in agent-007: behind the top 2, so it is not in the 15:30 round/);
+    expect(text(await call('notify_owner', { text: 'And?' }, { notifyOwner: behind }))).toMatch(/^Queued as Q8, position 3 in agent-007: behind the top 2, so it is not in the 15:30 briefing/);
   });
 
   it('says emergencies only in the description', async () => {
     const { NOTIFY_OWNER_TOOL } = await import('../server/mcp.js');
     expect(NOTIFY_OWNER_TOOL.description).toMatch(/EMERGENCIES ONLY/);
-    expect(NOTIFY_OWNER_TOOL.inputSchema.properties.urgency.description).toMatch(/cannot wait\s+for the next round/);
+    expect(NOTIFY_OWNER_TOOL.inputSchema.properties.urgency.description).toMatch(/cannot wait\s+for the next briefing/);
   });
 
   it('list_round_queue lists the queue by project, and drop_queued takes one out', async () => {
@@ -300,31 +300,31 @@ describe('Billion\'s round tools over MCP', () => {
     await ask('Beta', { project: 'beta' });
     const ctx = { listRoundQueue: () => ({ ...roundQueue(UTC), nextRound: next }), dropQueued };
     expect(text(await call('list_round_queue', {}, ctx))).toBe([
-      '0 question(s) open on the owner\'s screen now. Next: the 15:30 round (10/1 pm), taking the top 2 of each project.',
+      '0 question(s) open on the owner\'s screen now. Next: the 15:30 briefing (10/1 pm), taking the top 2 of each project.',
       '',
       'alpha (3)',
-      '  1. Q3 [rank 1, next round] Alpha three',
-      '  2. Q1 [next round] Alpha one',
+      '  1. Q3 [rank 1, next briefing] Alpha three',
+      '  2. Q1 [next briefing] Alpha one',
       '  3. Q2 [low, later] Alpha two',
       '',
       'beta (1)',
-      '  1. Q4 [next round] Beta',
+      '  1. Q4 [next briefing] Beta',
     ].join('\n'));
-    expect(text(await call('drop_queued', { number: 2 }, ctx))).toBe('Dropped Q2 from the round queue; the owner will not see it.');
+    expect(text(await call('drop_queued', { number: 2 }, ctx))).toBe('Dropped Q2 from the briefing queue; the owner will not see it.');
     expect(waitingItems()[1]).toMatchObject({ status: 'dismissed', dropped: true });
     expect(text(await call('drop_queued', { number: 2 }, ctx))).toBe('Q2 is not queued (it is dismissed).');
     expect(text(await call('drop_queued', {}, ctx))).toBe('Name the question by number or id.');
     expect(dropQueued({ number: 99 }).error).toBe('There is no Q99.');
   });
 
-  it('set_round_brief sets the next round\'s or the current one\'s, up to its length', async () => {
+  it('set_round_brief sets the next briefing\'s or the current one\'s, up to its length', async () => {
     const ctx = { setRoundBrief };
     freshInstall();
-    expect(text(await call('set_round_brief', { text: 'Quiet morning.' }, ctx))).toBe('The brief is set for the next round.');
+    expect(text(await call('set_round_brief', { text: 'Quiet morning.' }, ctx))).toBe('The brief is set for the next briefing.');
     expect(roundState().brief).toBe('Quiet morning.');
-    expect(text(await call('set_round_brief', { text: 'x', round: 'current' }, ctx))).toMatch(/No round has been released yet/);
+    expect(text(await call('set_round_brief', { text: 'x', round: 'current' }, ctx))).toMatch(/No briefing has been released yet/);
     expect(text(await call('set_round_brief', { text: 'x'.repeat(MAX_BRIEF_CHARS + 1) }, ctx))).toMatch(/keep it to 600/);
-    expect(text(await call('set_round_brief', { text: '' }, ctx))).toBe('Cleared the brief for the next round.');
+    expect(text(await call('set_round_brief', { text: '' }, ctx))).toBe('Cleared the brief for the next briefing.');
   });
 });
 
@@ -387,7 +387,7 @@ it('caps queued questions on their own, so a long queue never pushes an open que
 });
 
 describe('the owner starts a round early', () => {
-  it('releases the next round now under the same rules, and the clock does not release it again', async () => {
+  it('releases the next briefing now under the same rules, and the clock does not release it again', async () => {
     const t = at('2026-10-01T13:00:00Z');
     await roundTick({ now: at('2026-10-01T09:00:00Z'), env: {}, settings: UTC });
     billionHeard();
@@ -396,19 +396,19 @@ describe('the owner starts a round early', () => {
     expect(result.released.map(i => i.project)).toEqual(['b', 'a', 'a']);
     expect(result.left).toBe(1);
     expect(roundState().current).toMatchObject({ id: '2026-10-01 15:30', early: true });
-    expect(billionHeard()[0]).toMatch(/^\[Owner round\] Round 10\/1 pm \(started early by the owner\) released 3 \(item 1 = Q\d+, item 2 = Q\d+, item 3 = Q\d+\); 1 still queued/);
+    expect(billionHeard()[0]).toMatch(/^\[Owner briefing\] Briefing 10\/1 pm \(started early by the owner\) released 3 \(item 1 = Q\d+, item 2 = Q\d+, item 3 = Q\d+\); 1 still queued/);
     expect(await roundTick({ now: at('2026-10-01T15:30:05Z'), env: {}, settings: UTC })).toBeNull();
     expect(comingRound(at('2026-10-01T15:31:00Z'), UTC).id).toBe('2026-10-02 08:30');
     expect(roundView(t, UTC)).toMatchObject({ queued: 1, next: { id: '2026-10-02 08:30' } });
   });
 
   it('is refused with rounds off', async () => {
-    expect((await startRoundNow({ settings: { ...UTC, on: false } })).error).toMatch(/Rounds are off/);
+    expect((await startRoundNow({ settings: { ...UTC, on: false } })).error).toMatch(/Briefings are off/);
   });
 
   it('is what "start the round now" in the chat does, and it is not a turn of Billion\'s', async () => {
-    for (const phrase of ['Start the round now', 'start round', 'please release the next round.', 'Begin the round now!']) expect(START_ROUND_RE.test(phrase)).toBe(true);
-    for (const phrase of ['start the round after lunch', 'when does the round start?']) expect(START_ROUND_RE.test(phrase)).toBe(false);
+    for (const phrase of ['Start the round now', 'start the briefing now', 'start round', 'please release the next round.', 'Begin the round now!']) expect(START_ROUND_RE.test(phrase)).toBe(true);
+    for (const phrase of ['start the round after lunch', 'when does the briefing start?']) expect(START_ROUND_RE.test(phrase)).toBe(false);
     await ask('Queued one', { project: 'a' });
     expect(await ownerSays('Start the round now', { env: {} })).toEqual({ ok: true });
     expect(waitingItems()[0]).toMatchObject({ status: 'open', num: 1 });
@@ -428,7 +428,7 @@ describe('numbered items and "1d"', () => {
 
   it('numbers an emergency next in the round, and marks items done: folded as done, Billion told which', async () => {
     await ask('Pick a name', { project: 'a' });
-    await releaseRound({ id: 'r1', label: '10/1 am', name: 'Morning round', at: at('2026-10-01T08:30:00Z') }, { env: {}, settings: UTC });
+    await releaseRound({ id: 'r1', label: '10/1 am', name: 'Morning briefing', at: at('2026-10-01T08:30:00Z') }, { env: {}, settings: UTC });
     await ask('2FA code please', { urgency: 'blocking', env: {} });
     expect(waitingItems().map(i => [i.text, i.num, i.numRound])).toEqual([['Pick a name', 1, 'r1'], ['2FA code please', 2, 'r1']]);
     billionHeard();
@@ -436,12 +436,12 @@ describe('numbered items and "1d"', () => {
     expect(waitingItems().map(i => [i.status, i.answer, i.done])).toEqual([['answered', 'done', true], ['answered', 'done', true]]);
     expect(billionHeard()).toEqual(['[Owner via app] item 1 done (Q1: "Pick a name"); item 2 done (Q2: "2FA code please")']);
     expect(chatMessages().find(m => m.q?.n === 1).q).toMatchObject({ status: 'answered', done: true, num: 1 });
-    expect((await ownerSays('1d', { env: {} })).error).toBe('No open item 1 in this round.');
+    expect((await ownerSays('1d', { env: {} })).error).toBe('No open item 1 in this briefing.');
   });
 
   it('works from Telegram too, with a reply saying what was done', async () => {
     await ask('Pick a name', { project: 'a' });
-    await releaseRound({ id: 'r1', label: '10/1 am', name: 'Morning round', at: at('2026-10-01T08:30:00Z') }, { env: {}, settings: UTC });
+    await releaseRound({ id: 'r1', label: '10/1 am', name: 'Morning briefing', at: at('2026-10-01T08:30:00Z') }, { env: {}, settings: UTC });
     fetchMock.mockClear();
     expect(await handleUpdate({ update_id: 1, message: { chat: { id: 42 }, text: '1d' } }, { env: ENV })).toBe('done');
     expect(sent().map(c => c.body.text)).toEqual(['Done: item 1.']);
