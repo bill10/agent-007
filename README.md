@@ -28,11 +28,20 @@ If you already run your agents this way with Claude Code and a few scripts, grea
 
 ## Quick Start
 
+To try it:
+
 ```bash
 npx @bill10/agent-007
 ```
 
-Or install it globally with `npm i -g @bill10/agent-007`, then run `agent-007`.
+For daily use, install it and run it as a service, so it starts at login and keeps running after you close the terminal:
+
+```bash
+npm i -g @bill10/agent-007
+agent007 install
+```
+
+Or run `agent007` in a terminal (`agent-007`, the older name, works too). See [Run it as a service](#run-it-as-a-service).
 
 Or run it from a clone:
 
@@ -47,10 +56,24 @@ Open [http://localhost:7007](http://localhost:7007). Click **+ Job** to queue wo
 To check what it needs, at any time:
 
 ```bash
-npx @bill10/agent-007 doctor   # or agent-007 doctor, or npm start -- doctor
+npx @bill10/agent-007 doctor   # or agent007 doctor, or npm start -- doctor
 ```
 
 One line per check (Node and node-pty, `claude` and `codex` installed and logged in, `gh` and which account reaches each repo on the board, each repo's path and remote, the port, the settings files and `config.json`, the version against npm, Telegram, stray local plugin registrations), ✓, ✗ or – (not needed), with a fix under each ✗. It changes nothing, and exits 1 when anything is ✗. Every start runs the quick, offline part of it and prints only what failed.
+
+### Run it as a service
+
+In a terminal, Agent 007 and every agent it runs stop when the terminal closes. On macOS and Linux, `agent007 install` (`npm start -- install` in a clone) registers a per-user service that starts it at login and brings it back if it stops: a LaunchAgent in `~/Library/LaunchAgents` on macOS, a systemd `--user` unit on Linux. It runs the copy you installed from, with the absolute path of your `node` and the `PATH` of your login shell captured at install time. `--dry-run` prints what it would write.
+
+```bash
+agent007 status      # running or not, as a service or in a terminal, pid, version, port, uptime, workers
+agent007 restart     # waits for board workers mid-step to finish it (--now: don't wait)
+agent007 logs -f     # ~/.agent-007/logs/server.log, kept to 5 MB plus one older copy
+agent007 update      # git pull --ff-only in a clone, npm install -g in an install; then restart
+agent007 uninstall   # removes the service; ~/.agent-007 is kept
+```
+
+`status`, `restart` and `update` work on a server started in a terminal too: `restart` asks it to restart itself in the same terminal. Workers come back after a restart, but lose the step they were on. Windows has no service yet; run it in a terminal there.
 
 ### Settings
 
@@ -260,7 +283,7 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 
 ## Troubleshooting
 
-Start with `agent-007 doctor` (`npx @bill10/agent-007 doctor`, or `npm start -- doctor` in a clone): it checks everything below and prints the fix for each problem it finds.
+Start with `agent007 doctor` (`npx @bill10/agent-007 doctor`, or `npm start -- doctor` in a clone): it checks everything below and prints the fix for each problem it finds.
 
 **doctor says `no working ship skill`, or `N skills in ~/.codex/skills are broken links`.** **Required:** [gstack](https://github.com/garrytan/gstack), whose ship skill is how a card that needs a pull request finishes. Install it, or re-run its setup after moving or deleting its folder: `~/.claude/skills/gstack/setup --host claude` (or `--host codex`). doctor only reports; it never deletes a link. **Recommended:** `agent-browser` (cards use it for screenshots of UI changes); also the `impeccable` UI design skill, for `claude` and `codex`. doctor lists them but never fails on them.
 
@@ -271,6 +294,10 @@ Start with `agent-007 doctor` (`npx @bill10/agent-007 doctor`, or `npm start -- 
 - **Windows:** [Visual Studio Build Tools](https://github.com/microsoft/node-pty#windows) with the C++ workload
 
 **An agent will not start: `"claude" is not installed, or not on the PATH Agent 007 was started with.`** The CLI the agent runs (`claude`, `codex` or `gemini`) was not found, and the message says how to install it. If it is installed, Agent 007 was started from somewhere with a shorter `PATH` than your shell (a launcher or a service manager, say); start it from a terminal where `which claude` finds it. Billion runs on Claude Code too, so without it the Billion chat says what to do instead: install Claude Code and press **Start Billion**, or restart with `BILLION=0` to turn Billion off. Installed but not logged in, Claude Code opens on its sign-in in Billion's terminal, and the chat says so with a button that opens it; your messages reach Billion once you have signed in there.
+
+**Running as a service, an agent cannot find `claude`, `codex`, `gh` or `node`.** A service does not start from your shell, so it gets none of what `.zshrc` or `.bashrc` adds to `PATH` (nvm, `~/.local/bin`, Homebrew). `agent007 install` captures your login shell's `PATH` into the service when it runs, so a CLI installed or moved since, or a new nvm node, is not on it. `agent007 doctor` says so (✗ the service cannot find ...); run `agent007 install` again to capture it anew.
+
+**Where are the logs?** As a service: `~/.agent-007/logs/server.log` (`agent007 logs -f`); it is cut back to empty past 5 MB, with the previous 5 MB kept as `server.log.1`. In a terminal: that terminal. `agent007 status` says which.
 
 **A job card says `"gh" is not installed`.** The board finds pull requests with the GitHub CLI: install it from https://cli.github.com and run `gh auth login`. A job that ends in a pull request also needs a repo with a GitHub remote to push to.
 
@@ -285,7 +312,9 @@ server.js          Entry point + orchestrators (createSession, killSession)
 server/
   state.js         Shared mutable state (sessions, orphans, pools, config)
   settings.js      Config dir and the settings files (./.env, ~/.agent-007/.env)
-  doctor.js        `agent-007 doctor` and the start's quick check (report only, never changes anything)
+  doctor.js        `agent007 doctor` and the start's quick check (report only, never changes anything)
+  service.js       `agent007 install/uninstall/status/restart/logs/update`: the LaunchAgent / systemd unit
+  control.js       server.json and the token-checked /control routes status and restart call
   config.js        Config persistence (load, save, crash recovery)
   direct-run.js    Entry-point detection (symlink/space-safe `npm start` guard)
   git.js           Git operations (worktree, file tree, diff)
