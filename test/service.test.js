@@ -322,22 +322,42 @@ describe('update', () => {
     expect(restarted).toBe(true);
   });
 
-  it('npm global: npm install -g @latest; a copy outside npm root -g is refused; npx needs nothing', async () => {
+  it('npm global: installs the registry latest exactly; a copy outside npm root -g is refused; npx needs nothing', async () => {
     const root = tmp('a007-global-');
     mkdirSync(join(root, '@bill10', 'agent-007'), { recursive: true });
-    let version = '1.0.0.0';
-    const ctx = fakeCtx({
-      root: join(root, '@bill10', 'agent-007'),
-      answer: (cmd, args) => {
-        if (args[0] === 'root') return { stdout: `${root}\n` };
-        if (args[0] === 'install') version = '1.2.0.0';
-        return {};
-      },
-      version: () => version,
-    });
+    const globalCtx = ({ installs = '1.2.0.0', latest = async () => '1.2.0', start = '1.0.0.0' } = {}) => {
+      let version = start;
+      return fakeCtx({
+        root: join(root, '@bill10', 'agent-007'),
+        answer: (cmd, args) => {
+          if (args[0] === 'root') return { stdout: `${root}\n` };
+          if (args[0] === 'install') version = installs;
+          return {};
+        },
+        version: () => version,
+        latest,
+      });
+    };
+    const ctx = globalCtx();
     expect(await runCommand('update', {}, ctx)).toBe(0);
-    expect(ctx.calls).toEqual(['npm root -g', 'npm install -g @bill10/agent-007@latest']);
+    expect(ctx.calls).toEqual(['npm root -g', 'npm install -g @bill10/agent-007@1.2.0 --prefer-online']);
     expect(ctx.out.join('\n')).toContain('Updated 1.0.0.0 → 1.2.0.0.');
+
+    // npm's stale cache reinstalls the old version: said plainly, never "up to date", no restart.
+    const stale = globalCtx({ installs: '1.0.0.0' });
+    expect(await runCommand('update', {}, stale)).toBe(1);
+    expect(stale.out.join('\n')).toMatch(/ERR npm installed 1\.0\.0\.0, not 1\.2\.0\.0.*Retry: npm install -g @bill10\/agent-007@1\.2\.0 --prefer-online/);
+    expect(stale.out.join('\n')).not.toContain('up to date');
+
+    const current = globalCtx({ latest: async () => '1.0.0' });
+    expect(await runCommand('update', {}, current)).toBe(0);
+    expect(current.out.join('\n')).toContain('Already up to date (1.0.0.0).');
+    expect(current.calls).toEqual(['npm root -g']);
+
+    const offline = globalCtx({ latest: async () => null });
+    expect(await runCommand('update', {}, offline)).toBe(1);
+    expect(offline.out.join('\n')).toMatch(/ERR Could not reach the npm registry/);
+    expect(offline.out.join('\n')).not.toContain('up to date');
 
     const elsewhere = fakeCtx({ root: '/somewhere/node_modules/@bill10/agent-007', answer: () => ({ stdout: `${root}\n` }) });
     expect(await runCommand('update', {}, elsewhere)).toBe(1);

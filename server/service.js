@@ -441,11 +441,17 @@ async function updateNpm(ctx) {
   if (!rootG || !real(ctx.root).startsWith(real(rootG))) {
     return { error: `This copy is in ${ctx.root}, not npm's global folder (${rootG || 'unknown'}). Update it where it was installed (npm install ${PKG_NAME}@latest there).` };
   }
+  const { toNpm, fromNpm, versionAtLeast } = await import('./doctor.js');
   const before = ctx.version();
-  ctx.log(`npm install -g ${PKG_NAME}@latest ...`);
-  const r = await ctx.run('npm', ['install', '-g', `${PKG_NAME}@latest`], { timeout: 600_000 });
+  const latest = await ctx.latest();
+  if (!latest) return { error: `Could not reach the npm registry to find the latest version, so ${before} may or may not be current. Check the network and run agent007 update again.` };
+  if (versionAtLeast(toNpm(before), latest)) return { upToDate: true };
+  const want = fromNpm(latest);
+  ctx.log(`npm install -g ${PKG_NAME}@${latest} ...`);
+  const r = await ctx.run('npm', ['install', '-g', `${PKG_NAME}@${latest}`, '--prefer-online'], { timeout: 600_000 });
   if (r.code) return { error: `npm install -g failed: ${(r.stderr || r.stdout).trim().split('\n').slice(-5).join('\n')}` };
-  return ctx.version() === before ? { upToDate: true } : { updated: true };
+  if (ctx.version() !== want) return { error: `npm installed ${ctx.version()}, not ${want}, so this was not updated. Retry: npm install -g ${PKG_NAME}@${latest} --prefer-online` };
+  return { updated: true };
 }
 
 async function update(ctx, opts = {}) {
@@ -502,6 +508,8 @@ export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent0
     readServer: () => readServerFile(),
     callServer,
     version: () => readFileSync(join(PKG_ROOT, 'VERSION'), 'utf8').trim(),
+    // The registry's `latest`, asked directly: npm's own packument cache can lag it by minutes.
+    latest: async () => (await import('./doctor.js')).npmLatest(),
     sleep: (ms) => new Promise(r => setTimeout(r, ms)),
     now: Date.now,
     log: (s) => console.log(s),
