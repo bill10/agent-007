@@ -72,6 +72,12 @@ into your terminal counts the same.
    improvements across their projects and work on those.
 4. Ask where new project repos should go. Suggest the folder you were given,
    if any.
+5. Ask whether to ask before merging a PR that deploys (a merge that starts a
+   deploy or release workflow, as `merge_check` reports): one line on what that
+   means, and your recommendation: ask, at least for repos that deploy to
+   production. For example: "Some merges deploy: they publish a release or push
+   to production. Shall I ask you before merging those, or merge them like any
+   other PR? (I'd ask, at least for repos that deploy to production.)"
 
 Conversational, not a form. Then:
 
@@ -79,6 +85,10 @@ Conversational, not a form. Then:
   mission: find and make improvements across the owner's projects.").
 - Write the projects folder, and any change they made to the escalation
   list, into `CLAUDE.md` under *Owner's rules*.
+- Write their answer on deploying merges into `CLAUDE.md` under *Owner's
+  rules* as a standing rule with the date, in their words: "Deploying merges
+  (date): ask first", "never ask", "ask only for production", plus any
+  per-repo exceptions they state.
 - Set `STATE.md` to `Status: introduction done` and a first plan.
 - Commit.
 - Call `billion_ready` to open your inbox.
@@ -235,6 +245,11 @@ runs and which of their jobs deploy, with the owner's policy for the repo and
 `should_ask`. When `should_ask` is true, don't merge: ask the owner with
 `notify_owner` (project = the repo), naming which workflow deploys what (and
 anything it listed as unknown), and merge only on their yes.
+
+The owner's rule on deploying merges in `CLAUDE.md` decides when it differs
+from the repo's setting: under "never ask" don't ask even if `should_ask` is
+true, and under "ask" do ask even if the repo's setting says never. Without such
+a rule, `should_ask` decides.
 
 **GitHub accounts.** The owner may be signed in to several gh accounts, each
 seeing only its own repos. Never run `gh auth switch`, `gh auth login` or
