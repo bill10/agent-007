@@ -390,13 +390,15 @@ export function checkSkills(p, board) {
       if (broken.length) lines.push(fail(`${broken.length} skill${broken.length === 1 ? '' : 's'} in ${tilde(dir)} ${broken.length === 1 ? 'is a broken link' : 'are broken links'} (e.g. ${broken[0][0]} → ${broken[0][1]})`, fix));
     }
   }
+  // recommended: the report files these under their own heading.
+  const rec = (l) => ({ ...l, recommended: true });
   for (const { skill, why } of RECOMMENDED_SKILLS) {
     for (const cli of ['claude', 'codex']) {
       const found = skillDir(p, cli, skill);
-      lines.push(found ? ok(`${skill} (recommended) for ${cli}: ${tilde(found)}; ${why}`) : na(`${skill} (recommended) for ${cli}: not installed; ${why}`));
+      lines.push(rec(found ? ok(`${skill} (recommended) for ${cli}: ${tilde(found)}; ${why}`) : na(`${skill} (recommended) for ${cli}: not installed; ${why}`)));
     }
   }
-  for (const { cmd, why } of RECOMMENDED) lines.push(p.which(cmd) ? ok(`${cmd} (recommended): installed; ${why}`) : na(`${cmd} (recommended): not installed; ${why}`));
+  for (const { cmd, why } of RECOMMENDED) lines.push(rec(p.which(cmd) ? ok(`${cmd} (recommended): installed; ${why}`) : na(`${cmd} (recommended): not installed; ${why}`)));
   return lines;
 }
 
@@ -419,58 +421,109 @@ export function checkService(p) {
 
 // --- Running them ---
 
-// Each check, in order, as [title, run(ctx)]. fast: the subset a start runs,
-// none of which talks to the network.
+// The headings of the report, in the order they print. Every check below names
+// one; a check's lines all land under it.
+export const SECTIONS = ['System', 'Agents', 'GitHub', 'Repos', 'Skills', 'Settings & service', 'Telegram & voice', 'Recommended'];
+
+// Each check, grouped in SECTIONS order. fast: the subset a start runs, none
+// of which talks to the network.
 function checks(fast) {
   const all = [
-    ['Node', (c) => checkNode(c.p)],
-    ['Agent CLIs', (c) => checkClis(c.p, c.board)],
-    ['GitHub', (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account })],
-    ['Repos', (c) => checkRepos(c.p, c.board, c.origin, c.account), 'slow'],
-    ['Skills', (c) => checkSkills(c.p, c.board)],
-    ['Port', (c) => checkPort(c.p, { starting: fast })],
-    ['Settings', (c) => checkSettings(c.p, c.board)],
-    ['Service', (c) => checkService(c.p)],
-    ['Version', (c) => checkVersion(c.p), 'slow'],
-    ['Telegram', (c) => checkTelegram(c.p), 'slow'],
-    ['Whisper', (c) => checkWhisper(c.p), 'slow'],
-    ['Plugins', (c) => checkPlugins(c.p), 'slow'],
+    { title: 'Node', section: 'System', run: (c) => checkNode(c.p) },
+    // checkRepos leads with the git line (System); Repos below keeps the rest,
+    // and none when git is missing (that line is the only one).
+    { title: 'Git', section: 'System', run: async (c) => (await checkRepos(c.p, { repos: [], jobs: [] }, c.origin, c.account)).slice(0, 1) },
+    { title: 'Port', section: 'System', run: (c) => checkPort(c.p, { starting: fast }) },
+    { title: 'Agent CLIs', section: 'Agents', run: (c) => checkClis(c.p, c.board) },
+    { title: 'GitHub', section: 'GitHub', run: (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account }) },
+    { title: 'Repos', section: 'Repos', slow: true, run: async (c) => (await checkRepos(c.p, c.board, c.origin, c.account)).slice(1) },
+    { title: 'Skills', section: 'Skills', run: (c) => checkSkills(c.p, c.board).filter(l => !l.recommended) },
+    { title: 'Plugins', section: 'Skills', slow: true, run: (c) => checkPlugins(c.p) },
+    { title: 'Settings', section: 'Settings & service', run: (c) => checkSettings(c.p, c.board) },
+    { title: 'Service', section: 'Settings & service', run: (c) => checkService(c.p) },
+    { title: 'Version', section: 'Settings & service', slow: true, run: (c) => checkVersion(c.p) },
+    { title: 'Telegram', section: 'Telegram & voice', slow: true, run: (c) => checkTelegram(c.p) },
+    { title: 'Whisper', section: 'Telegram & voice', slow: true, run: (c) => checkWhisper(c.p) },
+    { title: 'Recommended', section: 'Recommended', run: (c) => checkSkills(c.p, c.board).filter(l => l.recommended) },
   ];
-  return fast ? all.filter(c => !c[2]) : all;
+  return fast ? all.filter(c => !c.slow) : all;
 }
 
-// [{ title, lines }] in check order. budgetMs: a check not done by then is
-// dropped without a word (the start never waits on one); a check that throws
-// says so as one ✗.
-export async function runDoctor({ probes, fast = false, budgetMs = Infinity } = {}) {
+// [{ title, section, lines }] in SECTIONS order. All checks start at once;
+// onSection({ heading, results }) is called for each section, in order, as
+// soon as it and every section before it is done, so a slow check holds back
+// only what prints after it. budgetMs: a check not done by then is dropped
+// without a word (the start never waits on one); a check that throws says so
+// as one ✗.
+export async function runDoctor({ probes, fast = false, budgetMs = Infinity, onSection } = {}) {
   // The budget runs from here, so reading config.json counts against it too.
   let timer;
   const late = Number.isFinite(budgetMs) ? new Promise(r => { timer = setTimeout(() => r(null), budgetMs); }) : null;
   const p = probes || defaultProbes();
   const c = { p, board: readBoard(p), origin: originOf(p, new Map()), account: accountOf(p, new Map()) };
-  const results = await Promise.all(checks(fast).map(async ([title, check]) => {
-    const done = Promise.resolve().then(() => check(c)).catch(err => [fail(`${title} check failed: ${redact(firstLine(err?.message))}`)]);
-    const lines = await (late ? Promise.race([done, late]) : done);
-    return lines && { title, lines };
-  }));
+  const started = checks(fast).map(({ title, section, run }) => {
+    const done = Promise.resolve().then(() => run(c)).catch(err => [fail(`${title} check failed: ${redact(firstLine(err?.message))}`)]);
+    return (late ? Promise.race([done, late]) : done).then(lines => lines && { title, section, lines });
+  });
+  const results = [];
+  for (const heading of SECTIONS) {
+    const idx = checks(fast).flatMap((k, i) => k.section === heading ? [i] : []);
+    const here = (await Promise.all(idx.map(i => started[i]))).filter(r => r && r.lines.length);
+    results.push(...here);
+    if (here.length) onSection?.({ heading, results: here });
+  }
   clearTimeout(timer);
-  return results.filter(Boolean);
+  return results;
 }
 
 export const failed = (results) => results.some(r => r.lines.some(l => l.status === 'fail'));
 
-// The `doctor` report: one line per check, a fix under each ✗.
-export function formatReport(results) {
-  return results.flatMap(({ lines }) => lines.flatMap(l => [
-    `${MARKS[l.status]} ${l.text}`,
-    ...(l.status === 'fail' && l.fix ? [`    fix: ${l.fix}`] : []),
-  ])).join('\n');
+// Color only on a terminal, unless told otherwise: FORCE_COLOR (not 0/false)
+// turns it on anywhere, else NO_COLOR (any value) turns it off. Plain ANSI:
+// util.styleText strips codes by the stream's own idea of color on newer Nodes.
+export function useColor(stream = process.stdout, env = process.env) {
+  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== '') return !['0', 'false'].includes(env.FORCE_COLOR);
+  if (env.NO_COLOR) return false;
+  return Boolean(stream?.isTTY);
+}
+
+const paint = (on, code, s) => (on ? `\x1b[${code}m${s}\x1b[0m` : s);
+
+// One check line, the fix indented under a ✗. ✓ colors its mark, ✗ the whole
+// line and its fix, – the whole line, dim.
+function formatLine(l, color) {
+  const text = `${MARKS[l.status]} ${l.text}`;
+  if (l.status === 'ok') return [`${paint(color, 32, MARKS.ok)} ${l.text}`];
+  if (l.status === 'na') return [paint(color, 2, text)];
+  return [paint(color, 31, text), ...(l.fix ? [paint(color, 31, `    fix: ${l.fix}`)] : [])];
+}
+
+// A section as printed: bold heading, its lines, a blank line after.
+export function formatSection({ heading, results }, { color = false } = {}) {
+  return `${[paint(color, 1, heading), ...results.flatMap(r => r.lines.flatMap(l => formatLine(l, color)))].join('\n')}\n\n`;
+}
+
+// "All good", or the counts: a problem is a ✗, a note a –.
+export function formatSummary(results, { color = false } = {}) {
+  const lines = results.flatMap(r => r.lines);
+  const problems = lines.filter(l => l.status === 'fail').length;
+  const notes = lines.filter(l => l.status === 'na').length;
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  if (!problems && !notes) return paint(color, 32, 'All good');
+  if (!problems) return paint(color, 32, `All good, ${plural(notes, 'note')}`);
+  return paint(color, 31, `${plural(problems, 'problem')}, ${plural(notes, 'note')}`);
+}
+
+// The `doctor` report in one piece (what runDoctor streams, joined).
+export function formatReport(results, opts = {}) {
+  const sections = SECTIONS.map(heading => ({ heading, results: results.filter(r => r.section === heading) })).filter(s => s.results.length);
+  return `${sections.map(s => formatSection(s, opts)).join('')}${formatSummary(results, opts)}`;
 }
 
 // What a start prints: only the ✗ lines, or nothing at all.
-export function formatStartup(results, doctorCommand) {
+export function formatStartup(results, doctorCommand, { color = false } = {}) {
   const bad = results.flatMap(r => r.lines).filter(l => l.status === 'fail');
   if (!bad.length) return '';
-  return [...bad.flatMap(l => [`  ${MARKS.fail} ${l.text}`, ...(l.fix ? [`      ${l.fix}`] : [])]),
+  return [...bad.flatMap(l => [`  ${paint(color, 31, MARKS.fail)} ${l.text}`, ...(l.fix ? [`      ${l.fix}`] : [])]),
     `  Run \`${doctorCommand}\` for details.`].join('\n');
 }

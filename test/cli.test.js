@@ -175,5 +175,12 @@ describe('settings', () => {
     expect(fine.out).not.toContain('✗');
     expect(fine.out).toContain('– claude not installed (nothing uses it)');
     expect(fine.code).toBe(0);
+    // Piped: headings and a summary, no ANSI. FORCE_COLOR paints it.
+    expect(fine.out).toMatch(/^System\n/);
+    expect(fine.out).toMatch(/\n\nAll good, \d+ notes?\n$/);
+    expect(fine.out).not.toContain('\x1b[');
+    expect(broken.out).toMatch(/\n\d+ problems?, \d+ notes?\n$/);
+    expect(doctor({ BILLION: '0', FORCE_COLOR: '1' }).out).toContain('\x1b[1mSystem\x1b[0m');
+    expect(doctor({ BILLION: '0', FORCE_COLOR: '1', NO_COLOR: '1' }).out).toContain('\x1b[');
   }, 30000);
 });
