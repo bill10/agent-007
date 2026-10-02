@@ -2,15 +2,29 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createServer as createHttpServer } from 'http';
 import { createServer } from 'net';
 import { join, posix, win32 } from 'path';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs';
+import { tmpdir } from 'os';
 import { telegramGetMe } from '../server/owner.js';
 import {
   portState, runDoctor, failed, formatReport, formatStartup, versionAtLeast,
-  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins, toNpm, fromNpm,
+  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins, checkSkills, toNpm, fromNpm,
 } from '../server/doctor.js';
 
 // A machine where everything passes; each test breaks one thing. No real CLI,
 // git or network is touched; only the portState tests open loopback sockets.
 const CONFIG = '/cfg/config.json';
+// A home with a working ship skill for each CLI (symlinked, as gstack does).
+function skillHome({ claude = true, codex = true } = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'doctor-skills-'));
+  const real = join(home, 'gstack-src');
+  mkdirSync(real, { recursive: true });
+  writeFileSync(join(real, 'SKILL.md'), '---\nname: ship\n---\nbody\n');
+  mkdirSync(join(home, '.claude/skills'), { recursive: true });
+  mkdirSync(join(home, '.codex/skills'), { recursive: true });
+  if (claude) symlinkSync(real, join(home, '.claude/skills/ship'));
+  if (codex) symlinkSync(real, join(home, '.codex/skills/gstack-ship'));
+  return { claudeDir: join(home, '.claude'), codexDir: join(home, '.codex'), agentsDir: join(home, '.agents'), home };
+}
 // Joined as checkPlugins joins it (backslashes on Windows).
 const PLUGINS = join('/home/.claude', 'plugins', 'installed_plugins.json');
 function probes(over = {}) {
@@ -42,6 +56,7 @@ function probes(over = {}) {
     configPath: CONFIG,
     worktreeDir: '/home/.agent-007/worktrees',
     claudeDir: '/home/.claude',
+    ...skillHome(),
     settingsLine: 'Settings: ~/.agent-007/.env',
     npmLatest: async () => '0.40.0',
     telegramGetMe: async () => ({ username: 'my_bot' }),
@@ -168,12 +183,12 @@ describe('doctor checks', () => {
       'tg@x': [{ scope: 'local', projectPath: '/home/.agent-007/worktrees/app-1' }, { scope: 'local', projectPath: '/gone' }, { scope: 'local', projectPath: '/r/app' }, { scope: 'local', projectPath: '/home/.agent-007/worktrees-old/app' }],
       'p@x': [{ scope: 'user' }],
     } }) };
-    const lines = checkPlugins(probes({ files }));
+    const lines = checkPlugins(probes({ files, claudeDir: '/home/.claude' }));
     expect(statuses(lines)).toEqual(['fail', 'fail']);
     expect(lines[0].fix).toMatch(/^cd \/home\/\.agent-007\/worktrees\/app-1 && claude plugin uninstall tg@x --scope local/);
     // A gone folder is made again for the uninstall, which applies where it runs.
     expect(lines[1].fix).toMatch(/^mkdir -p \/gone && cd \/gone && claude plugin uninstall tg@x --scope local && rmdir \/gone/);
-    expect(checkPlugins(probes())[0].status).toBe('ok');
+    expect(checkPlugins(probes({ claudeDir: '/home/.claude' }))[0].status).toBe('ok');
   });
 });
 
@@ -198,7 +213,7 @@ describe('runDoctor', () => {
     const net = () => { throw new Error('network in fast mode'); };
     const results = await runDoctor({ fast: true, probes: probes({ npmLatest: net, telegramGetMe: net, ghAccounts: net, ghAccountFor: net, repoEnv: net }) });
     expect(failed(results)).toBe(false);
-    expect(results.map(r => r.title)).toEqual(['Node', 'Agent CLIs', 'GitHub', 'Port', 'Settings']);
+    expect(results.map(r => r.title)).toEqual(['Node', 'Agent CLIs', 'GitHub', 'Skills', 'Port', 'Settings']);
   });
 
   it('fast keeps to its budget and drops a check that hangs', async () => {
@@ -392,5 +407,46 @@ describe('doctor review follow-ups', () => {
     expect(insideDir(wt, 'C:/Users/Me/.agent-007/worktrees/app-1', win32)).toBe(true);
     expect(insideDir(wt, 'C:\\Users\\Me\\.agent-007\\worktrees-old\\app', win32)).toBe(false);
     expect(insideDir(wt, 'D:\\Users\\Me\\.agent-007\\worktrees\\app-1', win32)).toBe(false);
+  });
+});
+
+describe('doctor skills', () => {
+  const codexBoard = { jobs: [{ state: 'todo', agent: 'codex' }] };
+  const idle = { billionRuns: () => false };
+
+  it('a symlinked ship skill passes for each CLI, codex under its gstack-ship name', () => {
+    const lines = checkSkills(probes(), codexBoard);
+    expect(statuses(lines.slice(0, 2))).toEqual(['ok', 'ok']);
+  });
+
+  it('no gstack is ✗ only for a CLI that is used for a PR card', () => {
+    const p = probes({ ...skillHome({ claude: false, codex: false }), ...idle });
+    const used = checkSkills(p, codexBoard);
+    expect(used[0].status).toBe('na');
+    expect(used[1]).toMatchObject({ status: 'fail', fix: expect.stringContaining('setup --host codex') });
+    expect(used[1].fix).toContain('https://github.com/garrytan/gstack');
+    expect(checkSkills(p, { jobs: [{ state: 'todo', agent: 'codex', requiresPr: false }] })[1].status).toBe('na');
+    expect(checkSkills(p, { jobs: [] })[1].status).toBe('na');
+  });
+
+  it('a dangling link is ✗ and is never deleted', () => {
+    const h = skillHome();
+    symlinkSync(join(h.home, 'gone'), join(h.codexDir, 'skills/gstack-qa'));
+    const lines = checkSkills(probes({ ...h, ...idle }), { jobs: [] });
+    const bad = lines.find(l => l.status === 'fail');
+    expect(bad.text).toMatch(/^1 skill in .*skills is a broken link \(e\.g\. gstack-qa → /);
+    expect(bad.fix).toContain('setup --host codex');
+    expect(checkSkills(probes({ ...h, ...idle }), { jobs: [] }).filter(l => l.status === 'fail')).toHaveLength(1);
+  });
+
+  it('agent-browser is ✓ or –, never ✗', () => {
+    const last = (which) => checkSkills(probes({ which }), { jobs: [] }).at(-1);
+    expect(last((c) => `/bin/${c}`).status).toBe('ok');
+    expect(last(() => null).status).toBe('na');
+  });
+
+  it('the fast run includes the skills check', async () => {
+    const results = await runDoctor({ fast: true, probes: probes() });
+    expect(results.map(r => r.title)).toContain('Skills');
   });
 });

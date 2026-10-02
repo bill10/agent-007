@@ -11,7 +11,7 @@
 // Imported only after the settings files are loaded: state.js reads PORT when
 // it loads.
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, readlinkSync } from 'fs';
 import { createServer } from 'net';
 import { homedir } from 'os';
 import path, { join, resolve } from 'path';
@@ -109,6 +109,8 @@ export function defaultProbes({ env = process.env, settingsLine = null } = {}) {
     configPath: CONFIG_PATH,
     worktreeDir: WORKTREE_DIR,
     claudeDir: env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : join(homedir(), '.claude'),
+    codexDir: env.CODEX_HOME ? resolve(env.CODEX_HOME) : join(homedir(), '.codex'),
+    agentsDir: join(homedir(), '.agents'),
     settingsLine,
     npmLatest,
     telegramGetMe: () => telegramGetMe(env),
@@ -332,6 +334,54 @@ export function checkPlugins(p) {
   return lines.length ? lines : [ok('no stray local plugin registrations')];
 }
 
+// Extras the board's workers use but nothing needs: an info line each, never ✗.
+// Add more here.
+const RECOMMENDED = [{ cmd: 'agent-browser', why: 'board cards use it for screenshots of UI changes' }];
+
+const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
+const skillName = (text) => /^---\r?\n([\s\S]*?)\r?\n---/.exec(text || '')?.[1].match(/^name:[ \t]*["']?([^"'\r\n]*?)["']?[ \t]*$/m)?.[1];
+const skillsDirs = (p, cli) => cli === 'claude' ? [join(p.claudeDir, 'skills')] : [join(p.codexDir, 'skills'), join(p.agentsDir, 'skills')];
+
+// Whether a skill whose name is `ship` is installed and readable for the CLI.
+function hasShipSkill(p, cli) {
+  if (cli === 'claude') return readable(join(p.claudeDir, 'skills', 'ship', 'SKILL.md')) !== null;
+  return skillsDirs(p, cli).some((dir) => {
+    let names = [];
+    try { names = readdirSync(dir); } catch { /* no such folder */ }
+    return names.some(n => skillName(readable(join(dir, n, 'SKILL.md'))) === 'ship');
+  });
+}
+
+// Links in a skills folder whose target is gone, as [name, target].
+function brokenLinks(dir) {
+  let entries = [];
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  return entries.filter(e => e.isSymbolicLink() && !existsSync(join(dir, e.name)))
+    .map(e => [e.name, (() => { try { return readlinkSync(join(dir, e.name)); } catch { return '?'; } })()]);
+}
+
+// The ship skill (gstack's) is how a card that needs a pull request finishes.
+export function checkSkills(p, board) {
+  const lines = [];
+  for (const cli of JOB_AGENTS.filter(c => c === 'claude' || c === 'codex')) {
+    const uses = [
+      p.billionRuns() && p.billionAgent() === cli && 'Billion runs on it',
+      board.jobs.some(j => jobAgent(j) === cli && jobRequiresPr(j)) && 'a board card that needs a pull request uses it',
+    ].filter(Boolean);
+    const stack = join(p.claudeDir, 'skills', 'gstack');
+    const fix = `install gstack (https://github.com/garrytan/gstack), then: ${shellPath(p.exists(stack) ? stack : join(p.claudeDir, 'skills', 'gstack'))}/setup --host ${cli}`;
+    if (hasShipSkill(p, cli)) lines.push(ok(`${cli}: ship skill installed`));
+    else if (uses.length) lines.push(fail(`${cli}: no working ship skill; ${uses.join(' and ')}`, fix));
+    else lines.push(na(`${cli}: no ship skill (nothing needs it)`));
+    for (const dir of skillsDirs(p, cli)) {
+      const broken = brokenLinks(dir);
+      if (broken.length) lines.push(fail(`${broken.length} skill${broken.length === 1 ? '' : 's'} in ${tilde(dir)} ${broken.length === 1 ? 'is a broken link' : 'are broken links'} (e.g. ${broken[0][0]} → ${broken[0][1]})`, fix));
+    }
+  }
+  for (const { cmd, why } of RECOMMENDED) lines.push(p.which(cmd) ? ok(`${cmd} installed (${why})`) : na(`${cmd} not installed (recommended, not required: ${why})`));
+  return lines;
+}
+
 // --- Running them ---
 
 // Each check, in order, as [title, run(ctx)]. fast: the subset a start runs,
@@ -342,6 +392,7 @@ function checks(fast) {
     ['Agent CLIs', (c) => checkClis(c.p, c.board)],
     ['GitHub', (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account })],
     ['Repos', (c) => checkRepos(c.p, c.board, c.origin, c.account), 'slow'],
+    ['Skills', (c) => checkSkills(c.p, c.board)],
     ['Port', (c) => checkPort(c.p, { starting: fast })],
     ['Settings', (c) => checkSettings(c.p, c.board)],
     ['Version', (c) => checkVersion(c.p), 'slow'],
