@@ -241,15 +241,14 @@ first when it isn't. Merge on your own unless the change is on the
 **Deploys.** A revert undoes a merge, but not a deploy the merge set off.
 Before every merge, run `merge_check` on the PR (its URL or the card id). It
 reads the repo's workflows at the base branch and says which ones the merge
-runs and which of their jobs deploy, with the owner's policy for the repo and
-`should_ask`. When `should_ask` is true, don't merge: ask the owner with
-`notify_owner` (project = the repo), naming which workflow deploys what (and
-anything it listed as unknown), and merge only on their yes.
+runs and which of their jobs deploy (each with its environment, if any), and
+anything it could not read as unknown.
 
-The owner's rule on deploying merges in `CLAUDE.md` decides when it differs
-from the repo's setting: under "never ask" don't ask even if `should_ask` is
-true, and under "ask" do ask even if the repo's setting says never. Without such
-a rule, `should_ask` decides.
+The owner's rule on deploying merges in `CLAUDE.md` is the only policy. With a
+rule ("never ask", "ask only for production", per-repo exceptions), follow it.
+Without one, ask when `merge_check` reports a deploy or can't tell. To ask,
+don't merge: use `notify_owner` (project = the repo), name which workflow
+deploys what (and anything unknown), and merge only on their yes.
 
 **GitHub accounts.** The owner may be signed in to several gh accounts, each
 seeing only its own repos. Never run `gh auth switch`, `gh auth login` or
@@ -415,8 +414,7 @@ The `agent-007-board` MCP tools:
   owner answered it elsewhere, like in your terminal (see **Escalate**).
 - `reopen_question`: puts an answered *Billion* tab question back to open
   when its answer wasn't meant for it (see **Escalate**).
-- `merge_check`: whether merging a PR deploys something, and whether the
-  owner wants to be asked first (see **Merging**).
+- `merge_check`: whether merging a PR deploys something (see **Merging**).
 - `answer_permission`: your answer to a worker's permission request (see
   **Approvals**).
 - `read_approval`: a waiting permission request in full, so you can judge

@@ -13,7 +13,7 @@
 // does. "Can't tell" must never come out as "no deploy".
 
 import { parse } from 'yaml';
-import { allJobs, ghAccountFor, runGh, deployMergePolicyFor, parseGithubRemote } from './jobs.js';
+import { allJobs, ghAccountFor, runGh, parseGithubRemote } from './jobs.js';
 import { config } from './state.js';
 import { gitExec } from './git.js';
 
@@ -195,17 +195,6 @@ export function analyzeWorkflows({ workflows, base, files }) {
   };
 }
 
-export const isProductionEnv = (env) => /^(?:prod|production)$/i.test(env || '') || /\$\{\{/.test(env || '');   // an expression could be production
-
-// Whether Billion must ask the owner before merging. Unknown asks unless the
-// owner said never.
-export function shouldAsk(policy, { matches, unknown }) {
-  if (policy === 'never-ask') return false;
-  if (unknown.length) return true;
-  if (policy === 'ask-production-only') return matches.some(m => isProductionEnv(m.environment));
-  return matches.length > 0;
-}
-
 const PR_URL = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/i;
 const errLine = (err) => String(err?.stderr || err?.message || err).trim().split('\n')[0].slice(0, 200);
 
@@ -223,7 +212,7 @@ async function repoForSlug(slug) {
 /**
  * The whole check for a card id or PR URL.
  *
- * @returns { pr, repo, policy, deploys, should_ask, triggered, matches, unknown, environments, notes } or { error }
+ * @returns { pr, repo, deploys, triggered, matches, unknown, environments, notes } or { error }
  */
 export async function mergeCheck(ref, {
   jobs = allJobs(), findRepo = repoForSlug, accountFor = ghAccountFor,
@@ -285,10 +274,9 @@ export async function mergeCheck(ref, {
   }
 
   const found = analyzeWorkflows({ workflows, base, files });
-  const result = {
+  return {
     pr: { url: pr.html_url || url, number: Number(number), title: pr.title || '', base, state: pr.merged ? 'merged' : pr.state },
     repo: slug,
-    policy: deployMergePolicyFor(repoPath),
     deploys: found.matches.length > 0,
     triggered: found.triggered,
     matches: found.matches,
@@ -296,6 +284,4 @@ export async function mergeCheck(ref, {
     environments,
     notes: [...notes, ...found.notes],
   };
-  result.should_ask = shouldAsk(result.policy, result);
-  return result;
 }

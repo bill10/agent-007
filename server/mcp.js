@@ -663,8 +663,8 @@ export const MERGE_CHECK_TOOL = {
     + 'closed, workflow_run chains, tag and release workflows only when something makes a tag) and which of '
     + 'their jobs deploy (an environment:, deploy/release/publish in the job name, deploy actions, docker '
     + 'push, npm publish, vercel, netlify, fly deploy, gh release create). Also the repo\'s GitHub '
-    + 'environments, the owner\'s per-repo policy, and should_ask. When should_ask is true, do not merge: '
-    + 'ask the owner with notify_owner first. Anything it could not read is listed as unknown, never as no deploy.',
+    + 'environments (each deploy names its environment, if any). Whether to ask the owner first is the '
+    + 'owner\'s rule in your CLAUDE.md; without one, ask when it deploys or lists unknowns. Anything it could not read is listed as unknown, never as no deploy.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -1029,8 +1029,6 @@ const CALLS = {
     const lines = [
       `${r.repo}#${r.pr.number} "${oneLine(r.pr.title)}" into ${r.pr.base}${r.pr.state === 'open' ? '' : ` (${r.pr.state})`}`,
       `deploys: ${r.deploys}${r.unknown.length ? ' (with unknowns: cannot fully tell)' : ''}`,
-      `policy: ${r.policy}`,
-      `should_ask: ${r.should_ask}${r.should_ask ? ' — do not merge; ask the owner with notify_owner first, naming what deploys.' : ''}`,
     ];
     if (r.matches.length) lines.push('Deploys:', ...r.matches.map(m => oneLine(`  ${m.workflow} job ${m.job} (${m.trigger}): ${m.why.join('; ')}`)));
     const quiet = r.triggered.filter(t => !r.matches.some(m => m.workflow === t.workflow));
