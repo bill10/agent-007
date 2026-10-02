@@ -545,6 +545,7 @@ export const TELL_OWNER_TOOL = {
     type: 'object',
     properties: {
       text: { type: 'string', description: 'The message, written to be read on a phone.' },
+      reply_to: { type: 'string', description: 'The id after # in the owner\'s message this answers, e.g. "3f9a0c1e" from [Owner via app, voice #3f9a0c1e]. Binds the reply to that message instead of the oldest waiting one; a voice reply is only read aloud to the owner when it is bound to their turn.' },
     },
     required: ['text'],
     additionalProperties: false,
@@ -947,7 +948,7 @@ const CALLS = {
   },
 
   [TELL_OWNER_TOOL.name]: async (args, ctx) => {
-    const result = ctx.tellOwner ? await ctx.tellOwner(args.text) : { error: 'Only Billion can message the owner.' };
+    const result = ctx.tellOwner ? await ctx.tellOwner(args.text, args.reply_to) : { error: 'Only Billion can message the owner.' };
     if (result.error) return toolText(result.error, true);
     return toolText(result.note ? `Shown in the owner's Billion tab. ${result.note}`
       : result.telegram ? 'Shown in the owner\'s Billion tab and sent on Telegram.'

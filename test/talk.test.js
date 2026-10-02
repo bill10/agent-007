@@ -36,7 +36,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
   commandExists: (file) => tools.available.has(file),
 }));
 
-const { ownerSays, tellOwner, notifyOwner, chatMessages, APP_VOICE_PREFIX, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
+const { ownerSays, tellOwner, notifyOwner, chatMessages, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
 const { talkSetup, voiceUtterance, voiceSays, voiceAudio, looksLikeEcho, speechPieces, _resetTalk, MAX_UTTERANCE_BYTES, UTTERANCE_LIMIT } = await import('../server/talk.js');
 const { setupRoutes } = await import('../server/http.js');
 const { sessions, CONFIG_DIR } = await import('../server/state.js');
@@ -78,7 +78,7 @@ describe('an utterance', () => {
     expect(result).toMatchObject({ ok: true, transcript: 'How is the launch going?' });
     expect(result.id).toEqual(expect.any(String));
     expect(tools.calls.map(([cmd]) => cmd)).toEqual(['ffmpeg', 'whisper-cli']);
-    expect(typed()).toContain(`${APP_VOICE_PREFIX} How is the launch going?`);
+    expect(typed()).toContain(`[Owner via app, voice #${result.id.slice(0, 8)}] How is the launch going?`);
     const msg = chatMessages().find(m => m.id === result.id);
     expect(msg).toMatchObject({ from: 'owner', via: 'app', voice: true, utterance: id(1), awaitsReply: true, text: 'How is the launch going?' });
   });
@@ -95,7 +95,7 @@ describe('an utterance', () => {
     expect(later).toMatchObject({ ok: true, id: first.id, duplicate: true });
     // The browser's recogniser revising its words under the same id.
     expect(await voiceSays('How is the launch doing?', { utterance: id(2), env: ENV })).toMatchObject({ id: first.id, duplicate: true });
-    expect(typed().split(APP_VOICE_PREFIX)).toHaveLength(2);
+    expect(typed().split('[Owner via app, voice #')).toHaveLength(2);
     expect(chatMessages().filter(m => m.utterance === id(2))).toHaveLength(1);
   });
 
@@ -109,7 +109,7 @@ describe('an utterance', () => {
   it('is never a round shortcut or an answer: a misheard "start the round" is a turn of Billion\'s', async () => {
     const result = await voiceSays('Start the round now', { utterance: id(4), env: ENV });
     expect(result.id).toEqual(expect.any(String));
-    expect(typed()).toContain(`${APP_VOICE_PREFIX} Start the round now`);
+    expect(typed()).toContain(`[Owner via app, voice #${result.id.slice(0, 8)}] Start the round now`);
   });
 
   it('refuses a bad id, no audio, too much audio, no whisper.cpp, and a flood', async () => {
@@ -149,6 +149,27 @@ describe('echo', () => {
     expect(looksLikeEcho('the background service', 'We shipped the background service.')).toBe(true);
     expect(looksLikeEcho('wait stop', 'wait, stop, we shipped it')).toBe(false);
     expect(looksLikeEcho('what about the phone app', 'We shipped the background service.')).toBe(false);
+  });
+});
+
+describe('reply_to', () => {
+  it('binds tell_owner to the voice turn it names, not the oldest waiting message', async () => {
+    const typedTurn = await ownerSays('typed and left waiting', { env: {} });
+    const asked = await voiceSays('What is my favourite colour?', { utterance: id(30), env: ENV });
+    // The id Billion sees after # (the first voice turn's line is checked above).
+    const short = asked.id.slice(0, 8);
+    expect(await tellOwner('Teal.', { env: {}, now: now(), replyTo: short })).toMatchObject({ ok: true });
+    expect(chatMessages().at(-1).replyTo).toBe(asked.id);
+    // The typed one still waits; without reply_to the oldest is answered, as before.
+    await tellOwner('About the typed one.', { env: {}, now: now() });
+    expect(chatMessages().at(-1).replyTo).toBe(typedTurn.id);
+  });
+
+  it('naming no waiting message falls back to the oldest, and says so', async () => {
+    const typedTurn = await ownerSays('typed', { env: {} });
+    const result = await tellOwner('Hm.', { env: {}, now: now(), replyTo: 'deadbeef' });
+    expect(result.note).toMatch(/matched no message waiting/);
+    expect(chatMessages().at(-1).replyTo).toBe(typedTurn.id);
   });
 });
 
@@ -232,7 +253,7 @@ describe('the routes', () => {
     const send = () => fetch(`${base}/api/talk/text`, { method: 'POST', headers: { ...H, 'Content-Type': 'application/json' }, body: JSON.stringify({ utterance: id(21), text: 'Any news on the job?' }) }).then(r => r.json());
     const first = await send();
     expect(await send()).toMatchObject({ id: first.id, duplicate: true });
-    expect(typed().split(APP_VOICE_PREFIX)).toHaveLength(2);
+    expect(typed().split('[Owner via app, voice #')).toHaveLength(2);
   });
 
   it('refuse an utterance over the size limit', async () => {

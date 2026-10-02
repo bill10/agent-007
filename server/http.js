@@ -181,8 +181,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           if (result.ok) publishStatus(broadcast);
           return result;
         },
-        tellOwner: (text) => (req.agentSession.isBillion
-          ? tellOwner(text, { broadcast })
+        tellOwner: (text, replyTo) => (req.agentSession.isBillion
+          ? tellOwner(text, { broadcast, replyTo })
           : { error: 'Only Billion can message the owner.' }),
         resolveQuestion: (ref, answer) => (req.agentSession.isBillion
           ? resolveQuestion(ref, answer, { broadcast })

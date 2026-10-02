@@ -16,7 +16,7 @@ import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
-import { billionReplied, publishStatus, MAX_STEPS } from './billion-status.js';
+import { billionReplied, publishStatus, MAX_STEPS, SHORT_ID_CHARS } from './billion-status.js';
 import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import {
   chooseMode, voiceSetting, speechUnavailable, synthesize, sayVoice, sayRate, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
@@ -641,7 +641,8 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   const id = randomUUID();
   const saved = files.length ? saveChatFiles(id, files) : { paths: [], records: [] };
   if (saved.error) return saved;
-  const prefix = voice ? APP_VOICE_PREFIX : APP_PREFIX;
+  // A voice turn names itself, so Billion can bind its spoken reply to it (tell_owner reply_to).
+  const prefix = voice ? `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}]` : APP_PREFIX;
   if (!sendText(billion, withFiles(body ? `${prefix} ${body}` : prefix, saved.paths))) {
     if (files.length) removeChatFiles(id);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
@@ -799,7 +800,8 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
 
 // notice: the server's own words (an account switch, say), which answer none
 // of the owner's messages, so a pending one stays pending.
-export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform, notice = false } = {}) {
+// replyTo: tell_owner's reply_to, the owner message it answers (billionReplied).
+export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform, notice = false, replyTo: named } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -809,17 +811,19 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
     return { error: `Not sent: you have messaged the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later.` };
   }
   sent.push(now);
-  // Each of the owner's messages gets its own reply, oldest first.
-  const replyTo = notice ? null : billionReplied();
-  const workDetails = replyTo ? pendingOwnerMessages()[0]?.workDetails : null;
+  // Each of the owner's messages gets its own reply: the one named, else the oldest.
+  const bound = notice ? { id: null } : billionReplied(named);
+  const replyTo = bound.id;
+  const workDetails = replyTo ? pendingOwnerMessages().find(m => m.id === replyTo)?.workDetails : null;
   addChat({ from: 'billion', text: body, ...(notice ? { notice: true } : {}), ...(replyTo ? { replyTo, ...(workDetails?.length ? { workDetails } : {}) } : {}) }, broadcast, env);
   publishStatus(broadcast);
+  const missed = bound.missed ? { note: `reply_to "${named}" matched no message waiting for a reply, so this answered the oldest one.` } : {};
   const { token, chatId } = telegramSettings(env);
-  if (!token || !chatId) return { ok: true, telegram: false };
-  if (ownerChannel === 'app') return { ok: true, telegram: false, tabOnly: true };
+  if (!token || !chatId) return { ok: true, telegram: false, ...missed };
+  if (ownerChannel === 'app') return { ok: true, telegram: false, tabOnly: true, ...missed };
   const result = await sendToOwner(body, { env, platform });
-  if (result.error) return { ok: true, note: `The Telegram send failed: ${result.error}` };
-  return { ok: true, telegram: true };
+  if (result.error) return { ok: true, note: `${missed.note ? `${missed.note} ` : ''}The Telegram send failed: ${result.error}` };
+  return { ok: true, telegram: true, ...missed };
 }
 
 // --- Rounds: the owner is come to twice a day (docs/BILLION.md, "Rounds") ---

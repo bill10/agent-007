@@ -31,10 +31,17 @@ export function setBillionStatus(text, now = Date.now()) {
   return { ok: true, cleared: !body };
 }
 
-// A tell_owner answers the oldest unanswered owner request, even after the
-// activity indicator has timed out. The reply's persisted replyTo closes it.
-export function billionReplied() {
-  return pendingOwnerMessages()[0]?.id ?? null;
+// A tell_owner answers the owner request it names (reply_to: the short id a
+// voice turn carries, or any longer prefix of a message id), else the oldest
+// unanswered one, even after the activity indicator has timed out. The
+// reply's persisted replyTo closes it. { id, missed } (missed: reply_to named
+// no waiting message, so the oldest was taken).
+export const SHORT_ID_CHARS = 8;
+export function billionReplied(replyTo) {
+  const pending = pendingOwnerMessages();
+  const wanted = typeof replyTo === 'string' ? replyTo.trim().replace(/^#/, '') : '';
+  const named = wanted.length >= SHORT_ID_CHARS && pending.find(m => m.id.startsWith(wanted));
+  return { id: (named || pending[0])?.id ?? null, missed: !!wanted && !named };
 }
 
 export function statusPayload(now = Date.now()) {

@@ -107,6 +107,11 @@ let resumable = false;
 // Messages of this conversation still waiting for a reply, and replies spoken.
 const awaiting = new Set();
 const spoken = new Set();
+// Turns from before a reload: their reply is still spoken if it comes, but
+// they show no "Thinking…" and get no cue (a turn cut off by a server
+// restart may never be answered; it waits in the thread).
+const restored = new Set();
+const thinkingFor = () => [...awaiting].filter(id => !restored.has(id)).length;
 const marks = new Map();  // message id → latency marks
 
 const restore = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch { return null; } };
@@ -118,7 +123,7 @@ function save() {
 {
   const saved = typeof sessionStorage !== 'undefined' ? restore() : null;
   if (saved) {
-    for (const id of saved.awaiting || []) awaiting.add(id);
+    for (const id of saved.awaiting || []) { awaiting.add(id); restored.add(id); }
     for (const id of saved.spoken || []) spoken.add(id);
     resumable = !!saved.on;
   }
@@ -162,7 +167,7 @@ export function talkBar() {
 function paint() {
   const bar = document.getElementById('talk-bar');
   if (!bar) return;
-  const s = talkState({ on, consent, starting, connected, playing, muted, hidden, uploads, awaiting: awaiting.size });
+  const s = talkState({ on, consent, starting, connected, playing, muted, hidden, uploads, awaiting: thinkingFor() });
   bar.dataset.state = s;
   const q = (c) => bar.querySelector(c);
   const start = q('.talk-start');
@@ -292,6 +297,7 @@ export function endTalk({ keepNote = false, notice } = {}) {
   ctx?.close().catch(() => {});
   stopRecognition();
   awaiting.clear();
+  restored.clear();
   resumable = false;
   try { sessionStorage.removeItem(STORE_KEY); } catch {}
   if (!keepNote) { note = notice && wasOn ? notice : ''; noteLink = false; }
@@ -344,7 +350,8 @@ async function startVad() {
     positiveSpeechThreshold: SPEECH_THRESHOLD,
     negativeSpeechThreshold: 0.35,
     redemptionMs: 800,
-    preSpeechPadMs: 300,
+    // Room for the first word of a barge-in, heard late under the raised bar.
+    preSpeechPadMs: 600,
     minSpeechMs: 300,
     startOnLoad: false,
     ...(audioCtx ? { audioContext: audioCtx } : {}),
@@ -512,7 +519,7 @@ export function talkHeard(m) {
   save();
   const mark = marks.get(m.replyTo);
   if (mark) mark.reply = performance.now();
-  if (!awaiting.size) clearTimeout(cueTimer);
+  if (!thinkingFor()) clearTimeout(cueTimer);
   replyQueue.push(m);
   if (!playing && !hidden) playNext();
   else paint();
@@ -542,7 +549,7 @@ function afterSpeech() {
 }
 
 function workingCue() {
-  if (!on || !awaiting.size || playing || hidden) return;
+  if (!on || !thinkingFor() || playing || hidden) return;
   speak('cue', 'Still working on it.');
 }
 
