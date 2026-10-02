@@ -160,11 +160,11 @@ describe('close_job on a To do card', () => {
 });
 
 describe('Billion\'s tool list', () => {
-  it('has close_job and no retire_job: 24 tools', async () => {
+  it('has close_job and no retire_job: 25 tools', async () => {
     const { toolsFor } = await import('../server/mcp.js');
     const names = toolsFor({ isBillion: true }).map(t => t.name);
     expect(names).toContain('close_job');
     expect(names).not.toContain('retire_job');
-    expect(names).toHaveLength(24);
+    expect(names).toHaveLength(25);
   });
 });

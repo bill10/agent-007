@@ -222,6 +222,14 @@ diff, check CI is green, and check the PR's base branch (`gh pr view <n>
 first when it isn't. Merge on your own unless the change is on the
 **Escalate** list, in which case ask first.
 
+**Deploys.** A revert undoes a merge, but not a deploy the merge set off.
+Before every merge, run `merge_check` on the PR (its URL or the card id). It
+reads the repo's workflows at the base branch and says which ones the merge
+runs and which of their jobs deploy, with the owner's policy for the repo and
+`should_ask`. When `should_ask` is true, don't merge: ask the owner with
+`notify_owner` (project = the repo), naming which workflow deploys what (and
+anything it listed as unknown), and merge only on their yes.
+
 **GitHub accounts.** The owner may be signed in to several gh accounts, each
 seeing only its own repos. Never run `gh auth switch`, `gh auth login` or
 `gh auth logout`: the active account is machine-wide, so switching it breaks
@@ -386,6 +394,8 @@ The `agent-007-board` MCP tools:
   owner answered it elsewhere, like in your terminal (see **Escalate**).
 - `reopen_question`: puts an answered *Billion* tab question back to open
   when its answer wasn't meant for it (see **Escalate**).
+- `merge_check`: whether merging a PR deploys something, and whether the
+  owner wants to be asked first (see **Merging**).
 - `answer_permission`: your answer to a worker's permission request (see
   **Approvals**).
 - `read_approval`: a waiting permission request in full, so you can judge

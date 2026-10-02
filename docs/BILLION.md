@@ -389,7 +389,8 @@ Principles (the charter gives these, not procedures):
   `server/jobs.js:333`; `add_repo` wraps `addRepo`, `server/git.js:173`).
   Private by default.
 - **Check results, not claims.**
-- **Billion reviews and merges its PRs.**
+- **Billion reviews and merges its PRs**, after `merge_check` says whether
+  the merge deploys (see *Merges that deploy*).
 - **Escalate** money, missing access, irreversible steps, payments /
   pricing / security / secrets, making a private repo public (its whole git
   history goes public), and strategic forks. Going public is **not** an
@@ -551,6 +552,44 @@ switches back. Nothing in Agent 007 switches it:
   command: `GH_TOKEN=$(gh auth token -u <account>) gh …`.
 - `agent-007 doctor` names the account board workers use for each GitHub repo
   on the board, and marks ✗ a repo no signed-in account can see.
+
+## Merges that deploy
+
+A revert undoes a merge but not a deploy the merge set off (#192). Billion
+merges with `gh pr merge` from its own terminal, so the guard is a check it
+runs first: the Billion-only board tool `merge_check` (`server/merge-check.js`),
+given a PR URL or a card id. Read-only, through the repo's gh account
+(`ghAccountFor`); it never writes to GitHub or runs a workflow.
+
+- **What the merge runs.** `.github/workflows/*.yml` at the PR's base branch:
+  `push` whose branch filters match the base and whose path filters match the
+  PR's changed files, `pull_request` / `pull_request_target` with
+  `types: [closed]`, `workflow_run` chains from those, and the jobs of a local
+  reusable workflow they call. Release and tag-push workflows count only when
+  one of those makes a tag (`git tag`, `gh release create`, a release action);
+  otherwise the result says they were left out.
+- **Which of those deploy.** A job with an `environment:`, deploy / release /
+  publish in its id or name, or a step using a known deploy action
+  (`aws-actions/*`, `google-github-actions/deploy-*`, `azure/*deploy`, Vercel,
+  Netlify, Fly, Pages, Wrangler, release actions, `docker/build-push-action`
+  with `push: true`) or running `docker push`, `npm publish`, `vercel`,
+  `netlify`, `fly deploy` or `gh release create`. Each match names the
+  workflow, job, trigger and why. `if:` conditions are not evaluated, so it
+  errs towards "deploys".
+- **Unknown, never "no".** A workflow it cannot read or parse, a changed-file
+  list it cannot get, or an external reusable workflow it cannot see inside
+  goes in `unknown`, and an unknown asks the owner like a deploy does.
+- **Context.** The repo's GitHub environments (a hosting integration such as
+  Vercel can deploy on push with no workflow at all).
+- **Policy.** Per repo, `jobBoard.deployMergePolicy` in `config.json`
+  (`{ "<repo path>": "never-ask" }`), set from the Jobs tab's *deploy merges*
+  control: `ask` (default), `never-ask`, or `ask-production-only` (only a
+  deploy to an environment named `production` or `prod`, or one whose name is
+  an expression). The result carries the policy and `should_ask`.
+
+The charter's *Merging* section: run `merge_check` before every merge; when
+`should_ask` is true, ask with `notify_owner` (project = the repo), naming
+which workflow deploys what, and merge only on a yes.
 
 ## Claude Code or Codex
 
