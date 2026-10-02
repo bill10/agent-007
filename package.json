@@ -41,7 +41,8 @@
     "express": "^4.22.3",
     "node-pty": "^1.2.0-beta.12",
     "strip-ansi": "^7.1.0",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "yaml": "^2.9.1"
   },
   "bugs": {
     "url": "https://github.com/bill10/agent-007/issues"

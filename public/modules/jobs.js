@@ -758,6 +758,21 @@ function renderToolbar() {
     perm.value = fromEnv ? '' : (boardSettings.permissionMode || 'auto');
   }
   markDangerousMode(perm);
+  renderDeployPolicy();
+}
+
+// Per repo, so a repo picker beside the policy; the picked repo stays picked.
+// Left alone while either select is open, unless the change came from it.
+function renderDeployPolicy(force = false) {
+  const repoEl = document.getElementById('job-deploy-repo');
+  const policyEl = document.getElementById('job-deploy-policy');
+  if (!repoEl || !policyEl) return;
+  if (!force && (document.activeElement === repoEl || document.activeElement === policyEl)) return;
+  const picked = repoEl.value;
+  repoEl.replaceChildren(...[...repos].map(([path, r]) => Object.assign(document.createElement('option'), { value: path, textContent: r.slug })));
+  if (repos.has(picked)) repoEl.value = picked;
+  policyEl.disabled = !repos.size;
+  policyEl.value = (boardSettings.deployMergePolicy || {})[repoEl.value] || 'ask';
 }
 
 // --- Attachments ---
@@ -1176,6 +1191,12 @@ export function setupJobBoard() {
   // opens — the warning has to be on screen while the choice is being made.
   const formPermEl = document.getElementById('job-permission-mode-field');
   if (formPermEl) formPermEl.onchange = () => markDangerousMode(formPermEl);
+  const deployRepoEl = document.getElementById('job-deploy-repo');
+  if (deployRepoEl) deployRepoEl.onchange = () => renderDeployPolicy(true);
+  const deployPolicyEl = document.getElementById('job-deploy-policy');
+  if (deployPolicyEl) deployPolicyEl.onchange = (e) => {
+    send({ type: 'job-settings', deployMergePolicy: { repo: deployRepoEl.value, policy: e.target.value } });
+  };
   const agentEl = document.getElementById('job-agent');
   if (agentEl) agentEl.onchange = syncAgentField;
 

@@ -15,6 +15,7 @@ import {
 import { addRepo } from './git.js';
 import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
+import { mergeCheck } from './merge-check.js';
 import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath, roundQueue, dropQueued, roundView } from './owner.js';
@@ -181,6 +182,9 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         respawnAgent: ({ name }) => (respawnAgent
           ? respawnAgent(req.agentSession, name)
           : { error: 'Re-spawning is not available.' }),
+        mergeCheck: (pr) => (req.agentSession.isBillion
+          ? mergeCheck(pr)
+          : { error: 'Only Billion checks merges.' }),
         setNextWake: (minutes) => (req.agentSession.isBillion
           ? setNextWake(req.agentSession, minutes)
           : { error: 'Only Billion has an operating loop.' }),
