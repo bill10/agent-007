@@ -78,7 +78,7 @@ export function portState(port, host) {
 
 // What `npm view <name> version` answers, read from the registry directly:
 // npm itself writes a log and its cache under ~/.npm, and this only reports.
-async function npmLatest() {
+export async function npmLatest() {
   try {
     const res = await fetch(`https://registry.npmjs.org/${PKG.name.replace('/', '%2F')}/latest`, { signal: AbortSignal.timeout(NET_MS) });
     return res.ok ? (await res.json())?.version || null : null;
