@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.50.0.0] - 2026-10-02
+
+### Added
+
+- **`agent007 install` can set up voice.** `install` asks once whether to set up voice too (only in a terminal), `install --voice` sets up voice alone without touching the service (Windows included), and `install --all` does both. Voice setup installs whisper.cpp and ffmpeg (Homebrew on macOS; instructions on Linux and Windows), downloads a speech model you confirm to `~/.agent-007/whisper/`, sets `WHISPER_MODEL` in `~/.agent-007/.env`, tests it, and offers a restart. doctor and the Talk button's "not set up" note now point to it.
+
 ## [0.49.4.0] - 2026-10-02
 
 ### Fixed
