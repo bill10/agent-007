@@ -9,6 +9,7 @@
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
 // each, and "Read new messages aloud" in the header), and the box has its own
 // mic (voice.js with the CHAT_VOICE target), all in the browser and free.
+// "Talk to Billion" (talk.js) is a hands-free voice conversation over the same thread.
 import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionStatus } from './state.js';
 import { switchToSession } from './terminal.js';
 import { send } from './ws.js';
@@ -21,6 +22,7 @@ import {
   autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
   englishVoices, pickVoice, savedVoiceURI, setVoiceURI,
 } from './readaloud.js';
+import { talkBar, talkHeard, talkOn, endTalk } from './talk.js';
 
 const errors = new Map();   // question id -> { error, status }: why the last tap did not go through
 const pending = new Map();  // question id -> its status when tapped, waiting for the server to move it on
@@ -84,6 +86,7 @@ export function hideWaiting() {
 export function leftChat() {
   stopVoice({ only: 'chat', notice: 'Voice input stopped — left the Billion tab' });
   if (speakingMessage() !== null || queuedCount()) stopReading();
+  if (talkOn()) endTalk({ notice: 'Talk ended — you left the Billion tab.' });
 }
 
 const el = (tag, className, text) => {
@@ -594,7 +597,9 @@ export function handleChatMessage(message) {
   const isNew = !chatMessages.some(m => m.id === message.id);
   upsertChatMessage(message);
   renderWaiting();
-  if (isNew && message.from !== 'owner' && waitingActive) readNew(message.id, speakableText(message));
+  talkHeard(message);
+  // While talking, the conversation speaks its own replies; read-aloud waits.
+  if (isNew && message.from !== 'owner' && waitingActive && !talkOn()) readNew(message.id, speakableText(message));
 }
 
 // The box's mic: the terminal mic's logic and limits (voice.js), with speech
@@ -604,7 +609,8 @@ export const CHAT_VOICE = {
   name: 'chat',
   button: () => document.getElementById('chat-mic'),
   indicator: () => document.getElementById('chat-voice'),
-  unavailable: () => (waitingActive && document.getElementById('chat-input') ? null : 'Open the Billion tab to dictate'),
+  unavailable: () => (talkOn() ? 'You are talking to Billion — End it to dictate'
+    : waitingActive && document.getElementById('chat-input') ? null : 'Open the Billion tab to dictate'),
   deliver(text) {
     const input = document.getElementById('chat-input');
     if (!input || !waitingActive) return false;
@@ -673,6 +679,7 @@ function shell() {
     strip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); strip.onclick(); } };
     board.insertBefore(strip, list);
     if (readAloudSupported()) board.insertBefore(readHead(), strip);
+    board.insertBefore(talkBar(), strip);
     // The panel covers the thread only, so the box stays below it.
     const body = el('div', 'chat-body');
     board.insertBefore(body, list);

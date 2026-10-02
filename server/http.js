@@ -24,6 +24,8 @@ import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
 import { setBillionNotice } from './billion.js';
 import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
+import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
+import { createRequire } from 'module';
 
 // --- Origin Check Middleware (B2) ---
 // Rejects cross-origin requests from disallowed origins. localhost is always
@@ -96,11 +98,26 @@ export function requireAgent(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized: this endpoint is for Agent 007 agent sessions' });
 }
 
+const require = createRequire(import.meta.url);
+const VENDOR = [
+  ['vad', '@ricky0123/vad-web', ['bundle.min.js', 'vad.worklet.bundle.min.js', 'silero_vad_v5.onnx']],
+  ['ort', 'onnxruntime-web/wasm', ['ort.wasm.min.js', 'ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm']],
+];
+
 // --- Routes ---
 export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAgent } = {}) {
   // The tab's "N waiting" follows the queue.
   const withView = (result) => { if (result.ok) broadcast?.(roundView()); return result; };
   app.use(express_static(staticDir));
+  // Talk to Billion's voice detector, served from this app, never a CDN: the
+  // Silero VAD bundle, its worklet and model, and the onnxruntime-web build it runs on.
+  for (const [route, file, names] of VENDOR) {
+    let dir;
+    try { dir = dirname(require.resolve(file)); } catch { continue; }
+    app.get(`/vendor/${route}/:name`, (req, res, next) => (names.includes(req.params.name)
+      ? res.sendFile(join(dir, req.params.name), { headers: { 'Cache-Control': 'public, max-age=86400' } })
+      : next()));
+  }
 
   // --- POST /mcp — the board's MCP server ---
   //
@@ -292,6 +309,37 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
         'Referrer-Policy': 'no-referrer',
       },
     }, (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'File missing on disk' }); });
+  });
+
+  // "Talk to Billion" (server/talk.js). The chat is the owner's alone, as
+  // above. The X-Agent007-Talk header is one no form or <audio> can send, and
+  // a page on another origin cannot add it without a CORS preflight this
+  // server never answers, so only the tab's own fetch reaches these.
+  const talkGate = (req, res, next) => {
+    if (authEnabled()) return res.status(403).json({ error: 'The Billion chat is the owner\'s alone' });
+    if (req.get('X-Agent007-Talk') !== '1') return res.status(403).json({ error: 'Forbidden' });
+    return next();
+  };
+  app.get('/api/talk', talkGate, (req, res) => res.json(talkSetup()));
+  // One recorded utterance (WAV), transcribed here and sent to Billion once.
+  app.post('/api/talk/utterance', talkGate, express.raw({ type: 'audio/wav', limit: MAX_UTTERANCE_BYTES }), async (req, res) => {
+    const result = await voiceUtterance(Buffer.isBuffer(req.body) ? req.body : null, {
+      utterance: req.get('X-Utterance-Id'), echoOf: req.get('X-Echo-Of') || undefined, broadcast,
+    });
+    res.status(result.error ? 400 : 200).json(result);
+  });
+  // The browser's own transcript, when whisper.cpp is not set up.
+  app.post('/api/talk/text', talkGate, async (req, res) => {
+    const { utterance, text, echoOf } = req.body || {};
+    const result = await voiceSays(text, { utterance, echoOf, broadcast });
+    res.status(result.error ? 400 : 200).json(result);
+  });
+  // One spoken piece of a voice reply (or the "still working" cue, id "cue").
+  app.get('/api/talk/audio/:id/:index', talkGate, async (req, res) => {
+    const result = await voiceAudio(req.params.id, Number(req.params.index));
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    res.set({ 'Content-Type': 'audio/mp4', 'X-Pieces': String(result.count), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    res.send(result.audio);
   });
 
   // The Settings panel's "Agents & accounts": the last scan, or a fresh one on POST (Refresh).

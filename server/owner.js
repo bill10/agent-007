@@ -31,6 +31,7 @@ const WAITING_CAP = 50;
 export const OWNER_PREFIX = '[Owner via Telegram]';
 export const OWNER_VOICE_PREFIX = '[Owner via Telegram, voice]';
 export const APP_PREFIX = '[Owner via app]';
+export const APP_VOICE_PREFIX = '[Owner via app, voice]';
 export const MAX_CHOICES = 5;
 export const MAX_CHOICE_CHARS = 40;
 // No practical limit on what the owner types or pastes in the Billion tab: these
@@ -608,17 +609,26 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
 // of its own, like a Telegram message. Refused, never queued, while Billion is
 // not running: the browser keeps the text in the box. files: the attachments
 // as the browser sent them (planChatFiles); files alone, no text, is a message.
-// { ok } or { error }.
-export async function ownerSays(text, { answers, files: list, broadcast, env = process.env } = {}) {
+// voice: a "Talk to Billion" turn (server/talk.js), always a turn of Billion's,
+// never a round shortcut a misheard word could trigger. utterance: its id, so
+// the same utterance sent again (a retry, a revised transcript) is the
+// message already sent, not a second one. Checked and written with no await
+// between, so two at once cannot both get through.
+// { ok, id } (duplicate: the utterance was in already) or { error }.
+export async function ownerSays(text, { answers, files: list, broadcast, env = process.env, voice = false, utterance } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   const { files, error } = planChatFiles(list);
   if (error) return { error };
+  if (utterance) {
+    const sent = chatMessages().find(m => m.utterance === utterance);
+    if (sent) return { ok: true, id: sent.id, duplicate: true };
+  }
   if (!body && !files.length) return { error: 'The message is empty.' };
-  if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
+  if (answers && !voice) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
   // Two things the server does itself, never a turn of Billion's: start the
   // round now, and "1d 3d". The words still show in the thread.
-  const nums = !files.length && doneNumbers(body);
-  if (!files.length && (nums || START_ROUND_RE.test(body))) {
+  const nums = !voice && !files.length && doneNumbers(body);
+  if (!voice && !files.length && (nums || START_ROUND_RE.test(body))) {
     const result = nums ? await markDone(nums, 'app', { broadcast, env }) : await startRoundNow({ broadcast, env });
     if (result.error) return result;
     setOwnerChannel('app');
@@ -631,15 +641,16 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   const id = randomUUID();
   const saved = files.length ? saveChatFiles(id, files) : { paths: [], records: [] };
   if (saved.error) return saved;
-  if (!sendText(billion, withFiles(body ? `${APP_PREFIX} ${body}` : APP_PREFIX, saved.paths))) {
+  const prefix = voice ? APP_VOICE_PREFIX : APP_PREFIX;
+  if (!sendText(billion, withFiles(body ? `${prefix} ${body}` : prefix, saved.paths))) {
     if (files.length) removeChatFiles(id);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel('app');
-  addChat({ id, from: 'owner', via: 'app', text: body, awaitsReply: true, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: body, awaitsReply: true, ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   // Pending, with the progress box under it, until a tell_owner answers it.
   publishStatus(broadcast);
-  return { ok: true };
+  return { ok: true, id };
 }
 
 // Answered everywhere: the item moves to Answered in every browser, and the
