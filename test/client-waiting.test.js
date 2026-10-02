@@ -253,6 +253,14 @@ describe('the thread', () => {
 describe('the text box', () => {
   beforeEach(() => showWaiting());
 
+  it('has the phone button between the mic and Send, and the call bar beside the row', () => {
+    const row = document.getElementById('chat-compose-row');
+    const ids = [...row.children].map(c => c.id);
+    expect(ids.slice(-3)).toEqual(['chat-mic', 'chat-talk', 'chat-send']);
+    expect(document.getElementById('talk-bar').nextElementSibling).toBe(row);
+    expect(document.querySelector('.talk-bar:not(#chat-compose *)')).not.toBeNull();
+  });
+
   it('sends on Enter, not on Shift+Enter, and empties only once the server took it', () => {
     type('hello', { shiftKey: true });
     expect(send).not.toHaveBeenCalled();

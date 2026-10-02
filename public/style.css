@@ -1883,6 +1883,7 @@ body.billion-chat .voice-fab, body.billion-chat .voice-indicator { display: none
 @media (max-width: 700px) { :root { --chat-control-h: 44px; } }
 .chat-control { min-height: var(--chat-control-h); }
 .chat-compose-row { display: flex; gap: var(--chat-gap); align-items: flex-end; }
+.chat-compose-row[hidden] { display: none; }
 #chat-input {
   flex: 1;
   min-width: 0;
@@ -2079,25 +2080,22 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   .chat-voice-pick { flex: 0 1 auto; min-width: 0; max-width: 100%; margin: 0 0 var(--chat-gap) auto; }
 }
 
-/* Talk to Billion (talk.js): a bar above the question strip. Its state word
-   carries a coloured dot, so listening, thinking and speaking read at a glance. */
-.talk-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--chat-gap);
-  flex-wrap: wrap;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-dark);
-  flex-shrink: 0;
-  font-size: 12px;
-}
+/* Talk to Billion (talk.js): the phone button sits in the composer row; during
+   a conversation the call bar stands in for that row. Its state word carries a
+   coloured dot, so listening, thinking and speaking read at a glance. */
+.talk-bar { display: flex; flex-direction: column; gap: var(--chat-gap); font-size: 12px; }
 .talk-bar [hidden] { display: none; }
+.talk-notes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--chat-gap); }
+.talk-call { display: flex; align-items: center; gap: var(--chat-gap); min-height: var(--chat-control-h); }
+.talk-gap { flex: 1; }
 .talk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 0 10px;
   font: inherit;
   color: var(--text-muted);
-  background: none;
+  background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
@@ -2106,9 +2104,11 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .talk-start { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); font-weight: 700; }
 .talk-start:hover { color: var(--accent-contrast); }
 .talk-mute[aria-pressed="true"] { color: var(--state-message); border-color: var(--state-message); }
-.talk-end { margin-left: auto; }
-.talk-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); }
-.talk-state::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.talk-end { color: var(--state-disconnected); border-color: var(--state-disconnected); }
+.talk-end:hover { color: var(--state-disconnected); }
+.talk-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); min-width: 0; }
+.talk-state::before { content: ''; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.talk-timer { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .talk-bar[data-state="listening"] .talk-state::before { background: var(--state-waiting); animation: talk-pulse 1.6s ease-in-out infinite; }
 .talk-bar[data-state="thinking"] .talk-state::before { background: var(--state-working); }
 .talk-bar[data-state="speaking"] .talk-state::before { background: var(--accent); }
@@ -2120,8 +2120,12 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .talk-detail a { color: var(--accent); }
 .talk-privacy { flex-basis: 100%; color: var(--text-dim); font-size: 11px; }
 @media (max-width: 700px) {
-  .talk-bar { padding: 4px 6px; font-size: 13px; }
-  .talk-btn { min-height: 36px; }
+  .talk-bar { font-size: 13px; }
+  .talk-btn { min-height: var(--chat-control-h); padding: 0 8px; }
+  .talk-end span, .talk-mute span { display: none; }
+  .chat-compose-row { gap: 4px; }
+  .chat-compose-row .chat-mic { width: 36px; }
+  .chat-compose-row .waiting-send { padding-inline: 10px; }
 }
 
 /* An agent the board created, not you. Subtle — it is still an ordinary agent
