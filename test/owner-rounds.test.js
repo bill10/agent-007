@@ -232,7 +232,11 @@ describe('the server\'s round tick and the first start', () => {
     expect(waitingItems().at(-1)).toMatchObject({ text: 'Day one', status: 'open' });
     // Not the 08:30 round that passed before the first start; the 15:30 one, once.
     expect(await roundTick({ now: at('2026-10-01T15:29:59Z'), env: {}, settings: UTC })).toBeNull();
-    expect((await roundTick({ now: at('2026-10-01T15:30:05Z'), env: {}, settings: UTC })).released).toEqual([]);
+    // The first round takes day one's still-open question in, like any round's leftovers.
+    const first = await roundTick({ now: at('2026-10-01T15:30:05Z'), env: {}, settings: UTC });
+    expect(first.released).toEqual([]);
+    expect(first.consolidated.map(i => i.text)).toEqual(['Day one']);
+    expect(waitingItems().find(i => i.text === 'Stuck merge').status).toBe('open');
     expect(await roundTick({ now: at('2026-10-01T15:31:00Z'), env: {}, settings: UTC })).toBeNull();
     expect(roundPayload(at('2026-10-01T15:31:00Z'), UTC)).toMatchObject({ type: 'round-state', on: true, max: 2, current: { id: '2026-10-01 15:30', label: '10/1 pm' }, next: { id: '2026-10-02 08:30' } });
     // From then on a question waits for its round.

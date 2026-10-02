@@ -763,8 +763,9 @@ the fresh-install test of v0.46 (2026-10-02), over two alternatives: rounds
 starting the day after install leaves an evening install with a day of
 questions at once, and exempting only the introduction leaves the first
 cycle's questions waiting. Before that first round the tab's section for them
-is *Open questions*, not *Needs you now*, and they stay open past it until
-answered (they belong to no round, so it does not consolidate them).
+is *Open questions*, not *Needs you now*. The first round consolidates the
+ones still open (blocking ones excepted), as any round does the last one's,
+and Billion re-queues what still matters.
 
 **The tab.** The Billion tab opens on **Chat** until a round has been
 released (where a new install sees the introduction, and why a missing or

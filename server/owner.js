@@ -886,7 +886,11 @@ const topWords = (max) => (max === 2 ? 'top two' : `top ${max}`);
 export async function releaseRound(round, { broadcast, env = process.env, settings = roundSettings(), now = Date.now(), early = false } = {}) {
   const items = waitingItems();
   const iso = new Date(now).toISOString();
-  const consolidated = items.filter(i => i.status === 'open' && i.round && i.round !== round.id);
+  // The first round also takes in what showed at once before it (no round, not
+  // an emergency), so day one's questions are not left open as emergencies.
+  const first = !roundState().current;
+  const consolidated = items.filter(i => i.status === 'open' && (i.round ? i.round !== round.id
+    : first && !i.outside && i.urgency !== 'blocking'));
   for (const item of consolidated) Object.assign(item, { status: 'consolidated', consolidatedAt: iso, consolidatedBy: round.id });
   const taken = new Map();
   const released = [];

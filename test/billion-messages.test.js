@@ -96,6 +96,20 @@ describe('Billion\'s inbox', () => {
     expect(pendingMessages(b.id)).toBe(1);
   });
 
+  it('types nothing, not even the owner\'s words, into a Billion an account switch is stopping', () => {
+    const b = billion({ messagesHeld: true, accountRotating: true });
+    expect(sendText(b, '[Owner via Telegram] still there?', NOW, { owner: true })).toBe(true);
+    expect(b.pty.write).not.toHaveBeenCalled();
+    expect(pendingMessages(b.id)).toBe(1);
+  });
+
+  it('keeps room for the owner\'s words behind a full queue of held notices', () => {
+    const b = billion({ messagesHeld: true, messageTyping: true });
+    for (let i = 0; i < 20; i++) sendNotice(b, `notice ${i}`, [], NOW);
+    expect(sendNotice(b, 'one more', [], NOW)).toBe(false);
+    expect(sendText(b, '[Owner via app] my answer', NOW, { owner: true })).toBe(true);
+  });
+
   it('keeps the owner\'s words in order around server notices while held', () => {
     vi.useFakeTimers();
     const b = billion({ messagesHeld: true, messageTyping: true });   // mid-paste: nothing goes in yet

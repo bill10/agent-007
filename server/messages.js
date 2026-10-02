@@ -176,7 +176,9 @@ export function sendText(session, text, now = Date.now(), { owner = false } = {}
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
   const ahead = serverAhead.get(session.id) || 0;
-  if (ahead >= QUEUE_CAP) return false;
+  // The owner's words get room of their own: notices piling up behind a held
+  // inbox must not turn their answers away.
+  if (ahead >= QUEUE_CAP * (owner ? 2 : 1)) return false;
   queue.splice(ahead, 0, { text: clean(text), ...(owner ? { owner: true } : {}) });
   queues.set(session.id, queue);
   serverAhead.set(session.id, ahead + 1);
@@ -206,8 +208,9 @@ export function sendNotice(session, headline, lines, now = Date.now()) {
 export function canDeliver(session, now = Date.now(), { owner = false } = {}) {
   // Billion holds its mail until it says it is ready (billion_ready), so
   // nothing lands in the middle of its introduction, except the owner's
-  // answers to it.
-  if (session.messagesHeld && !owner) return false;
+  // answers to it. Not while an account switch stops it: what is typed into a
+  // dying terminal is lost, and the queue carries over to the new one.
+  if (session.messagesHeld && (!owner || session.accountRotating)) return false;
   // Still typing the last one: a second would interleave with its pastes.
   if (session.messageTyping) return false;
   // Both: the stored state is up to a second old, and a dialog that opened
