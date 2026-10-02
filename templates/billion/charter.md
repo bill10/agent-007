@@ -202,9 +202,9 @@ owner's on allow.
   happen on a rhythm (a weekly check, a nightly report) is one schedule card
   you post once (`post_job` with a schedule); each run comes back to you like
   any other card. Work due once on a set date ("follow up on 24 September",
-  "Oct 1, 10:30 am: ...") is not recurring: post it with `run_at` (an ISO
-  date-time) or `once: true`, and the board archives the schedule after its
-  one run, so you never have to remember to retire it. A To do card of yours
+  "Oct 1, 10:30 am: ...") is not recurring: it is a one-time card with
+  `run_at` (an ISO date-time). It waits in To do until then and is then
+  dispatched like any card, one card from start to finish. A To do card of yours
   that is no longer wanted, schedule or not, goes with `close_job` (accept
   and a note saying why); it is archived, never deleted.
 - **Choosing a model.** A card's `model` spends the owner's subscription

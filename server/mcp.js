@@ -86,22 +86,22 @@ export const POST_JOB_TOOL = {
           + 'unless requires_pr is true. A schedule holds off while its last run is '
           + 'still going or its PR is open, and a newer no-PR run replaces the last '
           + 'one in Review. Omit this for ordinary work that should happen once now. '
-          + 'For work due once on a set date, pass run_at (or schedule with once: true) '
-          + 'so the card is archived after it runs instead of recurring every year.',
+          + 'For work due once on a set date, pass run_at instead.',
       },
       once: {
         type: 'boolean',
         description:
-          'Optional, with schedule. true: run a single time, at the schedule\'s next match, '
-          + 'then archive the schedule (its run card lives on). Use it for anything tied '
-          + 'to one date, such as a follow-up on 24 September.',
+          'Optional, with schedule; prefer run_at. true: a one-time job that starts at '
+          + 'the schedule\'s next match, the same as passing that time as run_at.',
       },
       run_at: {
         type: 'string',
         description:
           'Optional, instead of schedule: an ISO date-time ("2026-10-24T10:00", the '
-          + "server's local time unless it carries an offset) to run a single time, then "
-          + 'archive. Same as a one-date schedule with once: true. At most a year ahead.',
+          + "server's local time unless it carries an offset). Makes a one-time job that "
+          + 'waits in To do and starts at that time: one card, which then moves through the '
+          + 'board like any other. Use it for anything tied to one date, such as a follow-up '
+          + 'on 24 September. At most a year ahead.',
       },
       agent: {
         type: 'string',
@@ -210,16 +210,15 @@ export const EDIT_JOB_TOOL = {
       once: {
         type: 'boolean',
         description:
-          'true: the schedule runs a single time, at the schedule\'s next match, '
-          + 'then archive the schedule (its run card lives on). Use it for anything tied '
-          + 'to one date, such as a follow-up on 24 September.',
+          'Prefer run_at. true: make this a one-time job that starts at its schedule\'s next match.',
       },
       run_at: {
         type: 'string',
         description:
           'Instead of schedule: an ISO date-time ("2026-10-24T10:00", the '
-          + "server's local time unless it carries an offset) to run a single time, then "
-          + 'archive. Same as a one-date schedule with once: true. At most a year ahead.',
+          + "server's local time unless it carries an offset) for this card to start at; "
+          + 'it stays one card, a one-time job. An empty string clears it, so the card '
+          + 'starts as soon as it can. At most a year ahead.',
       },
       model: {
         type: 'string',
@@ -690,7 +689,7 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : null);
 // The cron and its next firing, built once: four builders used to spell this
 // out with three different separators, so the same fact read three ways.
 const scheduleText = (job, sep = ', next ') =>
-  `${job.schedule}${job.once ? ' (once, then archived)' : ''}${job.nextRunAt ? `${sep}${when(job.nextRunAt)}` : ''}`;
+  `${job.schedule}${job.nextRunAt ? `${sep}${when(job.nextRunAt)}` : ''}`;
 
 // One line per card: what it is, and the id needed to read or edit it. Kept
 // lean deliberately — who posted it and the whole detail body are what read_job
@@ -705,6 +704,7 @@ function summaryLine(job) {
     if (job.scheduleStatus) bits.push(job.scheduleStatus.label);
   }
   if (job.scheduleId) bits.push('a scheduled run');
+  if (job.runAt) bits.push(`starts ${when(job.runAt)}`);
   // The live state of the agent working it, when there is one, is the part a
   // person actually asks about ("is it stuck?").
   if (job.agentName) bits.push(`${job.agentName}${job.status ? ` ${job.status}` : ''}`);
@@ -735,7 +735,8 @@ const CALLS = {
     // A cron expression is easy to get subtly wrong ("0 0 * * 0" is not weekly
     // to everyone), and a concrete next-run time is what makes the mistake
     // visible while the user is still in the conversation to correct it.
-    const fires = result.job.schedule ? ` on a schedule (${scheduleText(result.job)})` : '';
+    const fires = result.job.schedule ? ` on a schedule (${scheduleText(result.job)})`
+      : result.job.runAt ? `, starting ${when(result.job.runAt)},` : '';
     const column = result.job.schedule ? '' : result.job.requiresPr === false ? ' (To do, no pull request)' : ' (To do)';
     const line = `Posted "${result.job.title}"${where}${fires} to the Agent 007 job board${column}.`;
     // The dispatcher note matters: with the board stopped the card sits there
@@ -790,7 +791,7 @@ const CALLS = {
           + `${job.runCount ? ` — posted ${job.runCount} run(s), last ${when(job.lastRunAt)}` : ''}`
           + `${job.requiresPr ? ', each run opens a pull request' : ''}`
           + `${job.lastSkipReason ? ` — last held off: ${job.lastSkipReason}` : ''}`
-        : `schedule: runs once${job.requiresPr ? '' : ', no pull request'}`
+        : `schedule: runs once${job.runAt ? `, starting ${when(job.runAt)}` : ''}${job.requiresPr ? '' : ', no pull request'}`
           + `${job.scheduleId ? ` (a run of schedule ${job.scheduleId})` : ''}`,
       job.scheduleStatus ? `schedule status: ${JSON.stringify(job.scheduleStatus)}` : null,
       `posted: ${when(job.postedAt)}`
@@ -832,7 +833,8 @@ const CALLS = {
     });
     if (result.error) return toolText(result.error, true);
     const job = result.job;
-    const fires = job.type === 'scheduled' ? ` It runs ${scheduleText(job)}.` : '';
+    const fires = job.type === 'scheduled' ? ` It runs ${scheduleText(job)}.`
+      : job.runAt ? ` It starts ${when(job.runAt)}.` : '';
     return toolText(
       `Updated ${result.changed.join(', ')} on "${job.title}" (${job.repo}), still in To do.${fires}`,
     );

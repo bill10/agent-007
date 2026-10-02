@@ -69,17 +69,6 @@ describe('schedule observation in the existing scan', () => {
     await scanning;
     expect(s.lastScheduleObservation).toMatchObject({ expectedAt: due, outcome: 'held' });
   });
-  it('once stays due through a hold then archives after one posting; archive never fires again', () => {
-    const s = setup({ once: true });
-    const r = { id: 'old', state: 'todo', scheduleId: s.id, repoPath: s.repoPath, postedBy: s.postedBy };
-    config.jobs.push(r);
-    fireSchedules(noop, { now });
-    expect(s.nextRunAt).toBe(due);
-    r.state = 'done';
-    expect(fireSchedules(noop, { now })).toHaveLength(1);
-    expect(getStatus(s.id).code).toBe('archived');
-    expect(fireSchedules(noop, { now: now + 86400000 })).toEqual([]);
-  });
   it('failed creation has an error observation and no invented run', () => {
     const s = setup();
     s.title = '';
@@ -111,15 +100,5 @@ describe('passive reporting regressions', () => {
     expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'jobs-list', jobs: expect.arrayContaining([expect.objectContaining({ id: s.id, scheduleStatus: expect.objectContaining({ code: 'held-stalled' }) })]) }));
     expect(JSON.stringify(config.jobs)).toBe(before);
     expect(readFileSync(join(CONFIG_DIR, 'config.json'), 'utf8')).toBe(savedBefore);
-  });
-  it('a recurring schedule edited to once still has a pending firing despite its history', () => {
-    const s = setup();
-    s.runCount = 4;
-    s.lastRunAt = new Date(now - 86400000).toISOString();
-    expect(updateJob(s.id, { once: true }, noop).error).toBeUndefined();
-    expect(getStatus(s.id).code).toBe('overdue');
-    expect(fireSchedules(noop, { now })).toHaveLength(1);
-    expect(s.state).toBe('done');
-    expect(getStatus(s.id).code).toBe('archived');
   });
 });

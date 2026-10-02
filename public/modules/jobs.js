@@ -108,7 +108,7 @@ function clockTime(iso) {
   });
 }
 
-// "Sat Oct 3, 9:00 AM": a once card's run time, always with the date.
+// "Sat Oct 3, 9:00 AM": a scheduled card's start time, always with the date.
 function dateTime(iso) {
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return '';
@@ -117,6 +117,11 @@ function dateTime(iso) {
 
 function isScheduled(job) {
   return job.type === 'scheduled';
+}
+
+// A one-time card waiting in To do for its start time (runAt).
+function startsLater(job) {
+  return !isScheduled(job) && job.state === 'todo' && !!job.runAt && Date.parse(job.runAt) > Date.now();
 }
 
 function repoSlug(repoPath) {
@@ -293,10 +298,17 @@ function renderCard(job) {
     // from the glance that the three columns exist to give.
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
+    // job.once: an old once schedule, archived after it fired (#178-#188).
     chip.textContent = job.once ? 'scheduled' : 'recurring';
-    chip.title = job.once
-      ? 'Runs once at this time, then is archived'
-      : 'Posts a run card each time it comes due; the runs are the cards that move';
+    chip.title = job.once ? 'Ran once at its date' : 'Posts a run card each time it comes due; the runs are the cards that move';
+    title.appendChild(chip);
+  }
+  // Only while it waits: once started it is an ordinary one-time card.
+  if (startsLater(job)) {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = 'scheduled';
+    chip.title = 'Waits in To do and starts at this time; this card is the job';
     title.appendChild(chip);
   }
   if (job.scheduleId) {
@@ -386,12 +398,18 @@ function renderCard(job) {
     card.appendChild(held);
   }
 
+  if (startsLater(job)) {
+    const when = document.createElement('div');
+    when.className = 'job-card-schedule';
+    when.innerHTML = `<span class="job-card-next">${escapeHtml(dateTime(job.runAt))} · ${escapeHtml(untilTime(job.runAt))}</span>`;
+    card.appendChild(when);
+  }
+
   if (isScheduled(job)) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
-    // A once card shows its date (below), never the cron; a recurring one says
-    // its schedule in words, with the cron kept in the tooltip.
-    const bits = job.once ? [] : [`<span class="job-card-cron" title="${escapeHtml(job.schedule || '')}">${escapeHtml(job.scheduleWords || job.schedule || '')}</span>`];
+    // Its schedule in words, with the cron kept in the tooltip.
+    const bits = [`<span class="job-card-cron" title="${escapeHtml(job.schedule || '')}">${escapeHtml(job.scheduleWords || job.schedule || '')}</span>`];
     if (job.state === 'done') {
       // Archived: it will not fire again, and its note below says why.
     } else if (job.paused) {
@@ -399,9 +417,7 @@ function renderCard(job) {
       // holding, and resuming re-arms from that moment instead of running it.
       bits.push('<span class="job-card-next job-card-paused">paused</span>');
     } else if (job.nextRunAt) {
-      bits.push(job.once
-        ? `<span class="job-card-next">${escapeHtml(dateTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`
-        : `<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
+      bits.push(`<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
     } else {
       // nextCronIso returned nothing: a valid expression that matches no date
       // that will ever come round, such as 30 February.
@@ -645,12 +661,15 @@ function renderCardActions(job) {
       actions.appendChild(mk('Dispatch now', 'Skip the wait and hand this card to a new agent now',
         () => send({ type: 'job-release-hold', jobId: job.id })));
     }
+    if (startsLater(job)) {
+      actions.appendChild(mk('Run now', 'Start this job now instead of at its scheduled time',
+        () => send({ type: 'job-release-hold', jobId: job.id })));
+    }
   }
   // Pause holds the schedule's next firing; a run already posted is its own
-  // card and is left alone.
-  // Not on a once card (resuming one re-arms from now, a year past its date),
-  // unless old data left it paused, so it cannot get stuck.
-  if (isScheduled(job) && job.state === 'todo' && (!job.once || job.paused)) {
+  // card and is left alone. Not on a one-time card, unless old data left it
+  // paused, so it cannot get stuck.
+  if (job.state === 'todo' && (isScheduled(job) || job.paused)) {
     actions.appendChild(job.paused
       ? mk('Resume', 'Resume this schedule. The next run is set from now, so a firing missed while paused is not replayed.',
         () => send({ type: 'job-pause', jobId: job.id, paused: false }))
@@ -957,9 +976,9 @@ function openForm(jobId) {
   titleEl.value = job ? job.title : '';
   detailEl.value = job ? job.detail : '';
   if (job) repoEl.value = job.repoPath;
-  typeEl.value = job && isScheduled(job) ? (job.once ? 'once' : 'scheduled') : 'one-time';
+  typeEl.value = job && isScheduled(job) ? 'scheduled' : job && job.runAt ? 'once' : 'one-time';
   const runAtEl = document.getElementById('job-run-at');
-  runAtEl.value = job && job.once && job.nextRunAt ? localInputValue(new Date(job.nextRunAt)) : '';
+  runAtEl.value = job && !isScheduled(job) && job.runAt ? localInputValue(new Date(job.runAt)) : '';
   initialRunAt = runAtEl.value;
   scheduleEl.value = job && job.schedule ? job.schedule : '';
   // '' is the "Board default" option, and it is what a card with no mode of
@@ -1022,17 +1041,17 @@ function saveForm() {
   if (jobType === 'once') {
     if (!runAtText) return showFormError('Pick the date and time this job should run.');
     if (editingJobId && runAtText === initialRunAt) {
-      // Unchanged: keep the stored schedule, so saving a card whose time has
-      // just gone by is still possible.
-      timing = { jobType: 'scheduled', schedule: jobs.get(editingJobId).schedule, once: true };
+      // Unchanged: runAt left out keeps the stored time, so saving a card
+      // whose time has just gone by is still possible.
+      timing = { jobType: 'one-time' };
     } else {
       const at = new Date(runAtText);
       if (at.getTime() <= Date.now()) return showFormError('Pick a time in the future.');
       if (at.getTime() - Date.now() > MAX_RUN_AT_MS) return showFormError('Pick a time within the next year.');
-      // An absolute instant: the server turns it into its own local-time schedule.
-      timing = { jobType: 'scheduled', runAt: at.toISOString(), once: true };
+      // An absolute instant: one card that starts then.
+      timing = { jobType: 'one-time', runAt: at.toISOString() };
     }
-  } else if (jobType === 'scheduled') timing = { once: false };
+  } else if (jobType === 'one-time') timing = { runAt: null };   // Now: clears a start time
   if (pendingAttachments.some(a => a.reading)) return showFormError('Still reading an attached file — try again in a moment.');
   // The form always holds the complete list; an empty one on an edit means
   // "none left".

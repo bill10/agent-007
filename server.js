@@ -29,7 +29,7 @@ import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktre
 import { createSessionFromConfig, killSessionProcesses, blockClaudeSpawns } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes } from './server/http.js';
-import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch, ghEnvForRepo, retireSpentSchedules } from './server/jobs.js';
+import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch, ghEnvForRepo, retireSpentSchedules, convertOnceSchedules } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
@@ -616,8 +616,10 @@ async function startup() {
   startModelRefresh();
   // The scan the start's doctor check began (bin/agent-007.js), or a new one.
   agentAccounts();
-  // One-date schedules ("0 10 24 9 *") that have already run are done: archived
-  // here, each one logged, rather than left showing next year's date.
+  // A once schedule not yet fired becomes a one-time card with its start time;
+  // then one-date schedules ("0 10 24 9 *") that have already run are done:
+  // archived here, each one logged, rather than left showing next year's date.
+  convertOnceSchedules(broadcast);
   retireSpentSchedules(broadcast);
   startDispatcher(createSession, broadcast, {
     onSessionCreated: (s) => broadcast(sessionPayload(s)),

@@ -18,7 +18,7 @@ import { statusPayload } from './billion-status.js';
 import { roundView, startRoundNow, markDone } from './owner.js';
 import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
-import { isValidJobAgent, sessionAgentFromCommand, runAtToSchedule } from '../lib/jobs.js';
+import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
 import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
 import {
@@ -349,13 +349,6 @@ export function broadcastToBrowsers(payload) {
   for (const client of clients) {
     if (client.readyState === 1 && client.fromBrowser) client.send(data);
   }
-}
-
-// The + Job form's "Once at…" sends runAt, an ISO instant; it becomes that
-// minute's one-date cron in server local time, as run_at does for agents.
-function formRunAt(msg) {
-  if (msg.runAt == null) return {};
-  return runAtToSchedule(msg.runAt);
 }
 
 export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState }) {
@@ -735,11 +728,9 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         // recorded for attribution, not access control. (Auth here is identity,
         // not a sandbox — see the note at the top of server/auth.js.)
         case 'job-create': {
-          const when = formRunAt(msg);
-          if (when.error) { ws.send(JSON.stringify({ type: 'notification', level: 'error', message: when.error })); break; }
           const result = addJob({
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
-            type: msg.jobType, schedule: when.schedule ?? msg.schedule, once: msg.once, attachments: msg.attachments,
+            type: msg.jobType, schedule: msg.schedule, runAt: msg.runAt, attachments: msg.attachments,
             // Empty means "inherit the board setting" — a real unset, so the
             // card follows the board if that changes before it is dispatched.
             permissionMode: msg.permissionMode,
@@ -753,11 +744,9 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           break;
         }
         case 'job-update': {
-          const when = formRunAt(msg);
-          if (when.error) { ws.send(JSON.stringify({ type: 'notification', level: 'error', message: when.error })); break; }
           const result = updateJob(msg.jobId, {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
-            type: msg.jobType, schedule: when.schedule ?? msg.schedule, once: msg.once, attachments: msg.attachments,
+            type: msg.jobType, schedule: msg.schedule, runAt: msg.runAt, attachments: msg.attachments,
             permissionMode: msg.permissionMode, agent: msg.agent, model: msg.model, requiresPr: msg.requiresPr,
           }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
