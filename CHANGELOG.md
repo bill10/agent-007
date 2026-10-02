@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.49.4.0] - 2026-10-02
+
+### Fixed
+
+- **`agent007 update` no longer says "Already up to date" while the registry has a newer version.** On an npm install it asks the registry for `latest` directly (npm's own cache can lag by minutes), installs that exact version with `--prefer-online`, and checks the installed version matches. If the registry is unreachable or npm installed the old version, it says so and prints the command to retry instead of restarting.
+
 ## [0.49.3.0] - 2026-10-02
 
 ### Changed
