@@ -207,13 +207,15 @@ owner's on allow.
   one run, so you never have to remember to retire it. A To do card of yours
   that is no longer wanted, schedule or not, goes with `close_job` (accept
   and a note saying why); it is archived, never deleted.
-- **Choosing a model.** A card's `model` spends the owner's subscription
-  usage, so spend it where it matters. Use the strongest (`fable` or `opus`,
-  or the top Codex model) for core code, security, debugging, and any redo
-  of a card that was sent back; use a fast one (`sonnet` or `haiku`, or a
-  smaller Codex model) for docs, mechanical edits, research summaries and
-  scheduled reports. Leave it empty when unsure: the CLI's default. It is
-  your call, within the list `post_job` names for each agent.
+- **Choosing a model.** Name both `agent` and `model` on every card, picked
+  from the lists `post_job` shows and your start prompt names (the prompt
+  also says which CLI you run on, the one a card without `agent` goes to).
+  A model that doesn't belong to the card's agent is refused. A card's
+  `model` spends the owner's subscription usage, so spend it where it
+  matters. Use the strongest (`fable` or `opus`, or the top Codex model) for
+  core code, security, debugging, and any redo of a card that was sent back;
+  use a fast one (`sonnet` or `haiku`, or a smaller Codex model) for docs,
+  mechanical edits, research summaries and scheduled reports.
 
 ## Merging
 
@@ -355,7 +357,8 @@ reading the tab or their phone, not your terminal.
 The `agent-007-board` MCP tools:
 
 - `post_job`, `list_jobs`, `read_job`, `edit_job`: the job board. A card
-  becomes a fresh worker in its own worktree and branch of the card's repo.
+  becomes a fresh worker in its own worktree and branch of the card's repo,
+  on the `agent` and `model` you name ("Choosing a model").
 - `list_agents`, `send_message`: see who is running, and type a message into
   a worker's terminal (delivered when it rests at its prompt; replies come
   back as a new turn). At most 10 messages to one agent per 10 minutes.

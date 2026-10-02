@@ -26,6 +26,7 @@ import { MAX_CHOICES, MAX_CHOICE_CHARS, QUESTION_TYPES } from './owner.js';
 import { WAKE_MIN_MIN, WAKE_MAX_MIN, WAKE_QUIET_MIN, WAKE_BUSY_MIN } from './billion-wake.js';
 import { MAX_BRIEF_CHARS } from './rounds.js';
 import { MAX_STATUS_CHARS, STATUS_TTL_MS } from './billion-status.js';
+import { describeModels } from './models.js';
 
 // Echoed back from the client's own initialize when it sends one. MCP clients
 // negotiate this, and answering with whatever the client asked for is the
@@ -656,20 +657,17 @@ const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER
   LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
+// The agent field also says which CLI the caller runs on, the default it falls to.
 export function toolsFor(session, models) {
   const tools = session?.isBillion ? [...TOOLS, ...BILLION_TOOLS] : TOOLS;
   if (!models) return tools;
-  const known = JOB_AGENTS.map(a => `${a}: ${models[a]?.length ? models[a].join(', ') : '(none found; leave empty)'}`).join('; ');
-  return tools.map(tool => (tool.inputSchema.properties.model ? {
-    ...tool,
-    inputSchema: {
-      ...tool.inputSchema,
-      properties: {
-        ...tool.inputSchema.properties,
-        model: { ...tool.inputSchema.properties.model, description: `${tool.inputSchema.properties.model.description} Available now — ${known}.` },
-      },
-    },
-  } : tool));
+  const known = describeModels(models);
+  const self = JOB_AGENTS.includes(session?.agent) ? ` You are running as ${session.agent}.` : '';
+  const amend = (props, name, extra) => (props[name] ? { ...props, [name]: { ...props[name], description: props[name].description + extra } } : props);
+  return tools.map(tool => {
+    const props = amend(amend(tool.inputSchema.properties, 'model', ` Available now — ${known}.`), 'agent', self);
+    return props === tool.inputSchema.properties ? tool : { ...tool, inputSchema: { ...tool.inputSchema, properties: props } };
+  });
 }
 
 // "the 15:30 round", as notify_owner and list_round_queue name it.

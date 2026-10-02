@@ -12,6 +12,7 @@ import { execFileSync } from 'child_process';
 import { CONFIG_DIR, sessions } from './state.js';
 import { authEnabled } from './auth.js';
 import { HANDOVER_FILE, CLI_NAMES } from './billion-handover.js';
+import { describeModels } from './models.js';
 
 import { quote, isCodexSessionId } from '../lib/jobs.js';
 import { envSwitchOn } from '../lib/helpers.js';
@@ -211,11 +212,14 @@ export function suggestProjectsDir(repoPaths, { ignoreUnder = CONFIG_DIR } = {})
 // Billion only needs telling. This saves the current definitions to file and
 // returns the names that differ from the last saved copy: all of them when
 // there is none, since the conversation may predate any of them.
+// The definitions carry the model lists, so a list that changes is a post_job
+// that changed; saveBoardTools rewrites the file when a refresh finds new ones.
+export const saveBoardTools = (file, tools) => writeFileSync(file, `${JSON.stringify(tools, null, 2)}\n`);
 export function changedBoardTools(file, tools) {
   let saved = [];
   try { saved = JSON.parse(readFileSync(file, 'utf8')); } catch {}
   const before = new Map((Array.isArray(saved) ? saved : []).map(t => [t?.name, JSON.stringify(t)]));
-  writeFileSync(file, `${JSON.stringify(tools, null, 2)}\n`);
+  saveBoardTools(file, tools);
   return tools.filter(t => before.get(t.name) !== JSON.stringify(t)).map(t => t.name);
 }
 
@@ -274,17 +278,24 @@ export function charterChanges(file, charter) {
 // HANDOVER.md first. Otherwise its own last conversation resumes when there is
 // one: Claude Code's --continue, Codex's session in this folder by id
 // (`codexSessionId`, never --last, which could reach another folder's).
-export function billionCommand({ agent = 'claude', created, hasConversation, codexSessionId, handover, dir, projectsHint, changedTools = [], toolsFile, charterNotice = '' }) {
+// Every start also says which CLI it runs on and the models a card may name
+// (`models`, null when discovery had not finished): a resumed conversation's
+// post_job may still list none.
+export function billionCommand({ agent = 'claude', created, hasConversation, codexSessionId, handover, dir, projectsHint, changedTools = [], toolsFile, charterNotice = '', models = null }) {
   const where = `Your folder is ${dir}.`;
   const hint = projectsHint
     ? `Suggest ${projectsHint} as the projects folder: most of the owner's repos are there.`
     : 'The owner has no repos yet, so ask for a projects folder without suggesting one.';
   const cycle = 'Otherwise run one operating cycle (CHARTER.md, "Operating loop"); the server wakes you for the next.';
-  const prompt = created
+  const cli = `You run on ${CLI_NAMES[agent]}; a card you post without \`agent\` goes to the same CLI.`;
+  const list = models
+    ? `Models available now: ${describeModels(models)}. Name both \`agent\` and \`model\` on every card (CHARTER.md, "Choosing a model").`
+    : `The model list is not ready yet; read it in ${toolsFile} (post_job's model field) before posting a card.`;
+  const prompt = (created
     ? `This is your first run. Introduce yourself as described in CHARTER.md under "First run". ${where} ${hint}`
     : handover
       ? `You now run on ${CLI_NAMES[agent]}, moved over from your previous CLI, and this is a new conversation. Read STATE.md and then ${HANDOVER_FILE} (the end of your last conversation) first. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`
-      : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`;
+      : `You were restarted. If STATE.md still says "Status: not started", do or finish your introduction (CHARTER.md, "First run"). ${hint} ${cycle} ${where}`) + ` ${cli} ${list}`;
   const changes = charterNotice ? `\n\n${charterNotice}` : '';
   if (agent === 'codex') {
     const resume = !created && !handover && isCodexSessionId(codexSessionId) ? `resume ${codexSessionId} ` : '';
@@ -353,7 +364,7 @@ export async function withBillionStopped(fn, { live, stop, start, announce = () 
   const carried = billion ? await stop(billion) : null;
   try { return await fn(); } finally {
     if (billion) {
-      const started = start({ carried });
+      const started = await start({ carried });
       if (started.error) failed(started.error);
       else if (!started.existing) announce(started.session);
     }

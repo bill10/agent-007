@@ -16,6 +16,7 @@ vi.mock('../server/account-migration.js', async original => {
   };
 });
 vi.mock('../server/claude-processes.js', () => ({ assertClaudeProcessesManaged: async () => {} }));
+vi.mock('../server/models.js', async original => ({ ...(await original()), modelsReady: async () => true, startModelRefresh: () => {} }));
 import { server, sessions, startBillion } from '../server.js';
 import { createSessionFromConfig } from '../server/pty.js';
 import { nextSessionId, CONFIG_DIR } from '../server/state.js';
@@ -103,7 +104,7 @@ describe('rotation through the owner socket', () => {
         expect(old.rotationResume).toBe(true);
       }
       expect(pendingMessages(billion.id)).toBe(queueSize);
-      expect(startBillion().error).toMatch(/Retry the paused Claude conversations/);
+      expect((await startBillion()).error).toMatch(/Retry the paused Claude conversations/);
       expect(sessions.get(billion.id)).toBe(billion);
       renameSync(hidden, executable);
       auth.activation = null;

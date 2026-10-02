@@ -33,6 +33,22 @@ describe('billionCommand on Codex', () => {
     }
   });
 
+  it('names its CLI and the model lists on every start, on both CLIs, quoted intact', () => {
+    const models = { claude: ['fable', 'opus'], codex: ['gpt-5.5', 'gpt-5.5-mini'] };
+    const starts = [{ created: true }, { created: false, codexSessionId: ID, hasConversation: true }, { created: false, handover: true }];
+    for (const agent of ['claude', 'codex']) {
+      for (const start of starts) {
+        const prompt = promptOf(billionCommand({ agent, dir, ...start, models, toolsFile: '/cfg/billion-tools.json' }));
+        expect(prompt).toContain(`You run on ${agent === 'codex' ? 'Codex' : 'Claude Code'}; a card you post without \`agent\` goes to the same CLI.`);
+        expect(prompt).toContain('Models available now: claude: fable, opus; codex: gpt-5.5, gpt-5.5-mini.');
+        expect(prompt).toMatch(/Name both `agent` and `model` on every card/);
+        const late = promptOf(billionCommand({ agent, dir, ...start, models: null, toolsFile: '/cfg/billion-tools.json' }));
+        expect(late).toContain('The model list is not ready yet; read it in /cfg/billion-tools.json');
+        expect(late).not.toContain('Models available now');
+      }
+    }
+  });
+
   it('without codex, prints how to install it', () => {
     expect(noAgentCommand('codex')).toContain(JSON.stringify(NO_CODEX_NOTICE).slice(1, 40));
   });

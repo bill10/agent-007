@@ -483,7 +483,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: 'Billion is off: turned off with BILLION=0, or user accounts are enabled' }));
             break;
           }
-          const result = startBillion();
+          const result = await startBillion();
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: 'claude', error: result.error }));
           // Already running (a second click): everyone has its tab already.
           else if (!result.existing) announceSession(result.session, ws);

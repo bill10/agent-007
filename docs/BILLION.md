@@ -38,6 +38,14 @@ Decided:
    prompt quotes the paragraphs that changed (past 40 lines, only their
    sections' names). With no saved copy yet, it quotes the charter's
    paragraphs on answering the owner in the tab rather than the terminal.
+   Every start prompt, first run, restart or handover, also says which CLI
+   Billion runs on and the models a card may name per CLI, and the charter
+   has it name both `agent` and `model` on every card. The start waits up to
+   15 s for the first model discovery; past that it starts anyway and the
+   prompt points to `billion-tools.json`, which carries the lists and is
+   rewritten whenever a refresh finds them changed. A list that changed
+   between starts makes `post_job` one of the changed tools the restart
+   prompt names.
 5. **No auto-restart** if it exits or crashes: show it stopped, with a Start button;
    start it again on the next server start.
 6. **Fixed name "Billion"**, reserved. `send_message` addresses agents by name,

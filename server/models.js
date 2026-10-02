@@ -11,7 +11,7 @@ import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { commandExists, resolveExecutable } from './command-path.js';
-import { isSafeModelName } from '../lib/jobs.js';
+import { isSafeModelName, JOB_AGENTS } from '../lib/jobs.js';
 
 // `claude --model` takes these as "the latest model of that family"
 // (claude --help names fable, opus and sonnet; haiku is in the same alias
@@ -81,17 +81,40 @@ export async function discoverModels({
 const STALE_MS = 10 * 60 * 1000;
 let cached = { claude: [], codex: [] };
 let cachedAt = 0;
+let first = null;
+const listeners = [];
+
+// Called with the new lists whenever a refresh finds them changed, so
+// whatever was written from the old ones (billion-tools.json) can be redone.
+export const onModelsChange = (fn) => { listeners.push(fn); };
 
 // cachedAt is stamped before the await so a second ask while Codex is still
 // answering does not start another run. It never rejects: callers fire and
 // forget, and a failed look keeps the last answer.
 export async function refreshModels(opts) {
   cachedAt = Date.now();
+  const before = JSON.stringify(cached);
   try { cached = await discoverModels(opts); } catch (err) { onChange(console.error)(`  Models: discovery failed: ${err?.message ?? err}`); }
+  if (JSON.stringify(cached) !== before) for (const fn of listeners) { try { fn(cached); } catch (err) { console.error('models-change:', err); } }
   return cached;
 }
 
 export function availableModels() { return cached; }
+
+// The lists as one line, the way post_job's model field and Billion's start
+// prompt both give them.
+export const describeModels = (models) =>
+  JOB_AGENTS.map(a => `${a}: ${models[a]?.length ? models[a].join(', ') : '(none found; leave empty)'}`).join('; ');
+
+// Whether the first discovery has finished, waiting at most `ms` for it:
+// Billion's start prompt names the lists, and Codex's can take seconds to
+// answer. Starts that discovery if nothing has yet.
+export function modelsReady(ms = 15_000, opts) {
+  first ??= refreshModels(opts);
+  let timer;
+  const late = new Promise(resolve => { timer = setTimeout(resolve, ms, false); });
+  return Promise.race([first.then(() => true), late]).finally(() => clearTimeout(timer));
+}
 
 // Whether a refresh changed anything, so the caller only repaints boards when it did.
 export async function refreshIfStale(now = Date.now()) {
@@ -101,6 +124,6 @@ export async function refreshIfStale(now = Date.now()) {
 }
 
 export function startModelRefresh() {
-  refreshModels();
+  first = refreshModels();
   setInterval(refreshModels, 60 * 60 * 1000).unref();
 }
