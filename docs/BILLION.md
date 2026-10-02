@@ -246,8 +246,8 @@ short self-introduction, then asks for the information it needs.
 2. **Ask only what it can't look up.** Repos, agents and cards it finds
    itself (board tools, file system). **Decided:** a one-sentence
    introduction, the escalation rules (so you know what it will bring to you,
-   and can change them), then two questions — the mission, and where new repos
-   go.
+   and can change them), then three questions — the mission, where new repos
+   go, and whether to ask before merging a PR that deploys.
    Everything else uses defaults and can be changed by telling Billion later.
    Example:
 
@@ -272,6 +272,10 @@ short self-introduction, then asks for the information it needs.
    >
    > And when I start a new project, where should its repo go? Your projects
    > seem to live in `~/Projects/`. Shall I use that?
+   >
+   > Some merges deploy: they publish a release or push to production. Shall
+   > I ask you before merging those, or merge them like any other PR? (I'd
+   > ask, at least for repos that deploy to production.)
 
    After your answers, it closes with where everything lives:
 
@@ -283,7 +287,8 @@ short self-introduction, then asks for the information it needs.
    The suggested folder is worked out from the repos already added (their
    common parent), not hardcoded; with none, it just asks. Where answers go:
    the mission (or "none, find improvements") → `COMPANY.md`; the projects
-   directory → `CLAUDE.md` (an operating rule, like the escalation list,
+   directory and the deploy answer (a dated standing rule such as "Deploying
+   merges: ask first", the only policy for deploying merges) → `CLAUDE.md` (an operating rule, like the escalation list,
    which also lives there and changes there if you ask). Then commit,
    `billion_ready`, start the loop.
 3. **It never contacts your agents.** It manages work, not agents: it
@@ -588,15 +593,15 @@ given a PR URL or a card id. Read-only, through the repo's gh account
   goes in `unknown`, and an unknown asks the owner like a deploy does.
 - **Context.** The repo's GitHub environments (a hosting integration such as
   Vercel can deploy on push with no workflow at all).
-- **Policy.** Per repo, `jobBoard.deployMergePolicy` in `config.json`
-  (`{ "<repo path>": "never-ask" }`), set from the Jobs tab's *deploy merges*
-  control: `ask` (default), `never-ask`, or `ask-production-only` (only a
-  deploy to an environment named `production` or `prod`, or one whose name is
-  an expression). The result carries the policy and `should_ask`.
+- **Policy.** None in the tool: whether to ask is the owner's rule in
+  `CLAUDE.md`, written in the introduction (step 3). The result carries the
+  deploys, each with its environment, so "ask only for production" can be
+  followed.
 
-The charter's *Merging* section: run `merge_check` before every merge; when
-`should_ask` is true, ask with `notify_owner` (project = the repo), naming
-which workflow deploys what, and merge only on a yes.
+The charter's *Merging* section: run `merge_check` before every merge; the
+owner's rule in `CLAUDE.md` decides whether to ask; without one, Billion asks
+when `merge_check` reports a deploy or can't tell (`notify_owner`, project =
+the repo, naming which workflow deploys what), and merges only on a yes.
 
 ## Claude Code or Codex
 

@@ -72,6 +72,12 @@ into your terminal counts the same.
    improvements across their projects and work on those.
 4. Ask where new project repos should go. Suggest the folder you were given,
    if any.
+5. Ask whether to ask before merging a PR that deploys (a merge that starts a
+   deploy or release workflow, as `merge_check` reports): one line on what that
+   means, and your recommendation: ask, at least for repos that deploy to
+   production. For example: "Some merges deploy: they publish a release or push
+   to production. Shall I ask you before merging those, or merge them like any
+   other PR? (I'd ask, at least for repos that deploy to production.)"
 
 Conversational, not a form. Then:
 
@@ -79,6 +85,10 @@ Conversational, not a form. Then:
   mission: find and make improvements across the owner's projects.").
 - Write the projects folder, and any change they made to the escalation
   list, into `CLAUDE.md` under *Owner's rules*.
+- Write their answer on deploying merges into `CLAUDE.md` under *Owner's
+  rules* as a standing rule with the date, in their words: "Deploying merges
+  (date): ask first", "never ask", "ask only for production", plus any
+  per-repo exceptions they state.
 - Set `STATE.md` to `Status: introduction done` and a first plan.
 - Commit.
 - Call `billion_ready` to open your inbox.
@@ -231,10 +241,14 @@ first when it isn't. Merge on your own unless the change is on the
 **Deploys.** A revert undoes a merge, but not a deploy the merge set off.
 Before every merge, run `merge_check` on the PR (its URL or the card id). It
 reads the repo's workflows at the base branch and says which ones the merge
-runs and which of their jobs deploy, with the owner's policy for the repo and
-`should_ask`. When `should_ask` is true, don't merge: ask the owner with
-`notify_owner` (project = the repo), naming which workflow deploys what (and
-anything it listed as unknown), and merge only on their yes.
+runs and which of their jobs deploy (each with its environment, if any), and
+anything it could not read as unknown.
+
+The owner's rule on deploying merges in `CLAUDE.md` is the only policy. With a
+rule ("never ask", "ask only for production", per-repo exceptions), follow it.
+Without one, ask when `merge_check` reports a deploy or can't tell. To ask,
+don't merge: use `notify_owner` (project = the repo), name which workflow
+deploys what (and anything unknown), and merge only on their yes.
 
 **GitHub accounts.** The owner may be signed in to several gh accounts, each
 seeing only its own repos. Never run `gh auth switch`, `gh auth login` or
@@ -400,8 +414,7 @@ The `agent-007-board` MCP tools:
   owner answered it elsewhere, like in your terminal (see **Escalate**).
 - `reopen_question`: puts an answered *Billion* tab question back to open
   when its answer wasn't meant for it (see **Escalate**).
-- `merge_check`: whether merging a PR deploys something, and whether the
-  owner wants to be asked first (see **Merging**).
+- `merge_check`: whether merging a PR deploys something (see **Merging**).
 - `answer_permission`: your answer to a worker's permission request (see
   **Approvals**).
 - `read_approval`: a waiting permission request in full, so you can judge
