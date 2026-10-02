@@ -417,6 +417,7 @@ describe('doctor skills', () => {
   it('a symlinked ship skill passes for each CLI, codex under its gstack-ship name', () => {
     const lines = checkSkills(probes(), codexBoard);
     expect(statuses(lines.slice(0, 2))).toEqual(['ok', 'ok']);
+    expect(lines[0].text).toMatch(/^gstack for claude: ship skill at .*ship$/);
   });
 
   it('no gstack is ✗ only for a CLI that is used for a PR card', () => {
@@ -442,6 +443,7 @@ describe('doctor skills', () => {
   it('agent-browser is ✓ or –, never ✗', () => {
     const last = (which) => checkSkills(probes({ which }), { jobs: [] }).at(-1);
     expect(last((c) => `/bin/${c}`).status).toBe('ok');
+    expect(last(() => null).text).toContain('agent-browser (recommended)');
     expect(last(() => null).status).toBe('na');
   });
 

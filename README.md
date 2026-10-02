@@ -262,7 +262,7 @@ Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, an
 
 Start with `agent-007 doctor` (`npx @bill10/agent-007 doctor`, or `npm start -- doctor` in a clone): it checks everything below and prints the fix for each problem it finds.
 
-**doctor says `no working ship skill`, or `N skills in ~/.codex/skills are broken links`.** Cards that need a pull request finish with the ship skill, which comes from [gstack](https://github.com/garrytan/gstack). Install it, or re-run its setup after moving or deleting its folder: `~/.claude/skills/gstack/setup --host claude` (or `--host codex`). doctor only reports; it never deletes a link. `agent-browser` is recommended (cards use it for screenshots of UI changes) but never required.
+**doctor says `no working ship skill`, or `N skills in ~/.codex/skills are broken links`.** **Required:** [gstack](https://github.com/garrytan/gstack), whose ship skill is how a card that needs a pull request finishes. Install it, or re-run its setup after moving or deleting its folder: `~/.claude/skills/gstack/setup --host claude` (or `--host codex`). doctor only reports; it never deletes a link. **Recommended:** `agent-browser` (cards use it for screenshots of UI changes); doctor lists it but never fails on it.
 
 **`npm install` fails building `node-pty`.** `node-pty` ships prebuilt binaries for macOS, Linux and Windows on x64 and arm64, so normally nothing compiles. Only if the install tries to build it from source and fails, install a C++ toolchain and run `npm install` again:
 
