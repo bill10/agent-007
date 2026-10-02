@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFile, spawn } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { createServer } from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -8,7 +8,7 @@ import {
   plist, systemdUnit, parseServiceFile, parseServiceState, serviceDefinition, loginShellPath, mergePath,
   checkoutDecision, waitForIdle, runCommand, capLog, formatUptime, serviceFilePath, LABEL, UNIT,
 } from '../server/service.js';
-import { readServerFile } from '../server/control.js';
+import { readServerFile, writeServerFile } from '../server/control.js';
 import { removeTempDir } from './temp-dir.js';
 
 const ROOT = process.cwd();
@@ -364,6 +364,16 @@ describe('logs', () => {
     expect(capLog(file, 10)).toBe(false);
     const none = fakeCtx({ env: { AGENT007_CONFIG_DIR: join(home, 'nope') } });
     expect(await runCommand('logs', {}, none)).toBe(1);
+  });
+});
+
+describe('server.json', () => {
+  it.skipIf(process.platform === 'win32')('is owner-only even when an older one was readable by others', () => {
+    const file = join(tmp('a007-sj-'), 'server.json');
+    writeFileSync(file, '{}', { mode: 0o644 });
+    writeServerFile({ port: 7007, host: '127.0.0.1', token: 'tok', file });
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readServerFile(file)).toMatchObject({ pid: process.pid, port: 7007, token: 'tok' });
   });
 });
 

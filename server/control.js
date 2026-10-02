@@ -21,6 +21,9 @@ export const serverFile = (env = process.env) => join(configDir(env), 'server.js
 
 export function writeServerFile({ port, host, token, service = process.env.AGENT007_SERVICE || null, file = serverFile() }) {
   mkdirSync(join(file, '..'), { recursive: true });
+  // Removed first: mode applies only to a new file, and one left by a crash
+  // (or made by hand) may be readable by others.
+  rmSync(file, { force: true });
   writeFileSync(file, JSON.stringify({ pid: process.pid, port: Number(port), host, version: VERSION, startedAt: Date.now(), service, token }, null, 2), { mode: 0o600 });
   // Only ours: a second server on another port may have written it since.
   process.on('exit', () => { if (readServerFile(file)?.pid === process.pid) rmSync(file, { force: true }); });
