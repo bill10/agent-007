@@ -300,6 +300,13 @@ short self-introduction, then asks for the information it needs.
    check: nothing goes to Billion until it calls `billion_ready`.
    - Messages (worker questions, `finish_job` notices) wait and arrive after
      the introduction. Nothing is lost.
+   - The owner's own words are the exception: chat messages, answers and
+     Telegram messages go in as usual, since the introduction is waiting for
+     them. The introduction itself is said with `tell_owner`, in the chat the
+     owner reads, not only in Billion's terminal (its tab is hidden by
+     default). Found in the fresh-install test of v0.46: the introduction sat
+     in the hidden terminal and the owner's reply in the chat waited for a
+     `billion_ready` that waited for that reply.
    - Approvals get no decision straight away while the inbox is held, so the
      dialog goes to you at once.
    Rare in practice: after a restart only the board starts workers (its
@@ -749,7 +756,20 @@ it can re-queue the ones that still matter; the round that already passed
 that day is not released on the spot (`rounds.json`: `migratedAt`, `lastAt`,
 the round on screen and its brief, a note waiting for Billion).
 
-**The tab.** The Billion tab opens on **This round**: a status line, the
+**Day one.** Until the first round comes due (or the owner starts one
+early), `notify_owner` shows a question at once, as with rounds off: a new
+install's introduction and first cycle should not wait for 08:30. Decided in
+the fresh-install test of v0.46 (2026-10-02), over two alternatives: rounds
+starting the day after install leaves an evening install with a day of
+questions at once, and exempting only the introduction leaves the first
+cycle's questions waiting. Before that first round the tab's section for them
+is *Open questions*, not *Needs you now*, and they stay open past it until
+answered (they belong to no round, so it does not consolidate them).
+
+**The tab.** The Billion tab opens on **Chat** until a round has been
+released (where a new install sees the introduction, and why a missing or
+logged-out CLI keeps Billion from starting), then on **This round**; the
+owner's own pick wins either way. This round shows a status line, the
 round's name and a counter ("3 of 7 done"), the brief, then one section per
 project with at most two cards. Each card is the question, its tap choices
 (recommended first), a reply box with Send, and *Skip* (dismiss). An answered

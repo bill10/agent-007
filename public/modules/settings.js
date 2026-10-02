@@ -48,7 +48,7 @@ export function renderTelegramSettings(state) {
   if (!box) return;
   box.hidden = false;
   const chat = state.chat;
-  const line = !state.on ? 'Off. Put a bot token from @BotFather in ~/.agent-007/.env as TELEGRAM_BOT_TOKEN and restart.'
+  const line = !state.on ? 'Off. Put a bot token from @BotFather in ~/.agent-007/.env as TELEGRAM_BOT_TOKEN (agent007 init creates that file) and restart.'
     : !chat ? 'Not connected. 1. Message your bot, or add it to your group. 2. Press "Use this chat" in the Billion tab.'
     : `Connected to ${chat.name ? `${chat.name} (chat ${chat.chatId})` : `chat ${chat.chatId}`}${chat.fromEnv ? ', set by TELEGRAM_CHAT_ID' : ''}.`;
   box.innerHTML = `<div class="settings-section-head"><h2>Telegram</h2></div><p class="settings-telegram"></p>`;

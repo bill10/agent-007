@@ -34,6 +34,7 @@ import { availableModels } from './models.js';
 import { nextCronIso, describeCron, parseCron } from '../lib/cron.js';
 import { scheduleStatus } from '../lib/schedule-status.js';
 import { commandExists, missingCommandMessage } from './command-path.js';
+import { skillHomes, skillDir } from './skills.js';
 
 // --- Board settings ---
 
@@ -135,6 +136,8 @@ export function jobsPayload() {
       agentAlive: !!(session && !session.exited),
       // Only a card that has to open a pull request cares.
       noGithubRemote: !!job.noGithubRemote && jobRequiresPr(job),
+      // The CLI that has no ship skill, when that is what stops the pull request.
+      noShipSkill: job.noShipSkill && jobRequiresPr(job) ? jobAgent(job) : null,
     };
   });
   // The .env defaults ride along, so the toolbar can show the mode workers
@@ -343,10 +346,16 @@ export function addJob({ title, detail, repoPath, type, schedule, runAt, permiss
 }
 
 // Written on the card when it is posted and again when it is dispatched, so a
-// PR job in a repo with no GitHub remote says so up front rather than after its
-// worker finishes. The job still runs. Returns the promise for tests; callers
-// don't wait on it.
-export async function noteGithubRemote(job, broadcast) {
+// PR job in a repo with no GitHub remote, or whose CLI has no ship skill to
+// open the pull request with, says so up front rather than stalling at its
+// last step. The job still runs. Returns the promise for tests; callers don't
+// wait on it.
+export async function noteGithubRemote(job, broadcast, { homes = skillHomes() } = {}) {
+  const noShip = !skillDir(homes, jobAgent(job), 'ship');
+  if (!!job.noShipSkill !== noShip) {
+    job.noShipSkill = noShip;
+    persist(broadcast);
+  }
   const has = await hasGithubRemote(job.repoPath);
   if (has === null || !allJobs().includes(job)) return;
   if (!!job.noGithubRemote === !has) return;

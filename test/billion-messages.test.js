@@ -7,7 +7,7 @@ import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
-  sendMessage, flushMessages, dropMessages, messageableAgents, pendingMessages, formatNotice, sendNotice,
+  sendMessage, flushMessages, dropMessages, messageableAgents, pendingMessages, formatNotice, sendNotice, sendText,
 } from '../server/messages.js';
 import { handleMcpMessage } from '../server/mcp.js';
 import { config, sessions } from '../server/state.js';
@@ -74,6 +74,26 @@ describe('Billion\'s inbox', () => {
     // The board's notice goes first, ahead of the agent's message.
     expect(written(b)).toContain('[Job board] card is in Review');
     expect(written(b)).not.toContain('[Message from agent Cobra');
+  });
+
+  it('lets the owner\'s words through mid-introduction, and nothing else', () => {
+    vi.useFakeTimers();
+    const worker = agent('Cobra');
+    const b = billion({ messagesHeld: true });
+    sendNotice(b, 'card is in Review', [], NOW);
+    sendMessage({ from: worker, to: BILLION_NAME, text: 'hi', sessions: mapOf(worker, b), now: NOW });
+    expect(sendText(b, '[Owner via app] Ship the CLI; repos in ~/code', NOW, { owner: true })).toBe(true);
+    // The introduction is waiting for exactly this answer.
+    expect(written(b)).toContain('[Owner via app] Ship the CLI');
+    expect(written(b)).not.toContain('[Job board]');
+    expect(pendingMessages(b.id)).toBe(2);
+    // The rest still waits for billion_ready, the board's notice first.
+    b.messagesHeld = false;
+    b.messageTyping = false;
+    b.messageDeliveredAt = 0;
+    flushMessages(b, NOW);
+    expect(written(b)).toContain('[Job board] card is in Review');
+    expect(pendingMessages(b.id)).toBe(1);
   });
 
   it('offers billion_ready to Billion only, and refuses it from anyone else', () => {
