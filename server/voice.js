@@ -156,9 +156,9 @@ export function synthesize(text, env = process.env, format = 'ogg') {
 export function whisperSetup(env = process.env) {
   const bin = (env.WHISPER_CPP_BIN || '').trim() || WHISPER_NAMES.find(n => commandExists(n, env));
   const model = (env.WHISPER_MODEL || '').trim();
-  if (!bin || !commandExists(bin, env)) return { missing: 'Voice notes need whisper.cpp on the computer running Agent 007 (brew install whisper-cpp, then WHISPER_MODEL); send text instead.' };
-  if (!model || !existsSync(model)) return { missing: 'Voice notes need a whisper.cpp model: set WHISPER_MODEL to a ggml model file (e.g. ggml-base.en.bin); send text instead.' };
-  if (!commandExists('ffmpeg', env)) return { missing: 'Voice notes need ffmpeg (brew install ffmpeg) to convert them; send text instead.' };
+  if (!bin || !commandExists(bin, env)) return { missing: 'Voice notes need whisper.cpp on the computer running Agent 007 (run `agent007 install --voice`, or brew install whisper-cpp and set WHISPER_MODEL); send text instead.' };
+  if (!model || !existsSync(model)) return { missing: 'Voice notes need a whisper.cpp model: run `agent007 install --voice`, or set WHISPER_MODEL to a ggml model file (e.g. ggml-base.en.bin); send text instead.' };
+  if (!commandExists('ffmpeg', env)) return { missing: 'Voice notes need ffmpeg (`agent007 install --voice`, or brew install ffmpeg) to convert them; send text instead.' };
   return { bin, model };
 }
 
