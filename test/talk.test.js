@@ -145,10 +145,12 @@ describe('echo', () => {
     expect((await voiceSays('No, what about the phone app?', { utterance: id(10), echoOf: reply.id, env: ENV })).id).toEqual(expect.any(String));
   });
 
-  it('looksLikeEcho needs three words, mostly the reply\'s', () => {
-    expect(looksLikeEcho('the background service', 'We shipped the background service.')).toBe(true);
+  it('looksLikeEcho needs six of the reply\'s words in a row, so a confirmation said back is the owner\'s', () => {
+    const said = 'Shall I merge PR 196 now? It is green and reviewed.';
+    expect(looksLikeEcho('merge PR 196 now', said)).toBe(false);
+    expect(looksLikeEcho('yes merge PR 196 now please', said)).toBe(false);
+    expect(looksLikeEcho('I merge PR 196 now it is green', said)).toBe(true);
     expect(looksLikeEcho('wait stop', 'wait, stop, we shipped it')).toBe(false);
-    expect(looksLikeEcho('what about the phone app', 'We shipped the background service.')).toBe(false);
   });
 });
 
@@ -165,11 +167,24 @@ describe('reply_to', () => {
     expect(chatMessages().at(-1).replyTo).toBe(typedTurn.id);
   });
 
-  it('naming no waiting message falls back to the oldest, and says so', async () => {
-    const typedTurn = await ownerSays('typed', { env: {} });
-    const result = await tellOwner('Hm.', { env: {}, now: now(), replyTo: 'deadbeef' });
-    expect(result.note).toMatch(/matched no message waiting/);
+  it('naming no waiting message (a follow-up to a turn already answered) binds to nothing, and says so', async () => {
+    const first = await voiceSays('First question here', { utterance: id(31), env: ENV });
+    const second = await voiceSays('Second question here', { utterance: id(32), env: ENV });
+    await tellOwner('First answer.', { env: {}, now: now(), replyTo: first.id.slice(0, 8) });
+    const result = await tellOwner('More on the first.', { env: {}, now: now(), replyTo: first.id.slice(0, 8) });
+    expect(result.note).toMatch(/answers none of them/);
+    expect(chatMessages().at(-1).replyTo).toBeUndefined();
+    expect(chatMessages().find(m => m.replyTo === second.id)).toBeUndefined();
+    expect((await tellOwner('Short id.', { env: {}, now: now(), replyTo: second.id.slice(0, 4) })).note).toMatch(/answers none/);
+  });
+
+  it('without reply_to, a typed message waiting is answered before a voice turn, so a notice is never read out as its answer', async () => {
+    const voice = await voiceSays('Spoken question', { utterance: id(33), env: ENV });
+    const typedTurn = await ownerSays('typed after it', { env: {} });
+    await tellOwner('Job 12 is done.', { env: {}, now: now() });
     expect(chatMessages().at(-1).replyTo).toBe(typedTurn.id);
+    await tellOwner('Answer, from a Billion that never passes reply_to.', { env: {}, now: now() });
+    expect(chatMessages().at(-1).replyTo).toBe(voice.id);
   });
 });
 

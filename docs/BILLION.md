@@ -1055,17 +1055,21 @@ usual.
 - **Only its own replies are spoken**: each turn is a message of its own,
   typed into Billion as `[Owner via app, voice #3f9a0c1e] ...`, and Billion
   answers it with `tell_owner` and `reply_to: "3f9a0c1e"`, which binds the
-  reply to that turn even when older messages are still waiting (without
-  `reply_to`, a reply answers the oldest waiting message, as before). Only the
-  reply bound to the turn is read out, a sentence or two at a time. Replies to what you typed or sent from Telegram appear in the thread
+  reply to that turn even when older messages are still waiting. A `reply_to`
+  that names no waiting message binds to none; without `reply_to`, a reply
+  answers the oldest waiting typed or Telegram message, then the oldest voice
+  turn. Only the reply bound to the turn is read out, a sentence or two at a
+  time. Replies to what you typed or sent from Telegram appear in the thread
   but are not spoken; questions, status lines and terminal output never are.
   The charter asks Billion to keep replies to voice turns short.
 - **Interrupting**: start talking while Billion speaks, or tap **Stop
   speaking**, and it stops at once; the rest of that reply is dropped (it is
   still in the thread). Stopping the voice never stops Billion's work.
 - **Echo**: the microphone runs with echo cancellation, the detector needs
-  louder speech to interrupt while Billion talks, and an utterance that is
-  mostly the words Billion was just saying is dropped, not sent.
+  louder speech to interrupt while Billion talks, and an utterance that
+  repeats six or more words of the reply that was playing, in order, is
+  dropped as Billion's own voice (the bar says so; say it again if it was
+  you). A shorter repeat, like "merge PR 196 now", is yours.
 - **Once each**: every utterance carries an id, and the server sends an id to
   Billion once, so a retry after a dropped connection never makes a second
   message. Voice turns are always messages to Billion, never "start the

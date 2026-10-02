@@ -331,6 +331,7 @@ server/
   account-migration.js  Platform credential stores, selective account writes and legacy rollback
   claude-rotation-sessions.js  Resume exact conversations after a shared login switch
   claude-processes.js  Detect Claude processes outside the app before a login switch
+  talk.js          Talk to Billion: an utterance's audio transcribed (whisper.cpp) and sent once, a voice reply spoken (say), /api/talk routes
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
@@ -352,6 +353,7 @@ public/
     jobs.js        Job board UI (columns, cards, the job form)
     waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box, its mic, pasted/dropped files)
     readaloud.js   Read aloud in the Billion tab (speechSynthesis: a speaker button per message, read new messages aloud)
+    talk.js        Talk to Billion: hands-free voice turns in the Billion tab (VAD, utterance upload, spoken replies)
     ws.js          WebSocket client with auto-reload on reconnect
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts

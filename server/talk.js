@@ -51,15 +51,24 @@ export function talkSetup(env = process.env, platform = process.platform) {
 }
 
 const words = (text) => String(text ?? '').toLowerCase().match(/[\p{L}\p{N}']+/gu) || [];
+export const ECHO_RUN_WORDS = 6;
 
-// Billion's own reply picked up by the mic: most of what was heard is words
-// it was just saying. Two words or fewer always count as the owner ("stop",
-// "wait"), so a barge-in is never mistaken for an echo.
+// Billion's own reply picked up by the mic: what was heard holds a run of at
+// least six of the reply's words in its order. Shorter echoes ("merge PR 196
+// now" said back to confirm) count as the owner: losing a real turn is worse
+// than Billion answering a stray fragment of itself.
 export function looksLikeEcho(heard, spoken) {
-  const said = new Set(words(spoken));
-  const got = words(heard);
-  if (got.length < 3 || !said.size) return false;
-  return got.filter(w => said.has(w)).length / got.length >= 0.8;
+  const said = words(spoken), got = words(heard);
+  let best = 0;
+  // ponytail: O(n·m) longest common run; both are a few hundred words at most.
+  for (let i = 0; i < got.length; i++) {
+    for (let j = 0; j < said.length; j++) {
+      let n = 0;
+      while (got[i + n] !== undefined && got[i + n] === said[j + n]) n++;
+      if (n > best) best = n;
+    }
+  }
+  return best >= ECHO_RUN_WORDS;
 }
 
 // The reply a voice turn may hear: Billion's tell_owner answer bound to an
@@ -100,6 +109,7 @@ export function voiceUtterance(audio, { utterance, echoOf, broadcast, env = proc
   const setup = whisperSetup(env);
   if (setup.missing) return Promise.resolve({ error: talkSetup(env).sttMissing, noWhisper: true });
   if (!allow('utterance', UTTERANCE_LIMIT, now)) return Promise.resolve({ error: 'Too many utterances this minute; wait a moment.' });
+  // Never rejects: the route awaits it, and Express 4 would not catch a rejection.
   const job = (async () => {
     const started = Date.now();
     let transcript;
@@ -108,8 +118,12 @@ export function voiceUtterance(audio, { utterance, echoOf, broadcast, env = proc
       return { error: 'Could not transcribe that; say it again.' };
     }
     const transcribeMs = Date.now() - started;
-    const result = await voiceSays(transcript, { utterance, echoOf, broadcast, env });
-    return { ...result, transcript, transcribeMs };
+    try {
+      return { ...await voiceSays(transcript, { utterance, echoOf, broadcast, env }), transcript, transcribeMs };
+    } catch (err) {
+      console.error('Talk: could not send an utterance:', err.message);
+      return { error: 'Could not send that to Billion; say it again.' };
+    }
   })().finally(() => inflight.delete(utterance));
   inflight.set(utterance, job);
   return job;

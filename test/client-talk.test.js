@@ -218,6 +218,81 @@ describe('a turn', () => {
   });
 });
 
+describe('races', () => {
+  it('End then Talk while the first start still waits leaves exactly one detector, and End stops it', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    routes['/api/talk'] = () => gate.then(() => response({ stt: 'whisper', tts: 'say' }));
+    const made = [];
+    window.vad.MicVAD.new = vi.fn(async (opts) => { vadOpts = opts; const v = { ...fakeVad, start: vi.fn(async () => {}), destroy: vi.fn(async () => {}) }; made.push(v); return v; });
+    const first = startTalk();
+    endTalk();
+    const second = startTalk();
+    release();
+    await Promise.all([first, second]);
+    await flush();
+    expect(made).toHaveLength(1);
+    expect(stateWord()).toBe('listening');
+    endTalk();
+    expect(made[0].destroy).toHaveBeenCalled();
+  });
+
+  it('an utterance dropped as Billion\'s own voice says so', async () => {
+    await talking();
+    routes['/api/talk/utterance'] = () => response({ ok: true, echo: true });
+    await utterance();
+    expect(bar().querySelector('.talk-detail').textContent).toMatch(/Billion's own voice/);
+    expect(_talkInternals().awaiting).toEqual([]);
+  });
+});
+
+describe('the page going away and coming back', () => {
+  const setHidden = (value) => {
+    Object.defineProperty(document, 'hidden', { value, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  };
+  afterEach(() => Object.defineProperty(document, 'hidden', { value: false, configurable: true }));
+
+  it('a hidden tab stops the mic and the voice, and the reply plays again when it is back', async () => {
+    await talking();
+    await utterance();
+    talkHeard(reply('r1', 'm1'));
+    await flush();
+    expect(played).toEqual(['r1#0']);
+    setHidden(true);
+    await flush();
+    expect(theAudio.paused).toBe(true);
+    expect(fakeVad.pause).toHaveBeenCalled();
+    expect(stateWord()).toBe('paused');
+    setHidden(false);
+    await flush();
+    expect(played).toEqual(['r1#0', 'r1#0']);
+  });
+
+  it('after a reload, Resume talking speaks a reply to a turn from before, without showing it as thinking', async () => {
+    sessionStorage.setItem('agent007-talk', JSON.stringify({ on: true, awaiting: ['m9'], spoken: [] }));
+    vi.resetModules();
+    const fresh = await import('../public/modules/talk.js');
+    const state = await import('../public/modules/state.js');
+    document.body.innerHTML = '';
+    document.body.append(fresh.talkBar());
+    await flush();
+    expect(bar().querySelector('.talk-start').textContent).toBe('Resume talking');
+    state.setChatMessages([reply('r9', 'm9', 'Late answer.')]);
+    await fresh.startTalk();
+    await flush();
+    expect(requests.some(r => r.url === '/api/talk/audio/r9/0')).toBe(true);
+    theAudio.end();
+    await flush();
+    theAudio.end();
+    await flush();
+    expect(stateWord()).toBe('listening');
+    expect(requests.some(r => r.url.includes('/api/talk/utterance'))).toBe(false);
+    fresh._resetTalk();
+    sessionStorage.clear();
+  });
+});
+
 describe('where it cannot run', () => {
   it('says so without a microphone API or outside a secure context', async () => {
     Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true });

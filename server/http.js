@@ -335,7 +335,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   // The browser's own transcript, when whisper.cpp is not set up.
   app.post('/api/talk/text', talkGate, async (req, res) => {
     const { utterance, text, echoOf } = req.body || {};
-    const result = await voiceSays(text, { utterance, echoOf, broadcast });
+    const result = await voiceSays(text, { utterance, echoOf, broadcast })
+      .catch(err => ({ error: `Could not send that to Billion: ${err.message}` }));
     res.status(result.error ? 400 : 200).json(result);
   });
   // One spoken piece of a voice reply (or the "still working" cue, id "cue").

@@ -92,6 +92,7 @@ let vad = null;
 let rec = null;
 let uploads = 0;
 let playing = null;       // id of the reply being spoken, 'cue' for the working cue
+let playingReply = null;  // that reply's message, to play again after a hidden tab
 let playGen = 0;
 let stopPlay = null;      // ends the piece playing now
 let fetches = null;       // AbortController for the pieces being fetched
@@ -101,6 +102,8 @@ let note = '';
 let noteLink = false;
 let audioEl = null;
 let audioCtx = null;      // the detector's, made inside the tap so iOS lets it run
+let silentUrl = null;     // a silent clip, played inside the tap to unlock audioEl
+let startGen = 0;         // bumped by every start and End: a start that awaited past one gives up
 let idleTimer = null;
 let cueTimer = null;
 let resumable = false;
@@ -233,6 +236,8 @@ export async function startTalk() {
   if (!navigator.mediaDevices?.getUserMedia) return setNote('This browser has no microphone API, so it cannot talk to Billion.');
   stopVoice();
   stopReading();
+  const gen = ++startGen;
+  const current = () => on && gen === startGen;
   on = true;
   starting = true;
   resumable = false;
@@ -242,21 +247,25 @@ export async function startTalk() {
   paint();
   let setup;
   try { setup = await serverSetup(); } catch (err) {
-    return failStart(`Could not start: ${err.message}`);
+    return current() && failStart(`Could not start: ${err.message}`);
   }
-  if (!on) return;
+  if (!current()) return;
   tts = setup.tts === 'say' ? 'say' : 'browser';
   if (tts === 'browser' && !window.speechSynthesis) return failStart(`Billion cannot speak here: ${setup.ttsMissing}, and this browser has no speech synthesis.`);
   if (setup.stt === 'whisper') {
     try {
-      await startVad();
+      await startVad(current);
+      if (!current()) return;
       mode = 'whisper';
       starting = false;
       if (tts === 'browser') note = `Replies are spoken by this browser: ${setup.ttsMissing}.`;
       return ready();
     } catch (err) {
       console.warn('[talk] voice detector failed:', err);
-      if (!on) return;
+      if (!current()) return;
+      const v = vad;
+      vad = null;
+      v?.destroy?.().catch?.(() => {});
       if (/NotAllowed|Permission|denied/i.test(`${err?.name} ${err?.message}`)) return failStart('Microphone access denied — allow it in your browser settings, then tap Talk to Billion again.');
       if (!recognitionCtor()) return failStart('The voice detector could not start in this browser.');
     }
@@ -283,6 +292,7 @@ function failStart(text, link = false) {
 export function endTalk({ keepNote = false, notice } = {}) {
   const wasOn = on;
   on = false;
+  startGen++;
   starting = false;
   consent = false;
   muted = false;
@@ -311,7 +321,8 @@ function unlockAudio() {
     audioEl.preload = 'auto';
   }
   try {
-    audioEl.src = URL.createObjectURL(new Blob([encodeWav(new Float32Array(160))], { type: 'audio/wav' }));
+    silentUrl ??= URL.createObjectURL(new Blob([encodeWav(new Float32Array(160))], { type: 'audio/wav' }));
+    audioEl.src = silentUrl;
     audioEl.play().catch(() => {});
   } catch {}
   try { window.speechSynthesis?.resume(); } catch {}
@@ -339,7 +350,8 @@ function loadScript(src) {
   });
 }
 
-async function startVad() {
+// current: false once End (or another start) came while this one awaited.
+async function startVad(current) {
   if (!window.ort) await loadScript('/vendor/ort/ort.wasm.min.js');
   if (!window.vad) await loadScript('/vendor/vad/bundle.min.js');
   const v = await window.vad.MicVAD.new({
@@ -370,9 +382,11 @@ async function startVad() {
       sendAudio(audio);
     },
   });
-  if (!on) { v.destroy(); return; }
+  if (!current()) { v.destroy().catch(() => {}); return; }
   vad = v;
-  if (!muted && !hidden) await vad.start();
+  if (!muted && !hidden) await v.start();
+  // End came while the mic was being granted: this detector is not ours any more.
+  if (!current() && vad !== v) v.destroy().catch(() => {});
 }
 
 function startMic() {
@@ -497,7 +511,7 @@ async function submitted(request, ended) {
     setNote(result.empty ? '' : result.error);
     return;
   }
-  if (result.echo) return paint();
+  if (result.echo) return setNote('That sounded like Billion\'s own voice, so it was not sent. Say it again if it was you.');
   note = '';
   awaiting.add(result.id);
   save();
@@ -537,6 +551,7 @@ export function talkStatus(msg) {
 
 function playNext() {
   const m = replyQueue.shift();
+  playingReply = m || null;
   if (m) speak(m.id, m.text, m.replyTo);
   else afterSpeech();
 }
@@ -677,7 +692,7 @@ if (typeof document !== 'undefined') {
     hidden = document.hidden;
     if (hidden) {
       stopMic();
-      const current = playing !== 'cue' && chatMessages.find(x => x.id === playing);
+      const current = playing && playing !== 'cue' ? playingReply : null;
       const kept = replyQueue;
       interrupt();
       replyQueue = current ? [current, ...kept] : kept;

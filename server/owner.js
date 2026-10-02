@@ -817,7 +817,7 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
   const workDetails = replyTo ? pendingOwnerMessages().find(m => m.id === replyTo)?.workDetails : null;
   addChat({ from: 'billion', text: body, ...(notice ? { notice: true } : {}), ...(replyTo ? { replyTo, ...(workDetails?.length ? { workDetails } : {}) } : {}) }, broadcast, env);
   publishStatus(broadcast);
-  const missed = bound.missed ? { note: `reply_to "${named}" matched no message waiting for a reply, so this answered the oldest one.` } : {};
+  const missed = bound.missed ? { note: `reply_to "${named}" matched no message waiting for a reply, so this answers none of them.` } : {};
   const { token, chatId } = telegramSettings(env);
   if (!token || !chatId) return { ok: true, telegram: false, ...missed };
   if (ownerChannel === 'app') return { ok: true, telegram: false, tabOnly: true, ...missed };

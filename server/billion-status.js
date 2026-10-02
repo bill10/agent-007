@@ -32,16 +32,21 @@ export function setBillionStatus(text, now = Date.now()) {
 }
 
 // A tell_owner answers the owner request it names (reply_to: the short id a
-// voice turn carries, or any longer prefix of a message id), else the oldest
-// unanswered one, even after the activity indicator has timed out. The
-// reply's persisted replyTo closes it. { id, missed } (missed: reply_to named
-// no waiting message, so the oldest was taken).
+// voice turn carries, or any longer prefix of a message id), even after the
+// activity indicator has timed out. The reply's persisted replyTo closes it.
+// A reply_to that names no waiting message binds to nothing (a follow-up to a
+// turn already answered must not become the next turn's spoken answer). With
+// no reply_to, the oldest waiting typed or Telegram message, else the oldest
+// voice turn (a Billion that does not pass reply_to). { id, missed }.
 export const SHORT_ID_CHARS = 8;
 export function billionReplied(replyTo) {
   const pending = pendingOwnerMessages();
   const wanted = typeof replyTo === 'string' ? replyTo.trim().replace(/^#/, '') : '';
-  const named = wanted.length >= SHORT_ID_CHARS && pending.find(m => m.id.startsWith(wanted));
-  return { id: (named || pending[0])?.id ?? null, missed: !!wanted && !named };
+  if (wanted) {
+    const named = wanted.length >= SHORT_ID_CHARS && pending.find(m => m.id.startsWith(wanted));
+    return named ? { id: named.id, missed: false } : { id: null, missed: true };
+  }
+  return { id: (pending.find(m => !m.voice) || pending[0])?.id ?? null, missed: false };
 }
 
 export function statusPayload(now = Date.now()) {
