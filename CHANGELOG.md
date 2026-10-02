@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.45.0.0] - 2026-10-02
+
+### Added
+
+- **`agent-007 doctor` checks the ship skill for each CLI.** A card that needs a pull request finishes with gstack's ship skill; doctor now says ✗ (with the gstack setup command) when Billion or such a card uses `claude` or `codex` and no working ship skill is installed, and reports skill links in `~/.claude/skills` and `~/.codex/skills` that point nowhere. `agent-browser` is listed as recommended, never ✗. The start's quick check includes both.
+
 ## [0.44.0.0] - 2026-10-02
 
 ### Changed
