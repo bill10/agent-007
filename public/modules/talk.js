@@ -22,12 +22,10 @@ const HEADERS = { 'X-Agent007-Talk': '1' };
 const SETUP_DOCS = 'https://github.com/bill10/agent-007/blob/main/docs/BILLION.md#voice';
 const STORE_KEY = 'agent007-talk';              // sessionStorage: survives the reload a reconnect does
 const CONSENT_KEY = 'agent007-talk-browser-stt'; // localStorage: the one-time notice was accepted
-export const WORKING_CUE_MS = 20 * 1000;
 export const IDLE_END_MS = 10 * 60 * 1000;
-// Progress updates while a turn waits: none in its first seconds (a fast
-// answer needs no filler), then at most one per gap, never the same twice.
-export const PROGRESS_QUIET_MS = 3 * 1000;
-export const PROGRESS_GAP_MS = 9 * 1000;
+// Progress updates while a turn waits: the first after a short quiet, then
+// each new status line as soon as nothing else is playing, never the same twice.
+export const PROGRESS_QUIET_MS = 800;
 const RETRY_FOR_MS = 2 * 60 * 1000;
 const SAMPLE_RATE = 16000;
 // The detector's bar for speech: higher while Billion talks, so what is left
@@ -60,10 +58,10 @@ export const shouldSpeak = (m, awaiting, spoken) =>
 
 // How long until this progress phrase may be spoken (0: now), or null when
 // it never should: nothing to say, or what was said last.
-// p: { since: when the turn was sent, at: when the last update was spoken, said }.
+// p: { since: when the turn was sent, said }.
 export function progressWait(phrase, p, now) {
   if (!phrase || phrase === p.said) return null;
-  return Math.max(0, p.since + PROGRESS_QUIET_MS - now, p.at + PROGRESS_GAP_MS - now);
+  return Math.max(0, p.since + PROGRESS_QUIET_MS - now);
 }
 
 // The one word the bar shows, from what is going on.
@@ -103,7 +101,7 @@ let tts = 'say';          // 'say' (server) or 'browser' (speechSynthesis)
 let vad = null;
 let rec = null;
 let uploads = 0;
-let playing = null;       // id of the reply being spoken, 'cue' for the working cue, 'status' for a progress update
+let playing = null;       // id of the reply being spoken, 'status' for a progress update
 let playingReply = null;  // that reply's message, to play again after a hidden tab
 let playGen = 0;
 let stopPlay = null;      // ends the piece playing now
@@ -118,9 +116,8 @@ let audioCtx = null;      // the detector's, made inside the tap so iOS lets it 
 let silentUrl = null;     // a silent clip, played inside the tap to unlock audioEl
 let startGen = 0;         // bumped by every start and End: a start that awaited past one gives up
 let idleTimer = null;
-let cueTimer = null;
 let progressTimer = null;
-let progress = { since: 0, at: -Infinity, said: '' };
+let progress = { since: 0, said: '' };
 let resumable = false;
 let startedAt = 0;
 let clockTimer = null;
@@ -128,12 +125,12 @@ let clockTimer = null;
 const awaiting = new Set();
 const spoken = new Set();
 // Turns from before a reload: their reply is still spoken if it comes, but
-// they show no "Thinking…" and get no cue (a turn cut off by a server
+// they show no "Thinking…" (a turn cut off by a server
 // restart may never be answered; it waits in the thread).
 const restored = new Set();
 const thinkingFor = () => [...awaiting].filter(id => !restored.has(id)).length;
-// The cue and progress updates: never a reply, so never an echo to report.
-const filler = (id) => id === 'cue' || id === 'status';
+// Progress updates: never a reply, so never an echo to report.
+const filler = (id) => id === 'status';
 const marks = new Map();  // message id → latency marks
 
 const restore = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch { return null; } };
@@ -379,7 +376,6 @@ export function endTalk({ keepNote = false, notice } = {}) {
   hearing = false;
   interrupt();
   clearTimeout(idleTimer);
-  clearTimeout(cueTimer);
   clearTimeout(progressTimer);
   const v = vad;
   vad = null;
@@ -601,10 +597,8 @@ async function submitted(request, ended) {
   awaiting.add(result.id);
   save();
   marks.set(result.id, { ended, submitted: performance.now(), transcribeMs: result.transcribeMs });
-  clearTimeout(cueTimer);
-  cueTimer = setTimeout(workingCue, WORKING_CUE_MS);
   // Only a status line that changes from here on is news for this turn.
-  progress = { since: Date.now(), at: progress.at, said: progressPhrase(billionStatus) };
+  progress = { since: Date.now(), said: progressPhrase(billionStatus) };
   clearTimeout(progressTimer);
   progressTimer = setTimeout(sayProgress, PROGRESS_QUIET_MS);
   // A fast reply can beat this answer to the page.
@@ -622,7 +616,7 @@ export function talkHeard(m) {
   save();
   const mark = marks.get(m.replyTo);
   if (mark) mark.reply = performance.now();
-  if (!thinkingFor()) { clearTimeout(cueTimer); clearTimeout(progressTimer); }
+  if (!thinkingFor()) clearTimeout(progressTimer);
   // A progress update gives way to the answer at once.
   if (filler(playing)) interrupt();
   replyQueue.push(m);
@@ -653,15 +647,12 @@ function afterSpeech() {
   if (!playing) vad?.setOptions({ positiveSpeechThreshold: SPEECH_THRESHOLD });
   paint();
   if (on && !playing) startMic();
-}
-
-function workingCue() {
-  if (!on || !thinkingFor() || playing || hidden || hearing) return;
-  speak('cue', 'Still working on it.');
+  if (!playing) sayProgress();
 }
 
 // A short spoken update when Billion's status line changes while a turn
-// waits, only when nothing else is playing; too soon, it waits its turn.
+// waits, as soon as nothing else is playing. Several changes while one was
+// spoken: only the newest is said next.
 function sayProgress() {
   clearTimeout(progressTimer);
   if (!on || !thinkingFor() || hidden) return;
@@ -669,13 +660,10 @@ function sayProgress() {
   const wait = progressWait(phrase, progress, Date.now());
   if (wait === null) return;
   if (wait > 0 || playing || uploads || hearing) {
-    progressTimer = setTimeout(sayProgress, wait || 1000);
+    progressTimer = setTimeout(sayProgress, wait || 250);
     return;
   }
-  progress = { ...progress, at: Date.now(), said: phrase };
-  // It says Billion is working, so the cue waits a full stretch again.
-  clearTimeout(cueTimer);
-  cueTimer = setTimeout(workingCue, WORKING_CUE_MS);
+  progress = { ...progress, said: phrase };
   speak('status', phrase);
 }
 

@@ -157,7 +157,7 @@ describe('the status line', () => {
       .toMatch(/^Working: reviewing PR #120 · 3 workers running · next round \d{1,2}:30 (am|pm)$/);
     expect(statusLine({ running: true, working: true, workers: 1 }, { on: true }, now)).toBe('Thinking… · 1 worker running');
     expect(statusLine({ running: true, working: false }, { on: false }, now)).toBe('Idle');
-    expect(statusLine({ running: true, working: false, awaitingReply: true, text: 'x' }, {}, now)).toBe('Waiting for Billion to reply…');
+    expect(statusLine({ running: true, working: false, awaitingReply: true, text: 'x' }, {}, now)).toBe('Replying shortly…');
     expect(statusLine({ running: false }, {}, now)).toBe('Billion is not running');
   });
 
@@ -172,7 +172,7 @@ describe('the status line', () => {
     expect(line.querySelector('.billion-status-dot')).toBe(dot);
     setBillionStatus({ running: true, working: false, awaitingReply: true, pending: ['m1'] });
     renderBillionStatus();
-    expect([line.dataset.mood, line.textContent]).toEqual(['idle', 'Waiting for Billion to reply…']);
+    expect([line.dataset.mood, line.textContent]).toEqual(['idle', 'Replying shortly…']);
   });
 });
 
@@ -241,7 +241,7 @@ describe('the progress box', () => {
     expect(row('notice').textContent).toContain('System update');
     expect(row('m1').textContent).toContain('Checking first');
     expect(row('m2').textContent).not.toContain('Checking first');
-    expect(row('m2').textContent).toContain('Waiting for the earlier reply');
+    expect(row('m2').textContent).toContain('Answering your earlier message first');
     expect(document.body.textContent).not.toContain('SECRET_RAW_TOOL_OUTPUT');
     expect(document.querySelectorAll('.chat-progress.active')).toHaveLength(1);
     setChatMessages([owner('m1'), owner('m2'), { id: 'a1', from: 'billion', text: 'First answer', replyTo: 'm1' }]);
@@ -258,7 +258,7 @@ describe('the progress box', () => {
     setBillionStatus({ running: true, working: true, pending: ['m2'], currentRequest: 'm1', progress: { m1: ['Checking first'], m2: [] } });
     renderWaiting();
     expect(row('m1').querySelector('.chat-progress')).toBeNull();
-    expect(row('m2').textContent).toContain('Waiting for the earlier reply');
+    expect(row('m2').textContent).toContain('Answering your earlier message first');
     expect(document.querySelector('.chat-progress.active')).toBeNull();
   });
 

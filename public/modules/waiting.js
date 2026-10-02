@@ -339,7 +339,7 @@ function progressBox(m, first) {
   box.setAttribute('role', 'status');
   box.setAttribute('aria-live', 'polite');
   box.classList.toggle('active', first && !!s?.working);
-  box.append(el('p', 'chat-progress-head', first && s?.working ? 'Billion is working on your message…' : first ? 'Waiting for Billion…' : 'Waiting for the earlier reply…'));
+  box.append(el('p', 'chat-progress-head', first && s?.working ? 'Working on your message…' : first ? 'Starting on your message…' : 'Answering your earlier message first…'));
   const lines = (s?.progress?.[m.id] || m.workDetails || []).filter(line => typeof line === 'string' && line.trim());
   const list = el('ul', 'chat-progress-steps');
   for (const line of lines.length ? lines : [first && s?.working ? 'Working…' : 'Waiting to start…']) list.append(el('li', null, line));

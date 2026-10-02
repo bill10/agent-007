@@ -339,7 +339,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       .catch(err => ({ error: `Could not send that to Billion: ${err.message}` }));
     res.status(result.error ? 400 : 200).json(result);
   });
-  // One spoken piece of a voice reply (or the "still working" cue, id "cue").
+  // One spoken piece of a voice reply.
   app.get('/api/talk/audio/:id/:index', talkGate, async (req, res) => {
     const result = await voiceAudio(req.params.id, Number(req.params.index));
     if (result.error) return res.status(result.status).json({ error: result.error });

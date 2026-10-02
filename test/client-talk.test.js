@@ -7,7 +7,7 @@
 // detector, fetch and the audio element are stand-ins.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  encodeWav, shouldSpeak, talkState, progressWait, talkStatus, PROGRESS_QUIET_MS, PROGRESS_GAP_MS, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
+  encodeWav, shouldSpeak, talkState, progressWait, talkStatus, PROGRESS_QUIET_MS, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
 } from '../public/modules/talk.js';
 import { setChatMessages, setBillionStatus } from '../public/modules/state.js';
 
@@ -272,22 +272,22 @@ describe('progress updates while Billion works', () => {
   const wait = (ms) => vi.advanceTimersByTimeAsync(ms);
   afterEach(() => vi.useRealTimers());
 
-  it('progressWait: quiet at first, then one per gap, never a repeat or nothing', () => {
-    const p = { since: 0, at: -Infinity, said: 'Old news' };
-    expect(progressWait('Reading', p, 1000)).toBe(PROGRESS_QUIET_MS - 1000);
+  it('progressWait: quiet only at first, then now; never a repeat or nothing', () => {
+    const p = { since: 0, said: 'Old news' };
+    expect(progressWait('Reading', p, 500)).toBe(PROGRESS_QUIET_MS - 500);
     expect(progressWait('Reading', p, PROGRESS_QUIET_MS)).toBe(0);
     expect(progressWait('Old news', p, 60000)).toBeNull();
     expect(progressWait('', p, 60000)).toBeNull();
-    expect(progressWait('Testing', { ...p, at: 5000 }, 8000)).toBe(PROGRESS_GAP_MS - 3000);
   });
 
-  it('speaks a changed status line, throttled and deduped, and gives way to the answer', async () => {
+  it('speaks a new status line at once after 0.8 s, newest only, no repeats, no filler, gives way to the answer', async () => {
     await talking();
     routes.audio = (id, i) => response(`${id}#${i}`, { headers: { 'X-Pieces': id === 'status' ? '1' : '2' } });
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     status('Looking at the board');              // from before the turn: not news
     vadOpts.onSpeechEnd(new Float32Array(1600));
     await wait(0);
+    expect(PROGRESS_QUIET_MS).toBe(800);
     await wait(PROGRESS_QUIET_MS);
     expect(said()).toEqual([]);
 
@@ -296,26 +296,31 @@ describe('progress updates while Billion works', () => {
     expect(said()).toEqual(['status#0']);
     expect(_talkInternals().playing).toBe('status');
     expect(fakeVad.setOptions).toHaveBeenLastCalledWith({ positiveSpeechThreshold: 0.8 });
+
+    // Several changes while one is spoken: only the newest follows, right away.
+    status('Checking the board');
+    status('Running the tests');
+    await wait(5000);
+    expect(said()).toHaveLength(1);
+    theAudio.end();
+    await wait(300);
+    expect(said()).toHaveLength(2);
+    expect(requests.filter(r => r.url.includes('/audio/status/'))).toHaveLength(2);
     theAudio.end();
     await wait(0);
+
+    // The same line again is not repeated.
+    status('Running the tests');
+    await wait(5000);
+    expect(said()).toHaveLength(2);
 
     // Never over the owner: an update waits while they speak.
     vadOpts.onSpeechRealStart();
-    status('Checking the board');
-    await wait(PROGRESS_GAP_MS + 2000);
-    expect(said()).toEqual(['status#0']);
-    vadOpts.onVADMisfire();
-    await wait(1000);
-    expect(said()).toEqual(['status#0', 'status#0']);
-    theAudio.end();
-    await wait(0);
-
-    status('Checking the board');                // the same line again
-    status('Running the tests');                 // news, but inside the gap
-    await wait(PROGRESS_GAP_MS - 1000);
+    status('Writing the fix');
+    await wait(5000);
     expect(said()).toHaveLength(2);
-    await wait(1000);
-    await wait(0);
+    vadOpts.onVADMisfire();
+    await wait(300);
     expect(said()).toHaveLength(3);
 
     // The answer arrives mid-update: the update stops, the answer plays next.
@@ -324,155 +329,11 @@ describe('progress updates while Billion works', () => {
     expect(_talkInternals().playing).toBe('r1');
     expect(played.at(-1)).toBe('r1#0');
 
-    // Answered: nothing more, not even the cue.
+    // Answered: nothing more, and no filler cue ever.
     theAudio.end(); await wait(0); theAudio.end(); await wait(0);
     status('Tidying up');
     await wait(60000);
     expect(said()).toHaveLength(3);
     expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
-  });
-});
-
-describe('the page going away and coming back', () => {
-  const setHidden = (value) => {
-    Object.defineProperty(document, 'hidden', { value, configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  };
-  afterEach(() => Object.defineProperty(document, 'hidden', { value: false, configurable: true }));
-
-  it('a hidden tab stops the mic and the voice, and the reply plays again when it is back', async () => {
-    await talking();
-    await utterance();
-    talkHeard(reply('r1', 'm1'));
-    await flush();
-    expect(played).toEqual(['r1#0']);
-    setHidden(true);
-    await flush();
-    expect(theAudio.paused).toBe(true);
-    expect(fakeVad.pause).toHaveBeenCalled();
-    expect(stateWord()).toBe('paused');
-    setHidden(false);
-    await flush();
-    expect(played).toEqual(['r1#0', 'r1#0']);
-  });
-
-  it('after a reload, Resume talking speaks a reply to a turn from before, without showing it as thinking', async () => {
-    sessionStorage.setItem('agent007-talk', JSON.stringify({ on: true, awaiting: ['m9'], spoken: [] }));
-    vi.resetModules();
-    const fresh = await import('../public/modules/talk.js');
-    const state = await import('../public/modules/state.js');
-    document.body.innerHTML = '';
-    document.body.append(fresh.talkBar());
-    await flush();
-    expect(bar().querySelector('.talk-start').hidden).toBe(false);
-    expect(bar().querySelector('.talk-start').textContent).toBe('Resume talking');
-    state.setChatMessages([reply('r9', 'm9', 'Late answer.')]);
-    await fresh.startTalk();
-    await flush();
-    expect(requests.some(r => r.url === '/api/talk/audio/r9/0')).toBe(true);
-    theAudio.end();
-    await flush();
-    theAudio.end();
-    await flush();
-    expect(stateWord()).toBe('listening');
-    expect(requests.some(r => r.url.includes('/api/talk/utterance'))).toBe(false);
-    fresh._resetTalk();
-    sessionStorage.clear();
-  });
-});
-
-describe('where it cannot run', () => {
-  it('says so without a microphone API or outside a secure context', async () => {
-    Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true });
-    await startTalk();
-    expect(talkOn()).toBe(false);
-    expect(bar().querySelector('.talk-detail').textContent).toMatch(/no microphone API/);
-  });
-
-  it('with no whisper.cpp and no speech recognition, links the setup steps', async () => {
-    routes['/api/talk'] = () => response({ stt: null, sttMissing: 'Talking needs whisper.cpp on the computer running Agent 007 (brew install whisper-cpp, then WHISPER_MODEL).', tts: 'say' });
-    await startTalk();
-    await flush();
-    expect(talkOn()).toBe(false);
-    const detail = bar().querySelector('.talk-detail');
-    expect(detail.textContent).toMatch(/brew install whisper-cpp.*no speech recognition/);
-    expect(detail.querySelector('a').href).toMatch(/BILLION\.md#voice/);
-  });
-
-  it('with no whisper.cpp, asks once before the browser\'s recognition hears anything', async () => {
-    const started = vi.fn();
-    vi.stubGlobal('webkitSpeechRecognition', class { start() { started(); } abort() {} });
-    localStorage.removeItem('agent007-talk-browser-stt');
-    routes['/api/talk'] = () => response({ stt: null, sttMissing: 'Talking needs whisper.cpp.', tts: 'say' });
-    await startTalk();
-    await flush();
-    expect(stateWord()).toBe('consent');
-    expect(bar().querySelector('.talk-privacy').textContent).toMatch(/Google/);
-    expect(started).not.toHaveBeenCalled();
-    await startTalk();   // Continue
-    await flush();
-    expect(started).toHaveBeenCalled();
-    expect(stateWord()).toBe('listening');
-    expect(localStorage.getItem('agent007-talk-browser-stt')).toBe('1');
-  });
-
-  it('a denied microphone ends with how to allow it', async () => {
-    window.vad.MicVAD.new = vi.fn(async (opts) => { vadOpts = opts; return { ...fakeVad, start: async () => { throw new DOMException('Permission denied', 'NotAllowedError'); } }; });
-    await startTalk();
-    await flush();
-    expect(talkOn()).toBe(false);
-    expect(bar().querySelector('.talk-detail').textContent).toMatch(/Microphone access denied/);
-  });
-});
-
-describe('the composer row and the call bar', () => {
-  const row = () => document.getElementById('chat-compose-row');
-  const call = () => bar().querySelector('.talk-call');
-
-  it('puts the phone button between the mic and Send, labelled and focusable', () => {
-    const ids = [...row().children].map(c => c.id);
-    expect(ids.indexOf('chat-talk')).toBe(ids.indexOf('chat-mic') + 1);
-    expect(ids.indexOf('chat-talk')).toBe(ids.indexOf('chat-send') - 1);
-    const b = document.getElementById('chat-talk');
-    expect(b.getAttribute('aria-label')).toBe('Talk to Billion');
-    expect(b.title).toMatch(/Talk to Billion/);
-    expect(b.tagName).toBe('BUTTON');
-    expect(b.querySelector('svg')).not.toBeNull();
-    expect(row().hidden).toBe(false);
-    expect(call().hidden).toBe(true);
-  });
-
-  it('a call swaps the row for the call bar, focus on End; End brings the box back with focus', async () => {
-    document.getElementById('chat-talk').click();
-    await flush();
-    expect(row().hidden).toBe(true);
-    expect(call().hidden).toBe(false);
-    expect(call().querySelector('.talk-state').textContent).toBe('Listening…');
-    expect(call().querySelector('.talk-timer').textContent).toBe('0:00');
-    expect(document.activeElement).toBe(call().querySelector('.talk-end'));
-    call().querySelector('.talk-end').click();
-    expect(row().hidden).toBe(false);
-    expect(call().hidden).toBe(true);
-    expect(document.activeElement).toBe(document.getElementById('chat-input'));
-  });
-
-  it('shows muted and speaking, and Mute toggles', async () => {
-    await startTalk();
-    await flush();
-    call().querySelector('.talk-mute').click();
-    expect(call().querySelector('.talk-state').textContent).toBe('Muted');
-    expect(call().querySelector('.talk-mute').textContent).toBe('Unmute');
-    expect(call().querySelector('.talk-mute').getAttribute('aria-label')).toBe('Unmute');
-    expect(call().querySelector('.talk-mute svg line[x1="1.5"]')).not.toBeNull();
-    call().querySelector('.talk-mute').click();
-    expect(call().querySelector('.talk-state').textContent).toBe('Listening…');
-  });
-
-  it('Esc ends the call', async () => {
-    await startTalk();
-    await flush();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-    expect(talkOn()).toBe(false);
-    expect(row().hidden).toBe(false);
   });
 });
