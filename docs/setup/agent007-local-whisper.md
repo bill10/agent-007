@@ -60,3 +60,46 @@ No Telegram or owner message, browser interaction, or microphone recording was
 performed. No existing local `LawsonBillMacMini/Agent007` folder was found in the
 home/project/document/desktop directory inspection, so this committed receipt is
 the owner artifact rather than creating a new unrelated folder.
+
+## Coordinator restart details (read-only follow-up)
+
+The running executable is `/opt/homebrew/Cellar/node/26.9.0/bin/node`.
+PID 27836 started **2026-10-02 10:17:33 PDT**. The live checkout's `http.js`
+was modified at **14:30:59 PDT**, and the Talk route's commit was authored at
+**12:18:19 PDT**, after process startup. The checkout's current disk VERSION is
+`0.49.1.0`; the running process's version could not be verified through its
+control API. This is evidence of a stale running route implementation, not a
+Whisper failure: missing model configuration would produce a capability JSON
+response, not a missing route.
+
+Read-only `node bin/agent-007.js status` in the live checkout reports not running,
+although port 7007 is listening. `/control/status` also returns 404 and the shared
+`server.json` is absent. Consequently the current documented normal restart
+command cannot control this particular older process; do not treat its status
+output as proof that the listening server has stopped.
+
+For a server supporting the current control protocol, the exact normal command is:
+
+```bash
+cd /Users/samslung/Projects/agent-007
+node bin/agent-007.js restart
+```
+
+`server/service.js` first polls until no **board worker is WORKING**, then requests
+`/control/restart` and waits for the replacement PID. It does not pause dispatch
+or drain arbitrary non-board sessions. `gracefulShutdown` terminates session PTYs;
+it does not keep their processes alive. Board workers are recovered from persisted
+orphan/job records on the next scan (unless `RESPAWN_BOARD_WORKERS=0`), with Codex
+conversation IDs resolved from the exact worktree's transcript. This is conversation
+recovery, not uninterrupted session preservation; manual/non-board sessions need
+separate coordination. The terminal CLI wrapper restarts on exit code 75.
+
+**Exact remaining coordinator action for this older process:** quiesce board
+dispatch, let every active worker finish, and preserve/resume information for any
+remaining sessions before arranging a normal stop/start through its original
+launcher using the updated checkout and shared settings. The current normal
+restart command is only usable if that launcher/process supports the control
+protocol; it currently does not. Do not send a signal or force a restart while
+workers remain active. After startup, run the capability GET above and the normal
+status command to confirm Whisper readiness and restart-control availability.
+No restart was attempted.
