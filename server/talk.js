@@ -13,7 +13,8 @@
 
 import { whisperSetup, transcribe, speechUnavailable, synthesize, MAX_NOTE_SECONDS } from './voice.js';
 import { chatMessages, ownerSays } from './owner.js';
-import { plainForSpeech, chunkForSpeech } from '../public/modules/readaloud.js';
+import { plainForSpeech, chunkForSpeech, progressPhrase } from '../public/modules/readaloud.js';
+import { statusPayload } from './billion-status.js';
 
 // The page sends 16 kHz 16-bit mono WAV: Telegram's five minutes of it.
 export const MAX_UTTERANCE_BYTES = MAX_NOTE_SECONDS * 16000 * 2 + 44;
@@ -129,7 +130,7 @@ export function voiceUtterance(audio, { utterance, echoOf, broadcast, env = proc
   return job;
 }
 
-const cache = new Map();   // `${id}:${index}` or 'cue' -> Promise<Buffer>
+const cache = new Map();   // `${id}:${index}`, 'cue:0' or `status:${phrase}` -> Promise<Buffer>
 function cached(key, make) {
   if (!cache.has(key)) {
     const made = make();
@@ -141,16 +142,18 @@ function cached(key, make) {
 }
 
 // Piece `index` of a voice reply, spoken by `say`: { audio, count } or
-// { status, error }. The fixed "still working" cue is reply id 'cue'.
+// { status, error }. The fixed "still working" cue is reply id 'cue'; id
+// 'status' is a short progress update made from Billion's status line now.
 export async function voiceAudio(id, index, { env = process.env, platform = process.platform, now = Date.now() } = {}) {
-  const pieces = id === 'cue' ? [WORKING_CUE] : speechPieces(voiceReply(id)?.text ?? '');
+  const phrase = id === 'status' ? progressPhrase(statusPayload(now)) : '';
+  const pieces = id === 'cue' ? [WORKING_CUE] : id === 'status' ? (phrase ? [phrase] : []) : speechPieces(voiceReply(id)?.text ?? '');
   if (!pieces.length) return { status: 404, error: 'No such reply.' };
   if (!(Number.isInteger(index) && index >= 0 && index < pieces.length)) return { status: 404, error: 'No such piece.' };
   const off = speechUnavailable(env, platform);
   if (off) return { status: 503, error: off };
   if (!allow('audio', AUDIO_LIMIT, now)) return { status: 429, error: 'Too much audio this minute.' };
   try {
-    return { audio: await cached(`${id}:${index}`, () => synthesize(pieces[index], env, 'm4a')), count: pieces.length };
+    return { audio: await cached(phrase ? `status:${phrase}` : `${id}:${index}`, () => synthesize(pieces[index], env, 'm4a')), count: pieces.length };
   } catch (err) {
     console.error('Talk: could not speak a reply:', err.message);
     return { status: 503, error: 'say could not speak it' };

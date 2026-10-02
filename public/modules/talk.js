@@ -16,7 +16,7 @@
 // to the browser's maker; without `say`, the browser's speechSynthesis.
 import { chatMessages, billionStatus } from './state.js';
 import { stopVoice } from './voice.js';
-import { stopReading, plainForSpeech, chunkForSpeech, pickVoice } from './readaloud.js';
+import { stopReading, plainForSpeech, chunkForSpeech, pickVoice, progressPhrase } from './readaloud.js';
 
 const HEADERS = { 'X-Agent007-Talk': '1' };
 const SETUP_DOCS = 'https://github.com/bill10/agent-007/blob/main/docs/BILLION.md#voice';
@@ -24,6 +24,10 @@ const STORE_KEY = 'agent007-talk';              // sessionStorage: survives the 
 const CONSENT_KEY = 'agent007-talk-browser-stt'; // localStorage: the one-time notice was accepted
 export const WORKING_CUE_MS = 20 * 1000;
 export const IDLE_END_MS = 10 * 60 * 1000;
+// Progress updates while a turn waits: none in its first seconds (a fast
+// answer needs no filler), then at most one per gap, never the same twice.
+export const PROGRESS_QUIET_MS = 3 * 1000;
+export const PROGRESS_GAP_MS = 9 * 1000;
 const RETRY_FOR_MS = 2 * 60 * 1000;
 const SAMPLE_RATE = 16000;
 // The detector's bar for speech: higher while Billion talks, so what is left
@@ -53,6 +57,14 @@ export function encodeWav(samples, rate = SAMPLE_RATE) {
 // to one of its own messages, not spoken yet.
 export const shouldSpeak = (m, awaiting, spoken) =>
   !!m && m.from === 'billion' && !!m.replyTo && !m.notice && !m.q && awaiting.has(m.replyTo) && !spoken.has(m.id);
+
+// How long until this progress phrase may be spoken (0: now), or null when
+// it never should: nothing to say, or what was said last.
+// p: { since: when the turn was sent, at: when the last update was spoken, said }.
+export function progressWait(phrase, p, now) {
+  if (!phrase || phrase === p.said) return null;
+  return Math.max(0, p.since + PROGRESS_QUIET_MS - now, p.at + PROGRESS_GAP_MS - now);
+}
 
 // The one word the bar shows, from what is going on.
 export function talkState(s) {
@@ -91,13 +103,14 @@ let tts = 'say';          // 'say' (server) or 'browser' (speechSynthesis)
 let vad = null;
 let rec = null;
 let uploads = 0;
-let playing = null;       // id of the reply being spoken, 'cue' for the working cue
+let playing = null;       // id of the reply being spoken, 'cue' for the working cue, 'status' for a progress update
 let playingReply = null;  // that reply's message, to play again after a hidden tab
 let playGen = 0;
 let stopPlay = null;      // ends the piece playing now
 let fetches = null;       // AbortController for the pieces being fetched
 let replyQueue = [];
 let echoOf = null;        // the reply that was playing when the owner started speaking
+let hearing = false;      // the detector hears the owner speaking now: no update talks over them
 let note = '';
 let noteLink = false;
 let audioEl = null;
@@ -106,6 +119,8 @@ let silentUrl = null;     // a silent clip, played inside the tap to unlock audi
 let startGen = 0;         // bumped by every start and End: a start that awaited past one gives up
 let idleTimer = null;
 let cueTimer = null;
+let progressTimer = null;
+let progress = { since: 0, at: -Infinity, said: '' };
 let resumable = false;
 let startedAt = 0;
 let clockTimer = null;
@@ -117,6 +132,8 @@ const spoken = new Set();
 // restart may never be answered; it waits in the thread).
 const restored = new Set();
 const thinkingFor = () => [...awaiting].filter(id => !restored.has(id)).length;
+// The cue and progress updates: never a reply, so never an echo to report.
+const filler = (id) => id === 'cue' || id === 'status';
 const marks = new Map();  // message id → latency marks
 
 const restore = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch { return null; } };
@@ -359,9 +376,11 @@ export function endTalk({ keepNote = false, notice } = {}) {
   starting = false;
   consent = false;
   muted = false;
+  hearing = false;
   interrupt();
   clearTimeout(idleTimer);
   clearTimeout(cueTimer);
+  clearTimeout(progressTimer);
   const v = vad;
   vad = null;
   v?.destroy?.().catch?.(() => {});
@@ -434,13 +453,15 @@ async function startVad(current) {
     // Billion's own voice past the echo canceller is not enough.
     onSpeechRealStart: () => {
       armIdle();
+      hearing = true;
       if (playing) {
-        echoOf = playing === 'cue' ? null : playing;
+        echoOf = filler(playing) ? null : playing;
         interrupt();
       }
     },
-    onVADMisfire: () => { echoOf = null; },
+    onVADMisfire: () => { echoOf = null; hearing = false; },
     onSpeechEnd: (audio) => {
+      hearing = false;
       if (!on || muted) return;
       sendAudio(audio);
     },
@@ -459,6 +480,7 @@ function startMic() {
 }
 
 function stopMic() {
+  hearing = false;
   if (mode === 'whisper') vad?.pause().catch(() => {});
   else stopRecognition();
 }
@@ -581,6 +603,10 @@ async function submitted(request, ended) {
   marks.set(result.id, { ended, submitted: performance.now(), transcribeMs: result.transcribeMs });
   clearTimeout(cueTimer);
   cueTimer = setTimeout(workingCue, WORKING_CUE_MS);
+  // Only a status line that changes from here on is news for this turn.
+  progress = { since: Date.now(), at: progress.at, said: progressPhrase(billionStatus) };
+  clearTimeout(progressTimer);
+  progressTimer = setTimeout(sayProgress, PROGRESS_QUIET_MS);
   // A fast reply can beat this answer to the page.
   for (const m of chatMessages) talkHeard(m);
   paint();
@@ -596,7 +622,9 @@ export function talkHeard(m) {
   save();
   const mark = marks.get(m.replyTo);
   if (mark) mark.reply = performance.now();
-  if (!thinkingFor()) clearTimeout(cueTimer);
+  if (!thinkingFor()) { clearTimeout(cueTimer); clearTimeout(progressTimer); }
+  // A progress update gives way to the answer at once.
+  if (filler(playing)) interrupt();
   replyQueue.push(m);
   if (!playing && !hidden) playNext();
   else paint();
@@ -610,6 +638,7 @@ export function talkHeardAll(messages) {
 export function talkStatus(msg) {
   connected = !msg?.disconnected;
   paint();
+  sayProgress();
 }
 
 function playNext() {
@@ -627,8 +656,27 @@ function afterSpeech() {
 }
 
 function workingCue() {
-  if (!on || !thinkingFor() || playing || hidden) return;
+  if (!on || !thinkingFor() || playing || hidden || hearing) return;
   speak('cue', 'Still working on it.');
+}
+
+// A short spoken update when Billion's status line changes while a turn
+// waits, only when nothing else is playing; too soon, it waits its turn.
+function sayProgress() {
+  clearTimeout(progressTimer);
+  if (!on || !thinkingFor() || hidden) return;
+  const phrase = progressPhrase(billionStatus);
+  const wait = progressWait(phrase, progress, Date.now());
+  if (wait === null) return;
+  if (wait > 0 || playing || uploads || hearing) {
+    progressTimer = setTimeout(sayProgress, wait || 1000);
+    return;
+  }
+  progress = { ...progress, at: Date.now(), said: phrase };
+  // It says Billion is working, so the cue waits a full stretch again.
+  clearTimeout(cueTimer);
+  cueTimer = setTimeout(workingCue, WORKING_CUE_MS);
+  speak('status', phrase);
 }
 
 async function speak(id, text, replyTo) {
@@ -639,7 +687,9 @@ async function speak(id, text, replyTo) {
   vad?.setOptions({ positiveSpeechThreshold: SPEECH_THRESHOLD_PLAYING });
   paint();
   try {
-    if (tts === 'say' && !(await speakFromServer(id, mine, replyTo)) && mine === playGen) {
+    // A progress update the server no longer has (the status moved on) is
+    // just skipped; only a reply it cannot speak means its voice is gone.
+    if (tts === 'say' && !(await speakFromServer(id, mine, replyTo)) && mine === playGen && id !== 'status') {
       tts = 'browser';
       setNote('This computer could not speak the reply; using the browser\'s voice.');
       await speakInBrowser(text, mine, replyTo);
@@ -756,7 +806,7 @@ if (typeof document !== 'undefined') {
     hidden = document.hidden;
     if (hidden) {
       stopMic();
-      const current = playing && playing !== 'cue' ? playingReply : null;
+      const current = playing && !filler(playing) ? playingReply : null;
       const kept = replyQueue;
       interrupt();
       replyQueue = current ? [current, ...kept] : kept;
@@ -774,9 +824,10 @@ export function _resetTalk() {
   endTalk();
   spoken.clear();
   marks.clear();
+  progress = { since: 0, at: -Infinity, said: '' };
   tts = 'say';
   mode = null;
   connected = true;
   hidden = false;
 }
-export const _talkInternals = () => ({ on, mode, tts, playing, awaiting: [...awaiting], spoken: [...spoken], replyQueue: replyQueue.map(m => m.id) });
+export const _talkInternals = () => ({ on, mode, tts, playing, progress: { ...progress }, awaiting: [...awaiting], spoken: [...spoken], replyQueue: replyQueue.map(m => m.id) });

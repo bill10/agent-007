@@ -1064,7 +1064,7 @@ Billion tab. Tap **Talk to Billion**, allow the microphone, and speak: when
 you stop, what you said is sent to Billion as a voice turn,
 Billion's `tell_owner` reply is spoken, and it listens again. The bar says
 **Listening**, **Thinking…** (with Billion's status line, and a spoken "Still
-working on it." after 20 seconds), **Speaking**, **Muted** or
+working on it." after 20 seconds of nothing else to say), **Speaking**, **Muted** or
 **Disconnected**; **Mute** turns the mic off, **End** ends it. The thread is
 the transcript: your turns show as "(voice)" bubbles, Billion's replies as
 usual.
@@ -1086,8 +1086,17 @@ usual.
   answers the oldest waiting typed or Telegram message, then the oldest voice
   turn. Only the reply bound to the turn is read out, a sentence or two at a
   time. Replies to what you typed or sent from Telegram appear in the thread
-  but are not spoken; questions, status lines and terminal output never are.
+  but are not spoken; questions and terminal output never are.
   The charter asks Billion to keep replies to voice turns short.
+- **Progress while it works**: while a turn waits for its reply, each new
+  `set_status` line is spoken as a short update, its first few words with
+  code, links, paths and file names left out. Nothing is said in the first
+  3 seconds (a fast answer needs no filler), at most one update every
+  9 seconds, never the same line twice, never while you are speaking, and
+  never over a reply: when the
+  answer arrives, an update still playing stops and the answer plays next.
+  The detector's raised bar while Billion talks covers updates too, and an
+  update is never treated as a reply you might be echoing.
 - **Interrupting**: start talking while Billion speaks, or tap **Stop
   speaking**, and it stops at once; the rest of that reply is dropped (it is
   still in the thread). Stopping the voice never stops Billion's work.

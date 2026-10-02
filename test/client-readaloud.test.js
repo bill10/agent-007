@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   plainForSpeech, speakableText, chunkForSpeech, pickVoice, englishVoices,
   toggleSpeak, readNew, stopReading, setAutoRead, resumeReading, autoReadOn,
-  needsResume, speakingMessage, queuedCount, _resetReadAloud,
+  needsResume, speakingMessage, queuedCount, _resetReadAloud, progressPhrase,
 } from '../public/modules/readaloud.js';
 
 describe('plainForSpeech', () => {
@@ -39,6 +39,25 @@ describe('plainForSpeech', () => {
   it('handles empty and missing text', () => {
     expect(plainForSpeech('')).toBe('');
     expect(plainForSpeech(undefined)).toBe('');
+  });
+});
+
+describe('progressPhrase', () => {
+  it('says the status line in a few words, without code, URLs, paths, flags or file names', () => {
+    expect(progressPhrase({ text: 'Reading the talk code in public/modules/talk.js now' })).toBe('Reading the talk code in now');
+    expect(progressPhrase({ text: 'Running `npm test -- --run` on the branch' })).toBe('Running on the branch');
+    expect(progressPhrase({ text: 'Checking https://github.com/x/y/pull/3 for review comments' })).toBe('Checking for review comments');
+    expect(progressPhrase({ text: 'Fixing the tests: two left, then shipping' })).toBe('Fixing the tests');
+    expect(progressPhrase({ text: 'one two three four five six seven eight nine ten' })).toBe('one two three four five six seven eight');
+  });
+
+  it('falls back to the progress box line; a tool call becomes plain words or nothing', () => {
+    const box = (line) => ({ text: '', currentRequest: 'm1', progress: { m1: ['older', line] } });
+    expect(progressPhrase(box('Drafting the reply'))).toBe('Drafting the reply');
+    expect(progressPhrase(box('Bash(git status)'))).toBe('Running a command');
+    expect(progressPhrase(box('mcp__agent-007-board__list_jobs(...)'))).toBe('');
+    expect(progressPhrase(box('`ls -la`'))).toBe('');
+    expect(progressPhrase(null)).toBe('');
   });
 });
 
