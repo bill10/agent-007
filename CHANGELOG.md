@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.44.0.0] - 2026-10-02
+
+### Changed
+
+- **A scheduled job is one card.** A job for one date is now an ordinary one-time card with a start time: it waits in To do showing its date under a *scheduled* chip, the board dispatches that same card when the time comes, and it moves through In progress, Review and Done like any other. No more separate run card, and no schedule archiving itself. **Run now** on the card starts it early; Edit moves its time, Now clears it, Recurring makes it a schedule. Agents still post it with `run_at` (or a schedule plus `once: true`). On start, the server converts every once schedule that has not fired yet into such a card, keeping its id, text, repo, agent, model and attachments, and logs each one.
+
 ## [0.43.0.0] - 2026-10-02
 
 ### Changed
