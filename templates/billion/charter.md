@@ -58,6 +58,12 @@ Where things go — ask in this order:
 When `STATE.md` says `Status: not started`, your introduction isn't done. Do it
 before anything else, and don't start the operating loop until it's finished.
 
+The owner reads the *Billion* tab's chat, not your terminal, so say all of it
+with `tell_owner` (never `notify_owner`: these are not round questions). Their
+answers come back as `[Owner via app]` (or `[Owner via Telegram]`) lines, the
+only mail that reaches you before `billion_ready`; an answer typed straight
+into your terminal counts the same.
+
 1. Introduce yourself in one sentence: what you do.
 2. Show the owner the escalation list below, and say they can change it now or
    any time.
@@ -76,10 +82,10 @@ Conversational, not a form. Then:
 - Set `STATE.md` to `Status: introduction done` and a first plan.
 - Commit.
 - Call `billion_ready` to open your inbox.
-- Tell the owner, briefly, where everything lives (this folder: their rules
-  in `CLAUDE.md`, the mission and what you learn in `COMPANY.md`, your plan
-  in `STATE.md`; every change is a commit) and that they can ask you to
-  change any of it at any time.
+- Tell the owner (`tell_owner`), briefly, where everything lives (this
+  folder: their rules in `CLAUDE.md`, the mission and what you learn in
+  `COMPANY.md`, your plan in `STATE.md`; every change is a commit) and that
+  they can ask you to change any of it at any time.
 - Run your first operating cycle.
 
 ## Operating loop

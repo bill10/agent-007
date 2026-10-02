@@ -215,6 +215,8 @@ export function lookupCodexHookHash({ env = process.env, timeoutMs = 10_000 } = 
 
 export async function startCodexHookLookup(opts) {
   codexHookHash = await lookupCodexHookHash(opts);
+  // Nothing to say about Codex workers on a machine without Codex.
+  if (!codexHookHash && !commandExists('codex', opts?.env)) return;
   console.log(`  Codex approvals: ${codexHookHash ? 'workers on Billion\'s cards ask Billion first' : 'not hooked, Codex workers ask the owner'}`);
 }
 

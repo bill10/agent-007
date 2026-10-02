@@ -169,12 +169,17 @@ export function formatNotice(headline, lines = []) {
 // Cleaned here, whoever wrote it: it goes into bracketed pastes, and a stray
 // ESC[201~ anywhere in it — a tool name, a card title — would end the paste
 // and type the rest as keystrokes of the user's own.
-export function sendText(session, text, now = Date.now()) {
+//
+// owner: the owner's own words (the Billion tab, Telegram), which Billion's
+// held inbox still lets in: its introduction is waiting for them.
+export function sendText(session, text, now = Date.now(), { owner = false } = {}) {
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
   const ahead = serverAhead.get(session.id) || 0;
-  if (ahead >= QUEUE_CAP) return false;
-  queue.splice(ahead, 0, { text: clean(text) });
+  // The owner's words get room of their own: notices piling up behind a held
+  // inbox must not turn their answers away.
+  if (ahead >= QUEUE_CAP * (owner ? 2 : 1)) return false;
+  queue.splice(ahead, 0, { text: clean(text), ...(owner ? { owner: true } : {}) });
   queues.set(session.id, queue);
   serverAhead.set(session.id, ahead + 1);
   flushMessages(session, now);
@@ -200,10 +205,12 @@ export function sendNotice(session, headline, lines, now = Date.now()) {
 }
 
 // Whether a message may be typed into this session right now.
-export function canDeliver(session, now = Date.now()) {
+export function canDeliver(session, now = Date.now(), { owner = false } = {}) {
   // Billion holds its mail until it says it is ready (billion_ready), so
-  // nothing lands in the middle of its introduction.
-  if (session.messagesHeld) return false;
+  // nothing lands in the middle of its introduction, except the owner's
+  // answers to it. Not while an account switch stops it: what is typed into a
+  // dying terminal is lost, and the queue carries over to the new one.
+  if (session.messagesHeld && (!owner || session.accountRotating)) return false;
   // Still typing the last one: a second would interleave with its pastes.
   if (session.messageTyping) return false;
   // Both: the stored state is up to a second old, and a dialog that opened
@@ -348,10 +355,12 @@ export function withdrawMessage({ from, id, sessions }) {
 // the queue is empty.
 export function flushMessages(session, now = Date.now()) {
   const queue = queues.get(session.id);
-  if (!queue?.length || !canDeliver(session, now)) return false;
-  deliver(session, queue.shift().text, now);
+  // A held inbox lets only the owner's words through, oldest first.
+  const at = session.messagesHeld ? (queue?.findIndex(e => e.owner) ?? -1) : 0;
+  if (!queue?.length || at === -1 || !canDeliver(session, now, { owner: !!queue[at].owner })) return false;
+  deliver(session, queue.splice(at, 1)[0].text, now);
   const ahead = serverAhead.get(session.id) || 0;
-  if (ahead) serverAhead.set(session.id, ahead - 1);
+  if (at < ahead) serverAhead.set(session.id, ahead - 1);
   if (!queue.length) queues.delete(session.id);
   return true;
 }

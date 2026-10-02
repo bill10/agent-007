@@ -32,6 +32,8 @@ export const OWNER_PREFIX = '[Owner via Telegram]';
 export const OWNER_VOICE_PREFIX = '[Owner via Telegram, voice]';
 export const APP_PREFIX = '[Owner via app]';
 export const APP_VOICE_PREFIX = '[Owner via app, voice]';
+// sendText's mark on the owner's own words: they reach Billion mid-introduction.
+const OWNER = { owner: true };
 export const MAX_CHOICES = 5;
 export const MAX_CHOICE_CHARS = 40;
 // No practical limit on what the owner types or pastes in the Billion tab: these
@@ -594,7 +596,7 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   const messageId = randomUUID();
   const saved = files.length ? saveChatFiles(messageId, files) : { paths: [], records: [] };
   if (saved.error) return saved;
-  if (!sendText(billion, withFiles(answerLine(via === 'app' ? APP_PREFIX : telegramPrefix(name), item, body), saved.paths))) {
+  if (!sendText(billion, withFiles(answerLine(via === 'app' ? APP_PREFIX : telegramPrefix(name), item, body), saved.paths), undefined, OWNER)) {
     if (files.length) removeChatFiles(messageId);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
@@ -643,7 +645,7 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   if (saved.error) return saved;
   // A voice turn names itself, so Billion can bind its spoken reply to it (tell_owner reply_to).
   const prefix = voice ? `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}]` : APP_PREFIX;
-  if (!sendText(billion, withFiles(body ? `${prefix} ${body}` : prefix, saved.paths))) {
+  if (!sendText(billion, withFiles(body ? `${prefix} ${body}` : prefix, saved.paths), undefined, OWNER)) {
     if (files.length) removeChatFiles(id);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
@@ -698,7 +700,7 @@ export async function reopenQuestion({ number, id } = {}, { broadcast, owner = f
     if (!(now - Date.parse(item.answeredAt) <= UNDO_MS)) return { error: `Too late to undo Q${item.n}; tell Billion instead.` };
     const billion = liveBillion();
     if (!billion) return { error: 'Billion is not running' };
-    if (!sendText(billion, `${APP_PREFIX} Q${item.n}: undo my answer "${item.answer}"; the question is open again.`)) {
+    if (!sendText(billion, `${APP_PREFIX} Q${item.n}: undo my answer "${item.answer}"; the question is open again.`, undefined, OWNER)) {
       return { error: 'Billion has too much waiting for it; try again in a while.' };
     }
   }
@@ -735,7 +737,10 @@ let sent = [];   // times of recent notify_owner calls
 // telegram: false. { ok, n, telegram } (telegram: pushed to the phone; held:
 // why not), or { pinned, n, error } when it was filed but the push could not happen.
 // queue: false shows every question at once, as before rounds (rounds: [] in config.json).
-export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, type, telegram, rank, queue = roundSettings().on, broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
+// So does a new install until its first round comes due (or is started early):
+// the introduction's questions and the first cycle's should not wait for 08:30.
+const roundsStarted = () => !!roundState().current;
+export async function notifyOwner(text, { choices, recommended, urgency = 'normal', project, type, telegram, rank, queue = roundSettings().on && roundsStarted(), broadcast, env = process.env, now = Date.now(), platform = process.platform } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -881,7 +886,11 @@ const topWords = (max) => (max === 2 ? 'top two' : `top ${max}`);
 export async function releaseRound(round, { broadcast, env = process.env, settings = roundSettings(), now = Date.now(), early = false } = {}) {
   const items = waitingItems();
   const iso = new Date(now).toISOString();
-  const consolidated = items.filter(i => i.status === 'open' && i.round && i.round !== round.id);
+  // The first round also takes in what showed at once before it (no round, not
+  // an emergency), so day one's questions are not left open as emergencies.
+  const first = !roundState().current;
+  const consolidated = items.filter(i => i.status === 'open' && (i.round ? i.round !== round.id
+    : first && !i.outside && i.urgency !== 'blocking'));
   for (const item of consolidated) Object.assign(item, { status: 'consolidated', consolidatedAt: iso, consolidatedBy: round.id });
   const taken = new Map();
   const released = [];
@@ -946,9 +955,8 @@ export function migrateToRounds({ broadcast, now = Date.now(), settings = roundS
   saveRoundState({ ...state, migratedAt: iso, lastAt: state.lastAt || iso });
   if (moved.length) broadcast?.(waitingPayload());
   const next = comingRound(now, settings);
-  noteForBillion(`[Owner round] Rounds are on: the owner now sees your questions only at ${settings.slots.join(' and ')}, at most ${settings.max} per project; notify_owner queues them (see Escalate in CHARTER.md).`
-    + `${moved.length ? ` Consolidated ${plural(moved.length, 'open question')} (${qList(moved)}): re-queue only the ones still in a project's ${topWords(settings.max)}.` : ''}`
-    + `${next ? ` Next round: ${next.label}.` : ''}`);
+  noteForBillion(`[Owner round] Rounds are on: from the first round${next ? ` (${next.label})` : ''} the owner sees your questions only at ${settings.slots.join(' and ')}, at most ${settings.max} per project; notify_owner queues them (see Escalate in CHARTER.md). Until then a question shows at once.`
+    + `${moved.length ? ` Consolidated ${plural(moved.length, 'open question')} (${qList(moved)}): re-queue only the ones still in a project's ${topWords(settings.max)}.` : ''}`);
   return moved;
 }
 
@@ -1002,7 +1010,7 @@ export async function markDone(nums, via = 'app', { broadcast, env = process.env
     return flat.length > 60 ? `${flat.slice(0, 60).trimEnd()}…` : flat;
   };
   const line = `${prefix} ${done.map(item => `item ${item.num} done (Q${item.n}: "${context(item)}")`).join('; ')}`;
-  if (!sendText(billion, line)) return { error: 'Billion has too much waiting for it; try again in a while.' };
+  if (!sendText(billion, line, undefined, OWNER)) return { error: 'Billion has too much waiting for it; try again in a while.' };
   setOwnerChannel(via);
   for (const item of done) await markAnswered(item.id, 'done', via, { broadcast, env, name, done: true });
   return { ok: true, done, missing };
@@ -1182,7 +1190,7 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     line = `${telegramPrefix(name, true)} ${heard.transcript}${caption}`;
     said = { from: 'owner', via: 'telegram', ...who, voice: true, text: `${heard.transcript}${caption}` };
   }
-  if (!sendText(billion, line)) {
+  if (!sendText(billion, line, undefined, OWNER)) {
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
     return 'full';
   }

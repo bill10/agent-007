@@ -344,6 +344,16 @@ describe('a repo with no GitHub remote', () => {
     handleJobsList({ jobs: [JOB()], settings: {} });
     expect(document.querySelector('.job-card .job-card-error')).toBeNull();
   });
+
+  it('says so too when its CLI has no ship skill, naming the CLI and gstack', () => {
+    handleJobsList({ jobs: [JOB({ noShipSkill: 'codex' })], settings: {} });
+    expect(document.querySelector('.job-card .job-card-error').textContent).toMatch(/^Codex has no ship skill, so the job can't open a pull request; install gstack/);
+  });
+
+  it('drops both once the card has its pull request', () => {
+    handleJobsList({ jobs: [JOB({ noGithubRemote: true, noShipSkill: 'claude', prUrl: 'https://github.com/o/r/pull/4', prNumber: 4 })], settings: {} });
+    expect(document.querySelector('.job-card .job-card-error')).toBeNull();
+  });
 });
 
 describe('dispatcher controls', () => {

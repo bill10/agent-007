@@ -51,7 +51,9 @@ npm install
 npm start
 ```
 
-Open [http://localhost:7007](http://localhost:7007). Click **+ Job** to queue work on the board, or **+ Agent** to start one by hand -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. Needs Node.js 20.12+ and Git ([full requirements](#requirements)).
+Open [http://localhost:7007](http://localhost:7007). It opens on the **Billion** tab's chat, where Billion, the agent that runs the board, introduces itself and asks for your mission and where new repos should go; answer in the chat. Billion runs on Claude Code, so install it and log in first (`claude auth login`); if it is missing or logged out, the chat says so. Its questions show as it asks them until its first round (08:30 or 15:30), then come twice a day.
+
+Add a repo with the **+** in the left panel's Repos header (or ask Billion to), then click **+ Job** to queue work on the board, or **+ Agent** to start one by hand -- preset buttons (Claude Code, Codex, Gemini, Bash; PowerShell on a Windows server) fill in the command, or type your own under Advanced. A card that ends in a pull request needs a GitHub remote on the repo, `gh` signed in, and [gstack](https://github.com/garrytan/gstack)'s ship skill; the card says when one is missing. Needs Node.js 20.12+ and Git ([full requirements](#requirements)).
 
 To check what it needs, at any time:
 
@@ -278,6 +280,8 @@ distinct color and shows up in the presence indicator.
 - Git
 - A modern browser (three panels at 900px+, explorer hidden below that, one panel at a time on a phone)
 - A CLI to run as the agent (defaults to `claude`, but works with any command)
+- For Billion: Claude Code, logged in (or Codex, with `BILLION_AGENT=codex`)
+- For cards that open a pull request: a GitHub remote on the repo, [`gh`](https://cli.github.com) signed in, and [gstack](https://github.com/garrytan/gstack)'s ship skill for the card's CLI
 
 Agent 007 runs on macOS, Linux, and Windows -- spawning agents, adding repos, and browsing paths all handle Windows natively, and CI runs the test suite on both Ubuntu and Windows. One Windows caveat: the per-agent MCP config file protects its token with POSIX file permissions, which Windows doesn't have, so on a shared Windows machine other local users can read it.
 

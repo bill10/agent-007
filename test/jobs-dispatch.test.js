@@ -2211,6 +2211,23 @@ describe('a PR job in a repo with no GitHub remote', () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
+  it('says when the card\'s CLI has no ship skill, and stops once one is installed', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'a007-noship-'));
+    const homes = { claudeDir: join(home, '.claude'), codexDir: join(home, '.codex'), agentsDir: join(home, '.agents') };
+    const { job } = addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
+    await noteGithubRemote(job, noopBroadcast, { homes });
+    expect(jobsPayload().jobs[0].noShipSkill).toBe('claude');
+    updateJob(job.id, { requiresPr: false }, noopBroadcast);
+    expect(jobsPayload().jobs[0].noShipSkill).toBeNull();
+    updateJob(job.id, { requiresPr: true }, noopBroadcast);
+
+    mkdirSync(join(homes.claudeDir, 'skills', 'ship'), { recursive: true });
+    writeFileSync(join(homes.claudeDir, 'skills', 'ship', 'SKILL.md'), '---\nname: ship\n---\n');
+    await noteGithubRemote(job, noopBroadcast, { homes });
+    expect(jobsPayload().jobs[0].noShipSkill).toBeNull();
+    rmSync(home, { recursive: true, force: true });
+  });
+
   it('writes nothing when git cannot answer', async () => {
     const { job } = addJob({ title: 'x', repoPath: REPO }, noopBroadcast);
     await noteGithubRemote(job, noopBroadcast);

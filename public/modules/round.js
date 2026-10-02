@@ -23,9 +23,15 @@ const el = (tag, className, text) => {
   return node;
 };
 
-// --- The two views: This round (the default) and Chat ---
+// --- The two views: This round and Chat ---
 
-export const subTab = () => (store.get(SUB_KEY) === 'chat' ? 'chat' : 'round');
+// The owner's pick, else Chat until a round has been released: on a new
+// install that is where Billion introduces itself, and where a missing or
+// logged-out CLI is explained.
+export const subTab = () => {
+  const saved = store.get(SUB_KEY);
+  return saved === 'chat' || saved === 'round' ? saved : roundInfo?.current ? 'round' : 'chat';
+};
 let onChat = () => {};
 
 export function setSubTab(which) {
@@ -126,7 +132,8 @@ export function roundModel(items = waitingItems, info = roundInfo) {
   const sections = [];
   const byNum = (a, b) => (a.num ?? Infinity) - (b.num ?? Infinity) || String(a.at).localeCompare(String(b.at));
   const now = items.filter(urgent).sort(byNum);
-  if (now.length) sections.push({ key: 'now', title: 'Needs you now', items: now, urgent: true });
+  // Before the first round every question shows at once, not only emergencies.
+  if (now.length) sections.push({ key: 'now', title: current ? 'Needs you now' : 'Open questions', items: now, urgent: !!current });
   now.forEach(i => shown.add(i.id));
   const byProject = new Map();
   const ordered = items.filter(i => !shown.has(i.id) && inRound(i))
@@ -354,6 +361,7 @@ export function renderRound() {
   for (const [id, { status }] of errors) if (waitingItems.find(i => i.id === id)?.status !== status) errors.delete(id);
   const view = document.getElementById('round-view');
   if (!view) return;
+  paintSubTabs();   // the default view changes with the first round
   const model = roundModel();
   const info = roundInfo;
   if (starting !== null && starting !== (info?.current?.id ?? '')) starting = null;
@@ -385,7 +393,8 @@ export function renderRound() {
   if (brief) page.append(el('p', 'round-brief', brief));
   if (!model.sections.length) {
     const next = info?.next?.at ? ` Next round ${roundTime(info.next.at)}.` : '';
-    page.append(el('p', 'round-empty', info?.current ? `Nothing for you this round.${next}` : `Billion's questions come in rounds, twice a day.${next}`));
+    page.append(el('p', 'round-empty', info?.current ? `Nothing for you this round.${next}`
+      : `Billion's questions come in rounds, twice a day.${next} Until then they show here as soon as Billion asks.`));
   }
   for (const s of model.sections) {
     const section = el('section', `round-dept${s.urgent ? ' urgent' : ''}`);

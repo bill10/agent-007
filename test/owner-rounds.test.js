@@ -32,15 +32,24 @@ let clock = 3e12;
 const now = () => (clock += 10 * NOTIFY_WINDOW_MS);
 const sent = () => fetchMock.mock.calls.map(([url, init]) => ({ method: url.split('/').pop(), body: JSON.parse(init.body) }));
 
-// Held, so nothing is typed: what the server queued for it is read back with takeMessages.
-const billion = { id: 'rounds-billion', name: 'Billion', isBillion: true, command: 'claude', state: 'WAITING', exited: false, messagesHeld: true, ownerId: null, pty: { write: vi.fn() } };
+// Held and mid-paste, so nothing is typed (a held inbox still takes the
+// owner's words): what the server queued for it is read back with takeMessages.
+const billion = { id: 'rounds-billion', name: 'Billion', isBillion: true, command: 'claude', state: 'WAITING', exited: false, messagesHeld: true, messageTyping: true, ownerId: null, pty: { write: vi.fn() } };
 const billionHeard = () => takeMessages(billion.id).queue.map(e => e.text);
 const ask = (text, opts = {}) => notifyOwner(text, { env: {}, now: now(), ...opts });
+
+// An install past its first round (rounds.json has a current one): before
+// that, notify_owner shows every question at once. A test of a brand-new
+// install removes it with freshInstall().
+const ROUNDS = join(CONFIG_DIR, 'rounds.json');
+const pastFirstRound = () => writeFileSync(ROUNDS, JSON.stringify({ current: { id: 'earlier' } }));
+const freshInstall = () => rmSync(ROUNDS, { force: true });
 
 beforeEach(() => {
   fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, result: { message_id: 7 } }) }));
   vi.stubGlobal('fetch', fetchMock);
   for (const f of ['waiting.json', 'rounds.json', 'chat.json']) rmSync(join(CONFIG_DIR, f), { force: true });
+  pastFirstRound();
   sessions.set(billion.id, billion);
   dropMessages(billion.id);
   setOwnerChannel(null);
@@ -207,7 +216,8 @@ describe('a round', () => {
 });
 
 describe('the server\'s round tick and the first start', () => {
-  it('consolidates every open question but blocking ones once, tells Billion, and waits for the next round', async () => {
+  it('consolidates every open question but blocking ones once, tells Billion, and shows questions at once until the first round', async () => {
+    freshInstall();
     writeFileSync(join(CONFIG_DIR, 'waiting.json'), JSON.stringify([
       { id: 'q1', n: 1, text: 'Old one', at: '2026-09-30T00:00:00Z', status: 'open' },
       { id: 'q2', n: 2, text: 'Stuck merge', at: '2026-09-30T00:00:00Z', status: 'open', urgency: 'blocking' },
@@ -215,14 +225,23 @@ describe('the server\'s round tick and the first start', () => {
     ]));
     expect(await roundTick({ now: at('2026-10-01T09:00:00Z'), env: {}, settings: UTC })).toBeNull();
     expect(waitingItems().map(i => i.status)).toEqual(['consolidated', 'open', 'answered']);
-    expect(billionHeard()).toEqual(['[Owner round] Rounds are on: the owner now sees your questions only at 08:30 and 15:30, at most 2 per project; notify_owner queues them (see Escalate in CHARTER.md). Consolidated 1 open question (Q1): re-queue only the ones still in a project\'s top two. Next round: 10/1 pm.']);
+    expect(billionHeard()).toEqual(['[Owner round] Rounds are on: from the first round (10/1 pm) the owner sees your questions only at 08:30 and 15:30, at most 2 per project; notify_owner queues them (see Escalate in CHARTER.md). Until then a question shows at once. Consolidated 1 open question (Q1): re-queue only the ones still in a project\'s top two.']);
     expect(migrateToRounds({ settings: UTC })).toBeNull();
+    // Day one: the introduction's and the first cycle's questions do not wait for 15:30.
+    expect(await ask('Day one', { project: 'a' })).toMatchObject({ ok: true, telegram: false });
+    expect(waitingItems().at(-1)).toMatchObject({ text: 'Day one', status: 'open' });
     // Not the 08:30 round that passed before the first start; the 15:30 one, once.
-    await ask('New', { project: 'a' });
     expect(await roundTick({ now: at('2026-10-01T15:29:59Z'), env: {}, settings: UTC })).toBeNull();
-    expect((await roundTick({ now: at('2026-10-01T15:30:05Z'), env: {}, settings: UTC })).released.map(i => i.text)).toEqual(['New']);
+    // The first round takes day one's still-open question in, like any round's leftovers.
+    const first = await roundTick({ now: at('2026-10-01T15:30:05Z'), env: {}, settings: UTC });
+    expect(first.released).toEqual([]);
+    expect(first.consolidated.map(i => i.text)).toEqual(['Day one']);
+    expect(waitingItems().find(i => i.text === 'Stuck merge').status).toBe('open');
     expect(await roundTick({ now: at('2026-10-01T15:31:00Z'), env: {}, settings: UTC })).toBeNull();
     expect(roundPayload(at('2026-10-01T15:31:00Z'), UTC)).toMatchObject({ type: 'round-state', on: true, max: 2, current: { id: '2026-10-01 15:30', label: '10/1 pm' }, next: { id: '2026-10-02 08:30' } });
+    // From then on a question waits for its round.
+    expect(await ask('New', { project: 'a' })).toMatchObject({ queued: true });
+    expect((await roundTick({ now: at('2026-10-02T08:30:05Z'), env: {}, settings: UTC })).released.map(i => i.text)).toEqual(['New']);
   });
 
   it('releases a missed round once after a long stop, and keeps a line for a Billion that is not running', async () => {
@@ -240,6 +259,7 @@ describe('the server\'s round tick and the first start', () => {
   });
 
   it('does nothing with rounds off', async () => {
+    freshInstall();
     expect(await roundTick({ now: Date.now(), settings: { ...UTC, on: false } })).toBeNull();
     expect(roundState()).toEqual({});
   });
@@ -299,6 +319,7 @@ describe('Billion\'s round tools over MCP', () => {
 
   it('set_round_brief sets the next round\'s or the current one\'s, up to its length', async () => {
     const ctx = { setRoundBrief };
+    freshInstall();
     expect(text(await call('set_round_brief', { text: 'Quiet morning.' }, ctx))).toBe('The brief is set for the next round.');
     expect(roundState().brief).toBe('Quiet morning.');
     expect(text(await call('set_round_brief', { text: 'x', round: 'current' }, ctx))).toMatch(/No round has been released yet/);

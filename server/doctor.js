@@ -13,8 +13,7 @@
 
 import { existsSync, readFileSync, readdirSync, readlinkSync } from 'fs';
 import { createServer } from 'net';
-import { homedir } from 'os';
-import path, { join, resolve } from 'path';
+import path, { join } from 'path';
 import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
 import { refreshAgentAccounts } from './agent-accounts.js';
 import { commandPath, INSTALL_HINTS } from './command-path.js';
@@ -26,6 +25,7 @@ import { tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
 import { installedService, parseServiceFile } from './service.js';
 import { whisperSetup } from './voice.js';
+import { skillHomes, skillsDirs, skillDir } from './skills.js';
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -110,9 +110,7 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     portState,
     configPath: CONFIG_PATH,
     worktreeDir: WORKTREE_DIR,
-    claudeDir: env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : join(homedir(), '.claude'),
-    codexDir: env.CODEX_HOME ? resolve(env.CODEX_HOME) : join(homedir(), '.codex'),
-    agentsDir: join(homedir(), '.agents'),
+    ...skillHomes(env),
     settingsLine,
     npmLatest,
     telegramGetMe: () => telegramGetMe(env),
@@ -300,7 +298,7 @@ export async function checkVersion(p) {
   if (!latest) return [na(`version ${p.version} (npm not reachable, latest unknown)`)];
   return [ok(versionAtLeast(toNpm(p.version), latest)
     ? `version ${p.version}, the latest`
-    : `version ${p.version}; ${fromNpm(latest)} is out (npx ${PKG.name}@latest, or git pull in a clone)`)];
+    : `version ${p.version}; ${fromNpm(latest)} is out (agent007 update, or npx ${PKG.name}@latest)`)];
 }
 
 export async function checkTelegram(p) {
@@ -364,24 +362,6 @@ export function checkPlugins(p) {
 const RECOMMENDED = [{ cmd: 'agent-browser', why: 'board cards use it for screenshots of UI changes' }];
 
 const RECOMMENDED_SKILLS = [{ skill: 'impeccable', why: 'UI design skill' }];
-
-const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
-const skillName = (text) => /^---\r?\n([\s\S]*?)\r?\n---/.exec(text || '')?.[1].match(/^name:[ \t]*["']?([^"'\r\n]*?)["']?[ \t]*$/m)?.[1];
-const skillsDirs = (p, cli) => cli === 'claude' ? [join(p.claudeDir, 'skills')] : [join(p.codexDir, 'skills'), join(p.agentsDir, 'skills')];
-
-// Where the skill whose front matter says `name: <name>` is installed and
-// readable for the CLI, or null. Claude's gstack ship is also found by folder.
-function skillDir(p, cli, name) {
-  const dirs = skillsDirs(p, cli);
-  if (cli === 'claude' && readable(join(dirs[0], name, 'SKILL.md')) !== null) return join(dirs[0], name);
-  for (const dir of dirs) {
-    let names = [];
-    try { names = readdirSync(dir); } catch { /* no such folder */ }
-    const n = names.find(n => skillName(readable(join(dir, n, 'SKILL.md'))) === name);
-    if (n) return join(dir, n);
-  }
-  return null;
-}
 
 // Links in a skills folder whose target is gone, as [name, target].
 function brokenLinks(dir) {

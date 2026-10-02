@@ -107,7 +107,12 @@ describe('This round', () => {
   it('says when the next round is when there is nothing for the owner', () => {
     show([], { ...INFO, current: null });
     expect(document.querySelector('.round-title').textContent).toBe('No round yet');
-    expect(document.querySelector('.round-empty').textContent).toMatch(/^Billion's questions come in rounds, twice a day\. Next round /);
+    expect(document.querySelector('.round-empty').textContent).toMatch(/^Billion's questions come in rounds, twice a day\. Next round .* Until then they show here as soon as Billion asks\.$/);
+  });
+
+  it('before the first round, shows each question as Open questions rather than an emergency', () => {
+    show([q(1, { round: undefined })], { ...INFO, current: null });
+    expect([...document.querySelectorAll('.round-dept-title')].map(h => h.textContent)).toEqual(['Open questions']);
   });
 
   it('with rounds off, shows every open question by project', () => {
@@ -117,8 +122,21 @@ describe('This round', () => {
 });
 
 describe('the switch between This round and Chat', () => {
-  it('opens on This round, remembers Chat, and draws the thread when it is shown', () => {
+  it('opens on Chat until a round has been released, so a new install sees the introduction and any setup notice', () => {
+    initSubTabs(vi.fn());
+    show([], { ...INFO, current: null });
+    expect(document.getElementById('waiting-board').dataset.sub).toBe('chat');
+    show([], INFO);
+    expect(document.getElementById('waiting-board').dataset.sub).toBe('round');
+    // The owner's own pick wins either way.
+    setSubTab('chat');
+    show([], INFO);
+    expect(subTab()).toBe('chat');
+  });
+
+  it('opens on This round once there has been one, remembers Chat, and draws the thread when it is shown', () => {
     const chat = vi.fn();
+    setRoundInfo(INFO);
     initSubTabs(chat);
     expect(subTab()).toBe('round');
     document.querySelector('#billion-subtabs [data-sub="chat"]').click();

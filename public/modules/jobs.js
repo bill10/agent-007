@@ -588,10 +588,18 @@ function renderCard(job) {
     card.appendChild(pr);
   }
 
-  if (job.noGithubRemote) {
+  // Moot once the card has its pull request.
+  if (job.noGithubRemote && !prHref) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = "This repo has no GitHub remote, so the job can't open a pull request; add one, or set its Pull request to Not required";
+    card.appendChild(err);
+  }
+
+  if (job.noShipSkill && !prHref) {
+    const err = document.createElement('div');
+    err.className = 'job-card-error';
+    err.textContent = `${job.noShipSkill === 'codex' ? 'Codex' : 'Claude Code'} has no ship skill, so the job can't open a pull request; install gstack (github.com/garrytan/gstack) and run its setup, or set its Pull request to Not required`;
     card.appendChild(err);
   }
 
