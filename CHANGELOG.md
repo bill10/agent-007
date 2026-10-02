@@ -5,6 +5,13 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.52.1.0] - 2026-10-02
+
+### Changed
+
+- **Talk to Billion speaks progress sooner and without filler.** The first spoken update comes after 0.8 s, and each new status line is spoken as soon as nothing else is playing (only the newest if several changed). The "Still working on it." cue is gone.
+- **Billion's activity text is verb + object.** "Working on your message…", "Starting on your message…", "Answering your earlier message first…", "Replying shortly…" replace the third-person wording.
+
 ## [0.52.0.0] - 2026-10-02
 
 ### Changed
