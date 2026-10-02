@@ -545,7 +545,7 @@ export const TELL_OWNER_TOOL = {
     type: 'object',
     properties: {
       text: { type: 'string', description: 'The message, written to be read on a phone.' },
-      reply_to: { type: 'string', description: 'The id after # in the owner\'s message this answers, e.g. "3f9a0c1e" from [Owner via app, voice #3f9a0c1e]. Binds the reply to that message instead of the oldest waiting one; a voice reply is only read aloud to the owner when it is bound to their turn.' },
+      reply_to: { type: 'string', description: 'The id after # in the owner\'s message this answers, e.g. "3f9a0c1e" from [Owner via app, voice #3f9a0c1e]. Binds the reply to that message instead of the oldest waiting one. REQUIRED to answer a voice turn: a tell_owner without reply_to never answers one, and only a reply bound to a voice turn is read aloud.' },
     },
     required: ['text'],
     additionalProperties: false,
