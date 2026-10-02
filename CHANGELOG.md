@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.42.0.0] - 2026-10-02
+
+### Changed
+
+- **Billion always knows its CLI and the models it may pick.** Every start prompt (first run, restart, handover) now says whether Billion runs on Claude Code or Codex and lists the models available per CLI, and `post_job`'s `agent` field tells the caller which CLI it runs as. Billion's start waits up to 15 s for the first model discovery, so a fresh conversation no longer loads a `post_job` that says Codex has no models; past that it starts anyway and points to `billion-tools.json`, which now carries the lists and is rewritten when they change. The charter has Billion name both `agent` and `model` on every card, picking the model most appropriate for the job, in place of the old strong/fast rule of thumb and "leave it empty when unsure".
+
 ## [0.41.0.0] - 2026-10-01
 
 ### Added
