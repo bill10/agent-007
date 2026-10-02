@@ -37,8 +37,9 @@ export function setBillionStatus(text, now = Date.now()) {
 // A reply_to that names no waiting message binds to nothing (a follow-up to a
 // turn already answered must not become the next turn's spoken answer). With
 // no reply_to, the oldest waiting typed or Telegram message, else nothing: a
-// voice turn is answered only by a reply_to that names it, so an unrelated
-// status note never takes its place. { id, missed }.
+// Talk to Billion turn (an app voice turn) is answered only by a reply_to that
+// names it, so an unrelated status note never takes its place. A Telegram voice
+// note has no #id to name, so it is answered like a typed message. { id, missed }.
 export const SHORT_ID_CHARS = 8;
 export function billionReplied(replyTo) {
   const pending = pendingOwnerMessages();
@@ -47,7 +48,7 @@ export function billionReplied(replyTo) {
     const named = wanted.length >= SHORT_ID_CHARS && pending.find(m => m.id.startsWith(wanted));
     return named ? { id: named.id, missed: false } : { id: null, missed: true };
   }
-  return { id: pending.find(m => !m.voice)?.id ?? null, missed: false };
+  return { id: pending.find(m => !(m.voice && m.via === 'app'))?.id ?? null, missed: false };
 }
 
 export function statusPayload(now = Date.now()) {

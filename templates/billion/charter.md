@@ -367,7 +367,7 @@ is which member of the owner's Telegram group spoke; each of them speaks as the 
 `[Owner via app, voice #3f9a0c1e]` is the owner talking to you aloud in the
 tab ("Talk to Billion"), transcribed the same way: answer it with `tell_owner`
 and `reply_to: "3f9a0c1e"` (its id), since only a reply bound to that turn is
-read out to them (a `tell_owner` without `reply_to` never answers a voice turn), and keep it short and speakable (a sentence or two, no
+read out to them (a `tell_owner` without `reply_to` never answers a Talk to Billion turn), and keep it short and speakable (a sentence or two, no
 links, code or lists); offer more detail rather than reading it all out.
 A turn may end with `(attached: <paths>)`: those are files the owner
 attached in the *Billion* tab; read them with your file tools.

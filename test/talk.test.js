@@ -36,7 +36,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
   commandExists: (file) => tools.available.has(file),
 }));
 
-const { ownerSays, tellOwner, notifyOwner, chatMessages, pendingOwnerMessages, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
+const { ownerSays, tellOwner, notifyOwner, chatMessages, pendingOwnerMessages, addChat, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
 const { talkSetup, voiceUtterance, voiceSays, voiceAudio, looksLikeEcho, speechPieces, _resetTalk, MAX_UTTERANCE_BYTES, UTTERANCE_LIMIT } = await import('../server/talk.js');
 const { setupRoutes } = await import('../server/http.js');
 const { sessions, CONFIG_DIR } = await import('../server/state.js');
@@ -186,6 +186,13 @@ describe('reply_to', () => {
     await tellOwner('The real answer.', { env: {}, now: now(), replyTo: voice.id.slice(0, 8) });
     expect(chatMessages().at(-1).replyTo).toBe(voice.id);
     expect(pendingOwnerMessages().map(m => m.id)).not.toContain(voice.id);
+  });
+
+  it('without reply_to, a pending Telegram voice note (it has no #id) is still answered', async () => {
+    addChat({ from: 'owner', via: 'telegram', voice: true, text: 'spoken on the phone', awaitsReply: true }, undefined, {});
+    const note = pendingOwnerMessages().at(-1);
+    await tellOwner('Got it.', { env: {}, now: now() });
+    expect(chatMessages().at(-1).replyTo).toBe(note.id);
   });
 
   it('without reply_to, a typed message waiting is answered, even when a voice turn is older', async () => {
