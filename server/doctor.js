@@ -11,7 +11,7 @@
 // Imported only after the settings files are loaded: state.js reads PORT when
 // it loads.
 
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, readlinkSync } from 'fs';
 import { createServer } from 'net';
 import { homedir } from 'os';
 import path, { join, resolve } from 'path';
@@ -109,6 +109,8 @@ export function defaultProbes({ env = process.env, settingsLine = null } = {}) {
     configPath: CONFIG_PATH,
     worktreeDir: WORKTREE_DIR,
     claudeDir: env.CLAUDE_CONFIG_DIR ? resolve(env.CLAUDE_CONFIG_DIR) : join(homedir(), '.claude'),
+    codexDir: env.CODEX_HOME ? resolve(env.CODEX_HOME) : join(homedir(), '.codex'),
+    agentsDir: join(homedir(), '.agents'),
     settingsLine,
     npmLatest,
     telegramGetMe: () => telegramGetMe(env),
@@ -332,6 +334,67 @@ export function checkPlugins(p) {
   return lines.length ? lines : [ok('no stray local plugin registrations')];
 }
 
+// Extras the board's workers use but nothing needs: an info line each, never ✗.
+// Add more here.
+const RECOMMENDED = [{ cmd: 'agent-browser', why: 'board cards use it for screenshots of UI changes' }];
+
+const RECOMMENDED_SKILLS = [{ skill: 'impeccable', why: 'UI design skill' }];
+
+const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
+const skillName = (text) => /^---\r?\n([\s\S]*?)\r?\n---/.exec(text || '')?.[1].match(/^name:[ \t]*["']?([^"'\r\n]*?)["']?[ \t]*$/m)?.[1];
+const skillsDirs = (p, cli) => cli === 'claude' ? [join(p.claudeDir, 'skills')] : [join(p.codexDir, 'skills'), join(p.agentsDir, 'skills')];
+
+// Where the skill whose front matter says `name: <name>` is installed and
+// readable for the CLI, or null. Claude's gstack ship is also found by folder.
+function skillDir(p, cli, name) {
+  const dirs = skillsDirs(p, cli);
+  if (cli === 'claude' && readable(join(dirs[0], name, 'SKILL.md')) !== null) return join(dirs[0], name);
+  for (const dir of dirs) {
+    let names = [];
+    try { names = readdirSync(dir); } catch { /* no such folder */ }
+    const n = names.find(n => skillName(readable(join(dir, n, 'SKILL.md'))) === name);
+    if (n) return join(dir, n);
+  }
+  return null;
+}
+
+// Links in a skills folder whose target is gone, as [name, target].
+function brokenLinks(dir) {
+  let entries = [];
+  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+  return entries.filter(e => e.isSymbolicLink() && !existsSync(join(dir, e.name)))
+    .map(e => [e.name, (() => { try { return readlinkSync(join(dir, e.name)); } catch { return '?'; } })()]);
+}
+
+// The ship skill (gstack's) is how a card that needs a pull request finishes.
+export function checkSkills(p, board) {
+  const lines = [];
+  for (const cli of JOB_AGENTS.filter(c => c === 'claude' || c === 'codex')) {
+    const uses = [
+      p.billionRuns() && p.billionAgent() === cli && 'Billion runs on it',
+      board.jobs.some(j => jobAgent(j) === cli && jobRequiresPr(j)) && 'a board card that needs a pull request uses it',
+    ].filter(Boolean);
+    const stack = join(p.claudeDir, 'skills', 'gstack');
+    const fix = `install gstack (https://github.com/garrytan/gstack), then: ${shellPath(p.exists(stack) ? stack : join(p.claudeDir, 'skills', 'gstack'))}/setup --host ${cli}`;
+    const found = skillDir(p, cli, 'ship');
+    if (found) lines.push(ok(`gstack for ${cli}: ship skill at ${tilde(found)}`));
+    else if (uses.length) lines.push(fail(`gstack for ${cli}: no working ship skill; ${uses.join(' and ')}`, fix));
+    else lines.push(na(`gstack for ${cli}: no ship skill (nothing needs it)`));
+    for (const dir of skillsDirs(p, cli)) {
+      const broken = brokenLinks(dir);
+      if (broken.length) lines.push(fail(`${broken.length} skill${broken.length === 1 ? '' : 's'} in ${tilde(dir)} ${broken.length === 1 ? 'is a broken link' : 'are broken links'} (e.g. ${broken[0][0]} → ${broken[0][1]})`, fix));
+    }
+  }
+  for (const { skill, why } of RECOMMENDED_SKILLS) {
+    for (const cli of ['claude', 'codex']) {
+      const found = skillDir(p, cli, skill);
+      lines.push(found ? ok(`${skill} (recommended) for ${cli}: ${tilde(found)}; ${why}`) : na(`${skill} (recommended) for ${cli}: not installed; ${why}`));
+    }
+  }
+  for (const { cmd, why } of RECOMMENDED) lines.push(p.which(cmd) ? ok(`${cmd} (recommended): installed; ${why}`) : na(`${cmd} (recommended): not installed; ${why}`));
+  return lines;
+}
+
 // --- Running them ---
 
 // Each check, in order, as [title, run(ctx)]. fast: the subset a start runs,
@@ -342,6 +405,7 @@ function checks(fast) {
     ['Agent CLIs', (c) => checkClis(c.p, c.board)],
     ['GitHub', (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account })],
     ['Repos', (c) => checkRepos(c.p, c.board, c.origin, c.account), 'slow'],
+    ['Skills', (c) => checkSkills(c.p, c.board)],
     ['Port', (c) => checkPort(c.p, { starting: fast })],
     ['Settings', (c) => checkSettings(c.p, c.board)],
     ['Version', (c) => checkVersion(c.p), 'slow'],
