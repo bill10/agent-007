@@ -6,7 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { telegramGetMe } from '../server/owner.js';
 import {
-  portState, runDoctor, failed, formatReport, formatStartup, versionAtLeast,
+  portState, runDoctor, failed, formatReport, formatStartup, formatSection, formatSummary, useColor, SECTIONS, versionAtLeast,
   insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, toNpm, fromNpm,
 } from '../server/doctor.js';
 import { plist } from '../server/service.js';
@@ -254,7 +254,7 @@ describe('runDoctor', () => {
     const net = () => { throw new Error('network in fast mode'); };
     const results = await runDoctor({ fast: true, probes: probes({ npmLatest: net, telegramGetMe: net, ghAccounts: net, ghAccountFor: net, repoEnv: net }) });
     expect(failed(results)).toBe(false);
-    expect(results.map(r => r.title)).toEqual(['Node', 'Agent CLIs', 'GitHub', 'Skills', 'Port', 'Settings', 'Service']);
+    expect(results.map(r => r.title)).toEqual(['Node', 'Git', 'Port', 'Agent CLIs', 'GitHub', 'Skills', 'Settings', 'Recommended']);
   });
 
   it('fast keeps to its budget and drops a check that hangs', async () => {
@@ -500,5 +500,75 @@ describe('doctor skills', () => {
   it('the fast run includes the skills check', async () => {
     const results = await runDoctor({ fast: true, probes: probes() });
     expect(results.map(r => r.title)).toContain('Skills');
+  });
+});
+
+describe('doctor report layout', () => {
+  const ESC = '\x1b[';
+
+  it('files every check line under exactly one section, in the fixed order', async () => {
+    const results = await runDoctor({ probes: probes() });
+    expect(results.every(r => SECTIONS.includes(r.section))).toBe(true);
+    const headings = formatReport(results).split('\n').filter(l => SECTIONS.includes(l));
+    expect(headings).toEqual(SECTIONS.filter(h => results.some(r => r.section === h)));
+    expect(headings).toContain('System');
+    expect(headings).toContain('Recommended');
+    // Each ✓/✗/– line is printed once.
+    const total = results.reduce((n, r) => n + r.lines.length, 0);
+    expect(formatReport(results).split('\n').filter(l => /^[✓✗–] /.test(l))).toHaveLength(total);
+  });
+
+  it('streams sections in order; a slow one holds back only what follows it', async () => {
+    const seen = [];
+    const slowPort = () => new Promise(r => setTimeout(() => r('free'), 150));
+    const slowVersion = probes({ portState: slowPort, npmLatest: () => new Promise(r => setTimeout(() => r('9.9.9'), 400)) });
+    const started = Date.now();
+    await runDoctor({ probes: slowVersion, onSection: ({ heading }) => seen.push([heading, Date.now() - started]) });
+    expect(seen.map(s => s[0])).toEqual(SECTIONS.filter(h => seen.some(s => s[0] === h)));
+    const at = Object.fromEntries(seen);
+    expect(at.System).toBeGreaterThanOrEqual(140);
+    expect(at['Settings & service']).toBeGreaterThanOrEqual(390);
+  });
+
+  it('prints an early section while a later one is still running', async () => {
+    const seen = [];
+    let release;
+    const hang = new Promise(r => { release = r; });
+    const run = runDoctor({ probes: probes({ ghAccounts: () => hang }), onSection: ({ heading }) => seen.push(heading) });
+    await new Promise(r => setTimeout(r, 100));
+    expect(seen).toContain('System');
+    expect(seen).toContain('Agents');
+    expect(seen).not.toContain('Repos');
+    release(['bob']);
+    await run;
+    expect(seen).toContain('Repos');
+  });
+
+  it('colors only when asked: TTY, FORCE_COLOR, not NO_COLOR', () => {
+    expect(useColor({ isTTY: true }, {})).toBe(true);
+    expect(useColor({ isTTY: false }, {})).toBe(false);
+    expect(useColor({ isTTY: true }, { NO_COLOR: '1' })).toBe(false);
+    expect(useColor({ isTTY: false }, { FORCE_COLOR: '1' })).toBe(true);
+    expect(useColor({ isTTY: true }, { FORCE_COLOR: '0' })).toBe(false);
+  });
+
+  it('plain output has no ANSI; colored output paints ✓ green, ✗ red with its fix, – dim, headings bold', async () => {
+    const results = await runDoctor({ probes: probes({ portState: async () => 'other' }) });
+    expect(formatReport(results)).not.toContain(ESC);
+    const colored = formatReport(results, { color: true });
+    expect(colored).toContain(`${ESC}1mSystem${ESC}0m`);
+    expect(colored).toContain(`${ESC}32m✓${ESC}0m`);
+    expect(colored).toMatch(/\x1b\[31m✗ port 7007 is in use by another program\x1b\[0m\n\x1b\[31m {4}fix: /);
+    const dim = formatSection({ heading: 'X', results: [{ lines: [{ status: 'na', text: 'nope' }] }] }, { color: true });
+    expect(dim).toContain(`${ESC}2m– nope${ESC}0m`);
+  });
+
+  it('ends with the summary: counts, or All good', () => {
+    const r = (...statuses) => [{ lines: statuses.map(status => ({ status, text: 't' })) }];
+    expect(formatSummary(r('ok'))).toBe('All good');
+    expect(formatSummary(r('ok', 'na', 'na'))).toBe('All good, 2 notes');
+    expect(formatSummary(r('fail', 'na'))).toBe('1 problem, 1 note');
+    expect(formatSummary(r('fail', 'fail'))).toBe('2 problems, 0 notes');
+    expect(formatReport(r('fail')).split('\n').at(-1)).toBe('1 problem, 0 notes');
   });
 });

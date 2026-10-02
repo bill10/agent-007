@@ -182,11 +182,16 @@ if (positionals[0] === 'init') {
   const { path, messages } = writeHandover(billionDir(), { from: billionAgent() });
   console.log(`Wrote ${path} (${messages} messages)`);
 } else if (positionals[0] === 'doctor') {
-  const { runDoctor, defaultProbes, formatReport, failed } = await import('../server/doctor.js');
-  const results = await runDoctor({ probes: defaultProbes({ settingsLine: settingsLine(settingsFiles, initCommand()), installCommand: ownCommand('install') }) });
+  const { runDoctor, defaultProbes, formatSection, formatSummary, useColor, failed } = await import('../server/doctor.js');
+  const color = useColor(process.stdout, process.env);
+  // Each section prints as it finishes, in a fixed order.
+  const results = await runDoctor({
+    probes: defaultProbes({ settingsLine: settingsLine(settingsFiles, initCommand()), installCommand: ownCommand('install') }),
+    onSection: (section) => process.stdout.write(formatSection(section, { color })),
+  });
   // Exit once written (a pipe on macOS is asynchronous), not on its own: a
   // probe that has not timed out yet would hold the loop open.
-  process.stdout.write(`${formatReport(results)}\n`, () => process.exit(failed(results) ? 1 : 0));
+  process.stdout.write(`${formatSummary(results, { color })}\n`, () => process.exit(failed(results) ? 1 : 0));
 } else if (SERVICE_COMMANDS.includes(positionals[0])) {
   const { runCommand, defaultContext } = await import('../server/service.js');
   process.exitCode = await runCommand(positionals[0], values, defaultContext({ launchEnv, cmd: ownCommand }));
@@ -199,7 +204,7 @@ if (positionals[0] === 'init') {
   const STARTUP_CHECK_MS = 2000;
   const doctor = import('../server/doctor.js').then(d => d.runDoctor({ fast: true, budgetMs: STARTUP_CHECK_MS })
     // With --port, so doctor checks this port and not PORT's.
-    .then(results => d.formatStartup(results, ownCommand(values.port ? `doctor --port ${values.port}` : 'doctor'))))
+    .then(results => d.formatStartup(results, ownCommand(values.port ? `doctor --port ${values.port}` : 'doctor'), { color: d.useColor() })))
     .catch(() => '');
   // Imported only now: server/state.js reads PORT when it loads.
   const { startup, gracefulShutdown } = await import('../server.js');
