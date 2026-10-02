@@ -24,7 +24,11 @@ import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
 import { tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
+<<<<<<< HEAD
 import { installedService, parseServiceFile } from './service.js';
+=======
+import { whisperSetup } from './voice.js';
+>>>>>>> origin/main
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -310,6 +314,26 @@ export async function checkTelegram(p) {
   return [ok(`Telegram bot @${me.username} answers`)];
 }
 
+export function checkWhisper(p, { whisperSetupFn = whisperSetup } = {}) {
+  const telegram = (p.env.TELEGRAM_BOT_TOKEN || '').trim();
+  const setup = whisperSetupFn(p.env);
+  const hasFFmpeg = p.which('ffmpeg');
+
+  if (!telegram) {
+    return [na('whisper.cpp (recommended): only used for Telegram voice notes (Telegram not set up)')];
+  }
+
+  if (setup.missing) {
+    return [na(`whisper.cpp (recommended, not required): not set up; voice notes over Telegram get a 'not set up' reply; ${setup.missing}`)];
+  }
+
+  if (!hasFFmpeg) {
+    return [na(`whisper.cpp (recommended): ${setup.bin}, model ${tilde(setup.model)}; ffmpeg not on PATH (brew install ffmpeg to enable transcription)`)];
+  }
+
+  return [ok(`whisper.cpp (recommended): ${setup.bin}, model ${tilde(setup.model)}; voice notes over Telegram are transcribed`)];
+}
+
 // Whether `child` is `dir` or inside it. path.relative, not a string prefix:
 // on Windows it ignores case and takes / for \, as Claude Code's recorded
 // projectPath may differ from WORKTREE_DIR in either. A sibling folder
@@ -432,6 +456,7 @@ function checks(fast) {
     ['Service', (c) => checkService(c.p)],
     ['Version', (c) => checkVersion(c.p), 'slow'],
     ['Telegram', (c) => checkTelegram(c.p), 'slow'],
+    ['Whisper', (c) => checkWhisper(c.p), 'slow'],
     ['Plugins', (c) => checkPlugins(c.p), 'slow'],
   ];
   return fast ? all.filter(c => !c[2]) : all;

@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 import { telegramGetMe } from '../server/owner.js';
 import {
   portState, runDoctor, failed, formatReport, formatStartup, versionAtLeast,
-  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkPlugins, checkSkills, checkService, toNpm, fromNpm,
+  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, toNpm, fromNpm,
 } from '../server/doctor.js';
 import { plist } from '../server/service.js';
 
@@ -192,6 +192,30 @@ describe('doctor checks', () => {
     ];
     expect(all.map(l => l[0].status)).toEqual(['ok', 'fail', 'na']);
     expect(JSON.stringify(all)).not.toContain('SECRET');
+  });
+
+  it('whisper: off when Telegram not set up; – when not set up but Telegram is; – when ffmpeg missing; ✓ when fully set up', () => {
+    // Telegram not set up: whisper.cpp info line
+    expect(checkWhisper(probes({ env: {} }))[0].status).toBe('na');
+    expect(checkWhisper(probes({ env: {} }))[0].text).toMatch(/only used for Telegram/);
+
+    // Telegram set up, whisper.cpp not set up
+    const setup = (ok) => ok ? { bin: 'whisper-cpp', model: '/path/to/model.bin' } : { missing: 'brew install whisper-cpp' };
+    const telegramEnv = { TELEGRAM_BOT_TOKEN: 'token' };
+    const notSet = checkWhisper(probes({ env: telegramEnv }), { whisperSetupFn: () => setup(false) })[0];
+    expect(notSet.status).toBe('na');
+    expect(notSet.text).toMatch(/not set up/);
+    expect(notSet.text).toMatch(/brew install whisper-cpp/);
+
+    // Telegram set up, whisper.cpp set up, ffmpeg missing
+    const noFFmpeg = checkWhisper(probes({ env: telegramEnv, which: (c) => c === 'ffmpeg' ? null : `/bin/${c}` }), { whisperSetupFn: () => setup(true) })[0];
+    expect(noFFmpeg.status).toBe('na');
+    expect(noFFmpeg.text).toMatch(/ffmpeg not on PATH/);
+
+    // Telegram set up, whisper.cpp set up, ffmpeg available
+    const full = checkWhisper(probes({ env: telegramEnv }), { whisperSetupFn: () => setup(true) })[0];
+    expect(full.status).toBe('ok');
+    expect(full.text).toMatch(/voice notes over Telegram are transcribed/);
   });
 
   it('plugins: local registrations in a board worktree or a gone folder are ✗', () => {
