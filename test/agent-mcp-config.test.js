@@ -6,9 +6,10 @@
 // is neither Claude Code nor Codex.
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { removeTempDir } from './temp-dir.js';
 
 // Windows has no POSIX mode bits: writeFileSync's mode lands as 0o666 and chmod
 // is a no-op, so the owner-only property can only be asserted on POSIX.
@@ -22,7 +23,7 @@ const {
   withMcpConfig, takesMcpConfig, boardBaseUrl, MCP_SERVER_NAME,
 } = await import('../server/agent-mcp.js');
 
-afterEach(() => { rmSync(DIR, { recursive: true, force: true }); });
+afterEach(() => { removeTempDir(DIR); });
 
 describe('the config an agent reads at startup', () => {
   it('points at this board over loopback with the session token in a header', () => {

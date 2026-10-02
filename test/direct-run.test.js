@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { isDirectRun } from '../server/direct-run.js';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, realpathSync } from 'fs';
 import { join, basename } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
+import { removeTempDir } from './temp-dir.js';
 
 // isDirectRun decides whether server.js was the process entry point. Its
 // failure mode is a silent exit 0 (the "npm start does nothing" bug), so every
@@ -21,7 +22,7 @@ describe('isDirectRun entry-point detection', () => {
     entry = join(spacedDir, 'server.js');
     writeFileSync(entry, '// entry fixture');
   });
-  afterAll(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  afterAll(() => { removeTempDir(base); });
 
   const urlOf = (p) => pathToFileURL(realpathSync(p)).href;
 

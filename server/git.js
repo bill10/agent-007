@@ -250,6 +250,37 @@ async function remoteBranchNames(repoPath) {
   }
 }
 
+// `git worktree add` is not safe to run twice at once in one repo: each run
+// reads every .git/worktrees/<name>/ entry, and trips over the other's
+// half-written one ("fatal: failed to read .git/worktrees/agent1/commondir").
+// Windows' slower file writes make that window wide enough to hit on a board
+// that dispatches several jobs into one repo. So adds into one repo take turns;
+// different repos still run in parallel. Turns are per git common dir, not per
+// path: a repo reached by two paths (a symlink, or registered through one of
+// its own linked worktrees) shares one .git/worktrees/.
+// ponytail: in-process only; a `git worktree add` run from outside the server can still collide.
+const worktreeAddTurns = new Map();
+const commonDirs = new Map();
+async function gitCommonDir(repoPath) {
+  if (!commonDirs.has(repoPath)) {
+    try {
+      const dir = (await gitExec(['-C', repoPath, 'rev-parse', '--git-common-dir'])).trim();
+      commonDirs.set(repoPath, realpathSync(resolve(repoPath, dir)));
+    } catch {
+      return repoPath;   // not a repo (yet): the add itself will report why
+    }
+  }
+  return commonDirs.get(repoPath);
+}
+export async function inWorktreeAddTurn(repoPath, fn) {
+  const key = await gitCommonDir(repoPath);
+  const run = (worktreeAddTurns.get(key) || Promise.resolve()).then(fn);
+  const settled = run.catch(() => {});
+  worktreeAddTurns.set(key, settled);
+  settled.then(() => { if (worktreeAddTurns.get(key) === settled) worktreeAddTurns.delete(key); });
+  return run;
+}
+
 // Ask git for a name rather than tracking which names are free.
 //
 // `worktree add -b` creates the ref atomically: it either succeeds, or it tells us
@@ -276,7 +307,7 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
     const args = ['-C', repoPath, 'worktree', 'add', worktreePath, '-b', branchName];
     if (start) args.push(start);
     try {
-      await gitExec(args);
+      await inWorktreeAddTurn(repoPath, () => gitExec(args));
       return { worktreePath, branchName, cocktail, startPoint: start };
     } catch (err) {
       const msg = err.stderr || err.message || '';

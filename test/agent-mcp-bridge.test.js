@@ -1,11 +1,12 @@
 import { afterEach, expect, it } from 'vitest';
 import { createServer } from 'http';
 import { spawn } from 'child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { handleMcpMessage } from '../server/mcp.js';
+import { removeTempDir } from './temp-dir.js';
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; });
@@ -31,7 +32,7 @@ it('connects a stdio client to the board, including discovery, posting and HTTP 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   cleanups.push(() => new Promise(resolve => server.close(resolve)));
   const dir = mkdtempSync(join(tmpdir(), 'board bridge '));
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  cleanups.push(() => removeTempDir(dir));
   const path = join(dir, 'config.json');
   writeFileSync(path, JSON.stringify({ mcpServers: { 'agent-007-board': {
     url: `http://127.0.0.1:${server.address().port}/mcp`,
@@ -69,7 +70,7 @@ it('connects a stdio client to the board, including discovery, posting and HTTP 
 
 function bridgeConfig(contents) {
   const dir = mkdtempSync(join(tmpdir(), 'board-bridge-errors-'));
-  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  cleanups.push(() => removeTempDir(dir));
   const path = join(dir, 'config.json');
   if (contents !== undefined) writeFileSync(path, contents);
   return path;

@@ -12,6 +12,7 @@ import { config, sessions, orphans } from '../server/state.js';
 import { pendingMessages } from '../server/messages.js';
 import { toolsFor } from '../server/mcp.js';
 import { BILLION_NAME } from '../lib/jobs.js';
+import { removeTempDir } from './temp-dir.js';
 
 // A fake `codex` first on PATH (posix only, like server.test.js's), so the
 // re-spawned session is a real PTY that resumes nothing.
@@ -30,21 +31,27 @@ beforeAll(() => {
 afterAll(() => {
   process.env.PATH = savedPath;
   if (savedCodexHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = savedCodexHome;
-  rmSync(bin, { recursive: true, force: true });
+  removeTempDir(bin);
 });
 
 const made = { jobs: [], dirs: [] };
 afterEach(async () => {
+  const killed = [...sessions.values()];
   for (const [id, s] of sessions) {
     clearInterval(s.stateCheckInterval);
     clearTimeout(s.scanTimer);
     try { s.pty.kill(); } catch {}
     sessions.delete(id);
   }
+  // The workers sit in the worktree dirs removed below, which Windows will not
+  // remove while a live process has one as its cwd.
+  for (const end = Date.now() + 5000; Date.now() < end && !killed.every(s => s.exited || !s.pty);) {
+    await new Promise(r => setTimeout(r, 25));
+  }
   orphans.clear();
   config.activeSessions = [];
   for (const id of made.jobs.splice(0)) await deleteJob(id, () => {});
-  for (const d of made.dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  for (const d of made.dirs.splice(0)) removeTempDir(d);
   boardSettings().maxPerRepo = 2;
 });
 

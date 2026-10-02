@@ -9,7 +9,7 @@ import {
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
-import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch, discardWorktree } from './git.js';
+import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch, discardWorktree, inWorktreeAddTurn } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
@@ -144,8 +144,10 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
       if (orphan.repoPath && orphan.branchName && existsSync(orphan.repoPath)) {
         try {
           try { rmSync(orphan.worktreePath, { recursive: true }); } catch {}
-          await gitExec(['-C', orphan.repoPath, 'worktree', 'prune']);
-          await gitExec(['-C', orphan.repoPath, 'worktree', 'add', orphan.worktreePath, orphan.branchName]);
+          await inWorktreeAddTurn(orphan.repoPath, async () => {
+            await gitExec(['-C', orphan.repoPath, 'worktree', 'prune']);
+            await gitExec(['-C', orphan.repoPath, 'worktree', 'add', orphan.worktreePath, orphan.branchName]);
+          });
           recreated = true;
         } catch (err) { console.error(`Failed to re-create worktree for ${orphan.name}:`, err.message || err.stderr); }
       }

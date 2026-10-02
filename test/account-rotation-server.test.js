@@ -1,7 +1,7 @@
 // End-to-end local socket + real PTYs; auth is an in-memory fixture and the
 // Claude executable is a stub. Never reads or changes a real login.
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, renameSync, existsSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync, renameSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import WebSocket from 'ws';
@@ -23,6 +23,7 @@ import { nextSessionId, CONFIG_DIR } from '../server/state.js';
 import { broadcast } from '../server/ws.js';
 import { sendText, pendingMessages } from '../server/messages.js';
 import { quote } from '../lib/jobs.js';
+import { removeTempDir } from './temp-dir.js';
 
 let root, executable, url;
 const wait = async fn => { const end = Date.now() + 12000; while (Date.now() < end) { const result = fn(); if (result) return result; await new Promise(r => setTimeout(r, 25)); } throw Error('Timed out'); };
@@ -37,10 +38,14 @@ beforeAll(async () => {
   url = `ws://127.0.0.1:${server.address().port}`;
 });
 afterAll(async () => {
-  for (const s of sessions.values()) { clearInterval(s.stateCheckInterval); clearTimeout(s.scanTimer); try { s.pty.kill(); } catch {} }
+  const all = [...sessions.values()];
+  for (const s of all) { clearInterval(s.stateCheckInterval); clearTimeout(s.scanTimer); try { s.pty.kill(); } catch {} }
+  // The stubs run with root as their cwd, and Windows will not remove a folder
+  // a live process sits in, so wait for every PTY to report its exit.
+  await wait(() => all.every(s => s.exited)).catch(() => {});
   sessions.clear();
   await new Promise(r => server.close(r));
-  rmSync(root, { recursive: true, force: true });
+  removeTempDir(root);
 });
 
 describe('rotation through the owner socket', () => {

@@ -3,6 +3,7 @@ import { deleteBranch, gitExec } from '../server/git.js';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir.js';
 
 // Regression: an agent's branch must be deletable even when its worktree dir was
 // removed out-of-band but git still registers it ("prunable"). Without pruning
@@ -19,7 +20,7 @@ describe('deleteBranch prunes stale worktrees before deleting', () => {
     await gitExec(['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init']);
     await gitExec(['-C', repo, 'branch', '-M', 'main']);
   });
-  afterEach(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  afterEach(() => { removeTempDir(base); });
 
   const branches = async () =>
     (await gitExec(['-C', repo, 'branch', '--list', 'bill-slung/*'])).trim();
