@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 import { telegramGetMe } from '../server/owner.js';
 import {
   portState, runDoctor, failed, formatReport, formatStartup, formatSection, formatSummary, useColor, SECTIONS, versionAtLeast,
-  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, toNpm, fromNpm,
+  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, checkRemote, toNpm, fromNpm,
 } from '../server/doctor.js';
 import { plist } from '../server/service.js';
 
@@ -62,6 +62,8 @@ function probes(over = {}) {
     service: () => null,
     whichIn: () => null,
     installCommand: 'agent007 install',
+    tailscaleServe: async () => null,
+    settingsFile: '/home/.agent-007/.env',
     npmLatest: async () => '0.40.0',
     telegramGetMe: async () => ({ username: 'my_bot' }),
     ...over,
@@ -143,6 +145,21 @@ describe('doctor checks', () => {
     await checkRepos(probes({ git: unset, env: { GIT_SSH_COMMAND: 'ssh -i k' } }), board(), origin);
     await checkRepos(probes({ git: unset, env: { GIT_SSH: '/usr/bin/plink' } }), board(), origin);
     expect(batch).toEqual(['ssh -o BatchMode=yes', undefined, undefined]);
+  });
+
+  it('remote: ✗ when tailscale serve proxies this port and ALLOWED_ORIGINS, as the server reads it, lacks the name', async () => {
+    const served = (proxy) => async () => ({ Web: { 'mini.tail1.ts.net:443': { Handlers: { '/': { Proxy: proxy } } } } });
+    expect(await checkRemote(probes({ tailscaleServe: async () => null }))).toEqual([]);
+    expect(await checkRemote(probes({ tailscaleServe: served('http://127.0.0.1:9999') }))).toEqual([]);
+    const bare = await checkRemote(probes({ tailscaleServe: served('http://127.0.0.1:7007'), settingsFile: '/h/.agent-007/.env' }));
+    expect(bare).toEqual([{ status: 'fail', text: expect.stringContaining('does not list mini.tail1.ts.net'), fix: 'Add ALLOWED_ORIGINS=mini.tail1.ts.net to /h/.agent-007/.env, then restart Agent 007' }]);
+    expect(statuses(await checkRemote(probes({ tailscaleServe: served('http://localhost:7007'), env: { ALLOWED_ORIGINS: 'https://mini.tail1.ts.net' } })))).toEqual(['ok']);
+    // With a service, this shell's ALLOWED_ORIGINS (a ./.env here) does not count; its settings file does.
+    const text = plist({ args: ['/n/node', '/a/bin/agent-007.js'], env: { PATH: '/svc' }, cwd: '/h/.agent-007', log: '/l' });
+    const svc = (files) => probes({ tailscaleServe: served('http://127.0.0.1:7007'), env: { ALLOWED_ORIGINS: 'mini.tail1.ts.net' }, settingsFile: '/h/.agent-007/.env', service: () => ({ file: '/x.plist', text }), files });
+    const [line] = await checkRemote(svc({}));
+    expect(line).toMatchObject({ status: 'fail', text: expect.stringContaining('(as the service reads it)'), fix: 'Add ALLOWED_ORIGINS=mini.tail1.ts.net to /h/.agent-007/.env, then agent007 restart' });
+    expect(statuses(await checkRemote(svc({ '/h/.agent-007/.env': 'ALLOWED_ORIGINS=other,mini.tail1.ts.net\n' })))).toEqual(['ok']);
   });
 
   it('service: nothing when none is installed; ✗ for a gone node or bin, or a CLI its PATH misses', () => {

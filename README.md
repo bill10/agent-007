@@ -108,6 +108,8 @@ Uncomment what you want, then restart. The ones people change:
 Highest wins: command-line flags (`--port`), then environment variables, then
 a `.env` in the directory you start it from, then `~/.agent-007/.env`. The full
 list is in [Configuration](#configuration) and `--help`.
+The service from `agent007 install` reads only `~/.agent-007/.env` (install
+copies over what the current folder's `.env` has and that file lacks).
 
 The details and caveats of every feature -- phone layout, voice input, themes and more -- are in [docs/FEATURES.md](docs/FEATURES.md).
 

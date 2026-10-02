@@ -15,9 +15,9 @@ import {
 import { homedir, userInfo } from 'os';
 import { createInterface } from 'readline';
 import { commandExists } from './command-path.js';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { configDir, tilde } from './settings.js';
+import { carryOverEnv, configDir, tilde } from './settings.js';
 import { setupVoice } from './voice-setup.js';
 import { callServer, pidAlive, readServerFile } from './control.js';
 
@@ -295,6 +295,13 @@ async function install(ctx, { 'dry-run': dryRun } = {}) {
   }
   mkdirSync(dirname(file), { recursive: true });
   mkdirSync(dirname(def.log), { recursive: true });
+  // The service does not run here, so this folder's ./.env (ALLOWED_ORIGINS
+  // for remote access, say) would stop applying. Key names only: values may be secrets.
+  if (resolve(def.cwd) !== resolve(ctx.cwd)) {
+    const shared = join(configDir(ctx.env), '.env');
+    const copied = carryOverEnv(join(ctx.cwd, '.env'), shared);
+    if (copied.length) ctx.log(`Copied ${copied.join(', ')} from ${tilde(join(ctx.cwd, '.env'))} to ${tilde(shared)}: the service runs in ${tilde(def.cwd)}, where that .env is not read.`);
+  }
   writeFileSync(file, text);
   try {
     await managerInstall(ctx, kind, file);
@@ -518,6 +525,7 @@ export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent0
     uid: process.getuid?.() ?? 0,
     user: launchEnv.USER || userInfo().username,
     env: launchEnv,
+    cwd: process.cwd(),
     execPath: process.execPath,
     root: PKG_ROOT,
     bin: BIN,

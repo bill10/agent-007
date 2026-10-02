@@ -20,6 +20,7 @@ function fakeCtx(over = {}) {
     home, out, calls, asked, cfg,
     platform: 'darwin', tty: true, yes: false,
     env: { HOME: home, PATH: '/usr/bin', AGENT007_CONFIG_DIR: cfg },
+    cwd: home,
     has: (n) => present.has(n),
     run: async (cmd, args) => {
       calls.push([cmd, ...args].join(' '));

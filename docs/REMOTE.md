@@ -42,6 +42,12 @@ port-forwarding can't work — use Tailscale.
    the cross-origin check rejects the remote browser.
 4. From the client, open `http://mac-mini.tailXXXX.ts.net:7007`.
 
+As a service (`agent007 install`), put these in `~/.agent-007/.env`: the
+service reads only that file, not the `.env` of the folder you used to start it
+from. `agent007 install` copies keys that file lacks from the current folder's
+`.env`, and `agent007 doctor` flags a `tailscale serve` hostname missing from
+`ALLOWED_ORIGINS`.
+
 ### Nicer: `tailscale serve` (HTTPS, no open port)
 
 Keep the server localhost-only and let Tailscale terminate TLS and proxy it:

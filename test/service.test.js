@@ -34,6 +34,7 @@ function fakeCtx(over = {}) {
     uid: 501,
     user: 'ada',
     env: { HOME: home, SHELL: '/bin/zsh', PATH: '/usr/bin', AGENT007_CONFIG_DIR: join(home, '.agent-007') },
+    cwd: over.cwd || tmp('a007-svc-cwd-'),
     execPath: '/opt/node/bin/node',
     root: '/opt/app',
     bin: '/opt/app/bin/agent-007.js',
@@ -188,6 +189,30 @@ describe('install / uninstall', () => {
     expect(await runCommand('install', {}, npx)).toBe(1);
     expect(npx.out.join('\n')).toContain('npm install -g @bill10/agent-007');
     for (const c of [terminal, taken, win, npx]) expect(existsSync(join(c.home, '.config'))).toBe(false);
+  });
+
+  it("carries the old folder's ./.env into the config dir's, never overwriting a key and never printing a value", async () => {
+    const ctx = fakeCtx({ answer: loginShell });
+    writeFileSync(join(ctx.cwd, '.env'), '# old terminal setup\nALLOWED_ORIGINS=mac-mini.tail1.ts.net\nexport PORT=7010\nTELEGRAM_BOT_TOKEN="123:secret" # bot\nHOST=0.0.0.0\nKEY="multi\nline"\n');
+    const shared = join(ctx.home, '.agent-007', '.env');
+    mkdirSync(join(ctx.home, '.agent-007'), { recursive: true });
+    writeFileSync(shared, '# HOST=\nHOST=127.0.0.1');
+    expect(await runCommand('install', {}, ctx)).toBe(0);
+    const text = readFileSync(shared, 'utf8');
+    expect(text).toContain('HOST=127.0.0.1\n\n# Carried over from');
+    expect(text).toContain('\nALLOWED_ORIGINS=mac-mini.tail1.ts.net\nexport PORT=7010\nTELEGRAM_BOT_TOKEN="123:secret" # bot\n');
+    expect(text).not.toContain('0.0.0.0');
+    expect(text).not.toContain('multi');
+    expect(ctx.out.join('\n')).toContain('Copied ALLOWED_ORIGINS, PORT, TELEGRAM_BOT_TOKEN from');
+    expect(ctx.out.join('\n')).not.toContain('secret');
+    const made = fakeCtx({ answer: loginShell, cwd: ctx.cwd });
+    expect(await runCommand('install', {}, made)).toBe(0);
+    if (process.platform !== 'win32') expect(statSync(join(made.home, '.agent-007', '.env')).mode & 0o777).toBe(0o600);
+    // Again: nothing left to copy, so nothing is appended or said.
+    const again = fakeCtx({ answer: loginShell, home: ctx.home, cwd: ctx.cwd });
+    expect(await runCommand('install', {}, again)).toBe(0);
+    expect(readFileSync(shared, 'utf8')).toBe(text);
+    expect(again.out.join('\n')).not.toContain('Copied');
   });
 
   it('uninstall with nothing installed says so', async () => {
