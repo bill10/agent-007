@@ -12,16 +12,18 @@
 // it loads.
 
 import { existsSync, readFileSync, readdirSync, readlinkSync } from 'fs';
+import { execFile } from 'child_process';
 import { createServer } from 'net';
-import path, { join } from 'path';
-import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS } from './state.js';
+import path, { dirname, join } from 'path';
+import { parseEnv } from 'util';
+import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS, originHost } from './state.js';
 import { refreshAgentAccounts } from './agent-accounts.js';
 import { commandPath, INSTALL_HINTS } from './command-path.js';
 import { billionAgent, billionRuns } from './billion.js';
 import { ghAccounts, ghAccountFor, ghAgentEnv, parseGithubRemote } from './jobs.js';
 import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
-import { tilde } from './settings.js';
+import { configDir, tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
 import { installedService, parseServiceFile } from './service.js';
 import { whisperSetup } from './voice.js';
@@ -117,6 +119,15 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     service: () => installedService(),
     whichIn: (cmd, PATH) => commandPath(cmd, { PATH }),
     installCommand,
+    settingsFile: join(configDir(env), '.env'),
+    // `tailscale serve status --json`, or null without tailscale.
+    tailscaleServe: () => new Promise((done) => {
+      const bin = commandPath('tailscale', env);
+      if (!bin) return done(null);
+      execFile(bin, ['serve', 'status', '--json'], { timeout: NET_MS, encoding: 'utf8' }, (err, out) => {
+        try { done(err ? null : JSON.parse(out)); } catch { done(null); }
+      });
+    }),
   };
 }
 
@@ -419,6 +430,30 @@ export function checkService(p) {
   return lines.length ? lines : [ok(`service ${tilde(svc.file)} runs ${tilde(node)} and finds what this shell finds`)];
 }
 
+// A browser on `tailscale serve`'s https://<name>.ts.net sends that name as its
+// Origin, which the server turns away unless ALLOWED_ORIGINS lists it. The
+// service reads its own settings (its unit's env, then ~/.agent-007/.env), not
+// this shell's ./.env, so with one installed those are what count.
+export async function checkRemote(p) {
+  const cfg = await p.tailscaleServe();
+  const proxy = new RegExp(`^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\]):${p.port}(/|$)`);
+  const names = new Set([cfg, ...Object.values(cfg?.Foreground || {})].flatMap(c => Object.entries(c?.Web || {}))
+    .filter(([, web]) => Object.values(web?.Handlers || {}).some(h => proxy.test(h?.Proxy || '')))
+    .map(([hostPort]) => hostPort.replace(/:\d+$/, '')));
+  if (!names.size) return [];
+  const svc = p.service() && parseServiceFile(p.service().text);
+  const fromFile = (file) => (p.exists(file) ? parseEnv(p.readFile(file)).ALLOWED_ORIGINS : undefined);
+  // A clone's service runs in the clone, so its ./.env counts too.
+  const origins = svc
+    ? svc.env.ALLOWED_ORIGINS ?? fromFile(join(dirname(dirname(svc.args[1] || '/')), '.env')) ?? fromFile(p.settingsFile)
+    : p.env.ALLOWED_ORIGINS;
+  const allowed = (origins || '').split(',').map(o => o.trim()).filter(Boolean).map(o => (o === '*' ? o : originHost(o)));
+  return [...names].map(name => (allowed.includes('*') || allowed.includes(name)
+    ? ok(`tailscale serve sends https://${name} to port ${p.port}, and ALLOWED_ORIGINS lets it in`)
+    : fail(`tailscale serve sends https://${name} to port ${p.port}, but ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''} does not list ${name}: remote browsers are turned away`,
+      `Add ALLOWED_ORIGINS=${[origins, name].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`)));
+}
+
 // --- Running them ---
 
 // The headings of the report, in the order they print. Every check below names
@@ -441,6 +476,7 @@ function checks(fast) {
     { title: 'Plugins', section: 'Skills', slow: true, run: (c) => checkPlugins(c.p) },
     { title: 'Settings', section: 'Settings & service', run: (c) => checkSettings(c.p, c.board) },
     { title: 'Service', section: 'Settings & service', run: (c) => checkService(c.p) },
+    { title: 'Remote access', section: 'Settings & service', slow: true, run: (c) => checkRemote(c.p) },
     { title: 'Version', section: 'Settings & service', slow: true, run: (c) => checkVersion(c.p) },
     { title: 'Telegram', section: 'Telegram & voice', slow: true, run: (c) => checkTelegram(c.p) },
     { title: 'Whisper', section: 'Telegram & voice', slow: true, run: (c) => checkWhisper(c.p) },

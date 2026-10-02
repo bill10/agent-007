@@ -35,15 +35,14 @@ const DEFAULT_ORIGIN_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 const rawOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',').map(s => s.trim()).filter(Boolean);
 const ALLOW_ALL_ORIGINS = rawOrigins.includes('*');
-const originHostsFromEnv = rawOrigins
-  .filter(o => o !== '*')
-  .map(entry => {
-    // Add a scheme when the entry lacks one, else new URL() parses a bare
-    // "host:port" as scheme+path and yields an empty hostname (silent lockout).
-    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry) ? entry : `http://${entry}`;
-    try { return new URL(withScheme).hostname; } catch { return null; }
-  })
-  .filter(Boolean);
+// One ALLOWED_ORIGINS entry's hostname, or null.
+export function originHost(entry) {
+  // Add a scheme when the entry lacks one, else new URL() parses a bare
+  // "host:port" as scheme+path and yields an empty hostname (silent lockout).
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry) ? entry : `http://${entry}`;
+  try { return new URL(withScheme).hostname; } catch { return null; }
+}
+const originHostsFromEnv = rawOrigins.filter(o => o !== '*').map(originHost).filter(Boolean);
 const ALLOWED_ORIGIN_HOSTS = new Set([...DEFAULT_ORIGIN_HOSTS, ...originHostsFromEnv]);
 
 // Shared origin gate for both HTTP (server/http.js) and WS (server/ws.js).
