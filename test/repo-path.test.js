@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { validateRepoPath } from '../server/git.js';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, realpathSync, rmSync } from 'fs';
+import { mkdtempSync, realpathSync } from 'fs';
 import { join, isAbsolute } from 'path';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir.js';
 
 // validateRepoPath used to test `repoPath.startsWith('/')`, which no absolute
 // Windows path satisfies — so "Add repo" answered "Path must be absolute" for
@@ -15,7 +16,7 @@ describe('validateRepoPath accepts this platform\'s absolute paths', () => {
     execFileSync('git', ['init'], { cwd: repo });
     execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '--allow-empty', '-m', 'init'], { cwd: repo });
   });
-  afterAll(() => { try { rmSync(repo, { recursive: true, force: true }); } catch {} });
+  afterAll(() => { removeTempDir(repo); });
 
   it('accepts a real absolute path on whichever platform is running', async () => {
     // The fixture path is `/tmp/...` on POSIX and `C:\Users\...\Temp\...` on

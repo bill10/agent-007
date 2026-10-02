@@ -12,6 +12,7 @@ import { parseCommand } from '../lib/helpers.js';
 import { createJob, createRunJob, buildJobCommand, buildJobPrompt, jobAgentFromCommand, jobAgent, resumeCommand, sessionAgentFromCommand, permissionFlagsFromCommand, normalizePermissionFlags, JOB_AGENTS, PERMISSION_MODES, CODEX_MODE_FLAGS, PERMISSION_FLAGS } from '../lib/jobs.js';
 import { execSync } from 'child_process';
 import { agentFromTranscripts, codexSessionIdFor, transcriptsFor } from '../server/agent-transcripts.js';
+import { removeTempDir } from './temp-dir.js';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-jobagent-'));
 const noop = () => {};
@@ -507,7 +508,7 @@ describe('re-adopting an orphan', () => {
   // open them, so the cleanup itself is safe).
   const tempRoots = [];
   const tempRoot = (prefix) => { const r = mkdtempSync(join(tmpdir(), prefix)); tempRoots.push(r); return r; };
-  afterEach(() => { for (const r of tempRoots.splice(0)) rmSync(r, { recursive: true, force: true }); });
+  afterEach(() => { for (const r of tempRoots.splice(0)) removeTempDir(r); });
 
   function fakeHomes() {
     const root = tempRoot('a007-homes-');

@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, statSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { addRotationAccount, configureRotation, rotateAccount, recoverRotation, publicRotationState, rotationState, retryAt, RETRY_MS } from '../server/account-rotation.js';
 import { resetInFlight } from '../server/account-migration.js';
+import { removeTempDir } from './temp-dir.js';
 
 let dir, live, logins, deps, now, actions;
 const login = name => ({ email: `${name}@example.com`, fields: { oauthAccount: { accountUuid: name, emailAddress: `${name}@example.com` } }, secret: `secret-${name}`, folder: `/claude-${name}` });
@@ -13,7 +14,7 @@ beforeEach(() => {
   deps = { dir, now: () => now, capture: async folder => { if (folder === null) return structuredClone(live); if (!logins[folder]) throw Error(); return structuredClone(logins[folder]); }, activate: async s => { actions.push(s.email); live = structuredClone(s); } };
   resetInFlight();
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeTempDir(dir));
 const add = async () => {
   await addRotationAccount('/b', deps); await addRotationAccount('/c', deps);
   await configure({ accounts: publicRotationState(dir).accounts.map(a => ({ id: a.id, enabled: true })) });

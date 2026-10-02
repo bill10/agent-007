@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from '../server/command-path.js';
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync } from 'fs';
 import { join, delimiter } from 'path';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir.js';
 
 // CreateProcessW only ever appends `.exe`, so a command installed as a `.cmd`
 // shim (`claude`, `aider`, anything from npm) has to be resolved to its real
@@ -37,7 +38,7 @@ describe('resolveExecutable on Windows', () => {
     // Sitting in the working directory, where nothing should look.
     writeFileSync(join(base, 'hijack.cmd'), '@echo off\n');
   });
-  afterAll(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  afterAll(() => { removeTempDir(base); });
 
   const resolve = (file, cwd = base) => resolveExecutable(file, env(), 'win32', cwd);
 
@@ -94,7 +95,7 @@ describe('isUsableCwd', () => {
     base = realpathSync(mkdtempSync(join(tmpdir(), 'a007-cwd-')));
     writeFileSync(join(base, 'file.txt'), 'x');
   });
-  afterAll(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  afterAll(() => { removeTempDir(base); });
 
   it('accepts an existing directory', () => {
     expect(isUsableCwd(base)).toBe(true);
@@ -123,7 +124,7 @@ describe('commandExists', () => {
     writeFileSync(join(bin, 'notes'), 'not a program', { mode: 0o644 });
     mkdirSync(join(bin, 'codex'));
   });
-  afterAll(() => rmSync(bin, { recursive: true, force: true }));
+  afterAll(() => removeTempDir(bin));
 
   it.skipIf(process.platform === 'win32')('finds an executable on PATH, and nothing else', () => {
     const env = { PATH: ['/no/such/dir', bin].join(delimiter) };

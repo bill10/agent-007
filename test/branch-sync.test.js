@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { startTreeScanLoop, gitExec, SCAN_INTERVAL_MS } from '../server/git.js';
 import { sessions } from '../server/state.js';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir.js';
 
 // Regression: a `git checkout -b` inside an agent's worktree must be reflected in
 // the branch shown in the UI *without* a manual tree refresh. The branch is polled
@@ -48,7 +49,7 @@ describe('branch sync polls on the recurring scan loop', () => {
     session.exited = true;
     clearTimeout(session.scanTimer);
     sessions.delete(session.id);
-    try { rmSync(base, { recursive: true, force: true }); } catch {}
+    removeTempDir(base);
   });
 
   it('emits branch-changed and updates session.branchName after a checkout -b', async () => {

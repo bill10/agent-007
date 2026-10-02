@@ -9,6 +9,14 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { removeTempDir } from './temp-dir.js';
+
+// These cases exercise who may post and edit cards, not remote discovery.
+// addJob's background `git remote -v` probe runs inside REPO and, on Windows,
+// holds it busy when afterAll removes it.
+vi.mock('../server/git.js', async original => ({
+  ...await original(), hasGithubRemote: vi.fn(async () => null),
+}));
 
 const { config, sessions } = await import('../server/state.js');
 const { requestApproval, answerApproval, clearApprovals, formatApproval } = await import('../server/approvals.js');
@@ -119,7 +127,7 @@ describe('an allow on input Billion only partly saw', () => {
 
 describe('Billion\'s cards', () => {
   const REPO = mkdtempSync(join(tmpdir(), 'a007-bh-repo-'));
-  afterAll(() => rmSync(REPO, { recursive: true, force: true }));
+  afterAll(() => removeTempDir(REPO));
   beforeEach(() => {
     config.repos = [{ path: REPO }];
     config.jobs = [];
@@ -172,7 +180,7 @@ describe('where Billion does not run', () => {
       execFileSync('git', ['init', '-q'], { cwd: dir });
       expect(() => ensureBillionRepo(dir)).toThrow(/without Billion's \.billion marker/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTempDir(dir);
     }
   });
 
@@ -191,7 +199,7 @@ describe('where Billion does not run', () => {
       writeFileSync(join(dir, 'charter.md'), '# Our governance charter\n');
       expect(() => ensureBillionRepo(dir)).toThrow(/without Billion's \.billion marker/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTempDir(dir);
     }
   });
 
@@ -203,7 +211,7 @@ describe('where Billion does not run', () => {
       expect(existsSync(join(dir, '.git'))).toBe(false);
       expect(existsSync(join(dir, 'CHARTER.md'))).toBe(false);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      removeTempDir(dir);
     }
   });
 

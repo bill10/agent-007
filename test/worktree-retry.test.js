@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createWorktree, gitExec } from '../server/git.js';
 import { COCKTAILS } from '../lib/helpers.js';
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'fs';
+import { mkdtempSync, existsSync, readdirSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir.js';
 
 // The whole feature, end to end: ask git for a name instead of tracking which
 // names are free. These run against a real repo because git IS the design — a
@@ -24,7 +25,7 @@ describe('createWorktree finds a free branch by trying', () => {
     await gitExec(['-C', repo, 'config', 'user.email', 't@t.com']);
     await gitExec(['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'init']);
   });
-  afterEach(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  afterEach(() => { removeTempDir(base); });
 
   // Each call needs its own agent name, since the worktree dir is keyed by it.
   const spawn = (custom) => createWorktree(repo, `agent${++agentN}`, custom);
@@ -105,6 +106,16 @@ describe('createWorktree finds a free branch by trying', () => {
     const result = await createWorktree(repo, 'invalid', 'bad..name', { suffixOnCollision: true });
     expect(result.error).toMatch(/Failed to create worktree/);
     expect(result.error).not.toMatch(/Could not find a free/);
+  });
+
+  // Adds into one repo take turns; one that fails must not hold up the rest.
+  it('keeps serving concurrent spawns after one of them fails', async () => {
+    const [bad, ...good] = await Promise.all([
+      createWorktree(repo, 'invalid', 'bad..name'),
+      spawn(), spawn(),
+    ]);
+    expect(bad.error).toMatch(/Failed to create worktree/);
+    for (const r of good) expect(r.error).toBeUndefined();
   });
 
   // --- custom branch: report the collision, never silently rename ---

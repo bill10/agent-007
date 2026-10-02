@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getDiff } from '../server/git.js';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { removeTempDir } from './temp-dir.js';
 
 // getDiff reads a client-controlled filePath and is open to non-owners (phase 2
 // read surface), so it must never escape the worktree.
@@ -15,7 +16,7 @@ describe('getDiff worktree containment', () => {
     writeFileSync(join(base, 'SECRET.txt'), 'TOP-SECRET');
     writeFileSync(join(wt, 'inside.txt'), 'hello inside');
   });
-  afterAll(() => { try { rmSync(base, { recursive: true, force: true }); } catch {} });
+  afterAll(() => { removeTempDir(base); });
 
   it('reads a file inside the worktree', async () => {
     const out = await getDiff({ worktreePath: wt }, 'inside.txt', '?');

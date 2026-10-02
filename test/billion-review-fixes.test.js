@@ -3,9 +3,10 @@
 // close_job telling the next worker why, before anyone can pick the card up.
 
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { removeTempDir } from './temp-dir.js';
 
 // These cases exercise board transitions, not remote discovery. addJob's
 // background git probe can otherwise hold REPO open during Windows cleanup.
@@ -128,7 +129,7 @@ describe('approvals', () => {
 
 describe('close_job sending a card back', () => {
   const REPO = mkdtempSync(join(tmpdir(), 'a007-rf-repo-'));
-  afterAll(() => rmSync(REPO, { recursive: true, force: true }));
+  afterAll(() => removeTempDir(REPO));
   beforeEach(() => {
     config.repos = [{ path: REPO }];
     config.jobs = [];
