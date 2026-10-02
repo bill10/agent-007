@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.52.0.0] - 2026-10-02
+
+### Changed
+
+- **The twice-a-day "round" is now the "Briefing".** The Billion tab's first view reads "Briefing", with "Start the briefing now", "next briefing" and the Telegram and Billion notices to match; Billion's charter and tool descriptions say "briefing" too. Typing "start the round now" still works, and so does "start the briefing now". Tool names, settings and stored data are unchanged.
+
 ## [0.51.0.0] - 2026-10-02
 
 ### Added
