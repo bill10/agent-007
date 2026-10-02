@@ -1586,6 +1586,8 @@ body {
 @media (prefers-reduced-motion: reduce) { .chat-msg.flash .chat-bubble { animation: none; outline: 2px solid var(--accent); } }
 .chat-text { margin: 0; color: var(--text); font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-height: 60vh; overflow-y: auto; }
 .chat-meta { color: var(--text-dim); font-size: 10px; align-self: flex-end; }
+.chat-slash-hint { margin: 0; color: var(--text-dim); font-size: 10px; }
+.chat-slash-hint[hidden] { display: none; }
 .chat-re { color: var(--text-dim); font-size: 10px; }
 .chat-answered { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; font-style: italic; }
 .chat-q-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; }

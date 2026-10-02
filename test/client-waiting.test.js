@@ -282,7 +282,7 @@ describe('the text box', () => {
     expect(document.getElementById('chat-error').textContent).toBe('Billion is not running; start it, then send again.');
     agents.set('b', { isBillion: true });
     renderWaiting();
-    expect(input().placeholder).toBe('Message Billion');
+    expect(input().placeholder).toBe('Message Billion, or /command to run one');
     agents.delete('b');
   });
 

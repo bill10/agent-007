@@ -15,6 +15,7 @@ import { randomUUID } from 'crypto';
 import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
+import { detectState } from '../lib/helpers.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
 import { billionReplied, publishStatus, MAX_STEPS, SHORT_ID_CHARS } from './billion-status.js';
 import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
@@ -606,6 +607,47 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
   return { ok: true, item: done };
 }
 
+// --- Slash commands: "/model opus" from the owner runs in Billion's CLI ---
+//
+// The owner's own channels only (the tab, their private Telegram chat): typed
+// bare into Billion's terminal, so whichever CLI it runs on takes it as its own
+// command. One line; "//text" sends "/text" as an ordinary message instead.
+export const slashCommand = (text) => (/^\/(?!\/)[^\s\x00-\x1f\x7f][^\x00-\x1f\x7f]*$/.test(text) ? text : null);
+export const unescapeSlash = (text) => (text.startsWith('//') ? text.slice(1) : text);
+
+const SCREEN_LINES = 12;
+
+// What Billion's terminal shows once the command settles: the CLI's last frame
+// when it paints in frames (Codex), else the last lines it printed. Lines with
+// no letter or digit (borders, an empty prompt) are dropped.
+export function screenText(session) {
+  const frame = session.lastFrame && (session.lastFrameAt || 0) >= (session.lastLineAt || 0) ? session.lastFrame : '';
+  const lines = frame ? frame.split('\n') : [...session.recentStrippedLines || []];
+  if (!frame && session.lastStrippedLine && session.lastStrippedLine !== lines.at(-1)) lines.push(session.lastStrippedLine);
+  return lines.map(l => l.trim()).filter(l => /[\p{L}\p{N}]/u.test(l)).slice(-SCREEN_LINES).join('\n');
+}
+
+// Typed when Billion rests at its prompt, like any message, but with no
+// [Owner via …] label and no reply awaited. Once it settles, the screen goes
+// into the thread (and back to Telegram when it came from there). A picker the
+// command opened (a bare /model) cannot be driven from here, so Escape closes
+// it rather than leave the next message to be typed into it. { ok } or { error }.
+export function runCommand(command, via, { broadcast, env = process.env, name = '' } = {}) {
+  const billion = liveBillion();
+  if (!billion) return { error: 'Billion is not running; start it, then send again.' };
+  // The session it was typed into: an account switch may move it to a new one.
+  const after = async (session) => {
+    const working = detectState(session) === 'WORKING';
+    const screen = working ? 'Running in Billion\'s terminal.' : screenText(session) || '(nothing on screen)';
+    if (!working) { try { session.pty.write('\x1b'); } catch {} }
+    addChat({ from: 'billion', screen: true, text: screen }, broadcast, env);
+    if (via === 'telegram') await sendTelegram(redact(screen, env), { env });
+  };
+  if (!sendText(billion, command, undefined, { ...OWNER, after })) return { error: 'Billion has too much waiting for it; try again in a while.' };
+  addChat({ from: 'owner', via, ...(name ? { name } : {}), text: command, command: true }, broadcast, env);
+  return { ok: true };
+}
+
 // What the owner types in the Billion tab. With answers (a question's id) it
 // answers that question; otherwise it goes into Billion's terminal as a turn
 // of its own, like a Telegram message. Refused, never queued, while Billion is
@@ -627,6 +669,7 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   }
   if (!body && !files.length) return { error: 'The message is empty.' };
   if (answers && !voice) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
+  if (!voice && !files.length && slashCommand(body)) return runCommand(body, 'app', { broadcast, env });
   // Two things the server does itself, never a turn of Billion's: start the
   // round now, and "1d 3d". The words still show in the thread.
   const nums = !voice && !files.length && doneNumbers(body);
@@ -645,12 +688,13 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   if (saved.error) return saved;
   // A voice turn names itself, so Billion can bind its spoken reply to it (tell_owner reply_to).
   const prefix = voice ? `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}]` : APP_PREFIX;
-  if (!sendText(billion, withFiles(body ? `${prefix} ${body}` : prefix, saved.paths), undefined, OWNER)) {
+  const said = voice ? body : unescapeSlash(body);
+  if (!sendText(billion, withFiles(said ? `${prefix} ${said}` : prefix, saved.paths), undefined, OWNER)) {
     if (files.length) removeChatFiles(id);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel('app');
-  addChat({ id, from: 'owner', via: 'app', text: body, awaitsReply: true, ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: said, awaitsReply: true, ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   // Pending, with the progress box under it, until a tell_owner answers it.
   publishStatus(broadcast);
   return { ok: true, id };
@@ -1148,7 +1192,9 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
   if (String(chat) !== chatId) return 'ignored';
   watchPrivacy(msg);
   const note = (msg.voice || msg.audio)?.file_id ? (msg.voice || msg.audio) : null;
-  const typed = typeof msg.text === 'string' && msg.text.trim() ? msg.text : null;
+  // The owner's private chat may run a slash command too; a group's members may not.
+  const own = msg.chat.type === 'private';
+  const typed = typeof msg.text === 'string' && msg.text.trim() ? (own ? unescapeSlash(msg.text.trim()) : msg.text) : null;
   if (!note && !typed) return 'ignored';
   saveOwnerMode(note ? 'voice' : 'text');
   setOwnerChannel('telegram');
@@ -1171,6 +1217,11 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
       : `Round started: ${plural(result.released.length, 'item')}.`), { env });
     addChat({ from: 'owner', via: 'telegram', ...(name ? { name } : {}), text: typed }, broadcast, env);
     return result.error ? 'refused' : nums ? 'done' : 'round';
+  }
+  if (own && !note && msg.text.trim() === typed && slashCommand(typed)) {
+    const result = runCommand(typed, 'telegram', { broadcast, env, name });
+    if (result.error) await sendTelegram(result.error, { env });
+    return result.error ? 'refused' : 'command';
   }
   const billion = liveBillion();
   if (!billion) {
