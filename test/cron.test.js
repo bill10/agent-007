@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCron, isValidCron, nextCronTime, nextCronIso, CRON_MACROS, MAX_SCHEDULE_LEN } from '../lib/cron.js';
+import { parseCron, isValidCron, nextCronTime, nextCronIso, CRON_MACROS, MAX_SCHEDULE_LEN, describeCron } from '../lib/cron.js';
 
 // Local time throughout, because that is what the parser answers in. Building
 // the reference points with `new Date(y, m, d, ...)` keeps the tests honest
@@ -142,4 +142,27 @@ describe('nextCronTime', () => {
   it('answers in ISO when asked to', () => {
     expect(nextCronIso('0 9 * * *', at(2026, 6, 10, 14))).toBe(new Date(at(2026, 6, 11, 9)).toISOString());
   });
+});
+
+describe('describeCron', () => {
+  it.each([
+    ['0 9 * * 1', 'Mondays at 9:00 AM'],
+    ['0 9 * * 1-5', 'Weekdays at 9:00 AM'],
+    ['30 17 * * 1,3,5', 'Mondays, Wednesdays and Fridays at 5:30 PM'],
+    ['0 10 * * 0,6', 'Weekends at 10:00 AM'],
+    ['@daily', 'Every day at midnight'],
+    ['0 12 * * *', 'Every day at 12:00 PM'],
+    ['*/15 * * * *', 'Every 15 minutes'],
+    ['* * * * *', 'Every minute'],
+    ['0 * * * *', 'Every hour'],
+    ['@hourly', 'Every hour'],
+    ['15 * * * *', 'Every hour at :15'],
+    ['0 */6 * * *', 'Every 6 hours'],
+    ['0 9 1 * *', 'Monthly on the 1st at 9:00 AM'],
+    ['0 9 22 * *', 'Monthly on the 22nd at 9:00 AM'],
+    ['@weekly', 'Sundays at midnight'],
+  ])('%s -> %s', (expr, words) => expect(describeCron(expr)).toBe(words));
+
+  it.each(['0 9 3 10 *', '0 9 1 * 1', '0,30 9 * * *', '9-17 * * * *', 'nonsense', '', '0 9 * * MON'])(
+    'returns null for %j so the raw cron is shown', (expr) => expect(describeCron(expr)).toBeNull());
 });

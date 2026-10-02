@@ -43,7 +43,7 @@ const BOARD_HTML = `
         <select id="job-repo"></select>
         <select id="job-type">
           <option value="one-time">Now</option>
-          <option value="once">Once at…</option>
+          <option value="once">Scheduled</option>
           <option value="scheduled">Recurring</option>
         </select>
         <div id="job-schedule-field" style="display:none">
@@ -440,7 +440,7 @@ describe('the per-job permission mode', () => {
     // elsewhere would only ever see the first, so this pins both.
     handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
     const chips = [...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent);
-    expect(chips).toEqual(['scheduled', 'plan']);
+    expect(chips).toEqual(['recurring', 'plan']);
   });
 
   it('colours only the bypassPermissions chip as dangerous', () => {
@@ -601,7 +601,7 @@ describe('job form', () => {
 
   it('lines up the scheduled, codex and mode chips in that order, and none on a plain card', () => {
     handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', agent: 'codex', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
-    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toEqual(['scheduled', 'codex', 'plan']);
+    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toEqual(['recurring', 'codex', 'plan']);
     handleJobsList({ jobs: [JOB({ agent: 'claude' })], settings: { running: false, maxPerRepo: 2 } });
     expect(cards()[0].querySelectorAll('.job-card-type')).toHaveLength(0);
   });
@@ -782,7 +782,7 @@ describe('archiving a To do card', () => {
     document.getElementById('btn-finished-jobs').click();
     const card = document.querySelector('#job-finished-cards .job-card');
     expect(card.querySelector('.job-card-finished').textContent).toMatch(/archived .* by Billion: Ran once/);
-    expect(card.querySelector('.job-card-type').textContent).toBe('once');
+    expect(card.querySelector('.job-card-type').textContent).toBe('scheduled');
     expect(button('Pause')).toBeUndefined();
     expect(button('Archive')).toBeUndefined();
   });
@@ -1106,9 +1106,33 @@ describe('scheduled cards', () => {
   it('marks the card and shows the cron with when it next fires', () => {
     handleJobsList({ jobs: [SCHEDULED()], settings: {} });
     const card = cards()[0];
-    expect(card.querySelector('.job-card-type').textContent).toBe('scheduled');
+    expect(card.querySelector('.job-card-type').textContent).toBe('recurring');
     expect(card.querySelector('.job-card-cron').textContent).toBe('0 9 * * 1-5');
     expect(card.querySelector('.job-card-next').textContent).toMatch(/next .*·.*in 2h/);
+  });
+
+  it('says a recurring schedule in words and keeps the cron in the tooltip', () => {
+    handleJobsList({ jobs: [SCHEDULED({ scheduleWords: 'Weekdays at 9:00 AM' })], settings: {} });
+    const cron = cards()[0].querySelector('.job-card-cron');
+    expect(cron.textContent).toBe('Weekdays at 9:00 AM');
+    expect(cron.title).toBe('0 9 * * 1-5');
+  });
+
+  it('shows a once card as a scheduled card with its date, no cron, and no Pause', () => {
+    const at = new Date(Date.now() + 2 * 86400_000).toISOString();
+    handleJobsList({ jobs: [SCHEDULED({ once: true, schedule: '0 9 3 10 *', nextRunAt: at })], settings: {} });
+    const card = cards()[0];
+    expect(card.querySelector('.job-card-type').textContent).toBe('scheduled');
+    expect(card.querySelector('.job-card-type').title).toBe('Runs once at this time, then is archived');
+    expect(card.querySelector('.job-card-cron')).toBeNull();
+    expect(card.textContent).not.toContain('0 9 3 10 *');
+    expect(card.querySelector('.job-card-next').textContent).toMatch(/\d.* · in 2d/);
+    expect([...card.querySelectorAll('.job-card-btn')].some(b => /Pause|Resume/.test(b.textContent))).toBe(false);
+  });
+
+  it('still offers Resume on an old paused once card', () => {
+    handleJobsList({ jobs: [SCHEDULED({ once: true, paused: true })], settings: {} });
+    expect([...document.querySelectorAll('.job-card-btn')].some(b => b.textContent === 'Resume')).toBe(true);
   });
 
   it('points at its latest run and says why it last held off', () => {

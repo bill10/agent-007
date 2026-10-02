@@ -31,7 +31,7 @@ import {
   runAtToSchedule, spentOneDateSchedules,
 } from '../lib/jobs.js';
 import { availableModels } from './models.js';
-import { nextCronIso } from '../lib/cron.js';
+import { nextCronIso, describeCron } from '../lib/cron.js';
 import { scheduleStatus } from '../lib/schedule-status.js';
 import { commandExists, missingCommandMessage } from './command-path.js';
 
@@ -126,6 +126,8 @@ export function jobsPayload() {
       type: jobType(job),
       status: deriveJobStatus(job, session),
       scheduleStatus: scheduleStatus(job, allJobs(), sessions, boardSettings()),
+      // The schedule in words for the card; null falls back to the raw cron.
+      scheduleWords: job.schedule ? describeCron(job.schedule) : null,
       agentState: session ? session.state : null,
       agentAlive: !!(session && !session.exited),
       // Only a card that has to open a pull request cares.
@@ -1013,6 +1015,9 @@ export function setJobPaused(jobId, paused, broadcast) {
   const job = allJobs().find(j => j.id === jobId);
   if (!job) return { error: 'Job not found' };
   const next = !!paused;
+  // Resuming a one-date schedule re-arms from now, which lands a year out once
+  // its date has passed. Change the time with Edit, or Archive it.
+  if (next && job.once) return { error: 'A scheduled job runs once and cannot be paused. Edit its time, or archive it.' };
   if (job.paused === next) return { job };
   job.paused = next;
   if (!next && job.schedule) job.nextRunAt = nextCronIso(job.schedule);

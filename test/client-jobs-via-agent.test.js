@@ -31,7 +31,7 @@ const BOARD_HTML = `
         <select id="job-repo"></select>
         <select id="job-type">
           <option value="one-time">Now</option>
-          <option value="once">Once at…</option>
+          <option value="once">Scheduled</option>
           <option value="scheduled">Recurring</option>
         </select>
         <div id="job-schedule-field" style="display:none">
