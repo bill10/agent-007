@@ -108,6 +108,13 @@ function clockTime(iso) {
   });
 }
 
+// "Sat Oct 3, 9:00 AM": a once card's run time, always with the date.
+function dateTime(iso) {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return '';
+  return then.toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function isScheduled(job) {
   return job.type === 'scheduled';
 }
@@ -286,9 +293,9 @@ function renderCard(job) {
     // from the glance that the three columns exist to give.
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
-    chip.textContent = job.once ? 'once' : 'scheduled';
+    chip.textContent = job.once ? 'scheduled' : 'recurring';
     chip.title = job.once
-      ? 'Posts a single run card when it comes due, then is archived'
+      ? 'Runs once at this time, then is archived'
       : 'Posts a run card each time it comes due; the runs are the cards that move';
     title.appendChild(chip);
   }
@@ -382,7 +389,9 @@ function renderCard(job) {
   if (isScheduled(job)) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
-    const bits = [`<span class="job-card-cron">${escapeHtml(job.schedule || '')}</span>`];
+    // A once card shows its date (below), never the cron; a recurring one says
+    // its schedule in words, with the cron kept in the tooltip.
+    const bits = job.once ? [] : [`<span class="job-card-cron" title="${escapeHtml(job.schedule || '')}">${escapeHtml(job.scheduleWords || job.schedule || '')}</span>`];
     if (job.state === 'done') {
       // Archived: it will not fire again, and its note below says why.
     } else if (job.paused) {
@@ -390,7 +399,9 @@ function renderCard(job) {
       // holding, and resuming re-arms from that moment instead of running it.
       bits.push('<span class="job-card-next job-card-paused">paused</span>');
     } else if (job.nextRunAt) {
-      bits.push(`<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
+      bits.push(job.once
+        ? `<span class="job-card-next">${escapeHtml(dateTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`
+        : `<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
     } else {
       // nextCronIso returned nothing: a valid expression that matches no date
       // that will ever come round, such as 30 February.
@@ -637,7 +648,9 @@ function renderCardActions(job) {
   }
   // Pause holds the schedule's next firing; a run already posted is its own
   // card and is left alone.
-  if (isScheduled(job) && job.state === 'todo') {
+  // Not on a once card (resuming one re-arms from now, a year past its date),
+  // unless old data left it paused, so it cannot get stuck.
+  if (isScheduled(job) && job.state === 'todo' && (!job.once || job.paused)) {
     actions.appendChild(job.paused
       ? mk('Resume', 'Resume this schedule. The next run is set from now, so a firing missed while paused is not replayed.',
         () => send({ type: 'job-pause', jobId: job.id, paused: false }))

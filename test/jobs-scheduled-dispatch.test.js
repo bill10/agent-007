@@ -246,6 +246,16 @@ describe('pausing a schedule', () => {
     expect(fireSchedules(noopBroadcast)).toHaveLength(1);
   });
 
+  it('refuses to pause a once schedule, and still resumes an already paused one', () => {
+    const schedule = dueSchedule();
+    schedule.once = true;
+    expect(setJobPaused(schedule.id, true, noopBroadcast).error).toMatch(/cannot be paused/);
+    expect(schedule.paused).toBeFalsy();
+    schedule.paused = true;
+    expect(setJobPaused(schedule.id, false, noopBroadcast).error).toBeUndefined();
+    expect(schedule.paused).toBe(false);
+  });
+
   it('leaves a run already posted alone', async () => {
     const schedule = dueSchedule();
     const [run] = fireSchedules(noopBroadcast);
