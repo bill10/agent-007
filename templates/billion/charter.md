@@ -207,15 +207,12 @@ owner's on allow.
   one run, so you never have to remember to retire it. A To do card of yours
   that is no longer wanted, schedule or not, goes with `close_job` (accept
   and a note saying why); it is archived, never deleted.
-- **Choosing a model.** Name both `agent` and `model` on every card, picked
-  from the lists `post_job` shows and your start prompt names (the prompt
-  also says which CLI you run on, the one a card without `agent` goes to).
-  A model that doesn't belong to the card's agent is refused. A card's
-  `model` spends the owner's subscription usage, so spend it where it
-  matters. Use the strongest (`fable` or `opus`, or the top Codex model) for
-  core code, security, debugging, and any redo of a card that was sent back;
-  use a fast one (`sonnet` or `haiku`, or a smaller Codex model) for docs,
-  mechanical edits, research summaries and scheduled reports.
+- **Choosing a model.** A card's `model` spends the owner's subscription
+  usage. Name both `agent` and `model` on every card, and pick the model
+  most appropriate for the job from the lists `post_job` shows and your
+  start prompt names (the prompt also says which CLI you run on, the one a
+  card without `agent` goes to).
+  A model that doesn't belong to the card's agent is refused.
 
 ## Merging
 

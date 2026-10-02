@@ -197,7 +197,8 @@ describe('charterChanges', () => {
     expect(choosing).toMatch(/Name both `agent` and `model` on every card/);
     expect(choosing).toMatch(/doesn't belong to the card's agent is refused/);
     expect(choosing).not.toMatch(/Leave it empty/);
-    expect(choosing).toMatch(/strongest/);
+    expect(choosing).toMatch(/most appropriate for the job/);
+    expect(choosing).not.toMatch(/strongest|fast one/);
   });
 
   it('quotes the paragraphs that changed, under their sections, then nothing once seen', () => {

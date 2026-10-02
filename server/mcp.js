@@ -43,8 +43,8 @@ export const SERVER_INFO = { name: 'agent-007-board', version: '1' };
 // The model field's description. toolsFor appends the models discovered on
 // this machine right now, since those are the only values the board accepts.
 const MODEL_HELP = 'Optional. Which model the card\'s CLI runs, from the list below for its '
-  + 'agent; empty for the CLI\'s default. A strong model for core code, security and '
-  + 'debugging; a fast one for docs, mechanical edits and research.';
+  + 'agent: the one most appropriate for the job; empty for the CLI\'s default. A model '
+  + 'that does not belong to the card\'s agent is refused.';
 
 export const POST_JOB_TOOL = {
   name: 'post_job',
