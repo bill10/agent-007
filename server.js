@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { isDirectRun } from './server/direct-run.js';
 import { dirname, join, basename } from 'path';
 import { mkdirSync, readFileSync } from 'fs';
+import { randomBytes } from 'crypto';
 
 import {
   PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
@@ -28,7 +29,8 @@ import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSess
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktree, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, deleteBranch } from './server/git.js';
 import { createSessionFromConfig, killSessionProcesses, blockClaudeSpawns } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
-import { setupRoutes } from './server/http.js';
+import { setupRoutes, checkOrigin } from './server/http.js';
+import { controlRoutes, writeServerFile, busyWorkers, RESTART_EXIT, VERSION } from './server/control.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch, ghEnvForRepo, retireSpentSchedules, convertOnceSchedules } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
@@ -65,6 +67,15 @@ const wss = new WebSocketServer({ server, verifyClient });
 // tool has to repaint every open board the moment it lands.
 // killSession is a hoisted declaration below: close_job retires a card's worker.
 setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession, respawnAgent });
+// `agent007 status` and `restart` (server/control.js); server.json carries
+// the token once the server listens.
+const controlToken = randomBytes(32).toString('hex');
+controlRoutes(app, {
+  token: controlToken,
+  checkOrigin,
+  status: () => ({ pid: process.pid, version: VERSION, port: Number(PORT), service: process.env.AGENT007_SERVICE || null, uptime: Math.round(process.uptime()), sessions: sessions.size, workers: busyWorkers(sessions) }),
+  restart: () => gracefulShutdown({ restart: true }),
+});
 
 // --- Orchestrators ---
 // These span multiple modules (git, pty, config, ws) and stay here.
@@ -651,6 +662,7 @@ async function startup() {
     // Bracket IPv6 literals so the URL is valid/clickable; show wildcard binds as localhost.
     const bracket = (h) => h.includes(':') && !h.startsWith('[') ? `[${h}]` : h;
     const displayHost = WILDCARD_BIND_HOSTS.includes(HOST) ? 'localhost' : bracket(HOST);
+    writeServerFile({ port: PORT, host: HOST, token: controlToken });
     console.log(`\n  Agent 007 is running at http://${displayHost}:${PORT}`);
     if (!LOOPBACK_HOSTS.includes(HOST)) {
       console.log(`  Listening on ${bracket(HOST)}:${PORT} — reachable from other machines. Keep this behind Tailscale/a trusted network.`);
@@ -661,8 +673,17 @@ async function startup() {
 
 // --- Graceful Shutdown (B10) ---
 // Wait for PTY processes to exit with 3s timeout, then force kill.
-function gracefulShutdown() {
-  console.log('\nShutting down...');
+// restart: exit with RESTART_EXIT, which the service (or bin/agent-007.js in
+// a terminal) answers by starting the server again. The port is let go first.
+// Called as a signal handler too, with the signal's name.
+function gracefulShutdown({ restart = false } = {}) {
+  console.log(restart ? '\nRestarting...' : '\nShutting down...');
+  const code = restart ? RESTART_EXIT : 0;
+  if (restart) {
+    server.close();
+    for (const ws of wss.clients) ws.terminate();
+    server.closeAllConnections();
+  }
   stopDispatcher();
   stopTelegram();
   clearInterval(wakeTimer);
@@ -682,8 +703,8 @@ function gracefulShutdown() {
       }));
     }
   }
-  if (killPromises.length === 0) { process.exit(0); return; }
-  Promise.all(killPromises).then(() => process.exit(0));
+  if (killPromises.length === 0) { process.exit(code); return; }
+  Promise.all(killPromises).then(() => process.exit(code));
   // Hard deadline: exit after 5s no matter what
   setTimeout(() => process.exit(1), 5000).unref();
 }

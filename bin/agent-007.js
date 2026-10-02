@@ -1,26 +1,31 @@
 #!/usr/bin/env node
-// agent-007 — the command `npx @bill10/agent-007` (or a global install, or
-// `npm start` in a clone) runs.
+// agent007 (or agent-007, the older name) — the command `npx @bill10/agent-007`
+// (or a global install, a service from `agent007 install`, or `npm start` in a
+// clone) runs.
 //
 // Loads settings (server/settings.js: ./.env, then ~/.agent-007/.env; the real
 // environment and --port win over both), then starts server.js. Everything the
 // server reads or writes resolves from the package or from ~/.agent-007, so it
 // runs the same from node_modules as from a clone.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { spawnSync } from 'child_process';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { basename, join } from 'path';
 import { fileURLToPath } from 'url';
 import { parseArgs } from 'util';
 import { configDir, loadSettings, settingsLine } from '../server/settings.js';
 
 // Each .env.example setting has a line here; test/cli.test.js checks that.
-const HELP = `Usage: agent-007 [--port <n>]
-       agent-007 init
-       agent-007 adduser "Display Name"
-       agent-007 handover
-       agent-007 doctor
+const HELP = `Usage: agent007 [--port <n>]
+       agent007 init
+       agent007 adduser "Display Name"
+       agent007 handover
+       agent007 doctor
+       agent007 install [--dry-run] | uninstall | status
+       agent007 restart [--now] | logs [-f] [-n <lines>] | update [--now]
 
-Starts Agent 007 at http://localhost:7007 (or --port).
+Starts Agent 007 at http://localhost:7007 (or --port). agent-007 is the same
+command under its older name; in a clone, npm start -- <command>.
 
 Commands:
   init             Create ~/.agent-007/.env, a commented settings template
@@ -28,8 +33,22 @@ Commands:
   handover         Write Billion's HANDOVER.md now, from the conversation of
                    the CLI it runs on (a switch writes one by itself)
   doctor           Check what Agent 007 needs (Node, claude/codex, gh, git,
-                   your repos, the port, settings, Telegram) and say how to
-                   fix what is missing. Changes nothing. Exits 1 on a problem
+                   your repos, the port, settings, Telegram, the service) and
+                   say how to fix what is missing. Changes nothing. Exits 1 on
+                   a problem
+
+Run it as a service (macOS and Linux):
+  install          Start Agent 007 at login and bring it back if it stops
+                   (a LaunchAgent, or a systemd --user unit), with your login
+                   shell's PATH. Run it again after moving node or a CLI.
+                   --dry-run prints what it would write
+  uninstall        Stop and remove the service; ~/.agent-007 is kept
+  status           Running or not, how, pid, version, port, uptime, workers
+  restart          Restart it, in a terminal or as a service. Waits for board
+                   workers mid-run to finish their step unless --now
+  logs             The service's log (~/.agent-007/logs/server.log); -f follows
+  update           git pull (a clone) or npm install -g (an install), then
+                   restart
 
 Options:
   -p, --port <n>   Port to listen on (overrides PORT)
@@ -67,13 +86,18 @@ Settings (default in brackets):
   TRUST_BOARD_WORKTREES   0 keeps Claude Code's and Codex's folder-trust
                           prompt for job board workers [on]
 
-Set them in the environment, in ~/.agent-007/.env (\`agent-007 init\` writes it,
+Set them in the environment, in ~/.agent-007/.env (\`agent007 init\` writes it,
 every setting explained and commented out), or in a .env in the current
 directory. Highest first: flags, environment, ./.env, ~/.agent-007/.env.
 
 State lives in ~/.agent-007 (AGENT007_CONFIG_DIR to move it).
 See https://github.com/bill10/agent-007#settings
 `;
+
+// As launched, before any settings file: what a restart or a service starts
+// from, so an edited .env is read again rather than frozen in.
+const launchEnv = { ...process.env };
+const SERVICE_COMMANDS = ['install', 'uninstall', 'status', 'restart', 'logs', 'update'];
 
 let parsed;
 try {
@@ -83,6 +107,10 @@ try {
       port: { type: 'string', short: 'p' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
+      'dry-run': { type: 'boolean' },
+      now: { type: 'boolean' },
+      follow: { type: 'boolean', short: 'f' },
+      lines: { type: 'string', short: 'n' },
     },
   });
 } catch (err) {
@@ -108,8 +136,9 @@ if (values.port !== undefined) {
   }
   // Before the files load, which never overwrite a variable already set.
   process.env.PORT = String(port);
+  launchEnv.PORT = String(port);
 }
-if (positionals.length && !['init', 'adduser', 'handover', 'doctor'].includes(positionals[0])) {
+if (positionals.length && !['init', 'adduser', 'handover', 'doctor', ...SERVICE_COMMANDS].includes(positionals[0])) {
   console.error(`Unknown command: ${positionals[0]}\n\n${HELP}`);
   process.exit(2);
 }
@@ -117,11 +146,17 @@ if (positionals.length && !['init', 'adduser', 'handover', 'doctor'].includes(po
 const settingsFiles = loadSettings();
 
 // Said the way it was launched, so it can be pasted back.
+// A service runs bin/agent-007.js itself: a clone's is `npm start`, an install's `agent007`.
 function ownCommand(sub) {
-  if (process.env.npm_command === 'exec') return `npx @bill10/agent-007 ${sub}`;
-  if (process.env.npm_lifecycle_event) return `npm start -- ${sub}`;
-  if (basename(process.argv[1] || '') === 'agent-007') return `agent-007 ${sub}`;
-  return `npx @bill10/agent-007 ${sub}`;
+  const said = (() => {
+    if (process.env.npm_command === 'exec') return `npx @bill10/agent-007 ${sub}`;
+    if (process.env.npm_lifecycle_event) return `npm start -- ${sub}`;
+    const name = basename(process.argv[1] || '');
+    if (name === 'agent007' || name === 'agent-007') return `${name} ${sub}`;
+    if (process.env.AGENT007_SERVICE) return existsSync(new URL('../.git', import.meta.url)) ? `npm start -- ${sub}` : `agent007 ${sub}`;
+    return `npx @bill10/agent-007 ${sub}`;
+  })();
+  return said.trim().replace(/ --$/, '');
 }
 const initCommand = () => ownCommand('init');
 
@@ -148,10 +183,13 @@ if (positionals[0] === 'init') {
   console.log(`Wrote ${path} (${messages} messages)`);
 } else if (positionals[0] === 'doctor') {
   const { runDoctor, defaultProbes, formatReport, failed } = await import('../server/doctor.js');
-  const results = await runDoctor({ probes: defaultProbes({ settingsLine: settingsLine(settingsFiles, initCommand()) }) });
+  const results = await runDoctor({ probes: defaultProbes({ settingsLine: settingsLine(settingsFiles, initCommand()), installCommand: ownCommand('install') }) });
   // Exit once written (a pipe on macOS is asynchronous), not on its own: a
   // probe that has not timed out yet would hold the loop open.
   process.stdout.write(`${formatReport(results)}\n`, () => process.exit(failed(results) ? 1 : 0));
+} else if (SERVICE_COMMANDS.includes(positionals[0])) {
+  const { runCommand, defaultContext } = await import('../server/service.js');
+  process.exitCode = await runCommand(positionals[0], values, defaultContext({ launchEnv, cmd: ownCommand }));
 } else {
   // Said out loud: run from inside another project, its .env (a HOST=0.0.0.0,
   // say) would otherwise change this server without a word.
@@ -165,6 +203,27 @@ if (positionals[0] === 'init') {
     .catch(() => '');
   // Imported only now: server/state.js reads PORT when it loads.
   const { startup, gracefulShutdown } = await import('../server.js');
+  const { RESTART_EXIT } = await import('../server/control.js');
+  if (process.env.AGENT007_LOG) {
+    // Under the service: its log, kept to a size now and every hour.
+    const { capLog } = await import('../server/service.js');
+    capLog(process.env.AGENT007_LOG);
+    setInterval(() => capLog(process.env.AGENT007_LOG), 3600_000).unref();
+  } else if (!process.env.AGENT007_RESTARTED) {
+    // In a terminal, `agent007 restart` makes the server exit with
+    // RESTART_EXIT; start it again here, in the same terminal, until it exits
+    // for any other reason. The old process waits (blocked, its loops
+    // stopped) and leaves with the new one's exit code.
+    process.on('exit', (code) => {
+      let status = code;
+      while (status === RESTART_EXIT) {
+        status = spawnSync(process.execPath, [...process.execArgv.filter(a => !a.startsWith('--watch')), ...process.argv.slice(1)], {
+          stdio: 'inherit', env: { ...launchEnv, AGENT007_RESTARTED: '1' },
+        }).status ?? 1;
+      }
+      process.exitCode = status;
+    });
+  }
   const problems = await doctor;
   if (problems) console.log(problems);
   startup();

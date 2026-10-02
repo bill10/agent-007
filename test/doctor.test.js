@@ -7,8 +7,9 @@ import { tmpdir } from 'os';
 import { telegramGetMe } from '../server/owner.js';
 import {
   portState, runDoctor, failed, formatReport, formatStartup, versionAtLeast,
-  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, toNpm, fromNpm,
+  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, toNpm, fromNpm,
 } from '../server/doctor.js';
+import { plist } from '../server/service.js';
 
 // A machine where everything passes; each test breaks one thing. No real CLI,
 // git or network is touched; only the portState tests open loopback sockets.
@@ -58,6 +59,9 @@ function probes(over = {}) {
     claudeDir: '/home/.claude',
     ...skillHome(),
     settingsLine: 'Settings: ~/.agent-007/.env',
+    service: () => null,
+    whichIn: () => null,
+    installCommand: 'agent007 install',
     npmLatest: async () => '0.40.0',
     telegramGetMe: async () => ({ username: 'my_bot' }),
     ...over,
@@ -139,6 +143,19 @@ describe('doctor checks', () => {
     await checkRepos(probes({ git: unset, env: { GIT_SSH_COMMAND: 'ssh -i k' } }), board(), origin);
     await checkRepos(probes({ git: unset, env: { GIT_SSH: '/usr/bin/plink' } }), board(), origin);
     expect(batch).toEqual(['ssh -o BatchMode=yes', undefined, undefined]);
+  });
+
+  it('service: nothing when none is installed; ✗ for a gone node or bin, or a CLI its PATH misses', () => {
+    expect(checkService(probes())).toEqual([]);
+    const text = plist({ args: ['/n/node', '/a/bin/agent-007.js'], env: { PATH: '/svc' }, cwd: '/a', log: '/l' });
+    const svc = (over) => probes({ service: () => ({ file: '/h/Library/LaunchAgents/x.plist', text }), whichIn: (cmd, PATH) => (PATH === '/svc' && cmd !== 'gh' ? `/svc/${cmd}` : null), ...over });
+    const lines = checkService(svc({ exists: (p) => p === '/a/bin/agent-007.js' }));
+    expect(lines.map(l => l.status)).toEqual(['fail', 'fail']);
+    expect(lines[0].text).toBe('the service runs node from /n/node, which is gone');
+    expect(lines[1].text).toBe('the service cannot find gh: /bin/gh is not on its PATH');
+    expect(lines[1].fix).toMatch(/^agent007 install/);
+    const good = checkService(svc({ exists: () => true, whichIn: (cmd) => `/svc/${cmd}` }));
+    expect(good).toEqual([{ status: 'ok', text: 'service /h/Library/LaunchAgents/x.plist runs /n/node and finds what this shell finds' }]);
   });
 
   it('port: free, held by Agent 007 (✗ only when starting), held by something else', async () => {
@@ -237,7 +254,7 @@ describe('runDoctor', () => {
     const net = () => { throw new Error('network in fast mode'); };
     const results = await runDoctor({ fast: true, probes: probes({ npmLatest: net, telegramGetMe: net, ghAccounts: net, ghAccountFor: net, repoEnv: net }) });
     expect(failed(results)).toBe(false);
-    expect(results.map(r => r.title)).toEqual(['Node', 'Agent CLIs', 'GitHub', 'Skills', 'Port', 'Settings']);
+    expect(results.map(r => r.title)).toEqual(['Node', 'Agent CLIs', 'GitHub', 'Skills', 'Port', 'Settings', 'Service']);
   });
 
   it('fast keeps to its budget and drops a check that hangs', async () => {
