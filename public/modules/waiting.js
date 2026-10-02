@@ -495,9 +495,9 @@ function bubble(m, detailsOpen, pendingIds, currentRequest) {
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
   if (m.text || !m.files?.length) box.appendChild(el('p', 'chat-text', m.text));
   if (m.files?.length) box.appendChild(sentFiles(m));
-  const meta = [m.notice && 'System update', m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), unanswered && 'waiting for Billion…'].filter(Boolean);
+  const meta = [m.notice && 'System update', m.command && 'Command', m.screen && 'Billion\'s terminal', m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), unanswered && 'waiting for Billion…'].filter(Boolean);
   const metaLine = el('span', 'chat-meta', meta.join(' · '));
-  if (!mine && readAloudSupported()) {
+  if (!mine && !m.screen && readAloudSupported()) {
     const foot = el('div', 'chat-meta-row');
     foot.append(speakButton(m), metaLine);
     box.appendChild(foot);
@@ -599,7 +599,7 @@ export function handleChatMessage(message) {
   renderWaiting();
   talkHeard(message);
   // While talking, the conversation speaks its own replies; read-aloud waits.
-  if (isNew && message.from !== 'owner' && waitingActive && !talkOn()) readNew(message.id, speakableText(message));
+  if (isNew && message.from !== 'owner' && !message.screen && waitingActive && !talkOn()) readNew(message.id, speakableText(message));
 }
 
 // The box's mic: the terminal mic's logic and limits (voice.js), with speech
@@ -708,7 +708,7 @@ function shell() {
     input.id = 'chat-input';
     input.rows = 1;
     input.setAttribute('aria-label', 'Message Billion');
-    input.oninput = () => fitInput(input);
+    input.oninput = () => { fitInput(input); renderSlashHint(); };
     input.onkeydown = (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
@@ -761,7 +761,10 @@ function shell() {
     error.hidden = true;
     form.onsubmit = (e) => { e.preventDefault(); submit(); };
     row.append(input, clip, pick, mic, talkButton(), btn);
-    form.append(tg, notice, target, chips, voice, talkBar(), row, error);
+    const slash = el('p', 'chat-slash-hint', 'Runs in Billion\'s terminal. A picker can\'t open here: give the argument, e.g. /model opus. Start with // to send it as a message.');
+    slash.id = 'chat-slash-hint';
+    slash.hidden = true;
+    form.append(tg, notice, target, chips, voice, talkBar(), row, slash, error);
     board.append(jump, form);
     board.addEventListener('paste', (e) => {
       const files = [...(e.clipboardData?.files || [])];
@@ -806,6 +809,13 @@ function dropTarget(board) {
 }
 
 
+// Under the box while it holds a slash command (server/owner.js, slashCommand).
+function renderSlashHint() {
+  const hint = document.getElementById('chat-slash-hint');
+  const text = document.getElementById('chat-input')?.value.trim() || '';
+  if (hint) hint.hidden = answerTarget() || !/^\/(?!\/)[^\s\x00-\x1f\x7f][^\x00-\x1f\x7f]*$/.test(text);
+}
+
 export function renderComposer() {
   const input = document.getElementById('chat-input');
   if (!input) return;
@@ -824,10 +834,11 @@ export function renderComposer() {
   }
   const running = billionRunning();
   input.placeholder = !running ? 'Start Billion to send'
-    : target ? `Answer Q${target.n}` : 'Message Billion';
+    : target ? `Answer Q${target.n}` : 'Message Billion, or /command to run one';
   document.getElementById('chat-send').disabled = !!sending;
   document.getElementById('chat-send').textContent = sending ? 'Sending' : 'Send';
   renderAttached();
+  renderSlashHint();
   const error = document.getElementById('chat-error');
   error.textContent = sendError;
   error.hidden = !sendError;

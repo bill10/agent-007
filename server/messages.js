@@ -43,6 +43,10 @@ export const SUBMIT_DELAY_MS = 150;
 // a line or less each, still bracketed so a newline stays a newline.
 export const PASTE_CHUNK_CHARS = 200;
 export const PASTE_GAP_MS = 10;
+// A slash command the owner sent (server/owner.js) holds the queue this long
+// after its Enter, past STATE_TIMEOUT_MS, so its screen can be read at rest
+// and a picker it opened closed before anything else is typed into it.
+export const COMMAND_SETTLE_MS = 3500;
 
 // Each entry is { text }, plus { id, fromId } for an agent's message so its
 // sender can withdraw or replace it (withdrawMessage, sendMessage's replaces).
@@ -172,14 +176,15 @@ export function formatNotice(headline, lines = []) {
 //
 // owner: the owner's own words (the Billion tab, Telegram), which Billion's
 // held inbox still lets in: its introduction is waiting for them.
-export function sendText(session, text, now = Date.now(), { owner = false } = {}) {
+// after(session): called COMMAND_SETTLE_MS after the Enter, nothing else typed until then.
+export function sendText(session, text, now = Date.now(), { owner = false, after } = {}) {
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
   const ahead = serverAhead.get(session.id) || 0;
   // The owner's words get room of their own: notices piling up behind a held
   // inbox must not turn their answers away.
   if (ahead >= QUEUE_CAP * (owner ? 2 : 1)) return false;
-  queue.splice(ahead, 0, { text: clean(text), ...(owner ? { owner: true } : {}) });
+  queue.splice(ahead, 0, { text: clean(text), ...(owner ? { owner: true } : {}), ...(after ? { after } : {}) });
   queues.set(session.id, queue);
   serverAhead.set(session.id, ahead + 1);
   flushMessages(session, now);
@@ -241,7 +246,7 @@ export function pasteChunks(text) {
   });
 }
 
-function deliver(session, text, now) {
+function deliver(session, { text, after }, now) {
   session.messageDeliveredAt = now;
   session.messageTyping = true;
   const chunks = pasteChunks(text);
@@ -264,6 +269,9 @@ function deliver(session, text, now) {
       return;
     }
     write(session, '\r');
+    if (!after) return;
+    session.messageTyping = true;
+    setTimeout(() => { session.messageTyping = false; if (!session.exited) after(session); }, COMMAND_SETTLE_MS);
   };
   type();
 }
@@ -358,7 +366,7 @@ export function flushMessages(session, now = Date.now()) {
   // A held inbox lets only the owner's words through, oldest first.
   const at = session.messagesHeld ? (queue?.findIndex(e => e.owner) ?? -1) : 0;
   if (!queue?.length || at === -1 || !canDeliver(session, now, { owner: !!queue[at].owner })) return false;
-  deliver(session, queue.splice(at, 1)[0].text, now);
+  deliver(session, queue.splice(at, 1)[0], now);
   const ahead = serverAhead.get(session.id) || 0;
   if (at < ahead) serverAhead.set(session.id, ahead - 1);
   if (!queue.length) queues.delete(session.id);

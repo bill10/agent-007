@@ -887,6 +887,20 @@ typing, tap *Reply* under it (or on its row in the Open questions panel): the bo
 "Answers Q3" (× goes back to a plain message). If Billion is not running the
 message is refused and stays in the box.
 
+A message that starts with `/` is a slash command for Billion's CLI: `/model
+opus` is typed bare into its terminal, as if you typed it there, so it reaches
+whichever CLI Billion runs on (Claude Code's models, or Codex's). Like any
+message it waits until Billion rests at its prompt. It shows in the thread as
+yours, marked *Command*, awaits no reply, and a few seconds later Billion's
+terminal screen follows as a bubble of its own. A command that opens a picker
+(a bare `/model`) cannot be driven from the chat: its screen is shown and the
+picker closed with Escape, so give the argument instead (the box says so while
+it holds a command). Start with `//` to send a message that begins with `/`
+(`//etc/hosts is wrong` reaches Billion as `[Owner via app] /etc/hosts is
+wrong`). The same works from your private Telegram chat with the bot, the
+screen coming back as a message; in a group nobody's `/` text runs as a
+command. Agents' messages never do.
+
 There is no practical length limit on what you type or paste, in a message or
 an answer: it reaches Billion whole, line breaks kept, as one turn (only a
 paste over 200,000 characters is refused, with the text left in the box), and
