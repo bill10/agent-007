@@ -135,15 +135,19 @@ export function sayRate(env = process.env) {
   return ratePick = raw ? Math.min(300, Math.max(120, n)) : null;
 }
 
-// text → OGG/Opus bytes. URLs are said as "link"; the caption carries them.
-export function synthesize(text, env = process.env) {
+// OGG/Opus for Telegram; AAC in M4A for a browser (Safari plays no Opus everywhere).
+const CODECS = { ogg: ['-c:a', 'libopus', '-b:a', '32k'], m4a: ['-c:a', 'aac', '-b:a', '64k'] };
+
+// text → audio bytes (OGG/Opus unless format says m4a). URLs are said as
+// "link"; the caption carries them.
+export function synthesize(text, env = process.env, format = 'ogg') {
   return inTempDir(async dir => {
-    const txt = join(dir, 'say.txt'), aiff = join(dir, 'say.aiff'), ogg = join(dir, 'say.ogg');
+    const txt = join(dir, 'say.txt'), aiff = join(dir, 'say.aiff'), ogg = join(dir, `say.${format}`);
     await writeFile(txt, text.replace(URL_RE, 'link'));
     const voice = await sayVoice(env);
     const rate = sayRate(env);
     await run('say', [...(voice ? ['-v', voice] : []), '-o', aiff, ...(rate ? ['-r', String(rate)] : []), '-f', txt]);
-    await run('ffmpeg', ['-y', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', aiff, '-c:a', 'libopus', '-b:a', '32k', ogg]);
+    await run('ffmpeg', ['-y', '-loglevel', 'error', '-protocol_whitelist', 'file', '-i', aiff, ...CODECS[format], ogg]);
     return readFile(ogg);
   });
 }
