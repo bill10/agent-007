@@ -70,12 +70,12 @@ export function talkState(s) {
 const LABELS = {
   consent: 'Before you talk',
   starting: 'Starting the microphone…',
-  disconnected: 'Disconnected — reconnecting',
-  speaking: 'Speaking — talk to interrupt',
+  disconnected: 'Reconnecting…',
+  speaking: 'Speaking',
   muted: 'Muted',
-  paused: 'Paused while the tab is hidden',
+  paused: 'Paused (tab hidden)',
   thinking: 'Thinking…',
-  listening: 'Listening',
+  listening: 'Listening…',
 };
 
 // --- State ---
@@ -107,6 +107,8 @@ let startGen = 0;         // bumped by every start and End: a start that awaited
 let idleTimer = null;
 let cueTimer = null;
 let resumable = false;
+let startedAt = 0;
+let clockTimer = null;
 // Messages of this conversation still waiting for a reply, and replies spoken.
 const awaiting = new Set();
 const spoken = new Set();
@@ -149,22 +151,56 @@ const button = (cls, text, onclick) => {
   return b;
 };
 
+const PHONE_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 2h2.3l1.2 3-1.5 1a8 8 0 0 0 4.8 4.8l1-1.5 3 1.2v2.3a1.5 1.5 0 0 1-1.6 1.5A11.5 11.5 0 0 1 1.7 3.6 1.5 1.5 0 0 1 3.2 2z"/></svg>';
+// The same handset turned down, for End.
+const HANGUP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 9.5c0-1 1-2.100 6.500-2.100s6.500 1.100 6.500 2.100v1.200a.8.8 0 0 1-.9.8l-2.300-.4a.8.8 0 0 1-.7-.8V8.900a9 9 0 0 0-4.200 0v1.400a.8.8 0 0 1-.7.8l-2.300.4a.8.8 0 0 1-.9-.8z"/></svg>';
+
+// The phone button in the composer row: starts a conversation. Its home is
+// waiting.js, beside the mic and Send.
+export function talkButton() {
+  const b = el('button', 'chat-mic chat-control talk-phone');
+  b.id = 'chat-talk';
+  b.type = 'button';
+  b.innerHTML = PHONE_SVG;
+  b.title = 'Talk to Billion: a hands-free conversation (speak, hear its reply, speak again)';
+  b.setAttribute('aria-label', 'Talk to Billion');
+  b.onclick = () => startTalk();
+  return b;
+}
+
+// Above the composer row: the notices (consent, setup, errors) and, during a
+// conversation, the call bar that stands in for the row.
 export function talkBar() {
   const bar = el('div', 'talk-bar');
   bar.id = 'talk-bar';
+  const notes = el('div', 'talk-notes');
+  const detail = el('span', 'talk-detail');
   const start = button('talk-start', 'Talk to Billion', () => startTalk());
-  start.title = 'A hands-free conversation with Billion: speak, hear its reply, speak again';
+  const privacy = el('div', 'talk-privacy');
+  notes.append(detail, start, privacy);
+  const call = el('div', 'talk-call');
   const state = el('span', 'talk-state');
   state.setAttribute('role', 'status');
   state.setAttribute('aria-live', 'polite');
-  const detail = el('span', 'talk-detail');
-  const skip = button('talk-skip', 'Stop speaking', () => interrupt());
+  const timer = el('span', 'talk-timer');
+  timer.setAttribute('role', 'timer');
+  const skip = button('talk-skip', 'Interrupt', () => interrupt());
   const mute = button('talk-mute', 'Mute', () => setMuted(!muted));
-  const end = button('talk-end', 'End', () => endTalk());
-  const privacy = el('div', 'talk-privacy');
-  bar.append(start, state, detail, skip, mute, end, privacy);
+  const end = button('talk-end', '', () => endTalk());
+  end.innerHTML = `${HANGUP_SVG}<span>End</span>`;
+  end.title = 'End the conversation (Esc)';
+  end.setAttribute('aria-label', 'End');
+  const gap = el('span', 'talk-gap');
+  call.append(state, timer, gap, skip, mute, end);
+  bar.append(notes, call);
   queueMicrotask(paint);
   return bar;
+}
+
+const clock = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+function tick() {
+  const t = document.querySelector('#talk-bar .talk-timer');
+  if (t) t.textContent = clock(Date.now() - startedAt);
 }
 
 function paint() {
@@ -173,11 +209,24 @@ function paint() {
   const s = talkState({ on, consent, starting, connected, playing, muted, hidden, uploads, awaiting: thinkingFor() });
   bar.dataset.state = s;
   const q = (c) => bar.querySelector(c);
+  // The call bar stands in for the text box row while a conversation runs.
+  const inCall = on && !consent;
+  q('.talk-call').hidden = !inCall;
+  const row = document.getElementById('chat-compose-row');
+  const wasHidden = row?.hidden;
+  if (row) row.hidden = inCall;
+  if (inCall && !wasHidden) q('.talk-end').focus();
+  else if (!inCall && wasHidden) document.getElementById('chat-input')?.focus();
+  const phone = document.getElementById('chat-talk');
+  if (phone) {
+    phone.title = resumable ? 'Resume talking to Billion' : 'Talk to Billion: a hands-free conversation (speak, hear its reply, speak again)';
+    phone.setAttribute('aria-label', resumable ? 'Resume talking' : 'Talk to Billion');
+  }
   const start = q('.talk-start');
-  start.hidden = on && !consent;
-  start.textContent = consent ? 'Continue' : resumable ? 'Resume talking' : 'Talk to Billion';
-  q('.talk-state').textContent = s === 'off' ? '' : LABELS[s];
-  q('.talk-state').hidden = s === 'off';
+  start.hidden = !(consent || (resumable && !on));
+  start.textContent = consent ? 'Continue' : 'Resume talking';
+  const stateEl = q('.talk-state');
+  stateEl.textContent = inCall ? LABELS[s] : '';
   const detail = q('.talk-detail');
   detail.textContent = '';
   const working = s === 'thinking' && billionStatus?.text ? `Still working: ${billionStatus.text}` : '';
@@ -193,15 +242,22 @@ function paint() {
   detail.hidden = !detail.textContent;
   q('.talk-skip').hidden = s !== 'speaking';
   const mute = q('.talk-mute');
-  mute.hidden = !on || consent || starting;
+  mute.hidden = starting;
   mute.textContent = muted ? 'Unmute' : 'Mute';
   mute.setAttribute('aria-pressed', String(muted));
-  q('.talk-end').hidden = !on;
-  q('.talk-privacy').textContent = !on ? '' : consent
+  const privacy = q('.talk-privacy');
+  privacy.textContent = !on ? '' : consent
     ? 'whisper.cpp is not set up on the computer running Agent 007, so this browser\'s own speech recognition would hear you. It may send your audio to the browser\'s maker (Chrome: Google).'
     : `${mode === 'browser' ? 'Your browser recognises your speech and may send the audio to its maker (Chrome: Google).' : 'Your voice is transcribed on the computer running Agent 007 (whisper.cpp); no audio leaves it.'}`
       + ` ${tts === 'say' ? 'Replies are spoken by that computer\'s voice.' : 'Replies are spoken by this browser.'}`;
-  q('.talk-privacy').hidden = !on;
+  privacy.hidden = !on;
+  bar.querySelector('.talk-notes').hidden = !(detail.textContent || !start.hidden || !privacy.hidden);
+  clearInterval(clockTimer);
+  clockTimer = null;
+  if (inCall) {
+    tick();
+    clockTimer = setInterval(tick, 1000);
+  }
 }
 
 function setNote(text, link = false) {
@@ -240,6 +296,7 @@ export async function startTalk() {
   const current = () => on && gen === startGen;
   on = true;
   starting = true;
+  startedAt = Date.now();
   resumable = false;
   muted = false;
   hidden = document.hidden;
@@ -687,6 +744,7 @@ function logLatency(id) {
 // A hidden tab cannot show the mic is on: it stops, playback too, and both
 // come back when the tab does. Replies that came meanwhile play then.
 if (typeof document !== 'undefined') {
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && on && !consent) endTalk(); });
   document.addEventListener('visibilitychange', () => {
     if (!on) return;
     hidden = document.hidden;

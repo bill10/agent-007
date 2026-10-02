@@ -22,7 +22,7 @@ import {
   autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
   englishVoices, pickVoice, savedVoiceURI, setVoiceURI,
 } from './readaloud.js';
-import { talkBar, talkHeard, talkOn, endTalk } from './talk.js';
+import { talkBar, talkButton, talkHeard, talkOn, endTalk } from './talk.js';
 
 const errors = new Map();   // question id -> { error, status }: why the last tap did not go through
 const pending = new Map();  // question id -> its status when tapped, waiting for the server to move it on
@@ -679,7 +679,6 @@ function shell() {
     strip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); strip.onclick(); } };
     board.insertBefore(strip, list);
     if (readAloudSupported()) board.insertBefore(readHead(), strip);
-    board.insertBefore(talkBar(), strip);
     // The panel covers the thread only, so the box stays below it.
     const body = el('div', 'chat-body');
     board.insertBefore(body, list);
@@ -704,6 +703,7 @@ function shell() {
     target.id = 'chat-target';
     target.hidden = true;
     const row = el('div', 'chat-compose-row');
+    row.id = 'chat-compose-row';
     const input = el('textarea', 'chat-control');
     input.id = 'chat-input';
     input.rows = 1;
@@ -760,8 +760,8 @@ function shell() {
     error.setAttribute('role', 'alert');
     error.hidden = true;
     form.onsubmit = (e) => { e.preventDefault(); submit(); };
-    row.append(input, clip, pick, mic, btn);
-    form.append(tg, notice, target, chips, voice, row, error);
+    row.append(input, clip, pick, mic, talkButton(), btn);
+    form.append(tg, notice, target, chips, voice, talkBar(), row, error);
     board.append(jump, form);
     board.addEventListener('paste', (e) => {
       const files = [...(e.clipboardData?.files || [])];

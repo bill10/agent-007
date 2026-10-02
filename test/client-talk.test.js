@@ -7,7 +7,7 @@
 // detector, fetch and the audio element are stand-ins.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  encodeWav, shouldSpeak, talkState, talkBar, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
+  encodeWav, shouldSpeak, talkState, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
 } from '../public/modules/talk.js';
 import { setChatMessages } from '../public/modules/state.js';
 
@@ -38,7 +38,7 @@ function response(body, { status = 200, headers = {} } = {}) {
 
 beforeEach(() => {
   document.body.innerHTML = '';
-  document.body.append(talkBar());
+  mountComposer();
   requests = [];
   played = [];
   vadOpts = null;
@@ -71,6 +71,21 @@ afterEach(() => {
   _resetTalk();
   vi.unstubAllGlobals();
 });
+
+// The composer as waiting.js builds it: the bar above the row, the phone button in it.
+function mountComposer() {
+  document.body.innerHTML = '';
+  const row = document.createElement('div');
+  row.id = 'chat-compose-row';
+  const input = document.createElement('textarea');
+  input.id = 'chat-input';
+  const mic = document.createElement('button');
+  mic.id = 'chat-mic';
+  const send = document.createElement('button');
+  send.id = 'chat-send';
+  row.append(input, mic, talkButton(), send);
+  document.body.append(talkBar(), row);
+}
 
 const bar = () => document.getElementById('talk-bar');
 const stateWord = () => bar().dataset.state;
@@ -201,7 +216,7 @@ describe('a turn', () => {
     talkHeard(reply('r1', 'm1'));
     await flush();
     expect(played).toEqual([]);
-    expect(bar().querySelector('.talk-start').hidden).toBe(false);
+    expect(bar().querySelector('.talk-call').hidden).toBe(true);
   });
 
   it('without say on the server, the browser speaks the reply', async () => {
@@ -277,6 +292,7 @@ describe('the page going away and coming back', () => {
     document.body.innerHTML = '';
     document.body.append(fresh.talkBar());
     await flush();
+    expect(bar().querySelector('.talk-start').hidden).toBe(false);
     expect(bar().querySelector('.talk-start').textContent).toBe('Resume talking');
     state.setChatMessages([reply('r9', 'm9', 'Late answer.')]);
     await fresh.startTalk();
@@ -334,5 +350,55 @@ describe('where it cannot run', () => {
     await flush();
     expect(talkOn()).toBe(false);
     expect(bar().querySelector('.talk-detail').textContent).toMatch(/Microphone access denied/);
+  });
+});
+
+describe('the composer row and the call bar', () => {
+  const row = () => document.getElementById('chat-compose-row');
+  const call = () => bar().querySelector('.talk-call');
+
+  it('puts the phone button between the mic and Send, labelled and focusable', () => {
+    const ids = [...row().children].map(c => c.id);
+    expect(ids.indexOf('chat-talk')).toBe(ids.indexOf('chat-mic') + 1);
+    expect(ids.indexOf('chat-talk')).toBe(ids.indexOf('chat-send') - 1);
+    const b = document.getElementById('chat-talk');
+    expect(b.getAttribute('aria-label')).toBe('Talk to Billion');
+    expect(b.title).toMatch(/Talk to Billion/);
+    expect(b.tagName).toBe('BUTTON');
+    expect(b.querySelector('svg')).not.toBeNull();
+    expect(row().hidden).toBe(false);
+    expect(call().hidden).toBe(true);
+  });
+
+  it('a call swaps the row for the call bar, focus on End; End brings the box back with focus', async () => {
+    document.getElementById('chat-talk').click();
+    await flush();
+    expect(row().hidden).toBe(true);
+    expect(call().hidden).toBe(false);
+    expect(call().querySelector('.talk-state').textContent).toBe('Listening…');
+    expect(call().querySelector('.talk-timer').textContent).toBe('0:00');
+    expect(document.activeElement).toBe(call().querySelector('.talk-end'));
+    call().querySelector('.talk-end').click();
+    expect(row().hidden).toBe(false);
+    expect(call().hidden).toBe(true);
+    expect(document.activeElement).toBe(document.getElementById('chat-input'));
+  });
+
+  it('shows muted and speaking, and Mute toggles', async () => {
+    await startTalk();
+    await flush();
+    call().querySelector('.talk-mute').click();
+    expect(call().querySelector('.talk-state').textContent).toBe('Muted');
+    expect(call().querySelector('.talk-mute').textContent).toBe('Unmute');
+    call().querySelector('.talk-mute').click();
+    expect(call().querySelector('.talk-state').textContent).toBe('Listening…');
+  });
+
+  it('Esc ends the call', async () => {
+    await startTalk();
+    await flush();
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(talkOn()).toBe(false);
+    expect(row().hidden).toBe(false);
   });
 });
