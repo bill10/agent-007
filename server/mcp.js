@@ -518,6 +518,8 @@ export const SET_STATUS_TOOL = {
     + 'slow reply is never a blank screen; while the owner waits on a reply it heads the progress box under their message, '
     + 'and folds into Work details when tell_owner answers it. Use concise, user-facing summaries: current step, findings, '
     + 'uncertainty or blocker, and next check. Never include private reasoning, raw analysis, tool output, command arguments or secrets. '
+    + 'During a Talk to Billion call its first few words are spoken while the owner waits, so lead with plain words '
+    + '("Running the tests"), not a path or command. '
     + `Update it while working; only the oldest unanswered owner message receives the summary. It fades after ${STATUS_TTL_MS / 60000} `
     + 'minutes without an update; "" clears it.',
   inputSchema: {

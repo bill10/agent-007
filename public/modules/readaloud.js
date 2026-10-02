@@ -87,6 +87,32 @@ export function chunkForSpeech(text, max = CHUNK_CHARS) {
   return chunks;
 }
 
+// A Talk to Billion progress update: Billion's status line (else the last
+// line of its progress box) cut to its first few words, with code, URLs,
+// paths, flags and file names left out, and a raw tool call said as what it
+// does (or not at all). '' when nothing sayable is left.
+const PROGRESS_WORDS = 8;
+const TOOL_WORDS = {
+  bash: 'Running a command', read: 'Reading files', edit: 'Editing files', write: 'Writing a file',
+  grep: 'Searching', glob: 'Searching', websearch: 'Searching the web', webfetch: 'Reading a web page',
+};
+export function progressPhrase(status, max = PROGRESS_WORDS) {
+  const steps = status?.progress?.[status?.currentRequest];
+  const raw = String(status?.text || (Array.isArray(steps) ? steps.at(-1) : '') || '');
+  const tool = raw.match(/^\s*(?:mcp__[\w-]+?__)?(\w+)\s*\(/);
+  if (tool) return TOOL_WORDS[tool[1].toLowerCase()] || '';
+  const t = raw
+    .replace(/```[\s\S]*?(```|$)|`[^`]*`?/g, ' ')
+    .replace(/\b(?:https?:\/\/|www\.)\S+/gi, ' ')
+    .replace(/\S*[/\\]\S*/g, ' ')                        // paths
+    .replace(/(^|\s)--?[a-z][\w-]*/gi, ' ')                // flags
+    .replace(/\b[\w-]+\.[a-z][a-z0-9]{0,4}\b/g, ' ')        // file.ext
+    .split(/[.;:!?()\n—–]|\s-\s/)[0];
+  const words = t.split(/\s+/).map(w => w.replace(/^[,"']+|[,"']+$/g, '')).filter(Boolean);
+  if (!words.some(w => /[a-z]{2}/i.test(w))) return '';
+  return words.slice(0, max).join(' ');
+}
+
 // The best installed English voice: the owner's pick if it is still there,
 // else en-US over other English, the high-quality ones (Premium, Enhanced,
 // Siri, Google, Natural) first.

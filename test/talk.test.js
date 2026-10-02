@@ -39,6 +39,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
 const { ownerSays, tellOwner, notifyOwner, chatMessages, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
 const { talkSetup, voiceUtterance, voiceSays, voiceAudio, looksLikeEcho, speechPieces, _resetTalk, MAX_UTTERANCE_BYTES, UTTERANCE_LIMIT } = await import('../server/talk.js');
 const { setupRoutes } = await import('../server/http.js');
+const { setBillionStatus, _resetStatus } = await import('../server/billion-status.js');
 const { sessions, CONFIG_DIR } = await import('../server/state.js');
 const { dropMessages } = await import('../server/messages.js');
 
@@ -241,6 +242,18 @@ describe('a reply\'s audio', () => {
   it('the "still working" cue is a fixed line, never a status', async () => {
     expect(await voiceAudio('cue', 0, { env: ENV, platform: 'darwin' })).toMatchObject({ count: 1 });
     expect(tools.said).toEqual(['Still working on it.']);
+  });
+
+  it('a progress update ("status") is Billion\'s status line now, cut short; none without one', async () => {
+    _resetStatus();
+    expect((await voiceAudio('status', 0, { env: ENV, platform: 'darwin' })).status).toBe(404);
+    setBillionStatus('Reading server/talk.js and the progress box code');
+    expect(await voiceAudio('status', 0, { env: ENV, platform: 'darwin' })).toMatchObject({ count: 1 });
+    expect((await voiceAudio('status', 1, { env: ENV, platform: 'darwin' })).status).toBe(404);
+    setBillionStatus('Running the tests');
+    await voiceAudio('status', 0, { env: ENV, platform: 'darwin' });
+    expect(tools.said).toEqual(['Reading and the progress box code', 'Running the tests']);
+    _resetStatus();
   });
 });
 

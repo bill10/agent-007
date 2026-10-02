@@ -7,9 +7,9 @@
 // detector, fetch and the audio element are stand-ins.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  encodeWav, shouldSpeak, talkState, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
+  encodeWav, shouldSpeak, talkState, progressWait, talkStatus, PROGRESS_QUIET_MS, PROGRESS_GAP_MS, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
 } from '../public/modules/talk.js';
-import { setChatMessages } from '../public/modules/state.js';
+import { setChatMessages, setBillionStatus } from '../public/modules/state.js';
 
 const flush = async (n = 6) => { for (let i = 0; i < n; i++) await new Promise(r => setTimeout(r, 0)); };
 
@@ -66,6 +66,7 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'mediaDevices', { value: { getUserMedia: vi.fn() }, configurable: true });
   Object.defineProperty(window, 'isSecureContext', { value: true, configurable: true });
   setChatMessages([]);
+  setBillionStatus(null);
 });
 afterEach(() => {
   _resetTalk();
@@ -258,6 +259,77 @@ describe('races', () => {
     await utterance();
     expect(bar().querySelector('.talk-detail').textContent).toMatch(/Billion's own voice/);
     expect(_talkInternals().awaiting).toEqual([]);
+  });
+});
+
+describe('progress updates while Billion works', () => {
+  const status = (text) => {
+    const s = { type: 'billion-status', text, working: true, currentRequest: 'm1', progress: { m1: [] } };
+    setBillionStatus(s);
+    talkStatus(s);
+  };
+  const said = () => played.filter(p => p.startsWith('status#'));
+  const wait = (ms) => vi.advanceTimersByTimeAsync(ms);
+  afterEach(() => vi.useRealTimers());
+
+  it('progressWait: quiet at first, then one per gap, never a repeat or nothing', () => {
+    const p = { since: 0, at: -Infinity, said: 'Old news' };
+    expect(progressWait('Reading', p, 1000)).toBe(PROGRESS_QUIET_MS - 1000);
+    expect(progressWait('Reading', p, PROGRESS_QUIET_MS)).toBe(0);
+    expect(progressWait('Old news', p, 60000)).toBeNull();
+    expect(progressWait('', p, 60000)).toBeNull();
+    expect(progressWait('Testing', { ...p, at: 5000 }, 8000)).toBe(PROGRESS_GAP_MS - 3000);
+  });
+
+  it('speaks a changed status line, throttled and deduped, and gives way to the answer', async () => {
+    await talking();
+    routes.audio = (id, i) => response(`${id}#${i}`, { headers: { 'X-Pieces': id === 'status' ? '1' : '2' } });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    status('Looking at the board');              // from before the turn: not news
+    vadOpts.onSpeechEnd(new Float32Array(1600));
+    await wait(0);
+    await wait(PROGRESS_QUIET_MS);
+    expect(said()).toEqual([]);
+
+    status('Reading the talk code');
+    await wait(0);
+    expect(said()).toEqual(['status#0']);
+    expect(_talkInternals().playing).toBe('status');
+    expect(fakeVad.setOptions).toHaveBeenLastCalledWith({ positiveSpeechThreshold: 0.8 });
+    theAudio.end();
+    await wait(0);
+
+    // Never over the owner: an update waits while they speak.
+    vadOpts.onSpeechRealStart();
+    status('Checking the board');
+    await wait(PROGRESS_GAP_MS + 2000);
+    expect(said()).toEqual(['status#0']);
+    vadOpts.onVADMisfire();
+    await wait(1000);
+    expect(said()).toEqual(['status#0', 'status#0']);
+    theAudio.end();
+    await wait(0);
+
+    status('Checking the board');                // the same line again
+    status('Running the tests');                 // news, but inside the gap
+    await wait(PROGRESS_GAP_MS - 1000);
+    expect(said()).toHaveLength(2);
+    await wait(1000);
+    await wait(0);
+    expect(said()).toHaveLength(3);
+
+    // The answer arrives mid-update: the update stops, the answer plays next.
+    talkHeard(reply('r1', 'm1'));
+    await wait(0);
+    expect(_talkInternals().playing).toBe('r1');
+    expect(played.at(-1)).toBe('r1#0');
+
+    // Answered: nothing more, not even the cue.
+    theAudio.end(); await wait(0); theAudio.end(); await wait(0);
+    status('Tidying up');
+    await wait(60000);
+    expect(said()).toHaveLength(3);
+    expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
   });
 });
 
