@@ -2122,7 +2122,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 @media (max-width: 700px) {
   .talk-bar { font-size: 13px; }
   .talk-btn { min-height: var(--chat-control-h); padding: 0 8px; }
-  .talk-end span { display: none; }
+  .talk-end span, .talk-mute span { display: none; }
   .chat-compose-row { gap: 4px; }
   .chat-compose-row .chat-mic { width: 36px; }
   .chat-compose-row .waiting-send { padding-inline: 10px; }

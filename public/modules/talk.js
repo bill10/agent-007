@@ -152,6 +152,9 @@ const button = (cls, text, onclick) => {
 };
 
 const PHONE_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.2 2h2.3l1.2 3-1.5 1a8 8 0 0 0 4.8 4.8l1-1.5 3 1.2v2.3a1.5 1.5 0 0 1-1.6 1.5A11.5 11.5 0 0 1 1.7 3.6 1.5 1.5 0 0 1 3.2 2z"/></svg>';
+const MIC_SVG = '<svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" aria-hidden="true"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/>';
+const MIC_ICON = `${MIC_SVG}</svg>`;
+const MIC_OFF_ICON = `${MIC_SVG}<line x1="1.5" y1="1.5" x2="12.5" y2="12.5"/></svg>`;
 // The same handset turned down, for End.
 const HANGUP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 9.5c0-1 1-2.100 6.500-2.100s6.500 1.100 6.500 2.100v1.200a.8.8 0 0 1-.9.8l-2.300-.4a.8.8 0 0 1-.7-.8V8.900a9 9 0 0 0-4.200 0v1.400a.8.8 0 0 1-.7.8l-2.300.4a.8.8 0 0 1-.9-.8z"/></svg>';
 
@@ -185,7 +188,7 @@ export function talkBar() {
   const timer = el('span', 'talk-timer');
   timer.setAttribute('role', 'timer');
   const skip = button('talk-skip', 'Interrupt', () => interrupt());
-  const mute = button('talk-mute', 'Mute', () => setMuted(!muted));
+  const mute = button('talk-mute', '', () => setMuted(!muted));
   const end = button('talk-end', '', () => endTalk());
   end.innerHTML = `${HANGUP_SVG}<span>End</span>`;
   end.title = 'End the conversation (Esc)';
@@ -243,7 +246,10 @@ function paint() {
   q('.talk-skip').hidden = s !== 'speaking';
   const mute = q('.talk-mute');
   mute.hidden = starting;
-  mute.textContent = muted ? 'Unmute' : 'Mute';
+  const label = muted ? 'Unmute' : 'Mute';
+  mute.innerHTML = `${muted ? MIC_OFF_ICON : MIC_ICON}<span></span>`;
+  mute.lastChild.textContent = label;
+  mute.setAttribute('aria-label', label);
   mute.setAttribute('aria-pressed', String(muted));
   const privacy = q('.talk-privacy');
   privacy.textContent = !on ? '' : consent

@@ -390,6 +390,8 @@ describe('the composer row and the call bar', () => {
     call().querySelector('.talk-mute').click();
     expect(call().querySelector('.talk-state').textContent).toBe('Muted');
     expect(call().querySelector('.talk-mute').textContent).toBe('Unmute');
+    expect(call().querySelector('.talk-mute').getAttribute('aria-label')).toBe('Unmute');
+    expect(call().querySelector('.talk-mute svg line[x1="1.5"]')).not.toBeNull();
     call().querySelector('.talk-mute').click();
     expect(call().querySelector('.talk-state').textContent).toBe('Listening…');
   });
