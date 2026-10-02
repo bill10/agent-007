@@ -1031,12 +1031,12 @@ const CALLS = {
       `policy: ${r.policy}`,
       `should_ask: ${r.should_ask}${r.should_ask ? ' — do not merge; ask the owner with notify_owner first, naming what deploys.' : ''}`,
     ];
-    if (r.matches.length) lines.push('Deploys:', ...r.matches.map(m => `  ${m.workflow} job ${m.job} (${m.trigger}): ${m.why.join('; ')}`));
+    if (r.matches.length) lines.push('Deploys:', ...r.matches.map(m => oneLine(`  ${m.workflow} job ${m.job} (${m.trigger}): ${m.why.join('; ')}`)));
     const quiet = r.triggered.filter(t => !r.matches.some(m => m.workflow === t.workflow));
-    if (quiet.length) lines.push('Also runs, no deploy found:', ...quiet.map(t => `  ${t.workflow} (${t.trigger})`));
-    if (r.unknown.length) lines.push('Unknown:', ...r.unknown.map(u => `  ${u}`));
-    if (r.environments.length) lines.push(`GitHub environments on the repo: ${r.environments.join(', ')} (a hosting integration such as Vercel or Netlify can deploy on push with no workflow)`);
-    if (r.notes.length) lines.push(...r.notes);
+    if (quiet.length) lines.push('Also runs, no deploy found:', ...quiet.map(t => oneLine(`  ${t.workflow} (${t.trigger})`)));
+    if (r.unknown.length) lines.push('Unknown:', ...r.unknown.map(u => `  ${oneLine(u)}`));
+    if (r.environments.length) lines.push(`GitHub environments on the repo: ${oneLine(r.environments.join(', '))} (a hosting integration such as Vercel or Netlify can deploy on push with no workflow)`);
+    if (r.notes.length) lines.push(...r.notes.map(oneLine));
     return toolText(lines.join('\n'));
   },
 
