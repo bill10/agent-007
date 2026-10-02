@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.50.3.0] - 2026-10-02
+
+### Fixed
+
+- **A status note no longer gets read out as the answer to a voice turn.** A `tell_owner` without `reply_to` now answers only a waiting typed message, never a "Talk to Billion" turn; voice turns are answered by a `tell_owner` whose `reply_to` names them.
+
 ## [0.50.2.0] - 2026-10-02
 
 ### Added
