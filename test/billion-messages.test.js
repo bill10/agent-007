@@ -96,6 +96,25 @@ describe('Billion\'s inbox', () => {
     expect(pendingMessages(b.id)).toBe(1);
   });
 
+  it('keeps the owner\'s words in order around server notices while held', () => {
+    vi.useFakeTimers();
+    const b = billion({ messagesHeld: true, messageTyping: true });   // mid-paste: nothing goes in yet
+    sendNotice(b, 'first notice', [], NOW);
+    sendText(b, '[Owner via app] one', NOW, { owner: true });
+    sendNotice(b, 'second notice', [], NOW);
+    sendText(b, '[Owner via app] two', NOW, { owner: true });
+    const typed = [];
+    for (let i = 0; i < 2; i++) {
+      Object.assign(b, { messageTyping: false, messageDeliveredAt: 0 });
+      b.pty.write.mockClear();
+      flushMessages(b, NOW);
+      typed.push(written(b));
+    }
+    expect(typed[0]).toContain('one');
+    expect(typed[1]).toContain('two');
+    expect(pendingMessages(b.id)).toBe(2);
+  });
+
   it('offers billion_ready to Billion only, and refuses it from anyone else', () => {
     const list = (session) => handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { session })
       .result.tools.map(t => t.name);
