@@ -24,11 +24,8 @@ import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
 import { tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
-<<<<<<< HEAD
 import { installedService, parseServiceFile } from './service.js';
-=======
 import { whisperSetup } from './voice.js';
->>>>>>> origin/main
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
