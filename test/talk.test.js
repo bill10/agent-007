@@ -36,7 +36,7 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
   commandExists: (file) => tools.available.has(file),
 }));
 
-const { ownerSays, tellOwner, notifyOwner, chatMessages, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
+const { ownerSays, tellOwner, notifyOwner, chatMessages, pendingOwnerMessages, addChat, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
 const { talkSetup, voiceUtterance, voiceSays, voiceAudio, looksLikeEcho, speechPieces, _resetTalk, MAX_UTTERANCE_BYTES, UTTERANCE_LIMIT } = await import('../server/talk.js');
 const { setupRoutes } = await import('../server/http.js');
 const { setBillionStatus, _resetStatus } = await import('../server/billion-status.js');
@@ -136,7 +136,7 @@ describe('an utterance', () => {
 describe('echo', () => {
   it('drops Billion\'s own reply heard back through the speakers, but never a short barge-in', async () => {
     const asked = await voiceSays('Remind me what we shipped', { utterance: id(7), env: ENV });
-    await tellOwner('We shipped the background service and the whisper check.', { env: {}, now: now() });
+    await tellOwner('We shipped the background service and the whisper check.', { env: {}, now: now(), replyTo: asked.id.slice(0, 8) });
     const reply = chatMessages().at(-1);
     expect(reply.replyTo).toBe(asked.id);
     const writes = b.pty.write.mock.calls.length;
@@ -179,20 +179,36 @@ describe('reply_to', () => {
     expect((await tellOwner('Short id.', { env: {}, now: now(), replyTo: second.id.slice(0, 4) })).note).toMatch(/answers none/);
   });
 
-  it('without reply_to, a typed message waiting is answered before a voice turn, so a notice is never read out as its answer', async () => {
+  it('without reply_to, a pending voice turn stays pending and the note answers nothing', async () => {
     const voice = await voiceSays('Spoken question', { utterance: id(33), env: ENV });
+    await tellOwner('Job 12 is done.', { env: {}, now: now() });
+    expect(chatMessages().at(-1).replyTo).toBeUndefined();
+    expect(pendingOwnerMessages().map(m => m.id)).toContain(voice.id);
+    await tellOwner('The real answer.', { env: {}, now: now(), replyTo: voice.id.slice(0, 8) });
+    expect(chatMessages().at(-1).replyTo).toBe(voice.id);
+    expect(pendingOwnerMessages().map(m => m.id)).not.toContain(voice.id);
+  });
+
+  it('without reply_to, a pending Telegram voice note (it has no #id) is still answered', async () => {
+    addChat({ from: 'owner', via: 'telegram', voice: true, text: 'spoken on the phone', awaitsReply: true }, undefined, {});
+    const note = pendingOwnerMessages().at(-1);
+    await tellOwner('Got it.', { env: {}, now: now() });
+    expect(chatMessages().at(-1).replyTo).toBe(note.id);
+  });
+
+  it('without reply_to, a typed message waiting is answered, even when a voice turn is older', async () => {
+    const voice = await voiceSays('Spoken question', { utterance: id(34), env: ENV });
     const typedTurn = await ownerSays('typed after it', { env: {} });
     await tellOwner('Job 12 is done.', { env: {}, now: now() });
     expect(chatMessages().at(-1).replyTo).toBe(typedTurn.id);
-    await tellOwner('Answer, from a Billion that never passes reply_to.', { env: {}, now: now() });
-    expect(chatMessages().at(-1).replyTo).toBe(voice.id);
+    expect(pendingOwnerMessages().map(m => m.id)).toContain(voice.id);
   });
 });
 
 describe('a reply\'s audio', () => {
   async function voiceTurnAnswered(text) {
     const asked = await voiceSays('What is next?', { utterance: id(Math.random().toString(36).slice(2, 8)), env: ENV });
-    await tellOwner(text, { env: {}, now: now() });
+    await tellOwner(text, { env: {}, now: now(), replyTo: asked.id.slice(0, 8) });
     return { asked, reply: chatMessages().at(-1) };
   }
 
@@ -266,7 +282,7 @@ describe('the routes', () => {
     await new Promise(r => server.once('listening', r));
     base = `http://127.0.0.1:${server.address().port}`;
   });
-  afterAll(() => new Promise(r => server.close(r)));
+  afterAll(() => new Promise(r => { server.close(r); server.closeAllConnections(); }));
   const H = { 'X-Agent007-Talk': '1' };
 
   it('need the tab\'s own header, which a page elsewhere cannot send without a preflight', async () => {
