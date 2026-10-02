@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.45.2.0] - 2026-10-02
+
+### Added
+
+- **doctor checks whisper.cpp (recommended).** Reports whether whisper.cpp is set up to transcribe Telegram voice notes, and what steps are needed to enable transcription.
+
 ## [0.45.1.0] - 2026-10-02
 
 ### Fixed
