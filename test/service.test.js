@@ -12,6 +12,9 @@ import { readServerFile, writeServerFile } from '../server/control.js';
 import { removeTempDir } from './temp-dir.js';
 
 const ROOT = process.cwd();
+// The "restarted" server's pid: one that is alive on every platform (there is
+// no pid 1 on Windows), and not this process's.
+const NEW_PID = process.ppid;
 const tmp = (p) => mkdtempSync(join(tmpdir(), p));
 
 // No real launchctl, systemctl, git or npm: `run` answers from `answer` and
@@ -215,26 +218,25 @@ describe('status / restart', () => {
     let workers = [2, 2, 1, 0];
     let restarted = false;
     const ctx = fakeCtx({
-      readServer: () => ({ pid: restarted ? 1 : process.pid, token: 't' }),
+      readServer: () => ({ pid: restarted ? NEW_PID : process.pid, token: 't' }),
       callServer: async (path, { method } = {}) => {
         if (method === 'POST') { restarted = true; return { ok: true }; }
-        return restarted ? live({ pid: 1, version: '1.1.0.0' }) : live({ workers: workers.shift() ?? 0 });
+        return restarted ? live({ pid: NEW_PID, version: '1.1.0.0' }) : live({ workers: workers.shift() ?? 0 });
       },
     });
-    // pid 1 (init/launchd) is always alive, so the "new" server reads as up.
     expect(await runCommand('restart', {}, ctx)).toBe(0);
     const text = ctx.out.join('\n');
     expect(text.match(/mid-run/g)).toHaveLength(2);
-    expect(text).toContain(`Restarted: pid ${process.pid} → 1, version 1.0.0.0 → 1.1.0.0.`);
+    expect(text).toContain(`Restarted: pid ${process.pid} → ${NEW_PID}, version 1.0.0.0 → 1.1.0.0.`);
   });
 
   it('--now skips the wait; nothing running and no service is an error', async () => {
     let restarted = false;
     const ctx = fakeCtx({
-      readServer: () => ({ pid: restarted ? 1 : process.pid, token: 't' }),
+      readServer: () => ({ pid: restarted ? NEW_PID : process.pid, token: 't' }),
       callServer: async (path, { method } = {}) => {
         if (method === 'POST') { restarted = true; return { ok: true }; }
-        return restarted ? live({ pid: 1 }) : live({ workers: 5 });
+        return restarted ? live({ pid: NEW_PID }) : live({ workers: 5 });
       },
     });
     expect(await runCommand('restart', { now: true }, ctx)).toBe(0);
@@ -310,10 +312,10 @@ describe('update', () => {
     const ctx = fakeCtx({
       root: checkout(),
       answer: gitAnswers(),
-      readServer: () => ({ pid: restarted ? 1 : process.pid, token: 't' }),
+      readServer: () => ({ pid: restarted ? NEW_PID : process.pid, token: 't' }),
       callServer: async (path, { method } = {}) => {
         if (method === 'POST') { restarted = true; return { ok: true }; }
-        return { pid: restarted ? 1 : process.pid, version: '1.0.0.0', workers: 0, port: 7007 };
+        return { pid: restarted ? NEW_PID : process.pid, version: '1.0.0.0', workers: 0, port: 7007 };
       },
     });
     expect(await runCommand('update', { now: true }, ctx)).toBe(0);
