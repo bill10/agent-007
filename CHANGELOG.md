@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.51.0.0] - 2026-10-02
+
+### Added
+
+- **Slash commands from the Billion chat.** A message starting with `/` (say `/model opus`) is typed bare into Billion's terminal at its next prompt, so it runs on whichever CLI Billion uses; the thread marks it *Command*, waits for no reply, and shows Billion's screen a few seconds later. A picker it opens (a bare `/model`) is shown and closed, so give the argument. `//` sends a literal `/` message. Works from your private Telegram chat too, never from a group or an agent.
+
 ## [0.50.3.0] - 2026-10-02
 
 ### Fixed
