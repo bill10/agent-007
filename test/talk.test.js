@@ -255,10 +255,6 @@ describe('a reply\'s audio', () => {
     expect(talkSetup({}, 'darwin')).toMatchObject({ stt: null, sttMissing: expect.stringMatching(/^Talking needs a whisper\.cpp model/) });
   });
 
-  it('the "still working" cue is a fixed line, never a status', async () => {
-    expect(await voiceAudio('cue', 0, { env: ENV, platform: 'darwin' })).toMatchObject({ count: 1 });
-    expect(tools.said).toEqual(['Still working on it.']);
-  });
 
   it('a progress update ("status") is Billion\'s status line now, cut short; none without one', async () => {
     _resetStatus();
@@ -289,7 +285,7 @@ describe('the routes', () => {
     expect((await fetch(`${base}/api/talk`)).status).toBe(403);
     expect((await fetch(`${base}/api/talk`, { headers: H })).status).toBe(200);
     expect((await fetch(`${base}/api/talk/utterance`, { method: 'POST', headers: { 'Content-Type': 'audio/wav', 'X-Utterance-Id': id(20) }, body: WAV })).status).toBe(403);
-    expect((await fetch(`${base}/api/talk/audio/cue/0`)).status).toBe(403);
+    expect((await fetch(`${base}/api/talk/audio/status/0`)).status).toBe(403);
     expect((await fetch(`${base}/api/talk`, { headers: { ...H, Origin: 'https://evil.example' } })).status).toBe(403);
   });
 

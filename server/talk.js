@@ -25,7 +25,6 @@ export const UTTERANCE_LIMIT = 30;      // utterances a minute
 export const AUDIO_LIMIT = 120;         // audio pieces a minute
 const WINDOW_MS = 60 * 1000;
 const CACHE_PIECES = 24;
-export const WORKING_CUE = 'Still working on it.';
 
 const ID_RE = /^[\w-]{8,64}$/;
 export const validUtterance = (id) => typeof id === 'string' && ID_RE.test(id);
@@ -130,7 +129,7 @@ export function voiceUtterance(audio, { utterance, echoOf, broadcast, env = proc
   return job;
 }
 
-const cache = new Map();   // `${id}:${index}`, 'cue:0' or `status:${phrase}` -> Promise<Buffer>
+const cache = new Map();   // `${id}:${index}` or `status:${phrase}` -> Promise<Buffer>
 function cached(key, make) {
   if (!cache.has(key)) {
     const made = make();
@@ -142,11 +141,11 @@ function cached(key, make) {
 }
 
 // Piece `index` of a voice reply, spoken by `say`: { audio, count } or
-// { status, error }. The fixed "still working" cue is reply id 'cue'; id
+// { status, error }. Reply id
 // 'status' is a short progress update made from Billion's status line now.
 export async function voiceAudio(id, index, { env = process.env, platform = process.platform, now = Date.now() } = {}) {
   const phrase = id === 'status' ? progressPhrase(statusPayload(now)) : '';
-  const pieces = id === 'cue' ? [WORKING_CUE] : id === 'status' ? (phrase ? [phrase] : []) : speechPieces(voiceReply(id)?.text ?? '');
+  const pieces = id === 'status' ? (phrase ? [phrase] : []) : speechPieces(voiceReply(id)?.text ?? '');
   if (!pieces.length) return { status: 404, error: 'No such reply.' };
   if (!(Number.isInteger(index) && index >= 0 && index < pieces.length)) return { status: 404, error: 'No such piece.' };
   const off = speechUnavailable(env, platform);

@@ -89,7 +89,7 @@ export function statusLine(status = billionStatus, info = roundInfo, now = Date.
   const lead = !status ? 'Connecting…'
     : s.disconnected ? 'Reconnecting…'
     : !s.running ? 'Billion is not running'
-      : s.awaitingReply ? (s.working ? (waiting > 1 ? `Billion is working on your ${waiting} messages…` : 'Billion is working on your message…') : 'Waiting for Billion to reply…')
+      : s.awaitingReply ? (s.working ? (waiting > 1 ? `Working on your ${waiting} messages…` : 'Working on your message…') : 'Replying shortly…')
         : s.text ? (s.working ? `Working: ${s.text}` : s.text)
           : s.working ? 'Thinking…' : 'Idle';
   const next = s.nextRoundAt ?? info?.next?.at;
