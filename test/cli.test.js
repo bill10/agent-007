@@ -21,7 +21,7 @@ describe('agent-007 CLI', () => {
   it('--help prints usage and exits 0', () => {
     const { code, out } = run(['--help']);
     expect(code).toBe(0);
-    expect(out).toMatch(/Usage: agent-007/);
+    expect(out).toMatch(/Usage: agent007/);
   });
 
   it('--version prints VERSION', () => {
@@ -66,8 +66,9 @@ describe('settings', () => {
 
   it('--help lists init and every setting .env.example documents', () => {
     const { out } = run(['--help']);
-    expect(out).toMatch(/agent-007 init/);
-    expect(out).toMatch(/agent-007 doctor/);
+    expect(out).toMatch(/agent007 init/);
+    expect(out).toMatch(/agent007 doctor/);
+    for (const sub of ['install', 'uninstall', 'status', 'restart', 'logs', 'update']) expect(out).toMatch(new RegExp(`agent007 .*${sub}`));
     const keys = [...readFileSync('.env.example', 'utf8').matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map(m => m[1]);
     expect(keys.length).toBeGreaterThan(5);
     for (const key of keys) expect(out).toContain(key);
