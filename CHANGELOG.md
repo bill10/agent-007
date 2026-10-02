@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.45.1.0] - 2026-10-02
+
+### Fixed
+
+- **Several jobs starting at once in one repo no longer fail to create their worktrees.** Two `git worktree add` runs at the same moment could trip over each other's half-written entry (`failed to read .git/worktrees/…/commondir`), most often on Windows, and the job failed to start. Worktree creation in one repo now takes turns; different repos still start in parallel.
+
 ## [0.45.0.0] - 2026-10-02
 
 ### Added
