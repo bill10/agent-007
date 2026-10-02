@@ -81,6 +81,31 @@ describe('discovery', () => {
   });
 });
 
+describe('waiting for the first discovery', () => {
+  it('answers true once it is in, and false past the bound without waiting longer', async () => {
+    vi.resetModules();
+    const slow = await import('../server/models.js');
+    const t = Date.now();
+    expect(await slow.modelsReady(50, { env: {}, exists: () => true, read: () => FIXTURE, run: () => new Promise(() => {}), log: noop })).toBe(false);
+    expect(Date.now() - t).toBeLessThan(1000);
+    vi.resetModules();
+    const fast = await import('../server/models.js');
+    expect(await fast.modelsReady(5000, { env: {}, exists: () => true, read: () => FIXTURE, run: async () => DEBUG_MODELS, log: noop })).toBe(true);
+    expect(fast.availableModels().codex.length).toBeGreaterThan(0);
+  });
+
+  it('tells a listener when a refresh changes the lists, and only then', async () => {
+    vi.resetModules();
+    const m = await import('../server/models.js');
+    const seen = vi.fn();
+    m.onModelsChange(seen);
+    const opts = { env: {}, exists: () => true, read: () => FIXTURE, run: async () => DEBUG_MODELS, log: noop };
+    await m.refreshModels(opts);
+    await m.refreshModels(opts);
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('validation', () => {
   it('takes a discovered model for the card\'s agent, empty as the default, and nothing else', () => {
     expect(resolveJobModel('', 'claude', MODELS)).toEqual({ model: null });
@@ -150,6 +175,15 @@ describe('on the board', () => {
     const homes = { claude: join(REPO, 'no-claude'), codex: join(REPO, 'no-codex') };
     const plan = orphanResumePlan({ repoPath: REPO, branchName: job.branchName, worktreePath: '/wt/x', agent: 'claude' }, homes);
     expect(parseCommand(plan.command).args).toEqual(['--continue', '--permission-mode', 'auto', '--model', 'fable']);
+  });
+
+  it('tells the caller which CLI it runs as, next to the model list', () => {
+    for (const agent of ['claude', 'codex']) {
+      const tools = handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { session: { isBillion: true, agent }, models: { claude: ['opus'], codex: [] } }).result.tools;
+      expect(tools.find(t => t.name === 'post_job').inputSchema.properties.agent.description).toMatch(new RegExp(`You are running as ${agent}\\.$`));
+    }
+    const anon = handleMcpMessage({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { models: { claude: [], codex: [] } }).result.tools;
+    expect(anon.find(t => t.name === 'post_job').inputSchema.properties.agent.description).not.toMatch(/You are running as/);
   });
 
   it('lists the discovered models in the MCP tool descriptions and shows the model on read', () => {

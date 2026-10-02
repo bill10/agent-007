@@ -147,7 +147,7 @@ describe('billionCommand', () => {
     expect(resumed).toContain('/cfg/billion-tools.json');
     expect(promptOf(billionCommand({ ...opts, created: false, hasConversation: false }))).not.toContain('notify_owner');
     expect(promptOf(billionCommand({ ...opts, created: true, hasConversation: true }))).not.toContain('notify_owner');
-    expect(promptOf(billionCommand({ ...opts, changedTools: [], created: false, hasConversation: true }))).not.toContain('billion-tools');
+    expect(promptOf(billionCommand({ ...opts, changedTools: [], created: false, hasConversation: true }))).not.toContain('changed these board tools');
   });
 
   it('starts cleanly when there is no conversation to continue', () => {
@@ -181,9 +181,25 @@ describe('changedBoardTools', () => {
   });
 });
 
+it('names post_job when only its model list changed since the last start', async () => {
+  const { toolsFor } = await import('../server/mcp.js');
+  const file = join(mkdtempSync(join(tmpdir(), 'a007-tools-')), 'billion-tools.json');
+  changedBoardTools(file, toolsFor({ isBillion: true, agent: 'codex' }, { claude: ['opus'], codex: [] }));
+  expect(changedBoardTools(file, toolsFor({ isBillion: true, agent: 'codex' }, { claude: ['opus'], codex: ['gpt-5.5'] }))).toEqual(['post_job', 'edit_job']);
+});
+
 describe('charterChanges', () => {
   const file = () => join(mkdtempSync(join(tmpdir(), 'a007-charter-')), 'billion-charter.md');
   const charter = readFileSync(new URL('../templates/billion/charter.md', import.meta.url), 'utf8');
+
+  it('has Billion name an agent and a model on every card, never leaving the model to chance', () => {
+    const choosing = charter.slice(charter.indexOf('**Choosing a model.**'), charter.indexOf('## Merging'));
+    expect(choosing).toMatch(/Name both `agent` and `model` on every card/);
+    expect(choosing).toMatch(/doesn't belong to the card's agent is refused/);
+    expect(choosing).not.toMatch(/Leave it empty/);
+    expect(choosing).toMatch(/most appropriate for the job/);
+    expect(choosing).not.toMatch(/strongest|fast one/);
+  });
 
   it('quotes the paragraphs that changed, under their sections, then nothing once seen', () => {
     const f = file();

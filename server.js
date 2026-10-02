@@ -34,7 +34,7 @@ import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
 import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand, deriveJobStatus } from './lib/jobs.js';
-import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
+import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, saveBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick, cliReady, matchLimit, SETTLE_MS } from './server/billion-limit.js';
@@ -51,7 +51,7 @@ import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
 import { comingRound } from './server/rounds.js';
 import { setStatusFacts, publishStatus } from './server/billion-status.js';
-import { startModelRefresh } from './server/models.js';
+import { startModelRefresh, modelsReady, availableModels, onModelsChange } from './server/models.js';
 import { agentAccounts, refreshAgentAccounts } from './server/agent-accounts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -197,7 +197,11 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
 // Returns the running one if there is one. On whichever CLI billionAgent()
 // says; `handover` starts it fresh after a switch, with `carried` the mail the
 // last one had waiting.
-function startBillion({ handover = false, carried = null } = {}) {
+// Async only for the model lists its prompt names: the first discovery is
+// waited for, at most 15 s. Everything after that wait is synchronous, so two
+// starts at once still find each other's session.
+async function startBillion({ handover = false, carried = null } = {}) {
+  const modelsIn = await modelsReady();
   for (const [id, s] of sessions) {
     if (!s.isBillion) continue;
     if (s.rotationResume) return { error: 'Retry the paused Claude conversations in Settings before starting Billion.' };
@@ -228,15 +232,15 @@ function startBillion({ handover = false, carried = null } = {}) {
   }
   const agent = billionAgent();
   const hasCli = commandExists(agent, process.env, process.platform, dir);
-  // Without the model lists toolsFor adds: those follow what is installed,
-  // not an upgrade. Only when claude starts, so no start without it uses up
-  // the notice: it is about Claude Code's resumed conversations. Best effort,
-  // like the charter.
-  const toolsFile = join(CONFIG_DIR, 'billion-tools.json');
+  // With the model lists toolsFor adds, so a list that changed since the last
+  // start names post_job. Only when the CLI starts, so no start without it
+  // uses up the notice: it is about Claude Code's resumed conversations, but
+  // a Codex Billion reads the file too when its prompt had no model list.
+  // Best effort, like the charter.
   let changedTools = [];
-  if (hasCli && agent === 'claude') {
-    try { changedTools = changedBoardTools(toolsFile, toolsFor({ isBillion: true })); } catch (err) {
-      console.error(`Billion: could not save the board tool definitions to ${toolsFile}:`, err.message);
+  if (hasCli) {
+    try { changedTools = changedBoardTools(BILLION_TOOLS_FILE, billionTools()); } catch (err) {
+      console.error(`Billion: could not save the board tool definitions to ${BILLION_TOOLS_FILE}:`, err.message);
     }
   }
   // Only when the CLI starts, like the tools, so a start without it does not
@@ -256,8 +260,9 @@ function startBillion({ handover = false, carried = null } = {}) {
     dir,
     projectsHint: suggestProjectsDir(config.repos.map(r => r.path)),
     changedTools,
-    toolsFile,
+    toolsFile: BILLION_TOOLS_FILE,
     charterNotice,
+    models: modelsIn ? availableModels() : null,
   }) : noAgentCommand(agent);
   const result = createSessionFromConfig({
     sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,
@@ -284,6 +289,17 @@ function startBillion({ handover = false, carried = null } = {}) {
   });
   return { session: result.session, ...(hasCli ? {} : { notice: `${cli} is not installed; its tab says how to fix that` }) };
 }
+
+// Billion's board tools as it sees them, model lists included. Rewritten when
+// a refresh finds new lists, so the copy its prompt points to stays current.
+const BILLION_TOOLS_FILE = join(CONFIG_DIR, 'billion-tools.json');
+const billionTools = () => toolsFor({ isBillion: true, agent: billionAgent() }, availableModels());
+onModelsChange(() => {
+  if (!liveBillion()) return;
+  try { saveBoardTools(BILLION_TOOLS_FILE, billionTools()); } catch (err) {
+    console.error(`Billion: could not save the board tool definitions to ${BILLION_TOOLS_FILE}:`, err.message);
+  }
+});
 
 // Stops a running Billion and waits for it to go, handing back the mail it
 // had waiting. SIGKILL after a few seconds, as at shutdown.
@@ -423,7 +439,7 @@ async function discoverRotationAccounts() {
 }
 
 // While Billion is out of the way for a swap, nobody starts another one under it.
-const startBillionUnlessSwitching = () => (switching ? { error: BILLION_SWITCHING } : startBillion());
+const startBillionUnlessSwitching = async () => (switching ? { error: BILLION_SWITCHING } : startBillion());
 async function switchAccount(how, { fromBrowser = false } = {}) {
   const can = canMigrate();
   if (can.error) return can;
@@ -620,7 +636,7 @@ async function startup() {
   if (billionRuns()) {
     const warning = billionAgentWarning();
     if (warning) console.warn(`  ${warning}`);
-    const { error, notice, session } = startBillion();
+    const { error, notice, session } = await startBillion();
     startBillionWakes();
     console.log(error ? `  Billion: not started (${error})` : notice ? `  Billion: ${notice}` : `  Billion: running on ${session.agent} in ${billionDir()}`);
   } else if (billionEnabled()) {
