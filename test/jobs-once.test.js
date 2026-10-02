@@ -1,6 +1,8 @@
-// One-time schedules: `once` / `run_at`, archiving after the single run, the
-// restart sweep of spent one-date schedules, and archiving by hand (the
-// owner's Archive, Billion's close_job on a To do card is in billion-board-tools.test.js).
+// Scheduled one-time jobs: `run_at` (and `once` with a schedule, for old
+// callers) makes one card with a start time; the dispatcher waits for it; a
+// server start converts pending once schedules; the restart sweep of spent
+// one-date schedules; archiving by hand (the owner's Archive, Billion's
+// close_job on a To do card is in billion-board-tools.test.js).
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -9,9 +11,9 @@ import { config, sessions, CONFIG_PATH, CONFIG_DIR } from '../server/state.js';
 import { loadConfig } from '../server/config.js';
 import {
   addJob, fireSchedules, allJobs, boardSettings, postJobForAgent, editJobForAgent,
-  archiveJob, retireSpentSchedules, updateJob,
+  archiveJob, retireSpentSchedules, convertOnceSchedules, updateJob, releaseJobHold,
 } from '../server/jobs.js';
-import { createJob, runAtToSchedule, isOneDateCron, spentOneDateSchedules, isJobDue } from '../lib/jobs.js';
+import { createJob, parseRunAt, isOneDateCron, spentOneDateSchedules, isJobDue, selectDispatchableJobs } from '../lib/jobs.js';
 
 const REPO = mkdtempSync(join(tmpdir(), 'a007-once-'));
 const noop = () => {};
@@ -24,18 +26,18 @@ beforeEach(() => {
   sessions.clear();
 });
 
-describe('runAtToSchedule', () => {
+describe('parseRunAt', () => {
   const now = new Date(2026, 9, 1, 9, 0).getTime();   // 1 Oct 2026, 09:00 local
 
-  it('turns a date-time into the one-date cron for that minute, local time', () => {
-    expect(runAtToSchedule('2026-10-24T10:30', now)).toEqual({ schedule: '30 10 24 10 *' });
+  it('turns a date-time into that minute as an instant, local time', () => {
+    expect(parseRunAt('2026-10-24T10:30:45', now)).toEqual({ runAt: new Date(2026, 9, 24, 10, 30).toISOString() });
   });
 
   it('refuses a time gone by, more than a year out, or not a date', () => {
-    expect(runAtToSchedule('2026-09-24T10:00', now).error).toMatch(/already gone by/);
-    expect(runAtToSchedule('2027-12-01T10:00', now).error).toMatch(/more than a year/);
-    expect(runAtToSchedule('next tuesday', now).error).toMatch(/not a date-time/);
-    expect(runAtToSchedule(42, now).error).toMatch(/ISO date-time/);
+    expect(parseRunAt('2026-09-24T10:00', now).error).toMatch(/already gone by/);
+    expect(parseRunAt('2027-12-01T10:00', now).error).toMatch(/more than a year/);
+    expect(parseRunAt('next tuesday', now).error).toMatch(/not a date-time/);
+    expect(parseRunAt(42, now).error).toMatch(/ISO date-time/);
   });
 });
 
@@ -59,77 +61,98 @@ describe('isOneDateCron / spentOneDateSchedules', () => {
   });
 });
 
-describe('a once schedule', () => {
-  it('is posted with run_at as a one-date schedule with once set', () => {
-    const at = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+describe('a scheduled job', () => {
+  const inDays = d => new Date(Date.now() + d * 86_400_000);
+
+  it('is posted with run_at as one one-time card with a start time: no schedule, no run card', () => {
+    const at = inDays(3);
     const r = postJobForAgent({ title: 'Follow up with Edward', repo: REPO, runAt: at.toISOString() }, noop);
     expect(r.error).toBeUndefined();
-    expect(r.job.type).toBe('scheduled');
-    expect(r.job.once).toBe(true);
-    expect(isOneDateCron(r.job.schedule)).toBe(true);
-    expect(Math.abs(Date.parse(r.job.nextRunAt) - at.getTime())).toBeLessThan(60_000);
+    expect(r.job).toMatchObject({ type: 'one-time', schedule: null, nextRunAt: null, requiresPr: true });
+    expect(Math.abs(Date.parse(r.job.runAt) - at.getTime())).toBeLessThan(60_000);
+    expect(fireSchedules(noop, { now: at.getTime() + 60_000 })).toEqual([]);
+    expect(allJobs()).toHaveLength(1);
   });
 
-  it('is what the + Job form builds: runAtToSchedule\'s cron with once, via addJob and updateJob', () => {
-    const at = new Date(Date.now() + 3600_000);
-    const { schedule } = runAtToSchedule(at.toISOString());
-    const r = addJob({ title: 'Form once', repoPath: REPO, type: 'scheduled', schedule, once: true }, noop);
-    expect(r.job).toMatchObject({ type: 'scheduled', once: true, schedule });
-    const later = runAtToSchedule(new Date(Date.now() + 2 * 3600_000).toISOString()).schedule;
-    expect(updateJob(r.job.id, { type: 'scheduled', schedule: later, once: true }, noop).job.schedule).toBe(later);
-    // switching to Recurring sends once:false
-    expect(updateJob(r.job.id, { type: 'scheduled', schedule: '0 9 * * 1', once: false }, noop).job.once).toBe(false);
+  it('is what an old caller\'s once: true with a one-date schedule makes too', () => {
+    const r = postJobForAgent({ title: 'old caller', repo: REPO, schedule: '0 10 24 9 *', once: true }, noop);
+    expect(r.job).toMatchObject({ type: 'one-time', schedule: null });
+    expect(new Date(r.job.runAt).getDate()).toBe(24);
+    expect(new Date(r.job.runAt).getHours()).toBe(10);
   });
 
-  it('refuses run_at with a schedule, once on a card with no schedule, and a non-boolean once', () => {
-    const later = new Date(Date.now() + 86_400_000).toISOString();
+  it('waits in To do until its start time, then the dispatcher takes the same card', () => {
+    const { job } = addJob({ title: 'later', repoPath: REPO, runAt: inDays(1).toISOString() }, noop);
+    expect(isJobDue(job)).toBe(false);
+    expect(selectDispatchableJobs(allJobs())).toEqual([]);
+    const due = Date.parse(job.runAt);
+    expect(selectDispatchableJobs(allJobs(), { now: due })).toEqual([job]);
+  });
+
+  it('Run now lets it go at once', () => {
+    const { job } = addJob({ title: 'later', repoPath: REPO, runAt: inDays(1).toISOString() }, noop);
+    releaseJobHold(job.id, noop);
+    expect(job.runAt).toBeNull();
+    expect(selectDispatchableJobs(allJobs())).toEqual([job]);
+  });
+
+  it('is edited by moving its time, cleared by Now, and made a schedule by Recurring', () => {
+    const { job } = addJob({ title: 'x', repoPath: REPO, runAt: inDays(1).toISOString() }, noop);
+    const later = inDays(5);
+    const r = editJobForAgent({ id: job.id, runAt: later.toISOString() }, noop);
+    expect(r.changed).toContain('run_at');
+    expect(Math.abs(Date.parse(job.runAt) - later.getTime())).toBeLessThan(60_000);
+    // the form: Scheduled with the time left alone sends no runAt
+    expect(updateJob(job.id, { type: 'one-time', title: 'y' }, noop).job.runAt).toBe(job.runAt);
+    expect(updateJob(job.id, { type: 'one-time', runAt: null }, noop).job.runAt).toBeNull();
+    updateJob(job.id, { runAt: inDays(2).toISOString() }, noop);
+    updateJob(job.id, { type: 'scheduled', schedule: '0 9 * * 1' }, noop);
+    expect(job).toMatchObject({ type: 'scheduled', runAt: null });
+  });
+
+  it('refuses run_at with a schedule, once on a card with no schedule, a non-boolean once, and a bad time', () => {
+    const later = inDays(1).toISOString();
     expect(postJobForAgent({ title: 'x', repo: REPO, runAt: later, schedule: '0 9 * * *' }, noop).error).toMatch(/not both/);
     expect(postJobForAgent({ title: 'x', repo: REPO, once: true }, noop).error).toMatch(/once needs a schedule/);
     expect(postJobForAgent({ title: 'x', repo: REPO, schedule: '0 9 * * *', once: 'yes' }, noop).error).toMatch(/true or false/);
+    expect(postJobForAgent({ title: 'x', repo: REPO, runAt: '2020-01-01T09:00' }, noop).error).toMatch(/gone by/);
+    expect(allJobs()).toHaveLength(0);
   });
 
-  it('posts its single run, then is archived; its run card lives on', () => {
-    const { job } = addJob({ title: 'Oct 1 check-in', repoPath: REPO, schedule: '30 10 1 10 *', once: true }, noop);
-    const due = Date.parse(job.nextRunAt);
-    const fired = fireSchedules(noop, { now: due });
-    expect(fired).toHaveLength(1);
-    expect(fired[0].scheduleId).toBe(job.id);
-    expect(fired[0].state).toBe('todo');
-    expect(job.state).toBe('done');
-    expect(job.archivedReason).toMatch(/One-time schedule/);
-    expect(job.nextRunAt).toBeNull();
-    expect(job.runCount).toBe(1);
-    // And it never fires again.
-    expect(fireSchedules(noop, { now: due + 365 * 86_400_000 })).toEqual([]);
-    expect(allJobs()).toHaveLength(2);
-  });
-
-  it('stays due through a hold instead of moving to next year', () => {
-    const { job } = addJob({ title: 'once', repoPath: REPO, schedule: '0 10 24 9 *', once: true }, noop);
-    const due = Date.parse(job.nextRunAt);
-    // An unfinished run of the same schedule holds it off.
-    allJobs().push({ ...createJob({ title: 'run', repoPath: REPO }).job, scheduleId: job.id, state: 'in-progress' });
-    expect(fireSchedules(noop, { now: due })).toEqual([]);
-    expect(job.state).toBe('todo');
-    expect(Date.parse(job.nextRunAt)).toBe(due);
-    expect(isJobDue(job, due + 60_000)).toBe(true);
-  });
-
-  it('a recurring schedule is untouched: it re-arms and stays in To do', () => {
+  it('a recurring schedule is untouched: it posts a run, re-arms and stays in To do', () => {
     const { job } = addJob({ title: 'weekly', repoPath: REPO, schedule: '0 9 * * 1' }, noop);
-    fireSchedules(noop, { now: Date.parse(job.nextRunAt) });
+    const due = Date.parse(job.nextRunAt);
+    expect(fireSchedules(noop, { now: due })).toHaveLength(1);
     expect(job.state).toBe('todo');
-    expect(job.once).toBe(false);
+    expect(Date.parse(job.nextRunAt)).toBeGreaterThan(due);
   });
+});
 
-  it('can be set or cleared with edit_job, and is cleared when the schedule goes', () => {
-    const { job } = addJob({ title: 'x', repoPath: REPO, schedule: '0 10 24 9 *' }, noop);
-    const r = editJobForAgent({ id: job.id, once: true }, noop);
-    expect(r.changed).toEqual(['once']);
-    expect(job.once).toBe(true);
-    updateJob(job.id, { type: 'one-time', schedule: '' }, noop);
-    expect(job.once).toBe(false);
-    expect(updateJob(job.id, { once: true }, noop).error).toMatch(/once needs a schedule/);
+describe('converting once schedules on a server start', () => {
+  it('turns a pending once schedule into the same card with runAt, and leaves the rest alone', () => {
+    const due = new Date(Date.now() + 86_400_000).toISOString();
+    const pending = {
+      ...createJob({ title: 'Oct 2 check-in', detail: 'd', repoPath: REPO, schedule: '0 10 2 10 *', agent: 'codex', postedByBillion: true, postedByName: 'Bill' }).job,
+      once: true, nextRunAt: due, attachments: [{ name: 'a.txt', path: '/x/a.txt' }], permissionMode: 'plan',
+    };
+    const archived = { ...createJob({ title: 'fired', repoPath: REPO, schedule: '0 10 24 9 *' }).job, once: true, state: 'done', runCount: 1 };
+    const run = { ...createJob({ title: 'its run', repoPath: REPO }).job, scheduleId: archived.id };
+    const weekly = createJob({ title: 'weekly', repoPath: REPO, schedule: '0 9 * * 1' }).job;
+    config.jobs.push(pending, archived, run, weekly);
+    const before = { ...pending };
+    const lines = [];
+    expect(convertOnceSchedules(noop, { log: l => lines.push(l) })).toEqual([pending]);
+    expect(pending).toMatchObject({
+      id: before.id, title: before.title, detail: 'd', repoPath: REPO, agent: 'codex', model: null,
+      requiresPr: false, attachments: before.attachments, permissionMode: 'plan', postedByBillion: true, postedByName: 'Bill',
+      type: 'one-time', schedule: null, nextRunAt: null, runAt: due, state: 'todo',
+    });
+    expect(pending).not.toHaveProperty('once');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/Oct 2 check-in/);
+    expect(archived).toMatchObject({ state: 'done', type: 'scheduled', once: true });
+    expect(run.scheduleId).toBe(archived.id);
+    expect(weekly).toMatchObject({ type: 'scheduled', schedule: '0 9 * * 1' });
   });
 });
 

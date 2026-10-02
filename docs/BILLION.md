@@ -1082,8 +1082,9 @@ anywhere but Telegram, and there is no paid transcription.
    Finished without running it, schedule or not, with the note as the card's
    reason (`archiveJob` in `server/jobs.js`, the same path as the owner's
    **Archive** button); send back is refused there. This was `retire_job`
-   until it folded into `close_job`. Work due once on a date is posted with
-   `run_at` or `once: true` and archives itself after its single run. Verified live end
+   until it folded into `close_job`. Work due once on a date is a one-time
+   card posted with `run_at`: it waits in To do until that time, then is
+   dispatched like any other card. Verified live end
    to end: Billion added a repo, posted a no-PR card, the worker finished,
    the `[Job board]` notice woke Billion, it read the result and accepted
    the card — Done in 41 s.

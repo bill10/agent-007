@@ -517,7 +517,7 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, attachments: [], model: '',
+      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, attachments: [], model: '', runAt: null,
     });
   });
 
@@ -1118,20 +1118,30 @@ describe('scheduled cards', () => {
     expect(cron.title).toBe('0 9 * * 1-5');
   });
 
-  it('shows a once card as a scheduled card with its date, no cron, and no Pause', () => {
+  it('shows a one-time card with a future start as scheduled, with its date, Run now and no Pause', () => {
     const at = new Date(Date.now() + 2 * 86400_000).toISOString();
-    handleJobsList({ jobs: [SCHEDULED({ once: true, schedule: '0 9 3 10 *', nextRunAt: at })], settings: {} });
+    handleJobsList({ jobs: [JOB({ runAt: at })], settings: {} });
     const card = cards()[0];
     expect(card.querySelector('.job-card-type').textContent).toBe('scheduled');
-    expect(card.querySelector('.job-card-type').title).toBe('Runs once at this time, then is archived');
     expect(card.querySelector('.job-card-cron')).toBeNull();
-    expect(card.textContent).not.toContain('0 9 3 10 *');
     expect(card.querySelector('.job-card-next').textContent).toMatch(/\d.* · in 2d/);
-    expect([...card.querySelectorAll('.job-card-btn')].some(b => /Pause|Resume/.test(b.textContent))).toBe(false);
+    const labels = [...card.querySelectorAll('.job-card-btn')].map(b => b.textContent);
+    expect(labels).toEqual(expect.arrayContaining(['Edit', 'Run now', 'Archive', 'Delete']));
+    expect(labels.some(l => /Pause|Resume/.test(l))).toBe(false);
+    [...card.querySelectorAll('.job-card-btn')].find(b => b.textContent === 'Run now').click();
+    expect(send).toHaveBeenCalledWith({ type: 'job-release-hold', jobId: card.dataset.jobId });
+  });
+
+  it('drops the scheduled look once the card has started', () => {
+    const at = new Date(Date.now() + 2 * 86400_000).toISOString();
+    handleJobsList({ jobs: [JOB({ runAt: at, state: 'in-progress' })], settings: {} });
+    const card = cards()[0];
+    expect([...card.querySelectorAll('.job-card-type')].some(c => c.textContent === 'scheduled')).toBe(false);
+    expect(card.querySelector('.job-card-next')).toBeNull();
   });
 
   it('still offers Resume on an old paused once card', () => {
-    handleJobsList({ jobs: [SCHEDULED({ once: true, paused: true })], settings: {} });
+    handleJobsList({ jobs: [JOB({ runAt: new Date(Date.now() + 86400_000).toISOString(), paused: true })], settings: {} });
     expect([...document.querySelectorAll('.job-card-btn')].some(b => b.textContent === 'Resume')).toBe(true);
   });
 
@@ -1303,7 +1313,8 @@ describe('the job form and schedules', () => {
     document.getElementById('job-run-at').value = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}T${p(at.getHours())}:${p(at.getMinutes())}`;
     document.getElementById('btn-job-save').click();
     const msg = send.mock.calls.map(c => c[0]).find(m => m.type === 'job-create');
-    expect(msg).toMatchObject({ jobType: 'scheduled', once: true });
+    expect(msg).toMatchObject({ jobType: 'one-time' });
+    expect(msg).not.toHaveProperty('once');
     expect(Math.abs(Date.parse(msg.runAt) - at.getTime())).toBeLessThan(60_000);
   });
 
