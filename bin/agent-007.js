@@ -21,7 +21,7 @@ const HELP = `Usage: agent007 [--port <n>]
        agent007 adduser "Display Name"
        agent007 handover
        agent007 doctor
-       agent007 install [--dry-run] | uninstall | status
+       agent007 install [--dry-run | --voice | --all [--yes]] | uninstall | status
        agent007 restart [--now] | logs [-f] [-n <lines>] | update [--now]
 
 Starts Agent 007 at http://localhost:7007 (or --port). agent-007 is the same
@@ -41,7 +41,14 @@ Run it as a service (macOS and Linux):
   install          Start Agent 007 at login and bring it back if it stops
                    (a LaunchAgent, or a systemd --user unit), with your login
                    shell's PATH. Run it again after moving node or a CLI.
-                   --dry-run prints what it would write
+                   --dry-run prints what it would write. In a terminal it then
+                   asks whether to set up voice too
+  install --voice  Voice only, no service: whisper.cpp + ffmpeg (Homebrew on
+                   macOS; instructions on Linux and Windows), a speech model
+                   downloaded to ~/.agent-007/whisper (asks first), and
+                   WHISPER_MODEL in ~/.agent-007/.env. Works on Windows too
+  install --all    The service and voice, no questions; --yes also accepts
+                   the default model's download
   uninstall        Stop and remove the service; ~/.agent-007 is kept
   status           Running or not, how, pid, version, port, uptime, workers
   restart          Restart it, in a terminal or as a service. Waits for board
@@ -109,6 +116,9 @@ try {
       version: { type: 'boolean', short: 'v' },
       'dry-run': { type: 'boolean' },
       now: { type: 'boolean' },
+      voice: { type: 'boolean' },
+      all: { type: 'boolean' },
+      yes: { type: 'boolean', short: 'y' },
       follow: { type: 'boolean', short: 'f' },
       lines: { type: 'string', short: 'n' },
     },

@@ -13,9 +13,12 @@ import {
   closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync,
 } from 'fs';
 import { homedir, userInfo } from 'os';
+import { createInterface } from 'readline';
+import { commandExists } from './command-path.js';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { configDir, tilde } from './settings.js';
+import { setupVoice } from './voice-setup.js';
 import { callServer, pidAlive, readServerFile } from './control.js';
 
 export const LABEL = 'com.bill10.agent-007';
@@ -476,7 +479,23 @@ async function update(ctx, opts = {}) {
   return restart(ctx, opts);
 }
 
-const COMMANDS = { install, uninstall, status, restart, logs, update };
+// install: the service, the voice setup, or both (see bin/agent-007.js HELP).
+async function installWithVoice(ctx, opts = {}) {
+  const { voice, all, yes } = opts;
+  if (voice && all) { ctx.err('Use --voice or --all, not both.'); return 2; }
+  const setup = () => setupVoice({ ...ctx, yes: Boolean(yes) }, { running: async () => Boolean(await liveServer(ctx)), restart: () => restart(ctx, {}) });
+  if (voice) return setup();
+  const code = await install(ctx, opts);
+  if (opts['dry-run'] || (code && !all)) return code;
+  if (!all) {
+    if (!ctx.tty) return code;
+    const a = await ctx.ask('Set up voice too? Downloads whisper.cpp and a ~150 MB speech model. [y/N] ');
+    if (!/^y/i.test(a.trim())) return code;
+  }
+  return (await setup()) || code;
+}
+
+const COMMANDS = { install: installWithVoice, uninstall, status, restart, logs, update };
 export const SERVICE_COMMANDS = Object.keys(COMMANDS);
 
 // --- The real machine ---
@@ -515,6 +534,10 @@ export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent0
     log: (s) => console.log(s),
     err: (s) => console.error(s),
     write: (s) => process.stdout.write(s),
+    tty: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    ask: (q) => new Promise(r => { const rl = createInterface({ input: process.stdin, output: process.stdout }); rl.question(q, a => { rl.close(); r(a); }); }),
+    fetch: (...a) => fetch(...a),
+    has: (n) => commandExists(n, launchEnv),
     cmd,
   };
 }

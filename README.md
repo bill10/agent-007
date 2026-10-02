@@ -65,7 +65,15 @@ One line per check (Node and node-pty, `claude` and `codex` installed and logged
 
 ### Run it as a service
 
-In a terminal, Agent 007 and every agent it runs stop when the terminal closes. On macOS and Linux, `agent007 install` (`npm start -- install` in a clone) registers a per-user service that starts it at login and brings it back if it stops: a LaunchAgent in `~/Library/LaunchAgents` on macOS, a systemd `--user` unit on Linux. It runs the copy you installed from, with the absolute path of your `node` and the `PATH` of your login shell captured at install time. `--dry-run` prints what it would write.
+In a terminal, Agent 007 and every agent it runs stop when the terminal closes. On macOS and Linux, `agent007 install` (`npm start -- install` in a clone) registers a per-user service that starts it at login and brings it back if it stops: a LaunchAgent in `~/Library/LaunchAgents` on macOS, a systemd `--user` unit on Linux. It runs the copy you installed from, with the absolute path of your `node` and the `PATH` of your login shell captured at install time. `--dry-run` prints what it would write. In a terminal, `install` then asks whether to set up voice too.
+
+```bash
+agent007 install           # the service, then asks: set up voice too? [y/N] (no question without a terminal)
+agent007 install --voice   # voice only: never touches the service; works on Windows too
+agent007 install --all     # the service and voice (--yes also accepts the default model's download)
+```
+
+Voice is whisper.cpp, ffmpeg and a speech model, so Talk to Billion and Telegram voice notes are transcribed on your machine. `install --voice` runs `brew install whisper-cpp ffmpeg` on macOS (Linux and Windows: it prints the steps), asks which model (`ggml-base.en`, about 150 MB, or `ggml-small`, about 500 MB), downloads it to `~/.agent-007/whisper/` after you confirm, sets `WHISPER_MODEL` in `~/.agent-007/.env` and checks it by transcribing a test clip. Steps already done are skipped. From a clone, `npm start -- install --voice`.
 
 ```bash
 agent007 status      # running or not, as a service or in a terminal, pid, version, port, uptime, workers

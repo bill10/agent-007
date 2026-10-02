@@ -1138,7 +1138,18 @@ anywhere but Telegram, and there is no paid transcription.
   then typed into Billion's terminal as `[Owner via Telegram, voice] <transcript>`.
   A caption you type on the note follows as `(caption: ...)`. Whisper's
   markers like `[BLANK_AUDIO]` are dropped, and a note with no words left
-  gets a reply asking you to send it again. Set up:
+  gets a reply asking you to send it again. Set up with one command:
+
+  ```bash
+  agent007 install --voice   # voice only, no service (npm start -- install --voice in a clone)
+  agent007 install           # the service, then asks whether to set up voice too
+  agent007 install --all     # both, no questions (--yes accepts the default model's download)
+  ```
+
+  It installs whisper.cpp and ffmpeg (Homebrew on macOS; on Linux and Windows it
+  prints the steps), asks which model, downloads it after you confirm, sets
+  `WHISPER_MODEL`, tests it on a clip and offers to restart a running server;
+  each step is skipped if already done. Or by hand:
 
   ```bash
   brew install whisper-cpp ffmpeg
