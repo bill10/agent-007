@@ -36,6 +36,12 @@ const BOARD_HTML = `
           <option value="dontAsk">dontAsk</option>
           <option value="plan">plan</option>
         </select>
+        <select id="job-deploy-repo"></select>
+        <select id="job-deploy-policy">
+          <option value="ask">ask</option>
+          <option value="ask-production-only">prod</option>
+          <option value="never-ask">never</option>
+        </select>
         <button id="btn-finished-jobs"></button>
       </div>
       <div class="job-form" id="job-form" style="display:none">
@@ -468,6 +474,23 @@ describe('the per-job permission mode', () => {
     expect(perm.querySelector('option[value=""]')).toBeNull();
     expect(perm.classList).not.toContain('job-mode-danger');
     handleJobsList({ jobs: [], settings: { permissionModeChosen: false, envModes: { claude: null, codex: null } } });
+  });
+
+  it('shows and sends each repo\'s deploy-merge policy', () => {
+    repos.set('/r/a', { slug: 'a', exists: true });
+    repos.set('/r/b', { slug: 'b', exists: true });
+    handleJobsList({ jobs: [], settings: { running: false, maxPerRepo: 2, deployMergePolicy: { '/r/b': 'never-ask' } } });
+    const repoEl = document.getElementById('job-deploy-repo');
+    const policyEl = document.getElementById('job-deploy-policy');
+    expect([...repoEl.options].map(o => o.textContent).slice(-2)).toEqual(['a', 'b']);
+    expect(policyEl.value).toBe('ask');
+    repoEl.value = '/r/b';
+    repoEl.dispatchEvent(new Event('change'));
+    expect(policyEl.value).toBe('never-ask');
+    policyEl.value = 'ask-production-only';
+    policyEl.dispatchEvent(new Event('change'));
+    expect(send).toHaveBeenCalledWith({ type: 'job-settings', deployMergePolicy: { repo: '/r/b', policy: 'ask-production-only' } });
+    repos.delete('/r/a'); repos.delete('/r/b');
   });
 
   it('marks the toolbar select when the board itself is on bypassPermissions', () => {

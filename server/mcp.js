@@ -651,9 +651,32 @@ export const SET_NEXT_WAKE_TOOL = {
   },
 };
 
+// Billion's: it merges with `gh pr merge` itself, so this is the check it runs
+// first (server/merge-check.js, issue #192).
+export const MERGE_CHECK_TOOL = {
+  name: 'merge_check',
+  description:
+    'Before you merge a pull request, check whether the merge deploys something. Reads the repo\'s '
+    + '.github/workflows at the PR\'s base branch (read-only, through the GitHub API) and reports which '
+    + 'workflows the merge sets off (push to the base with matching branch and path filters, pull_request '
+    + 'closed, workflow_run chains, tag and release workflows only when something makes a tag) and which of '
+    + 'their jobs deploy (an environment:, deploy/release/publish in the job name, deploy actions, docker '
+    + 'push, npm publish, vercel, netlify, fly deploy, gh release create). Also the repo\'s GitHub '
+    + 'environments, the owner\'s per-repo policy, and should_ask. When should_ask is true, do not merge: '
+    + 'ask the owner with notify_owner first. Anything it could not read is listed as unknown, never as no deploy.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      pr: { type: 'string', description: 'The pull request URL, or the id of the card whose pull request it is.' },
+    },
+    required: ['pr'],
+    additionalProperties: false,
+  },
+};
+
 export const TOOLS = [POST_JOB_TOOL, LIST_JOBS_TOOL, READ_JOB_TOOL, EDIT_JOB_TOOL, FINISH_JOB_TOOL, LIST_AGENTS_TOOL, SEND_MESSAGE_TOOL, WITHDRAW_MESSAGE_TOOL];
 const BILLION_TOOLS = [BILLION_READY_TOOL, ADD_REPO_TOOL, CLOSE_JOB_TOOL, ANSWER_PERMISSION_TOOL, READ_APPROVAL_TOOL, NOTIFY_OWNER_TOOL,
-  LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL];
+  LIST_ROUND_QUEUE_TOOL, DROP_QUEUED_TOOL, SET_ROUND_BRIEF_TOOL, SET_STATUS_TOOL, TELL_OWNER_TOOL, RESOLVE_QUESTION_TOOL, REOPEN_QUESTION_TOOL, READ_AGENT_SCREEN_TOOL, RESPAWN_AGENT_TOOL, SET_NEXT_WAKE_TOOL, MERGE_CHECK_TOOL];
 
 // `models` is { claude: [...], codex: [...] } as server/models.js last found them.
 // The agent field also says which CLI the caller runs on, the default it falls to.
@@ -997,6 +1020,24 @@ const CALLS = {
     const result = ctx.setNextWake ? ctx.setNextWake(args.minutes) : { error: 'Only Billion has an operating loop.' };
     if (result.error) return toolText(result.error, true);
     return toolText(`The server wakes you for the next cycle at ${new Date(result.at).toLocaleTimeString()} or when you next rest after that, then goes back to its own pace.`);
+  },
+
+  [MERGE_CHECK_TOOL.name]: async (args, ctx) => {
+    const r = ctx.mergeCheck ? await ctx.mergeCheck(args.pr) : { error: 'Only Billion checks merges.' };
+    if (r.error) return toolText(r.error, true);
+    const lines = [
+      `${r.repo}#${r.pr.number} "${oneLine(r.pr.title)}" into ${r.pr.base}${r.pr.state === 'open' ? '' : ` (${r.pr.state})`}`,
+      `deploys: ${r.deploys}${r.unknown.length ? ' (with unknowns: cannot fully tell)' : ''}`,
+      `policy: ${r.policy}`,
+      `should_ask: ${r.should_ask}${r.should_ask ? ' — do not merge; ask the owner with notify_owner first, naming what deploys.' : ''}`,
+    ];
+    if (r.matches.length) lines.push('Deploys:', ...r.matches.map(m => oneLine(`  ${m.workflow} job ${m.job} (${m.trigger}): ${m.why.join('; ')}`)));
+    const quiet = r.triggered.filter(t => !r.matches.some(m => m.workflow === t.workflow));
+    if (quiet.length) lines.push('Also runs, no deploy found:', ...quiet.map(t => oneLine(`  ${t.workflow} (${t.trigger})`)));
+    if (r.unknown.length) lines.push('Unknown:', ...r.unknown.map(u => `  ${oneLine(u)}`));
+    if (r.environments.length) lines.push(`GitHub environments on the repo: ${oneLine(r.environments.join(', '))} (a hosting integration such as Vercel or Netlify can deploy on push with no workflow)`);
+    if (r.notes.length) lines.push(...r.notes.map(oneLine));
+    return toolText(lines.join('\n'));
   },
 
   [LIST_AGENTS_TOOL.name]: (args, ctx) => {

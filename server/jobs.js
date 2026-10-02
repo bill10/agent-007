@@ -47,6 +47,9 @@ function defaultSettings() {
     maxPerRepo: MAX_AGENTS_PER_REPO,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
+    // Per repo path, what Billion does before a merge that deploys (merge_check,
+    // server/merge-check.js). Only repos off the default 'ask' are stored.
+    deployMergePolicy: {},
     // Whether a human ever picked that mode in the toolbar. Written only by
     // updateSettings; see boardSettings() for why the flag has to exist.
     permissionModeChosen: false,
@@ -1305,6 +1308,16 @@ export async function releasePushedOrphans(broadcast) {
   return released;
 }
 
+// What Billion does before merging a PR that deploys: ask the owner (the
+// default), never ask, or ask only when the deploy targets an environment named
+// production or prod. A hand-edited value that is none of these reads as 'ask'.
+export const DEPLOY_MERGE_POLICIES = ['ask', 'never-ask', 'ask-production-only'];
+
+export function deployMergePolicyFor(repoPath) {
+  const policy = repoPath && boardSettings().deployMergePolicy?.[repoPath];
+  return DEPLOY_MERGE_POLICIES.includes(policy) ? policy : 'ask';
+}
+
 export function updateSettings(fields, broadcast) {
   const settings = boardSettings();
   // Starting the board, or raising its cap, makes room right away.
@@ -1318,6 +1331,12 @@ export function updateSettings(fields, broadcast) {
   if (isValidPermissionMode(fields.permissionMode)) {
     settings.permissionMode = fields.permissionMode;
     settings.permissionModeChosen = true;
+  }
+  const dmp = fields.deployMergePolicy;
+  if (dmp && DEPLOY_MERGE_POLICIES.includes(dmp.policy) && (config.repos || []).some(r => r.path === dmp.repo)) {
+    settings.deployMergePolicy = { ...(typeof settings.deployMergePolicy === 'object' ? settings.deployMergePolicy : {}) };
+    if (dmp.policy === 'ask') delete settings.deployMergePolicy[dmp.repo];
+    else settings.deployMergePolicy[dmp.repo] = dmp.policy;
   }
   persist(broadcast);
   if (settings.running && (!before.running || settings.maxPerRepo > before.maxPerRepo)) requestDispatch();
@@ -1578,7 +1597,7 @@ export function relinkSessionToJob(session, broadcast) {
 // One `gh` invocation. `token` picks the account; undefined means "whatever gh
 // is signed in as". GITHUB_TOKEN is dropped when we override, since it outranks
 // GH_TOKEN and would silently win.
-function runGh(args, { cwd, token, timeout = 15_000 } = {}) {
+export function runGh(args, { cwd, token, timeout = 15_000 } = {}) {
   const env = { ...process.env };
   if (token) {
     env.GH_TOKEN = token;

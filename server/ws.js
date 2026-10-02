@@ -793,6 +793,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           updateSettings({
             running: msg.running, maxPerRepo: msg.maxPerRepo,
             intervalMs: msg.intervalMs, permissionMode: msg.permissionMode,
+            deployMergePolicy: msg.deployMergePolicy,
           }, broadcast);
           break;
         }

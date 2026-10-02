@@ -166,6 +166,15 @@
                 <option value="plan">plan — read-only</option>
               </select>
             </label>
+            <label class="job-cap-label" title="Before Billion merges a pull request it checks whether the merge sets off a deploy (a workflow on push to the base branch that deploys or publishes). Ask: it asks you first. Production only: it asks only when the deploy targets an environment named production or prod. Never: it merges without asking.">
+              deploy merges
+              <select id="job-deploy-repo" aria-label="Repository"></select>
+              <select id="job-deploy-policy" aria-label="What Billion does before merging a deploy">
+                <option value="ask">ask me</option>
+                <option value="ask-production-only">ask for production only</option>
+                <option value="never-ask">never ask</option>
+              </select>
+            </label>
           </div>
 
           <div class="job-form" id="job-form" style="display:none">
