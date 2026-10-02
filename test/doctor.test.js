@@ -447,6 +447,15 @@ describe('doctor skills', () => {
     expect(last(() => null).status).toBe('na');
   });
 
+  it('impeccable is ✓ or – per CLI, found by its front matter name, never ✗', () => {
+    const h = skillHome();
+    mkdirSync(join(h.home, '.claude/skills/impeccable'), { recursive: true });
+    writeFileSync(join(h.home, '.claude/skills/impeccable/SKILL.md'), '---\nname: impeccable\n---\n');
+    const lines = checkSkills(probes({ ...h, ...idle }), { jobs: [] }).filter(l => l.text.startsWith('impeccable'));
+    expect(lines.map(l => l.status)).toEqual(['ok', 'na']);
+    expect(lines[1].text).toContain('impeccable (recommended) for codex: not installed');
+  });
+
   it('the fast run includes the skills check', async () => {
     const results = await runDoctor({ fast: true, probes: probes() });
     expect(results.map(r => r.title)).toContain('Skills');

@@ -338,17 +338,21 @@ export function checkPlugins(p) {
 // Add more here.
 const RECOMMENDED = [{ cmd: 'agent-browser', why: 'board cards use it for screenshots of UI changes' }];
 
+const RECOMMENDED_SKILLS = [{ skill: 'impeccable', why: 'UI design skill' }];
+
 const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
 const skillName = (text) => /^---\r?\n([\s\S]*?)\r?\n---/.exec(text || '')?.[1].match(/^name:[ \t]*["']?([^"'\r\n]*?)["']?[ \t]*$/m)?.[1];
 const skillsDirs = (p, cli) => cli === 'claude' ? [join(p.claudeDir, 'skills')] : [join(p.codexDir, 'skills'), join(p.agentsDir, 'skills')];
 
-// Where the skill named `ship` is installed and readable for the CLI, or null.
-function shipSkillDir(p, cli) {
-  if (cli === 'claude') { const d = join(p.claudeDir, 'skills', 'ship'); return readable(join(d, 'SKILL.md')) !== null ? d : null; }
-  for (const dir of skillsDirs(p, cli)) {
+// Where the skill whose front matter says `name: <name>` is installed and
+// readable for the CLI, or null. Claude's gstack ship is also found by folder.
+function skillDir(p, cli, name) {
+  const dirs = skillsDirs(p, cli);
+  if (cli === 'claude' && readable(join(dirs[0], name, 'SKILL.md')) !== null) return join(dirs[0], name);
+  for (const dir of dirs) {
     let names = [];
     try { names = readdirSync(dir); } catch { /* no such folder */ }
-    const n = names.find(n => skillName(readable(join(dir, n, 'SKILL.md'))) === 'ship');
+    const n = names.find(n => skillName(readable(join(dir, n, 'SKILL.md'))) === name);
     if (n) return join(dir, n);
   }
   return null;
@@ -372,13 +376,19 @@ export function checkSkills(p, board) {
     ].filter(Boolean);
     const stack = join(p.claudeDir, 'skills', 'gstack');
     const fix = `install gstack (https://github.com/garrytan/gstack), then: ${shellPath(p.exists(stack) ? stack : join(p.claudeDir, 'skills', 'gstack'))}/setup --host ${cli}`;
-    const found = shipSkillDir(p, cli);
+    const found = skillDir(p, cli, 'ship');
     if (found) lines.push(ok(`gstack for ${cli}: ship skill at ${tilde(found)}`));
     else if (uses.length) lines.push(fail(`gstack for ${cli}: no working ship skill; ${uses.join(' and ')}`, fix));
     else lines.push(na(`gstack for ${cli}: no ship skill (nothing needs it)`));
     for (const dir of skillsDirs(p, cli)) {
       const broken = brokenLinks(dir);
       if (broken.length) lines.push(fail(`${broken.length} skill${broken.length === 1 ? '' : 's'} in ${tilde(dir)} ${broken.length === 1 ? 'is a broken link' : 'are broken links'} (e.g. ${broken[0][0]} → ${broken[0][1]})`, fix));
+    }
+  }
+  for (const { skill, why } of RECOMMENDED_SKILLS) {
+    for (const cli of ['claude', 'codex']) {
+      const found = skillDir(p, cli, skill);
+      lines.push(found ? ok(`${skill} (recommended) for ${cli}: ${tilde(found)}; ${why}`) : na(`${skill} (recommended) for ${cli}: not installed; ${why}`));
     }
   }
   for (const { cmd, why } of RECOMMENDED) lines.push(p.which(cmd) ? ok(`${cmd} (recommended): installed; ${why}`) : na(`${cmd} (recommended): not installed; ${why}`));
