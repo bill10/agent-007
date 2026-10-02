@@ -269,7 +269,7 @@ describe('the routes', () => {
     await new Promise(r => server.once('listening', r));
     base = `http://127.0.0.1:${server.address().port}`;
   });
-  afterAll(() => new Promise(r => server.close(r)));
+  afterAll(() => new Promise(r => { server.close(r); server.closeAllConnections(); }));
   const H = { 'X-Agent007-Talk': '1' };
 
   it('need the tab\'s own header, which a page elsewhere cannot send without a preflight', async () => {
