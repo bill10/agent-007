@@ -2079,6 +2079,51 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   .chat-voice-pick { flex: 0 1 auto; min-width: 0; max-width: 100%; margin: 0 0 var(--chat-gap) auto; }
 }
 
+/* Talk to Billion (talk.js): a bar above the question strip. Its state word
+   carries a coloured dot, so listening, thinking and speaking read at a glance. */
+.talk-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--chat-gap);
+  flex-wrap: wrap;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-dark);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.talk-bar [hidden] { display: none; }
+.talk-btn {
+  padding: 0 10px;
+  font: inherit;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.talk-btn:hover { color: var(--text); }
+.talk-start { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); font-weight: 700; }
+.talk-start:hover { color: var(--accent-contrast); }
+.talk-mute[aria-pressed="true"] { color: var(--state-message); border-color: var(--state-message); }
+.talk-end { margin-left: auto; }
+.talk-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); }
+.talk-state::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
+.talk-bar[data-state="listening"] .talk-state::before { background: var(--state-waiting); animation: talk-pulse 1.6s ease-in-out infinite; }
+.talk-bar[data-state="thinking"] .talk-state::before { background: var(--state-working); }
+.talk-bar[data-state="speaking"] .talk-state::before { background: var(--accent); }
+.talk-bar[data-state="muted"] .talk-state::before { background: var(--state-message); }
+.talk-bar[data-state="disconnected"] .talk-state::before { background: var(--state-disconnected); }
+@keyframes talk-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .talk-bar .talk-state::before { animation: none; } }
+.talk-detail { color: var(--text-muted); min-width: 0; overflow-wrap: anywhere; }
+.talk-detail a { color: var(--accent); }
+.talk-privacy { flex-basis: 100%; color: var(--text-dim); font-size: 11px; }
+@media (max-width: 700px) {
+  .talk-bar { padding: 4px 6px; font-size: 13px; }
+  .talk-btn { min-height: 36px; }
+}
+
 /* An agent the board created, not you. Subtle — it is still an ordinary agent
    you can type into; the marker only explains where it came from. */
 .terminal-tab.board-spawned .dot {

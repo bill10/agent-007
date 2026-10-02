@@ -16,7 +16,7 @@ import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
 import { sendText } from './messages.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
-import { billionReplied, publishStatus, MAX_STEPS } from './billion-status.js';
+import { billionReplied, publishStatus, MAX_STEPS, SHORT_ID_CHARS } from './billion-status.js';
 import { uploadName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import {
   chooseMode, voiceSetting, speechUnavailable, synthesize, sayVoice, sayRate, whisperSetup, transcribe, MAX_NOTE_SECONDS, MAX_NOTE_BYTES,
@@ -31,6 +31,7 @@ const WAITING_CAP = 50;
 export const OWNER_PREFIX = '[Owner via Telegram]';
 export const OWNER_VOICE_PREFIX = '[Owner via Telegram, voice]';
 export const APP_PREFIX = '[Owner via app]';
+export const APP_VOICE_PREFIX = '[Owner via app, voice]';
 // sendText's mark on the owner's own words: they reach Billion mid-introduction.
 const OWNER = { owner: true };
 export const MAX_CHOICES = 5;
@@ -610,17 +611,26 @@ export async function answerWaiting(id, answer, via, { broadcast, env = process.
 // of its own, like a Telegram message. Refused, never queued, while Billion is
 // not running: the browser keeps the text in the box. files: the attachments
 // as the browser sent them (planChatFiles); files alone, no text, is a message.
-// { ok } or { error }.
-export async function ownerSays(text, { answers, files: list, broadcast, env = process.env } = {}) {
+// voice: a "Talk to Billion" turn (server/talk.js), always a turn of Billion's,
+// never a round shortcut a misheard word could trigger. utterance: its id, so
+// the same utterance sent again (a retry, a revised transcript) is the
+// message already sent, not a second one. Checked and written with no await
+// between, so two at once cannot both get through.
+// { ok, id } (duplicate: the utterance was in already) or { error }.
+export async function ownerSays(text, { answers, files: list, broadcast, env = process.env, voice = false, utterance } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   const { files, error } = planChatFiles(list);
   if (error) return { error };
+  if (utterance) {
+    const sent = chatMessages().find(m => m.utterance === utterance);
+    if (sent) return { ok: true, id: sent.id, duplicate: true };
+  }
   if (!body && !files.length) return { error: 'The message is empty.' };
-  if (answers) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
+  if (answers && !voice) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
   // Two things the server does itself, never a turn of Billion's: start the
   // round now, and "1d 3d". The words still show in the thread.
-  const nums = !files.length && doneNumbers(body);
-  if (!files.length && (nums || START_ROUND_RE.test(body))) {
+  const nums = !voice && !files.length && doneNumbers(body);
+  if (!voice && !files.length && (nums || START_ROUND_RE.test(body))) {
     const result = nums ? await markDone(nums, 'app', { broadcast, env }) : await startRoundNow({ broadcast, env });
     if (result.error) return result;
     setOwnerChannel('app');
@@ -633,15 +643,17 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   const id = randomUUID();
   const saved = files.length ? saveChatFiles(id, files) : { paths: [], records: [] };
   if (saved.error) return saved;
-  if (!sendText(billion, withFiles(body ? `${APP_PREFIX} ${body}` : APP_PREFIX, saved.paths), undefined, OWNER)) {
+  // A voice turn names itself, so Billion can bind its spoken reply to it (tell_owner reply_to).
+  const prefix = voice ? `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}]` : APP_PREFIX;
+  if (!sendText(billion, withFiles(body ? `${prefix} ${body}` : prefix, saved.paths), undefined, OWNER)) {
     if (files.length) removeChatFiles(id);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel('app');
-  addChat({ id, from: 'owner', via: 'app', text: body, awaitsReply: true, ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: body, awaitsReply: true, ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   // Pending, with the progress box under it, until a tell_owner answers it.
   publishStatus(broadcast);
-  return { ok: true };
+  return { ok: true, id };
 }
 
 // Answered everywhere: the item moves to Answered in every browser, and the
@@ -793,7 +805,8 @@ export async function notifyOwner(text, { choices, recommended, urgency = 'norma
 
 // notice: the server's own words (an account switch, say), which answer none
 // of the owner's messages, so a pending one stays pending.
-export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform, notice = false } = {}) {
+// replyTo: tell_owner's reply_to, the owner message it answers (billionReplied).
+export async function tellOwner(text, { broadcast, env = process.env, now = Date.now(), platform = process.platform, notice = false, replyTo: named } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   if (!body) return { error: 'The message is empty.' };
   if (body.length > MAX_NOTIFY_CHARS) return { error: `The message is ${body.length} characters; keep it under ${MAX_NOTIFY_CHARS}.` };
@@ -803,17 +816,19 @@ export async function tellOwner(text, { broadcast, env = process.env, now = Date
     return { error: `Not sent: you have messaged the owner ${NOTIFY_LIMIT} times in the last minute. Put the rest in one message later.` };
   }
   sent.push(now);
-  // Each of the owner's messages gets its own reply, oldest first.
-  const replyTo = notice ? null : billionReplied();
-  const workDetails = replyTo ? pendingOwnerMessages()[0]?.workDetails : null;
+  // Each of the owner's messages gets its own reply: the one named, else the oldest.
+  const bound = notice ? { id: null } : billionReplied(named);
+  const replyTo = bound.id;
+  const workDetails = replyTo ? pendingOwnerMessages().find(m => m.id === replyTo)?.workDetails : null;
   addChat({ from: 'billion', text: body, ...(notice ? { notice: true } : {}), ...(replyTo ? { replyTo, ...(workDetails?.length ? { workDetails } : {}) } : {}) }, broadcast, env);
   publishStatus(broadcast);
+  const missed = bound.missed ? { note: `reply_to "${named}" matched no message waiting for a reply, so this answers none of them.` } : {};
   const { token, chatId } = telegramSettings(env);
-  if (!token || !chatId) return { ok: true, telegram: false };
-  if (ownerChannel === 'app') return { ok: true, telegram: false, tabOnly: true };
+  if (!token || !chatId) return { ok: true, telegram: false, ...missed };
+  if (ownerChannel === 'app') return { ok: true, telegram: false, tabOnly: true, ...missed };
   const result = await sendToOwner(body, { env, platform });
-  if (result.error) return { ok: true, note: `The Telegram send failed: ${result.error}` };
-  return { ok: true, telegram: true };
+  if (result.error) return { ok: true, note: `${missed.note ? `${missed.note} ` : ''}The Telegram send failed: ${result.error}` };
+  return { ok: true, telegram: true, ...missed };
 }
 
 // --- Rounds: the owner is come to twice a day (docs/BILLION.md, "Rounds") ---

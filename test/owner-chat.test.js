@@ -41,7 +41,7 @@ afterEach(() => {
 describe('the owner typing in the Billion tab', () => {
   it('reaches Billion as [Owner via app] and shows as the owner\'s bubble', async () => {
     const broadcast = vi.fn();
-    expect(await ownerSays('  How is the release going? ', { broadcast })).toEqual({ ok: true });
+    expect(await ownerSays('  How is the release going? ', { broadcast })).toMatchObject({ ok: true });
     expect(typed()).toContain(`${APP_PREFIX} How is the release going?`);
     const [m] = chatMessages();
     expect(m).toMatchObject({ from: 'owner', via: 'app', text: 'How is the release going?' });
@@ -63,7 +63,7 @@ describe('the owner typing in the Billion tab', () => {
   it('delivers a long pasted message whole, newlines kept, and keeps it whole in the thread', async () => {
     const listing = Array.from({ length: 60 }, (_, i) => `Item ${i}: a product with a long description`.padEnd(150, '.')).join('\n');
     expect(listing.length).toBeGreaterThan(4096);
-    expect(await ownerSays(listing)).toEqual({ ok: true });
+    expect(await ownerSays(listing)).toMatchObject({ ok: true });
     // Typed in small bracketed pastes, one after another, then one Enter: one turn.
     await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} ${listing}\r`), { timeout: 20000 });
     expect(chatMessages()[0].text).toBe(listing);
@@ -179,7 +179,7 @@ describe('attachments in the Billion tab', () => {
   const dir = () => join(CONFIG_DIR, 'chat-files');
 
   it('saves them owner-only under chat-files/<message id>, and one turn carries their absolute paths', async () => {
-    expect(await ownerSays('look at this', { files: [file('shot.png', 'png', 'image/png'), file('notes.pdf')] })).toEqual({ ok: true });
+    expect(await ownerSays('look at this', { files: [file('shot.png', 'png', 'image/png'), file('notes.pdf')] })).toMatchObject({ ok: true });
     const [m] = chatMessages();
     expect(m.files).toEqual([{ name: 'shot.png', size: 3, type: 'image/png' }, { name: 'notes.pdf', size: 5, type: 'text/plain' }]);
     const a = join(dir(), m.id, 'shot.png');
@@ -195,7 +195,7 @@ describe('attachments in the Billion tab', () => {
   });
 
   it('sends files with no text', async () => {
-    expect(await ownerSays('', { files: [file('a.txt')] })).toEqual({ ok: true });
+    expect(await ownerSays('', { files: [file('a.txt')] })).toMatchObject({ ok: true });
     const [m] = chatMessages();
     expect(m.text).toBe('');
     await vi.waitFor(() => expect(typed()).toBe(`${APP_PREFIX} (attached: ${join(dir(), m.id, 'a.txt')})\r`));
@@ -211,7 +211,7 @@ describe('attachments in the Billion tab', () => {
   });
 
   it('sanitises names and refuses what the job form refuses: too big, too many, unnamed, clashing', async () => {
-    expect(await ownerSays('x', { files: [file('../../etc/passwd')] })).toEqual({ ok: true });
+    expect(await ownerSays('x', { files: [file('../../etc/passwd')] })).toMatchObject({ ok: true });
     expect(chatMessages()[0].files[0].name).toBe('.._.._etc_passwd');
     const big = { name: 'big.bin', data: Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64') };
     expect((await ownerSays('x', { files: [big] })).error).toMatch(/too large/);

@@ -127,7 +127,7 @@ describe('notify_owner', () => {
     });
 
     it('stays in the tab after a message from the app', async () => {
-      expect(await ownerSays('how is the build?', { env: ENV })).toEqual({ ok: true });
+      expect(await ownerSays('how is the build?', { env: ENV })).toMatchObject({ ok: true });
       expect(await tellOwner('Green.', { env: ENV, now: now() })).toEqual({ ok: true, telegram: false, tabOnly: true });
       expect(texts()).toEqual([]);
       expect(chatMessages().at(-1)).toMatchObject({ from: 'billion', text: 'Green.' });

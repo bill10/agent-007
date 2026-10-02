@@ -1051,6 +1051,56 @@ runs in the browser (`speechSynthesis` and the Web Speech API's
   vendor's servers (Chrome and Edge: Google and Microsoft; Safari may do it on
   the device), so don't dictate secrets. The terminal's own mic is unchanged.
 
+### Talk to Billion
+
+A hands-free conversation with the same Billion, in the Chat view of the
+Billion tab. Tap **Talk to Billion**, allow the microphone, and speak: when
+you stop, what you said is sent to Billion as a voice turn,
+Billion's `tell_owner` reply is spoken, and it listens again. The bar says
+**Listening**, **Thinking…** (with Billion's status line, and a spoken "Still
+working on it." after 20 seconds), **Speaking**, **Muted** or
+**Disconnected**; **Mute** turns the mic off, **End** ends it. The thread is
+the transcript: your turns show as "(voice)" bubbles, Billion's replies as
+usual.
+
+- **Audio stays on this machine**: the end of each utterance is found in the
+  browser by a small voice detector (Silero VAD, served by Agent 007 itself),
+  the audio is transcribed on the computer running Agent 007 by whisper.cpp,
+  and replies are spoken there by `say`, with your `SAY_VOICE` and
+  `SAY_RATE`, so Billion sounds the same as on Telegram. Set up whisper.cpp
+  as in [Voice](#voice). Without it, the browser's own speech recognition is
+  used after a one-time notice that it may send the audio to the browser's
+  maker (Chrome: Google); without `say` (Linux, Windows), the browser speaks
+  the replies. The bar always says which.
+- **Only its own replies are spoken**: each turn is a message of its own,
+  typed into Billion as `[Owner via app, voice #3f9a0c1e] ...`, and Billion
+  answers it with `tell_owner` and `reply_to: "3f9a0c1e"`, which binds the
+  reply to that turn even when older messages are still waiting. A `reply_to`
+  that names no waiting message binds to none; without `reply_to`, a reply
+  answers the oldest waiting typed or Telegram message, then the oldest voice
+  turn. Only the reply bound to the turn is read out, a sentence or two at a
+  time. Replies to what you typed or sent from Telegram appear in the thread
+  but are not spoken; questions, status lines and terminal output never are.
+  The charter asks Billion to keep replies to voice turns short.
+- **Interrupting**: start talking while Billion speaks, or tap **Stop
+  speaking**, and it stops at once; the rest of that reply is dropped (it is
+  still in the thread). Stopping the voice never stops Billion's work.
+- **Echo**: the microphone runs with echo cancellation, the detector needs
+  louder speech to interrupt while Billion talks, and an utterance that
+  repeats six or more words of the reply that was playing, in order, is
+  dropped as Billion's own voice (the bar says so; say it again if it was
+  you). A shorter repeat, like "merge PR 196 now", is yours.
+- **Once each**: every utterance carries an id, and the server sends an id to
+  Billion once, so a retry after a dropped connection never makes a second
+  message. Voice turns are always messages to Billion, never "start the
+  round" or "1d": a misheard word cannot act for you.
+- **Limits**: the mic stops on **End**, when you leave the Billion tab, while
+  the page is hidden (it comes back with the page), and after 10 minutes with
+  no speech. An utterance can be up to 5 minutes; 30 utterances a minute.
+  With user accounts on, like the chat itself, it is off. A reconnect reloads
+  the page; tap **Resume talking** and any reply that came meanwhile is
+  spoken.
+
 ### Voice
 
 A poor man's audio chat, free and on your own machine: nothing is sent
