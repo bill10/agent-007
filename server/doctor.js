@@ -24,6 +24,7 @@ import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
 import { tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
+import { installedService, parseServiceFile } from './service.js';
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -83,7 +84,7 @@ async function npmLatest() {
   } catch { return null; }
 }
 
-export function defaultProbes({ env = process.env, settingsLine = null } = {}) {
+export function defaultProbes({ env = process.env, settingsLine = null, installCommand = 'agent007 install' } = {}) {
   return {
     env,
     nodeVersion: process.versions.node,
@@ -114,6 +115,9 @@ export function defaultProbes({ env = process.env, settingsLine = null } = {}) {
     settingsLine,
     npmLatest,
     telegramGetMe: () => telegramGetMe(env),
+    service: () => installedService(),
+    whichIn: (cmd, PATH) => commandPath(cmd, { PATH }),
+    installCommand,
   };
 }
 
@@ -395,6 +399,23 @@ export function checkSkills(p, board) {
   return lines;
 }
 
+// The service `agent007 install` wrote, if any: its node and bin still
+// there, and each CLI found here found on its baked-in PATH too (a service
+// starts with none of the login shell's). Nothing when none is installed.
+export function checkService(p) {
+  const svc = p.service();
+  if (!svc) return [];
+  const { args: [node, bin], env } = parseServiceFile(svc.text);
+  const fix = `${p.installCommand} (writes it again, with your login shell's PATH now)`;
+  const lines = [];
+  for (const [what, file] of [['node', node], ['Agent 007', bin]]) {
+    if (!file || !p.exists(file)) lines.push(fail(`the service runs ${what} from ${file ? tilde(file) : 'nowhere'}, which is gone`, fix));
+  }
+  const missing = ['claude', 'codex', 'gh'].filter(cmd => p.which(cmd) && !p.whichIn(cmd, env.PATH || ''));
+  for (const cmd of missing) lines.push(fail(`the service cannot find ${cmd}: ${tilde(p.which(cmd))} is not on its PATH`, fix));
+  return lines.length ? lines : [ok(`service ${tilde(svc.file)} runs ${tilde(node)} and finds what this shell finds`)];
+}
+
 // --- Running them ---
 
 // Each check, in order, as [title, run(ctx)]. fast: the subset a start runs,
@@ -408,6 +429,7 @@ function checks(fast) {
     ['Skills', (c) => checkSkills(c.p, c.board)],
     ['Port', (c) => checkPort(c.p, { starting: fast })],
     ['Settings', (c) => checkSettings(c.p, c.board)],
+    ['Service', (c) => checkService(c.p)],
     ['Version', (c) => checkVersion(c.p), 'slow'],
     ['Telegram', (c) => checkTelegram(c.p), 'slow'],
     ['Plugins', (c) => checkPlugins(c.p), 'slow'],

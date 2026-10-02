@@ -11,7 +11,8 @@
   "type": "module",
   "main": "server.js",
   "bin": {
-    "agent-007": "bin/agent-007.js"
+    "agent-007": "bin/agent-007.js",
+    "agent007": "bin/agent-007.js"
   },
   "files": [
     ".env.example",
