@@ -452,10 +452,10 @@ export async function checkRemote(p) {
     : p.env.ALLOWED_ORIGINS;
   const allowed = (origins || '').split(',').map(o => o.trim()).filter(Boolean).map(o => (o === '*' ? o : originHost(o)));
   const shown = origins ? [na(`ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''}: ${origins}`)] : [];
-  return [...names].map(name => (allowed.includes('*') || allowed.includes(name)
+  return [...names].map(name => (allowed.includes('*') || allowed.includes(originHost(name))
     ? ok(`tailscale serve sends https://${name} to port ${p.port}, and ALLOWED_ORIGINS lets it in`)
-    : fail(`tailscale serve sends https://${name} to port ${p.port}, but ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''} does not list ${name}: remote browsers are turned away`,
-      `Add ALLOWED_ORIGINS=${[origins, name].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`))).concat(shown);
+    : fail(`tailscale serve sends https://${name} to port ${p.port}, but ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''} does not list ${originHost(name)}: remote browsers are turned away`,
+      `Add ALLOWED_ORIGINS=${[origins, originHost(name)].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`))).concat(shown);
 }
 
 // --- Running them ---
