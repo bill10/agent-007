@@ -12,6 +12,35 @@ reach it from another machine *without* exposing it to the public internet.
 > phase (`docs/designs/multiplayer.md`). Keep the server behind Tailscale and
 > only issue tokens to people you'd give an SSH login.
 
+## One command: `agent007 install --remote`
+
+With [Tailscale](https://tailscale.com/download) installed and logged in on the
+host and on your phone or laptop (same tailnet):
+
+```bash
+agent007 install --remote          # npm start -- install --remote in a clone
+```
+
+Then open `https://<host>.<tailnet>.ts.net` on any device in your tailnet. It:
+
+1. finds the `tailscale` CLI (on `PATH`, else inside `/Applications/Tailscale.app`
+   on macOS) and checks it is running and logged in. If not, it says what to do
+   (install it, or `tailscale up`) and changes nothing;
+2. reads `tailscale serve status`: a port already served is kept, and another
+   site on the HTTPS port (443) is never replaced without a `y` (without a
+   terminal it stops and prints the command);
+3. runs `tailscale serve --bg <port>`, which tailscaled keeps across reboots. If
+   Serve is not enabled on your tailnet, it prints the link Tailscale gives to
+   enable it;
+4. adds the host's ts.net name to `ALLOWED_ORIGINS` in `~/.agent-007/.env`,
+   keeping any entries already there;
+5. restarts Agent 007 if it is running, so the new setting takes effect.
+
+`--dry-run` prints the changes instead of making them. `agent007 install --all`
+does it after the service and voice, and plain `agent007 install` offers it when
+Tailscale is installed. `agent007 doctor` checks the result. The rest of this
+page is what it automates, and the other options.
+
 ## Recommended: Tailscale
 
 A home connection is almost always behind **CGNAT**, so forwarding a port on your

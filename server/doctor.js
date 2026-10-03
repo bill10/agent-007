@@ -26,6 +26,7 @@ import { gitExec, resolveBaseBranch } from './git.js';
 import { configDir, tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
 import { installedService, parseServiceFile } from './service.js';
+import { tailscaleBin, serveTargets } from './tailscale.js';
 import { whisperSetup } from './voice.js';
 import { skillHomes, skillsDirs, skillDir } from './skills.js';
 
@@ -122,9 +123,7 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     settingsFile: join(configDir(env), '.env'),
     // `tailscale serve status --json`, or null without tailscale.
     tailscaleServe: () => new Promise((done) => {
-      // The macOS app keeps its CLI inside the bundle, on PATH only if the owner installed it.
-      const app = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
-      const bin = commandPath('tailscale', env) || (process.platform === 'darwin' && existsSync(app) ? app : null);
+      const bin = tailscaleBin(env);
       if (!bin) return done(null);
       execFile(bin, ['serve', 'status', '--json'], { timeout: NET_MS, encoding: 'utf8' }, (err, out) => {
         try { done(err ? null : JSON.parse(out)); } catch { done(null); }
@@ -438,13 +437,9 @@ export function checkService(p) {
 // this shell's ./.env, so with one installed those are what count.
 export async function checkRemote(p) {
   const cfg = await p.tailscaleServe();
-  const proxy = new RegExp(`^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\]):${p.port}(/|$)`);
   if (!cfg) return [na('Tailscale not found, or `tailscale serve status` failed: remote access not checked')];
-  const webs = [cfg, ...Object.values(cfg.Foreground || {})].flatMap(c => Object.entries(c?.Web || {}));
-  const names = new Set(webs.filter(([, web]) => Object.values(web?.Handlers || {}).some(h => proxy.test(h?.Proxy || '')))
-    .map(([hostPort]) => hostPort.replace(/:\d+$/, '')));
+  const { names, targets } = serveTargets(cfg, p.port);
   if (!names.size) {
-    const targets = [...new Set(webs.flatMap(([, web]) => Object.values(web?.Handlers || {}).map(h => h?.Proxy || h?.Path || h?.Text && 'text').filter(Boolean)))];
     return [targets.length
       ? fail(`tailscale serve does not proxy port ${p.port} (it serves: ${targets.join(', ')})`, `Point it here: tailscale serve --bg ${p.port}`)
       : na(`tailscale serve does not proxy port ${p.port} (it serves nothing): remote access is off`)];

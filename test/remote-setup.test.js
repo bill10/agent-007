@@ -1,0 +1,166 @@
+import { describe, it, expect } from 'vitest';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { setupRemote, addOrigin } from '../server/remote-setup.js';
+import { tailscaleBin, serveTargets, MAC_APP_CLI } from '../server/tailscale.js';
+import { runCommand } from '../server/service.js';
+import { removeTempDir } from './temp-dir.js';
+
+const NAME = 'mini.tail1.ts.net';
+const PORT = 7123;
+const RUNNING = { BackendState: 'Running', Self: { DNSName: `${NAME}.` } };
+const served = (proxy, host = NAME, port = 443) => ({ TCP: { [port]: { HTTPS: true } }, Web: { [`${host}:${port}`]: { Handlers: { '/': { Proxy: proxy } } } } });
+
+// Never a real tailscale, launchd or ~/.agent-007: a temp HOME and a fake CLI.
+function fakeCtx({ status = RUNNING, serve = {}, serveRun, answers = [], running = false, ...over } = {}) {
+  const home = mkdtempSync(join(tmpdir(), 'a007-remote-'));
+  const cfg = join(home, '.agent-007');
+  const out = [], calls = [], asked = [], restarts = [];
+  const ctx = {
+    home, cfg, out, calls, asked, restarts,
+    platform: 'darwin', tty: true, port: PORT, root: home,
+    env: { HOME: home, PATH: '/usr/bin', AGENT007_CONFIG_DIR: cfg },
+    tailscaleBin: () => '/usr/local/bin/tailscale',
+    run: async (cmd, args) => {
+      calls.push(args.join(' '));
+      if (args[0] === 'status') return status ? { code: 0, stdout: JSON.stringify(status), stderr: '' } : { code: 1, stdout: '', stderr: 'failed to connect to local tailscaled' };
+      if (args.join(' ') === 'serve status --json') return { code: 0, stdout: JSON.stringify(serve), stderr: '' };
+      return serveRun || { code: 0, stdout: '', stderr: '' };
+    },
+    ask: async (q) => { asked.push(q); return answers.shift() ?? ''; },
+    log: (s) => out.push(s), err: (s) => out.push(`ERR ${s}`),
+    cmd: (s) => `agent007 ${s}`,
+    ...over,
+  };
+  const server = { running: async () => running, restart: async () => { restarts.push(1); } };
+  return { ctx, server };
+}
+const text = (c) => c.out.join('\n');
+const envFile = (c) => join(c.cfg, '.env');
+const changes = (c) => c.calls.filter(a => a.startsWith('serve --bg'));
+
+describe('setupRemote', () => {
+  it('serves the port, adds the ts.net name to ALLOWED_ORIGINS (0600), restarts a running server', async () => {
+    const { ctx, server } = fakeCtx({ running: true });
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(changes(ctx)).toEqual([`serve --bg ${PORT}`]);
+    const env = readFileSync(envFile(ctx), 'utf8');
+    expect(env).toContain(`\nALLOWED_ORIGINS=${NAME}\n`);
+    expect(env).not.toMatch(/^# ALLOWED_ORIGINS=/m);
+    if (process.platform !== 'win32') expect(statSync(envFile(ctx)).mode & 0o777).toBe(0o600);
+    expect(ctx.restarts).toEqual([1]);
+    expect(ctx.out.at(-1)).toBe(`Open https://${NAME} on any device in your tailnet.`);
+    removeTempDir(ctx.home);
+  });
+
+  it('keeps a port already served and existing origins, and changes nothing when all is in place', async () => {
+    const { ctx, server } = fakeCtx({ serve: served(`http://127.0.0.1:${PORT}`), running: true });
+    mkdirSync(ctx.cfg, { recursive: true });
+    writeFileSync(envFile(ctx), 'PORT=7123\nALLOWED_ORIGINS=other.example\n');
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(changes(ctx)).toEqual([]);
+    expect(readFileSync(envFile(ctx), 'utf8')).toBe(`PORT=7123\nALLOWED_ORIGINS=other.example,${NAME}\n`);
+    expect(ctx.restarts).toEqual([1]);
+    ctx.out.length = 0;
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(text(ctx)).toMatch(/already lets mini\.tail1\.ts\.net in/);
+    expect(ctx.restarts).toEqual([1]);
+    removeTempDir(ctx.home);
+  });
+
+  it('stops without changing anything when Tailscale is missing, not running or not logged in', async () => {
+    for (const [over, says] of [
+      [{ tailscaleBin: () => null }, /not installed.*\n.*tailscale\.com\/download/],
+      [{ status: null }, /`tailscale status` failed \(failed to connect.*\n.*tailscale up/],
+      [{ status: { BackendState: 'NeedsLogin' } }, /Tailscale is NeedsLogin.*\n.*Open the Tailscale app and log in, or run: \/usr\/local\/bin\/tailscale up/],
+    ]) {
+      const { ctx, server } = fakeCtx(over);
+      expect(await setupRemote(ctx, server)).toBe(1);
+      expect(text(ctx)).toMatch(says);
+      expect(text(ctx)).toContain('Nothing was changed');
+      expect(changes(ctx)).toEqual([]);
+      expect(existsSync(envFile(ctx))).toBe(false);
+      removeTempDir(ctx.home);
+    }
+  });
+
+  it('never replaces another site on 443 without a yes', async () => {
+    const other = served('http://127.0.0.1:3000');
+    for (const opts of [{ answers: ['n'] }, { tty: false }]) {
+      const { ctx, server } = fakeCtx({ serve: other, ...opts });
+      expect(await setupRemote(ctx, server)).toBe(1);
+      expect(text(ctx)).toMatch(/already serves http:\/\/127\.0\.0\.1:3000/);
+      expect(text(ctx)).toContain(`--https=8443 ${PORT}`);
+      expect(changes(ctx)).toEqual([]);
+      expect(existsSync(envFile(ctx))).toBe(false);
+      removeTempDir(ctx.home);
+    }
+    const { ctx, server } = fakeCtx({ serve: other, answers: ['y'] });
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(changes(ctx)).toEqual([`serve --bg ${PORT}`]);
+    removeTempDir(ctx.home);
+  });
+
+  it('prints the link Tailscale gives when Serve is not enabled on the tailnet', async () => {
+    const url = 'https://login.tailscale.com/f/serve?node=abc123';
+    const { ctx, server } = fakeCtx({ serveRun: { code: -1, stdout: `Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         ${url}\n`, stderr: '' } });
+    expect(await setupRemote(ctx, server)).toBe(1);
+    expect(text(ctx)).toContain(`Serve is not enabled on your tailnet. Enable it here, then run agent007 install --remote again:\n  ${url}`);
+    expect(existsSync(envFile(ctx))).toBe(false);
+    removeTempDir(ctx.home);
+  });
+
+  it('--dry-run reads status and prints what it would do, changing nothing', async () => {
+    const { ctx, server } = fakeCtx({ 'dry-run': true, running: true });
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(changes(ctx)).toEqual([]);
+    expect(text(ctx)).toContain(`Would run: /usr/local/bin/tailscale serve --bg ${PORT}`);
+    expect(text(ctx)).toContain(`Would set ALLOWED_ORIGINS=${NAME}`);
+    expect(existsSync(envFile(ctx))).toBe(false);
+    expect(ctx.restarts).toEqual([]);
+    removeTempDir(ctx.home);
+  });
+
+  it('warns when the environment sets ALLOWED_ORIGINS without the name', async () => {
+    const { ctx, server } = fakeCtx();
+    ctx.env.ALLOWED_ORIGINS = 'other.example';
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(text(ctx)).toMatch(/also set in your environment.*add mini\.tail1\.ts\.net there too/);
+    removeTempDir(ctx.home);
+  });
+
+  it('is what `install --remote` runs, alone', async () => {
+    const { ctx } = fakeCtx();
+    ctx.callServer = async () => null;
+    ctx.readServer = () => null;
+    expect(await runCommand('install', { remote: true }, ctx)).toBe(0);
+    expect(changes(ctx)).toEqual([`serve --bg ${PORT}`]);
+    expect(await runCommand('install', { remote: true, voice: true }, ctx)).toBe(2);
+    removeTempDir(ctx.home);
+  });
+});
+
+describe('tailscale helpers', () => {
+  it('finds the CLI on PATH, else the macOS app bundle', () => {
+    const none = { PATH: '/nonexistent' };
+    expect(tailscaleBin(none, { platform: 'darwin', exists: (p) => p === MAC_APP_CLI })).toBe(MAC_APP_CLI);
+    expect(tailscaleBin(none, { platform: 'linux', exists: () => true })).toBe(null);
+    expect(tailscaleBin(none, { platform: 'darwin', exists: () => false })).toBe(null);
+  });
+
+  it('serveTargets: names sent to this port, other targets, busy HTTPS ports', () => {
+    const cfg = { ...served(`http://localhost:${PORT}`), Foreground: { x: served('http://127.0.0.1:3000', NAME, 8443) } };
+    const t = serveTargets(cfg, PORT);
+    expect([...t.names]).toEqual([NAME]);
+    expect(t.targets).toEqual(['http://127.0.0.1:3000']);
+    expect([...t.busyPorts]).toEqual(['8443']);
+  });
+
+  it('addOrigin merges and never removes', () => {
+    expect(addOrigin(undefined, NAME)).toBe(NAME);
+    expect(addOrigin('a.example, b.example', NAME)).toBe(`a.example,b.example,${NAME}`);
+    expect(addOrigin(`https://${NAME}`, NAME)).toBe(null);
+    expect(addOrigin('*', NAME)).toBe(null);
+  });
+});

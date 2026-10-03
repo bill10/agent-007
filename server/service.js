@@ -19,6 +19,8 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { carryOverEnv, configDir, tilde } from './settings.js';
 import { setupVoice } from './voice-setup.js';
+import { setupRemote } from './remote-setup.js';
+import { tailscaleBin } from './tailscale.js';
 import { callServer, pidAlive, readServerFile } from './control.js';
 
 export const LABEL = 'com.bill10.agent-007';
@@ -486,23 +488,30 @@ async function update(ctx, opts = {}) {
   return restart(ctx, opts);
 }
 
-// install: the service, the voice setup, or both (see bin/agent-007.js HELP).
-async function installWithVoice(ctx, opts = {}) {
-  const { voice, all, yes } = opts;
-  if (voice && all) { ctx.err('Use --voice or --all, not both.'); return 2; }
-  const setup = () => setupVoice({ ...ctx, yes: Boolean(yes) }, { running: async () => Boolean(await liveServer(ctx)), restart: () => restart(ctx, {}) });
-  if (voice) return setup();
-  const code = await install(ctx, opts);
-  if (opts['dry-run'] || (code && !all)) return code;
-  if (!all) {
-    if (!ctx.tty) return code;
-    const a = await ctx.ask('Set up voice too? Downloads whisper.cpp and a ~150 MB speech model. [y/N] ');
-    if (!/^y/i.test(a.trim())) return code;
+// install: the service, voice, remote access, or all three (see bin/agent-007.js HELP).
+async function installWithExtras(ctx, opts = {}) {
+  const { voice, remote, all, yes } = opts;
+  if ([voice, remote, all].filter(Boolean).length > 1) { ctx.err('Use one of --voice, --remote or --all.'); return 2; }
+  const server = { running: async () => Boolean(await liveServer(ctx)), restart: () => restart(ctx, {}) };
+  const setVoice = () => setupVoice({ ...ctx, yes: Boolean(yes) }, server);
+  const setRemote = () => setupRemote({ ...ctx, yes: Boolean(yes), tty: ctx.tty && !all, 'dry-run': Boolean(opts['dry-run']) }, server);
+  if (voice) return setVoice();
+  if (remote) return setRemote();
+  let code = await install(ctx, opts);
+  if (opts['dry-run']) return all ? (await setRemote()) || code : code;
+  if (code && !all) return code;
+  if (all) {
+    code = (await setVoice()) || code;
+    return (await setRemote()) || code;
   }
-  return (await setup()) || code;
+  if (!ctx.tty) return code;
+  if (/^y/i.test((await ctx.ask('Set up voice too? Downloads whisper.cpp and a ~150 MB speech model. [y/N] ')).trim())) code = (await setVoice()) || code;
+  // Offered only where Tailscale is installed: without it there is nothing to set up yet.
+  if (ctx.tailscaleBin?.() && /^y/i.test((await ctx.ask('Set up remote access with Tailscale too? Serves Agent 007 at https://<this machine>.ts.net to your tailnet. [y/N] ')).trim())) code = (await setRemote()) || code;
+  return code;
 }
 
-const COMMANDS = { install: installWithVoice, uninstall, status, restart, logs, update };
+const COMMANDS = { install: installWithExtras, uninstall, status, restart, logs, update };
 export const SERVICE_COMMANDS = Object.keys(COMMANDS);
 
 // --- The real machine ---
@@ -546,6 +555,7 @@ export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent0
     ask: (q) => new Promise(r => { const rl = createInterface({ input: process.stdin, output: process.stdout }); rl.question(q, a => { rl.close(); r(a); }); }),
     fetch: (...a) => fetch(...a),
     has: (n) => commandExists(n, launchEnv),
+    tailscaleBin: () => tailscaleBin(launchEnv),
     cmd,
   };
 }
