@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.53.2.0] - 2026-10-03
+
+### Fixed
+
+- **`agent007 install --remote` no longer hangs silently when Serve isn't enabled.** `tailscale serve` prints a link to enable Serve and waits; its output now shows live, the wait is capped at 5 minutes (the link and the command to re-run are printed if it runs out), and Ctrl-C stops cleanly. The `ts.net` name it found is printed before serve runs.
+
 ## [0.53.1.0] - 2026-10-03
 
 ### Changed
