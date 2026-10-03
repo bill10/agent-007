@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.53.5.0] - 2026-10-03
+
+### Changed
+
+- **`agent007 install --remote` no longer asks before touching HTTPS 443.** When another app (say a dashboard) already uses Tailscale Serve's port 443, it leaves it alone, serves Agent 007 on the first free HTTPS port (8443, then 10000), adds `<name>:<port>` to ALLOWED_ORIGINS and prints `Open https://<name>:<port>`. If all three are taken it says what uses them and changes nothing. `agent007 doctor` recognises names on those ports.
+
 ## [0.53.4.0] - 2026-10-03
 
 ### Fixed
