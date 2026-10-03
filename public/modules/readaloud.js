@@ -113,6 +113,18 @@ export function progressPhrase(status, max = PROGRESS_WORDS) {
   return words.slice(0, max).join(' ');
 }
 
+// The progress box heading for one pending message: `first` is the one Billion
+// is on. waiting.js shows it and progressSpeech says it, so they cannot differ.
+export function progressHeading(status, first) {
+  return first ? (status?.working ? 'Working on your message…' : 'Starting on your message…') : 'Answering your earlier message first…';
+}
+
+// What a progress update says: Billion's status line, else the box heading of
+// the request it is on (no ellipsis), else nothing.
+export function progressSpeech(status) {
+  return progressPhrase(status) || (status?.currentRequest ? progressHeading(status, true).replace('…', '') : '');
+}
+
 // The best installed English voice: the owner's pick if it is still there,
 // else en-US over other English, the high-quality ones (Premium, Enhanced,
 // Siri, Google, Natural) first.
