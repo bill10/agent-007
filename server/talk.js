@@ -85,14 +85,29 @@ export const speechPieces = (text) => chunkForSpeech(plainForSpeech(text), SPEEC
 // One transcript in: { ok, id, duplicate? }, { ok, echo } when it was
 // Billion's own voice (nothing sent), or { error }. echoOf: the reply that was
 // playing when the owner started speaking.
-export async function voiceSays(transcript, { utterance, echoOf, broadcast, env = process.env } = {}) {
+export async function voiceSays(transcript, { utterance, echoOf, broadcast, env = process.env, now = Date.now() } = {}) {
   if (!validUtterance(utterance)) return { error: 'Bad utterance id.' };
   const text = typeof transcript === 'string' ? transcript.replace(/\s+/g, ' ').trim() : '';
   if (!text) return { error: 'No words were heard.', empty: true };
   const playing = typeof echoOf === 'string' && voiceReply(echoOf);
   if (playing && looksLikeEcho(text, plainForSpeech(playing.text))) return { ok: true, echo: true };
+  if (heardProgress(text, now)) {
+    console.log('Talk: dropped a voice turn that was the page\'s own progress phrase.');
+    return { ok: true, echo: true };
+  }
   return ownerSays(text, { voice: true, utterance, broadcast, env });
 }
+
+// Progress phrases handed to the page lately: the mic hears them too, and they
+// carry no echo id. A transcript that is one of them (or, at two words or
+// more, part of one) is the page's own voice.
+const PROGRESS_ECHO_MS = 10_000;
+const progressSpoken = [];   // { at, words }
+const heardProgress = (text, now) => {
+  while (progressSpoken.length && now - progressSpoken[0].at > PROGRESS_ECHO_MS) progressSpoken.shift();
+  const got = words(text).join(' ');
+  return !!got && progressSpoken.some(p => got === p.words || (got.includes(' ') && p.words.includes(got)));
+};
 
 // An utterance retried while its first try is still being transcribed waits
 // for that one: one transcription, one message.
@@ -119,7 +134,7 @@ export function voiceUtterance(audio, { utterance, echoOf, broadcast, env = proc
     }
     const transcribeMs = Date.now() - started;
     try {
-      return { ...await voiceSays(transcript, { utterance, echoOf, broadcast, env }), transcript, transcribeMs };
+      return { ...await voiceSays(transcript, { utterance, echoOf, broadcast, env, now }), transcript, transcribeMs };
     } catch (err) {
       console.error('Talk: could not send an utterance:', err.message);
       return { error: 'Could not send that to Billion; say it again.' };
@@ -148,6 +163,7 @@ export async function voiceAudio(id, index, { env = process.env, platform = proc
   const pieces = id === 'status' ? (phrase ? [phrase] : []) : speechPieces(voiceReply(id)?.text ?? '');
   if (!pieces.length) return { status: 404, error: 'No such reply.' };
   if (!(Number.isInteger(index) && index >= 0 && index < pieces.length)) return { status: 404, error: 'No such piece.' };
+  if (phrase) progressSpoken.push({ at: now, words: words(phrase).join(' ') });
   const off = speechUnavailable(env, platform);
   if (off) return { status: 503, error: off };
   if (!allow('audio', AUDIO_LIMIT, now)) return { status: 429, error: 'Too much audio this minute.' };
@@ -165,4 +181,5 @@ export function _resetTalk() {
   recent.audio = [];
   inflight.clear();
   cache.clear();
+  progressSpoken.length = 0;
 }
