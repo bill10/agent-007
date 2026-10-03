@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.54.1.0] - 2026-10-03
+
+### Added
+
+- **Talk to Billion on an iPhone: a Speaker / Earpiece button in the call bar.** Replies stay on the output you pick for the whole call, remembered per browser (Speaker by default). Mute now silences the mic track instead of closing it, and the audio session is held at play-and-record for the call, so iOS no longer flips replies between the loudspeaker and the earpiece. Desktop and Android browsers show no button.
+
 ## [0.54.0.0] - 2026-10-03
 
 ### Added
