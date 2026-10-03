@@ -1,6 +1,7 @@
 // Records the README's hero demo (docs/billion-demo.gif and billion-demo.mp4)
-// from a scratch server: its own HOME and port, and the stub claude and gh in
-// scripts/demo/bin, so nothing real is spent and every run plays the same.
+// from a scratch server (scratch.mjs): its own HOME and port, and the stub
+// claude and gh in scripts/demo/bin, so nothing real is spent and every run
+// plays the same.
 //
 // Needs Google Chrome and ffmpeg installed, and playwright:
 //   npm i --no-save playwright
@@ -8,64 +9,18 @@
 //
 // Then docs/billion-demo.gif and docs/screenshot.png are copied from out-dir, and the MP4 goes on the
 // latest release: gh release upload <tag> out-dir/billion-demo.mp4 --clobber
-import { spawn, execFileSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, statSync } from 'fs';
-import { tmpdir } from 'os';
+import { execFileSync } from 'child_process';
+import { mkdirSync, statSync } from 'fs';
 import { join } from 'path';
-import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
+import { startScratchServer, sleep } from './scratch.mjs';
 
-const root = fileURLToPath(new URL('../../', import.meta.url));
-// Real path: macOS's tmpdir is a symlink, and the board would list the repo twice.
-const home = realpathSync(mkdtempSync(join(tmpdir(), 'a007-demo-')));
-const out = process.argv[2] || join(home, 'out');
-const PORT = 7107;
-const url = `http://127.0.0.1:${PORT}`;
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
-// A repo with a remote, as a real project would have.
-const repo = join(home, 'code', 'shop');
-mkdirSync(repo, { recursive: true });
-const git = (...a) => execFileSync('git', a, { cwd: repo, stdio: 'ignore' });
-git('-c', 'init.defaultBranch=main', 'init', '-q');
-writeFileSync(join(repo, 'README.md'), '# shop\n');
-git('add', '-A');
-git('-c', 'user.name=Demo', '-c', 'user.email=demo@example.com', 'commit', '-qm', 'first');
-execFileSync('git', ['init', '-q', '--bare', `${repo}.git`]);
-git('remote', 'add', 'origin', `${repo}.git`);
-git('push', '-q', '-u', 'origin', 'main');
-
-mkdirSync(join(home, '.agent-007'), { recursive: true });
-writeFileSync(join(home, '.claude.json'), '{}');   // what the board pre-trusts worktrees in
-writeFileSync(join(home, '.agent-007', 'config.json'), JSON.stringify({
-  version: 1, repos: [{ path: repo, addedAt: new Date().toISOString() }], orphans: [], activeSessions: [], jobs: [],
-  // A fast scan, so a merged PR's card files away in seconds rather than minutes.
-  jobBoard: { running: true, intervalMs: 2000 },
-}));
-
-// Nothing of the host's own setup: no tokens, no Telegram, no config dirs,
-// no .env (the server runs from the scratch HOME), only what a shell needs.
-const keep = ['PATH', 'TERM', 'LANG', 'LC_ALL', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR'];
-const env = Object.fromEntries(keep.filter(k => process.env[k]).map(k => [k, process.env[k]]));
-Object.assign(env, {
-  HOME: home, PORT: String(PORT), HOST: '127.0.0.1',
-  PATH: `${join(root, 'scripts/demo/bin')}:${env.PATH}`,
+const { home, url, server } = await startScratchServer({
+  port: 7107,
   // The login fix finishes after the owner has answered Billion's question.
-  DEMO_PACE_DARK: '1100', DEMO_PACE_LOGIN: '2300',
-  GIT_AUTHOR_NAME: 'Demo', GIT_AUTHOR_EMAIL: 'demo@example.com', GIT_COMMITTER_NAME: 'Demo', GIT_COMMITTER_EMAIL: 'demo@example.com',
+  env: { DEMO_PACE_DARK: '1100', DEMO_PACE_LOGIN: '2300' },
 });
-// Something else on the port would be what gets recorded.
-if (await fetch(url).then(() => true, () => false)) throw new Error(`${url} is already taken`);
-const server = spawn(process.execPath, [join(root, 'bin/agent-007.js')], { cwd: home, env, stdio: ['ignore', 'pipe', 'pipe'] });
-server.stdout.pipe(process.stdout);
-server.stderr.pipe(process.stderr);
-process.on('exit', () => server.kill());
-for (let i = 0; ; i++) {
-  if (server.exitCode !== null) throw new Error('server exited');
-  try { await fetch(url); break; } catch { if (i > 100) throw new Error('server did not start'); await sleep(100); }
-}
-
-if (process.env.DEMO_SERVE) { console.log(`Serving ${url} from ${home}`); await new Promise(() => {}); }
+const out = process.argv[2] || join(home, 'out');
 
 mkdirSync(out, { recursive: true });
 const size = { width: 1280, height: 800 };
@@ -103,7 +58,7 @@ const cardsLeft = () => page.waitForFunction(() => !document.querySelector('.job
 
 // 1. The owner gives Billion a goal in the chat.
 await sleep(1500);
-const box = page.locator('[placeholder="Message Billion"]');
+const box = page.locator('#chat-input');
 await click(box, 200);
 await box.pressSequentially('Ship dark mode and fix the login bug', { delay: 55 });
 await sleep(400);
@@ -123,13 +78,13 @@ await page.waitForFunction(() => document.querySelectorAll('.job-card').length =
 await sleep(1500);
 // 4. Billion asks the owner one question; the owner taps the recommended answer.
 await click(chatTab);
-await page.locator('.waiting-choice.recommended').waitFor({ timeout: 60_000 });
+await page.locator('.waiting-list .waiting-choice.recommended').waitFor({ timeout: 60_000 });
 await sleep(2500);
 const cursor = page.locator('#demo-cursor');
 await cursor.evaluate(c => { c.style.display = 'none'; });
 await page.screenshot({ path: join(out, 'screenshot.png') });   // docs/screenshot.png
 await cursor.evaluate(c => { c.style.display = ''; });
-await click(page.locator('.waiting-choice.recommended'));
+await click(page.locator('.waiting-list .waiting-choice.recommended'));
 await park();   // off Billion's reply, which lands where the button was
 await page.locator('.waiting-list').getByText('Skipping it').waitFor({ timeout: 30_000 });
 await sleep(1500);

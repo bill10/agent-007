@@ -1,0 +1,353 @@
+// Records the phone-call demo (docs/phone-call-teaser.gif and phone-call.mp4):
+// a Talk to Billion call on a phone, from the spoken request to the merged PR.
+// Same scratch server as record.mjs (scratch.mjs, stub claude and gh), run
+// with DEMO_SCRIPT=phone. Two phones are recorded at once, one on the call and
+// one on the Jobs tab, and the video cuts between them without dropping time,
+// so the soundtrack stays where it happened.
+//
+// The owner's lines are macOS `say` (OWNER_VOICE) fed to the page as its
+// speech recognition's result; Billion's are the audio the page itself played
+// (the server's `say`, SAY_VOICE), captured as it played. Captions are burned
+// in, and the video says it is scripted, sped up and text-to-speech.
+//
+// Needs macOS (say), Google Chrome, ffmpeg, and playwright:
+//   npm i --no-save playwright
+//   node scripts/demo/phone-call.mjs [out-dir]     (default: a temp folder)
+//
+// Then docs/phone-call-teaser.gif is copied from out-dir, and the MP4 goes on
+// the latest release: gh release upload <tag> out-dir/phone-call.mp4 --clobber
+import { execFileSync } from 'child_process';
+import { mkdirSync, writeFileSync, statSync } from 'fs';
+import { join } from 'path';
+import { chromium } from 'playwright';
+import { startScratchServer, sleep } from './scratch.mjs';
+
+const OWNER_VOICE = process.env.OWNER_VOICE || 'Evan (Enhanced)';
+const BILLION_VOICE = process.env.BILLION_VOICE || 'Ava (Premium)';
+const LINES = {
+  owner1: 'Add a dark-mode toggle to the settings page.',
+  owner2: 'Thanks. Tell me when it\'s merged.',
+};
+
+const { home, url } = await startScratchServer({
+  port: 7117,
+  env: { DEMO_SCRIPT: 'phone', SAY_VOICE: BILLION_VOICE, DEMO_PACE_DARK: '2800', DEMO_PACE_REVIEW: '4000' },
+});
+// One merged PR already, so the worker's is #42.
+writeFileSync(join(home, 'demo-prs.json'), JSON.stringify([{ number: 41, url: 'https://github.com/acme/shop/pull/41', head: 'earlier', state: 'MERGED', mergedAt: new Date().toISOString(), isDraft: false, isCrossRepository: false }]));
+const out = process.argv[2] || join(home, 'out');
+mkdirSync(out, { recursive: true });
+const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], { stdio: 'inherit' });
+const duration = (f) => Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', f], { encoding: 'utf8' }));
+
+// The owner's voice, made first so its length is known when it is "spoken".
+const ownerClips = {};
+for (const [key, text] of Object.entries(LINES)) {
+  const file = join(out, `${key}.aiff`);
+  execFileSync('say', ['-v', OWNER_VOICE, '-o', file, text]);
+  ownerClips[key] = { file, ms: duration(file) * 1000 };
+}
+
+// --- The two phones ---
+
+const phone = { width: 390, height: 844 };
+const browser = await chromium.launch({ channel: 'chrome', args: ['--autoplay-policy=no-user-gesture-required'] });
+const contextFor = () => browser.newContext({
+  viewport: phone, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark',
+});
+const [ctxA, ctxB] = [await contextFor(), await contextFor()];
+// The call's page: its speech recognition is the script, and every reply it
+// plays is handed back for the soundtrack.
+await ctxA.addInitScript(() => {
+  try { localStorage.setItem('agent007-talk-browser-stt', '1'); } catch {}
+  class Recognition { start() { window.__demoRec = this; } abort() { if (window.__demoRec === this) window.__demoRec = null; } stop() { this.abort(); } }
+  window.SpeechRecognition = window.webkitSpeechRecognition = Recognition;
+  window.__demoHear = (text) => {
+    const r = window.__demoRec;
+    if (!r) return false;
+    const result = [{ transcript: text }];
+    result.isFinal = true;
+    r.onresult({ resultIndex: 0, results: [result] });
+    return true;
+  };
+  // Billion's set_status line, which a status piece speaks.
+  const WS = window.WebSocket;
+  window.WebSocket = class extends WS {
+    constructor(...a) {
+      super(...a);
+      this.addEventListener('message', (e) => {
+        try { const m = JSON.parse(e.data); if (m.type === 'billion-status') window.__demoStatus = m; } catch {}
+      });
+    }
+  };
+  // Which reply or status line each audio piece is, from the URL it came from.
+  const pieces = new Map();   // blob URL → { from: /api/talk/audio/<id>/<i>, blob }
+  const fetch0 = window.fetch;
+  window.fetch = async (input, init) => {
+    const res = await fetch0(input, init);
+    const from = String(input?.url || input);
+    if (from.includes('/api/talk/audio/')) {
+      const blob = res.blob.bind(res);
+      res.blob = async () => Object.assign(await blob(), { demoFrom: from });
+    }
+    return res;
+  };
+  const create = URL.createObjectURL;
+  URL.createObjectURL = (b) => { const u = create.call(URL, b); if (b.demoFrom) pieces.set(u, { from: b.demoFrom, blob: b }); return u; };
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    const piece = pieces.get(this.src);
+    if (piece) {
+      const { from, blob } = piece;
+      const id = decodeURIComponent(from.split('/api/talk/audio/')[1].split('/')[0]);
+      const text = id === 'status'
+        ? window.__demoStatus?.text || 'Working on your message'
+        : document.querySelector(`[data-id="${CSS.escape(id)}"] .chat-text, [data-id="${CSS.escape(id)}"]`)?.innerText || '';
+      const at = Date.now();
+      // From the blob itself: the page revokes its URL as soon as a piece is cut off.
+      const bytes = blob.arrayBuffer();
+      let done = false;
+      // Until it ends or is cut off: the soundtrack holds what was heard.
+      const stop = () => {
+        if (done) return;
+        done = true;
+        const end = Date.now();
+        bytes.then(buf => {
+          const u8 = new Uint8Array(buf);
+          let bin = '';
+          for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+          window.__demoAudio({ at, end, text, b64: btoa(bin) });
+        });
+      };
+      // Changing src fires pause and emptied for the piece before: count from when this one plays.
+      this.addEventListener('playing', () => { for (const e of ['ended', 'pause', 'error']) this.addEventListener(e, stop, { once: true }); }, { once: true });
+    }
+    return play.call(this);
+  };
+});
+const clips = [];   // Billion's speech as played: { at, end, text, file }
+await ctxA.exposeFunction('__demoAudio', ({ at, end, text, b64 }) => {
+  const file = join(out, `billion-${clips.length + 1}.m4a`);
+  writeFileSync(file, Buffer.from(b64, 'base64'));
+  clips.push({ at, end, text: text.trim().split('\n')[0], file });
+  console.log(`[demo] Billion said "${clips.at(-1).text}" at +${((at - t0) / 1000).toFixed(1)}s for ${((end - at) / 1000).toFixed(1)}s`);
+});
+
+// Each phone filmed as fast as it can be screenshot, at 2x: Playwright's own
+// video records at CSS size, too soft once scaled up. The frames' times make
+// the video (ffmpeg's concat with durations).
+function film(page, name) {
+  const dir = join(out, name);
+  mkdirSync(dir, { recursive: true });
+  const frames = [];
+  let rolling = true;
+  const done = (async () => {
+    const cdp = await page.context().newCDPSession(page);
+    while (rolling) {
+      const at = Date.now();
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 88 });
+      const file = join(dir, `${String(frames.length).padStart(5, '0')}.jpg`);
+      writeFileSync(file, Buffer.from(data, 'base64'));
+      frames.push({ at, file });
+    }
+  })();
+  return {
+    frames,
+    // The frame list for ffmpeg, its clock starting at the first frame.
+    async stop(until) {
+      rolling = false;
+      await done;
+      const list = join(out, `${name}.txt`);
+      writeFileSync(list, frames.map((f, i) => `file '${f.file}'\nduration ${(((frames[i + 1]?.at ?? until) - f.at) / 1000).toFixed(3)}\n`).join('')
+        + `file '${frames.at(-1).file}'\n`);
+      return list;
+    },
+  };
+}
+
+const A = await ctxA.newPage();
+const B = await ctxB.newPage();
+const t0 = Date.now();
+// A touch, since video has no cursor: a ring where the finger lands.
+const STYLE = `#job-dispatcher-status { visibility: hidden }
+  .demo-tap { position: fixed; z-index: 99999; pointer-events: none; width: 44px; height: 44px; margin: -22px 0 0 -22px;
+    border-radius: 50%; background: #fff4; border: 2px solid #fffc; animation: demo-tap .6s ease-out forwards }
+  @keyframes demo-tap { from { transform: scale(.4); opacity: 1 } to { transform: scale(1.3); opacity: 0 } }`;
+for (const p of [A, B]) {
+  await p.goto(url);
+  await p.addStyleTag({ content: STYLE });
+}
+const [filmA, filmB] = [film(A, 'phone-a'), film(B, 'phone-b')];
+async function tap(page, locator, hold = 400) {
+  await locator.waitFor();
+  const box = await locator.boundingBox();
+  await page.evaluate(({ x, y }) => {
+    const ring = document.createElement('div');
+    ring.className = 'demo-tap';
+    Object.assign(ring.style, { left: `${x}px`, top: `${y}px` });
+    document.body.appendChild(ring);
+    setTimeout(() => ring.remove(), 700);
+  }, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+  await sleep(150);
+  await locator.click();
+  await sleep(hold);
+}
+const until = (page, fn, arg) => page.waitForFunction(fn, arg, { timeout: 90_000 });
+const callState = (state) => until(A, (s) => document.getElementById('talk-bar')?.dataset.state === s, state);
+const cardIn = (state) => until(B, (s) => !!document.querySelector(`.job-column[data-state="${s}"] .job-card`), state);
+// When Billion started saying it (the piece has ended by then).
+async function heard(re) {
+  for (let i = 0; ; i++) {
+    const clip = clips.find(c => re.test(c.text));
+    if (clip) return clip.at;
+    if (i > 1800) throw new Error(`Billion never said ${re}`);
+    await sleep(50);
+  }
+}
+
+// The edit: which phone is on screen from when, and the captions.
+const cuts = [];
+const cut = (src, at = Date.now()) => cuts.push({ src, at });
+const captions = [];
+async function ownerSays(key) {
+  await callState('listening');
+  const at = Date.now();
+  captions.push({ who: 'You', text: LINES[key], at, file: ownerClips[key].file });
+  await sleep(ownerClips[key].ms + 250);
+  if (!await A.evaluate(t => window.__demoHear(t), LINES[key])) throw new Error('the call was not listening');
+}
+
+// 1. The Billion tab; the owner taps the phone button and the call bar comes up.
+await B.locator('.terminal-tab.board-tab:not(.waiting-tab)').click();   // the second phone waits on the board
+await sleep(1500);
+cut('A');
+await sleep(2500);
+await tap(A, A.locator('#chat-talk'), 0);
+await callState('listening');
+await sleep(2000);
+// 2. The request, and Billion's answer.
+await ownerSays('owner1');
+const reply = await heard(/Got it/);
+await sleep(Math.max(0, reply + 3500 - Date.now()));
+// 3. The board: the card lands and a worker picks it up.
+cut('B');
+await cardIn('in-progress');
+await sleep(2500);
+await tap(B, B.locator('.job-card-live').first());
+await sleep(8000);
+await tap(B, B.locator('.terminal-tab.board-tab:not(.waiting-tab)'), 0);
+// 4. "Tell me when it's merged": the call waits on the work and says how it goes.
+cut('A');
+await ownerSays('owner2');
+await sleep(3500);
+cut('B');
+await cardIn('review');
+const ci = await heard(/CI passed/);
+cut('A', ci - 300);
+await heard(/Merged/);
+// 5. The card files away as merged. Its worker's tab closing takes the second
+// phone off the board, so it goes back (off screen) and opens the finished jobs.
+await until(B, () => !document.querySelector('.job-column[data-state="review"] .job-card'));
+await sleep(600);
+await B.locator('.terminal-tab.board-tab:not(.waiting-tab)').click();
+await sleep(300);
+cut('B');
+await tap(B, B.locator('#btn-finished-jobs'), 2800);
+cut('A');
+await callState('listening');
+await sleep(5000);
+const end = Date.now();
+
+const [videoA, videoB] = [await filmA.stop(end), await filmB.stop(end)];
+await Promise.all([ctxA.close(), ctxB.close()]);
+
+// The captions: the owner's lines and what Billion said, as long as each was heard.
+for (const c of clips) captions.push({ who: 'Billion', text: c.text, at: c.at, ms: c.end - c.at, file: c.file });
+captions.sort((a, b) => a.at - b.at);
+captions.forEach((c, i) => {
+  c.ms ??= duration(c.file) * 1000;
+  c.until = Math.min(c.at + c.ms + 700, captions[i + 1]?.at ?? Infinity);
+});
+
+// --- Stills: the frame around the phone, the captions, the end card ---
+
+const W = 1080, H = 1920;
+const screen = { width: 720, height: 1558, x: 180, y: 150 };
+const FONT = `font-family: -apple-system, 'Helvetica Neue', sans-serif;`;
+const still = await browser.newPage({ viewport: { width: W, height: H } });
+async function render(file, html, size = { width: W, height: H }) {
+  await still.setViewportSize(size);
+  await still.setContent(`<body style="margin:0;${FONT}">${html}</body>`);
+  await still.screenshot({ path: file, omitBackground: true });
+}
+const NOTE = 'Scripted demo with stand-in agents · sped up · voices are text-to-speech';
+await render(join(out, 'frame.png'), `
+  <div style="position:absolute;left:${screen.x}px;top:${screen.y}px;width:${screen.width}px;height:${screen.height}px;border-radius:48px;
+    box-shadow:0 0 0 3px #2a2f37, 0 0 0 3000px #0b0d10"></div>
+  <div style="position:absolute;top:58px;width:100%;text-align:center;color:#8b93a1;font-size:26px">${NOTE}</div>`);
+const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+for (const [i, c] of captions.entries()) {
+  c.png = join(out, `caption-${i}.png`);
+  await render(c.png, `<div style="width:${W}px;height:212px;display:flex;align-items:center;justify-content:center;text-align:center;
+    padding:0 60px;box-sizing:border-box;font-size:42px;line-height:1.25;color:#f2f4f7">
+    <div><span style="color:${c.who === 'You' ? '#7cc4ff' : '#e0b04a'};font-weight:600">${c.who}:</span> ${esc(c.text)}</div></div>`,
+  { width: W, height: 212 });
+}
+const endCard = join(out, 'end.png');
+await render(endCard, `<div style="width:${W}px;height:${H}px;background:#0b0d10;color:#f2f4f7;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:34px;text-align:center">
+  <div style="font-size:84px;font-weight:700">Agent 007</div>
+  <div style="font-size:46px;color:#c9ced6">Talk to your coding agents.</div>
+  <div style="margin-top:50px;font-size:38px;color:#e0b04a">github.com/bill10/agent-007</div>
+  <div style="font-size:38px;font-family:ui-monospace,Menlo,monospace;color:#f2f4f7">npx @bill10/agent-007</div>
+  <div style="position:absolute;bottom:80px;font-size:26px;color:#8b93a1">${NOTE}</div></div>`);
+await browser.close();
+
+// --- The cut ---
+
+const s = (ms) => (ms / 1000).toFixed(3);
+const first = cuts[0].at;
+const total = end - first;
+const END_SECONDS = 6;
+const looped = (png, seconds = total / 1000) => ['-loop', '1', '-t', String(seconds), '-i', png];
+const inputs = ['-f', 'concat', '-safe', '0', '-i', videoA, '-f', 'concat', '-safe', '0', '-i', videoB, ...looped(join(out, 'frame.png')), ...looped(endCard, END_SECONDS)];
+const filters = [];
+cuts.forEach((c, i) => {
+  const to = cuts[i + 1]?.at ?? end;
+  const offset = (c.src === 'A' ? filmA : filmB).frames[0].at;
+  filters.push(`[${c.src === 'A' ? 0 : 1}:v]trim=start=${s(c.at - offset)}:end=${s(to - offset)},setpts=PTS-STARTPTS,fps=30,scale=${screen.width}:${screen.height}[seg${i}]`);
+});
+filters.push(`${cuts.map((_, i) => `[seg${i}]`).join('')}concat=n=${cuts.length}:v=1:a=0[phone]`);
+filters.push(`color=c=#0b0d10:s=${W}x${H}:r=30:d=${s(total)}[bg]`);
+filters.push(`[bg][phone]overlay=${screen.x}:${screen.y}:shortest=1[v0]`);
+filters.push(`[v0][2:v]overlay=0:0:shortest=1[v1]`);
+let last = 'v1';
+captions.forEach((c, i) => {
+  inputs.push(...looped(c.png));
+  const n = 4 + i;
+  filters.push(`[${last}][${n}:v]overlay=0:${screen.y + screen.height}:enable='between(t,${s(c.at - first)},${s(c.until - first)})'[c${i}]`);
+  last = `c${i}`;
+});
+filters.push(`[3:v]fps=30,format=yuv420p[endv]`, `[${last}]format=yuv420p[mainv]`, `[mainv][endv]concat=n=2:v=1:a=0[v]`);
+// The voices, each where it was spoken.
+const audioStart = 4 + captions.length;
+captions.forEach((c, i) => {
+  inputs.push('-i', c.file);
+  const delay = Math.max(0, Math.round(c.at - first));
+  filters.push(`[${audioStart + i}:a]atrim=0:${s(c.ms)},aresample=48000,aformat=channel_layouts=stereo,adelay=${delay}|${delay}[a${i}]`);
+});
+filters.push(`${captions.map((_, i) => `[a${i}]`).join('')}amix=inputs=${captions.length}:normalize=0,apad,atrim=0:${s(total + END_SECONDS * 1000)}[a]`);
+const mp4 = join(out, 'phone-call.mp4');
+ff(...inputs, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]',
+  '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', mp4);
+
+// The README teaser: the request and Billion's answer, muted, captions burned in.
+const ask = captions.find(c => c.who === 'You');
+const answer = captions.find(c => c.at > ask.at && c.who === 'Billion' && /Got it/.test(c.text));
+const teaserFrom = ask.at - first - 400;
+const gif = join(out, 'phone-call-teaser.gif');
+ff('-ss', s(teaserFrom), '-t', s(Math.min(8000, answer.until - first + 300 - teaserFrom)), '-i', mp4, '-vf',
+  'fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle', gif);
+console.log(`cuts: ${cuts.map(c => `${c.src}@${s(c.at - first)}`).join(' ')}`);
+for (const f of [mp4, gif]) console.log(`${f}  ${(statSync(f).size / 1e6).toFixed(1)} MB, ${duration(f).toFixed(1)} s`);
+process.exit(0);
