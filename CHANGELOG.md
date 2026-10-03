@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.52.2.0] - 2026-10-03
+
+### Fixed
+
+- **`agent007 doctor` always says something about remote access.** It now finds the Tailscale CLI inside the macOS app (`/Applications/Tailscale.app`) when `tailscale` is not on PATH, reports when Tailscale is missing or `tailscale serve` does not proxy this port (listing what it serves), and shows the `ALLOWED_ORIGINS` the service reads.
+
 ## [0.52.1.0] - 2026-10-02
 
 ### Changed
