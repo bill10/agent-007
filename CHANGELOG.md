@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.54.0.0] - 2026-10-03
+
+### Added
+
+- **Settings shows the version and an Update button.** The top of the Settings panel names the running version and, when npm has a newer one, offers Update, which runs `agent007 update` in the background (npm install -g, or git pull for a clone), then restarts once busy workers finish. The panel follows it through Updating…, Waiting for busy workers…, Restarting… and the new version, or shows the error from `~/.agent-007/logs/update.log` with the terminal command to run instead. The gear gets a dot while an update is out. The registry is asked at most every 10 minutes; npx copies show no button. Owner only, like the Claude account switch.
+
 ## [0.53.5.0] - 2026-10-03
 
 ### Changed
