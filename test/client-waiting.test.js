@@ -283,6 +283,12 @@ describe('the text box', () => {
     agents.set('b', { isBillion: true });
     renderWaiting();
     expect(input().placeholder).toBe('Message Billion, or /command to run one');
+    // A phone's box is too narrow for the /command hint.
+    const matchMedia = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q === '(max-width: 700px)' });
+    renderWaiting();
+    expect(input().placeholder).toBe('Message Billion');
+    window.matchMedia = matchMedia;
     agents.delete('b');
   });
 
@@ -539,6 +545,28 @@ describe('read aloud and dictation in the tab', () => {
     leaveWaiting();
     expect(speakingMessage()).toBeNull();
     stopReading();
+  });
+
+  it('the voice picker shows when there is a choice, its phone label naming the voice picked', () => {
+    const box = document.getElementById('chat-voice-box');
+    const label = () => box.querySelector('.chat-voice-label').textContent;
+    renderWaiting();
+    expect(box.hidden).toBe(true);
+    const voices = ['Albert', 'Samantha'].map((name, i) => ({ name, lang: 'en-US', voiceURI: `v${i}`, localService: true }));
+    window.speechSynthesis.getVoices = () => voices;
+    renderWaiting();
+    expect(box.hidden).toBe(false);
+    expect(label()).toMatch(/^Voice: auto/);
+    const pick = document.getElementById('chat-voice-pick');
+    pick.value = 'v1';
+    pick.onchange();
+    expect(label()).toBe('Samantha');
+  });
+
+  it('the box and the voice picker are not login fields to a password manager', () => {
+    for (const id of ['chat-input', 'chat-voice-pick']) {
+      expect(document.getElementById(id).getAttribute('autocomplete'), id).toBe('off');
+    }
   });
 
   it('the box, mic and Send, and the header controls, share one control height token', () => {
