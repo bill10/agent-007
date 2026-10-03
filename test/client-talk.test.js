@@ -323,8 +323,11 @@ describe('progress updates while Billion works', () => {
     await wait(300);
     expect(said()).toHaveLength(3);
 
-    // The answer arrives mid-update: the update stops, the answer plays next.
+    // The answer arrives mid-update: the update finishes, the answer plays next.
     talkHeard(reply('r1', 'm1'));
+    await wait(0);
+    expect(_talkInternals().playing).toBe('status');
+    theAudio.end();
     await wait(0);
     expect(_talkInternals().playing).toBe('r1');
     expect(played.at(-1)).toBe('r1#0');
@@ -335,6 +338,53 @@ describe('progress updates while Billion works', () => {
     await wait(60000);
     expect(said()).toHaveLength(3);
     expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
+  });
+
+  describe('an answer arriving during a status phrase', () => {
+    const start = async () => {
+      await talking();
+      routes.audio = (id, i) => response(`${id}#${i}`, { headers: { 'X-Pieces': id === 'status' ? '1' : '2' } });
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+      status('Looking at the board');
+      vadOpts.onSpeechEnd(new Float32Array(1600));
+      await wait(PROGRESS_QUIET_MS);
+      status('Reading the talk code');
+      await wait(0);
+      expect(_talkInternals().playing).toBe('status');
+    };
+
+    it('lets the phrase finish, drops a newer queued one, then plays the answer', async () => {
+      await start();
+      status('Running the tests');
+      talkHeard(reply('r1', 'm1'));
+      await wait(1000);
+      expect(_talkInternals().playing).toBe('status');
+      theAudio.end();
+      await wait(0);
+      expect(_talkInternals().playing).toBe('r1');
+      await wait(60000);
+      expect(said()).toEqual(['status#0']);
+    });
+
+    it('stops a phrase still going after 3 s, then plays the answer', async () => {
+      await start();
+      talkHeard(reply('r1', 'm1'));
+      await wait(2900);
+      expect(_talkInternals().playing).toBe('status');
+      await wait(200);
+      expect(_talkInternals().playing).toBe('r1');
+    });
+
+    it('owner speech stops the phrase and the waiting answer at once', async () => {
+      await start();
+      talkHeard(reply('r1', 'm1'));
+      vadOpts.onSpeechRealStart();
+      await wait(0);
+      expect(_talkInternals().playing).toBeNull();
+      expect(_talkInternals().replyQueue).toEqual([]);
+      await wait(5000);
+      expect(played.some(p => p.startsWith('r1'))).toBe(false);
+    });
   });
 
   it('speaks the box heading when there is no status line; a status line wins; each heading once', async () => {

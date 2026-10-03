@@ -131,6 +131,9 @@ const restored = new Set();
 const thinkingFor = () => [...awaiting].filter(id => !restored.has(id)).length;
 // Progress updates: never a reply, so never an echo to report.
 const filler = (id) => id === 'status';
+const STATUS_CAP_MS = 3000;  // a progress phrase still going after this is stopped for a waiting answer
+let capTimer = null;
+let statusAt = 0;
 const marks = new Map();  // message id → latency marks
 
 const restore = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch { return null; } };
@@ -617,10 +620,21 @@ export function talkHeard(m) {
   const mark = marks.get(m.replyTo);
   if (mark) mark.reply = performance.now();
   if (!thinkingFor()) clearTimeout(progressTimer);
-  // A progress update gives way to the answer at once.
-  if (filler(playing)) interrupt();
+  // A progress update in the middle of a phrase finishes it (capped at
+  // STATUS_CAP_MS); the answer plays right after.
   replyQueue.push(m);
-  if (!playing && !hidden) playNext();
+  if (filler(playing)) {
+    clearTimeout(capTimer);
+    const mine = playGen;
+    capTimer = setTimeout(() => {
+      if (mine !== playGen) return;
+      const kept = replyQueue;
+      interrupt();
+      replyQueue = kept;
+      if (kept.length && !hidden) playNext();
+    }, Math.max(0, STATUS_CAP_MS - (Date.now() - statusAt)));
+    paint();
+  } else if (!playing && !hidden) playNext();
   else paint();
 }
 
@@ -674,6 +688,7 @@ async function speak(id, text, replyTo) {
   if (mode === 'browser') stopRecognition();
   vad?.setOptions({ positiveSpeechThreshold: SPEECH_THRESHOLD_PLAYING });
   paint();
+  statusAt = Date.now();
   try {
     // A progress update the server no longer has (the status moved on) is
     // just skipped; only a reply it cannot speak means its voice is gone.
@@ -686,6 +701,7 @@ async function speak(id, text, replyTo) {
     }
   } finally {
     if (mine === playGen) {
+      clearTimeout(capTimer);
       playing = null;
       playNext();
     }
@@ -752,6 +768,7 @@ function speakInBrowser(text, mine, replyTo) {
 // work goes on; the replies stay in the thread.
 export function interrupt() {
   playGen++;
+  clearTimeout(capTimer);
   replyQueue = [];
   fetches?.abort();
   fetches = null;
