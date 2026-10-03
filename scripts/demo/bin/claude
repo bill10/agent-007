@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Stand-in `claude` for the README demo (scripts/demo/record.mjs). Started as
 // Billion (--dangerously-skip-permissions) it answers the owner's goal, posts
-// two cards, merges each as it reaches Review and asks one question; started
+// two cards, merges each as it reaches Review and asks one question (with
+// DEMO_SCRIPT=phone, scripts/demo/phone-call.mjs: answers a Talk to Billion
+// call, posts one card and says its progress until it merges); started
 // as a board worker it prints a few lines of work, opens a PR with the stub gh
 // and calls finish_job. Every step goes through the board's real MCP tools.
 import { readFileSync } from 'fs';
@@ -40,10 +42,32 @@ if (argv.includes('--dangerously-skip-permissions')) {
   await call('billion_ready');
   prompt();
   const merged = [];
+  const turns = [];   // the call's voice turns, by their #id
   const handle = async (line) => {
     say(line);
     say();
-    if (/^\[Owner via app\] Q\d+:/.test(line)) {
+    const voice = line.match(/^\[Owner via app, voice #(\w+)\]/);
+    if (voice) {
+      turns.push(voice[1]);
+      // The first turn is the request; the second waits on the merge, and the
+      // status lines are what the call says meanwhile.
+      if (turns.length === 1) {
+        await call('tell_owner', { text: 'Got it. I\'ll put a card on the board.', reply_to: voice[1] });
+        await call('post_job', { title: 'Add a dark-mode toggle to Settings', repo: 'shop', detail: 'A Dark mode switch on the settings page, remembered per browser. Tests for the toggle.' });
+        await call('set_status', { text: 'A worker is on it' });
+      }
+    } else if (process.env.DEMO_SCRIPT === 'phone' && /is in Review/.test(line)) {
+      const card = line.match(/\(card ([^,\s]+),/)?.[1];
+      const pr = (await call('read_job', { id: card })).match(/pull\/(\d+)/)?.[1];
+      await call('set_status', { text: `Reviewing PR ${pr}` });
+      await step('Bash', `gh pr diff ${pr}`, 'Diff reads clean, tests pass', Number(process.env.DEMO_PACE_REVIEW || 2500));
+      await call('set_status', { text: 'Tests passed, merging' });
+      await sleep(Number(process.env.DEMO_PACE_REVIEW || 2500));
+      say(`\x1b[32m●\x1b[39m Bash(gh pr merge ${pr} --squash)`);
+      say(`  ${dim(`⎿  ${execFileSync('gh', ['pr', 'merge', pr, '--squash'], { encoding: 'utf8' }).trim()}`)}`);
+      await call('set_status', { text: '' });
+      await call('tell_owner', { text: 'Merged. It\'s live after the next update.', reply_to: turns.at(-1) });
+    } else if (/^\[Owner via app\] Q\d+:/.test(line)) {
       await call('tell_owner', { text: 'Skipping it. The free tier holds until launch; I will ask again before then.' });
     } else if (line.startsWith('[Owner via app]')) {
       await call('tell_owner', { text: 'On it. Two jobs on the board: dark mode, and the login bug. I will review and merge each one as it lands.' });
@@ -91,6 +115,13 @@ if (argv.includes('--dangerously-skip-permissions')) {
   banner(branch);
   say(`> ${title}\r\n`);
   const plans = {
+    'Add a dark-mode toggle to Settings': [
+      ['Read', 'src/settings/SettingsPage.jsx', 'Read 112 lines'],
+      ['Write', 'src/settings/DarkModeToggle.jsx', 'Wrote 38 lines'],
+      ['Update', 'src/styles/theme.css', 'Added 27 lines: [data-theme="dark"] palette'],
+      ['Write', 'test/dark-mode-toggle.test.js', 'Wrote 31 lines'],
+      ['Bash', 'npm test', '121 passed'],
+    ],
     'Add dark mode': [
       ['Read', 'src/styles/theme.css', 'Read 84 lines'],
       ['Update', 'src/styles/theme.css', 'Added 31 lines: dark palette under prefers-color-scheme'],
