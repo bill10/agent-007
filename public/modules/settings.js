@@ -1,7 +1,8 @@
 // The Settings panel behind the gear in the terminal header. "Agents &
 // accounts" shows the server's last scan of installed agent CLIs and their
 // login folders (GET /api/agent-accounts); Refresh rescans (POST). "Telegram"
-// shows the connected chat, with Change.
+// shows the connected chat, with Change. On top, this copy's version and,
+// when npm has a newer one, Update.
 
 import { authHeaders, showLogin, escapeHtml } from './auth.js';
 import { send } from './ws.js';
@@ -65,6 +66,35 @@ export function renderTelegramSettings(state) {
   }
 }
 
+// The version line (GET /api/update, server/self-update.js) and where an
+// update started from it has got to. step: null, 'updating', 'restarting',
+// 'done' or 'failed'.
+const UPDATE_CMD = 'agent007 update';
+export function renderVersion(info, step = null) {
+  const lines = [`<div><span class="settings-version-name">Agent 007</span> ${escapeHtml(info.version)}</div>`];
+  if (step === 'done') {
+    lines.push(`<div class="settings-version-new">Updated to ${escapeHtml(info.version)}. Reload the page to use it.</div>`,
+      '<button type="button" class="settings-refresh" data-update="reload">Reload</button>');
+  } else if (step === 'failed') {
+    const log = info.finished?.log || 'The update stopped without saying why.';
+    lines.push('<div>The update failed:</div>', `<div class="settings-version-error">${escapeHtml(log)}</div>`,
+      `<div>Run it in a terminal instead: <code>${UPDATE_CMD}</code></div>`);
+  } else if (step === 'restarting') {
+    lines.push('<div>Restarting…</div>');
+  } else if (step === 'updating') {
+    const n = info.updating?.waiting;
+    lines.push(`<div>${n ? `Waiting for ${n} busy worker${n === 1 ? '' : 's'}…` : 'Updating…'}</div>`);
+  } else if (info.finished?.code === 0) {
+    lines.push(`<div>${escapeHtml(info.finished.log.split('\n').at(-1) || 'Up to date.')}</div>`);
+  } else if (info.kind === 'npx') {
+    lines.push('<div class="settings-dim">npx runs the latest each start.</div>');
+  } else if (info.latest) {
+    lines.push(`<div class="settings-version-new">Version ${escapeHtml(info.latest)} is available</div>`,
+      `<button type="button" class="settings-refresh" data-update="start" title="Runs ${UPDATE_CMD}: ${info.kind === 'checkout' ? 'git pull' : 'npm install -g'}, then a restart once busy workers finish">Update</button>`);
+  }
+  return lines.join('');
+}
+
 export function setupSettings() {
   const btn = document.getElementById('settings-btn');
   const panel = document.getElementById('settings-panel');
@@ -99,7 +129,74 @@ export function setupSettings() {
     if (show) { place(); load(); }
   };
 
-  btn.onclick = () => open(panel.hidden);
+  // Version and Update. Polled every 2s while an update runs: the server
+  // going away is the restart, and its coming back the end of it.
+  const box = document.getElementById('settings-version');
+  let step = null;
+  let polling = false;
+  async function loadVersion() {
+    let resp;
+    try { resp = await fetch('/api/update', { headers: authHeaders() }); } catch { resp = null; }
+    if (resp?.status === 403) { box.hidden = true; return null; }
+    if (!resp?.ok) return null;
+    const info = await resp.json();
+    box.hidden = false;
+    btn.classList.toggle('has-update', Boolean(info.latest) && info.kind !== 'npx');
+    return info;
+  }
+  const show = (info) => {
+    box.innerHTML = renderVersion(info, step);
+    const start = box.querySelector('[data-update="start"]');
+    if (start) start.onclick = update;
+    const reload = box.querySelector('[data-update="reload"]');
+    if (reload) reload.onclick = () => location.reload();
+  };
+  let last = null;
+  async function refreshVersion() {
+    const info = await loadVersion();
+    if (!info) return;
+    // Started from another window: follow it here too.
+    if (info.updating && !step) step = 'updating';
+    show(last = info);
+    if (step === 'updating') poll();
+  }
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    const before = last?.version;
+    while (step === 'updating' || step === 'restarting') {
+      await new Promise(r => setTimeout(r, 2000));
+      const info = await loadVersion();
+      if (!info) { step = 'restarting'; if (last) show(last); continue; }
+      last = info;
+      if (info.finished) step = info.finished.code === 0 ? null : 'failed';
+      else if (step === 'restarting' || info.version !== before) step = 'done';
+      show(info);
+    }
+    polling = false;
+  }
+  async function update() {
+    step = 'updating';
+    show(last);
+    try {
+      const resp = await fetch('/api/update', { method: 'POST', headers: authHeaders() });
+      if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || `HTTP ${resp.status}`);
+    } catch (err) {
+      step = 'failed';
+      show({ ...last, finished: { code: 1, log: err.message } });
+      return;
+    }
+    poll();
+  }
+  refreshVersion();
+
+  btn.onclick = () => {
+    if (panel.hidden && step !== 'updating' && step !== 'restarting') {
+      if (step === 'failed') step = null;
+      refreshVersion();
+    }
+    open(panel.hidden);
+  };
   refresh.onclick = () => load('POST');
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) { open(false); btn.focus(); } });
   document.addEventListener('mousedown', (e) => { if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) open(false); });

@@ -208,6 +208,19 @@ body {
 .settings-status.in { color: var(--state-waiting); }
 .settings-status.out { color: var(--state-disconnected); }
 .settings-empty { color: var(--text-dim); }
+/* Version and Update, the panel's first section; the gear's dot says one is out. */
+.settings-version { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--border); line-height: 1.4; color: var(--text-muted); }
+.settings-version[hidden] { display: none; }
+.settings-version-name { color: var(--text); font-weight: bold; }
+.settings-version-new { color: var(--accent); }
+.settings-version-error { color: var(--state-disconnected); white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+.settings-version code { color: var(--text); overflow-wrap: anywhere; }
+.settings-version .settings-refresh { margin-top: 6px; }
+#settings-btn { position: relative; }
+#settings-btn.has-update::after {
+  content: ''; position: absolute; top: -1px; right: -1px; width: 7px; height: 7px;
+  border-radius: 50%; background: var(--accent); border: 1px solid var(--bg-panel);
+}
 
 /* Voice input */
 /* Fab geometry is the single source for the pill's placement below AND the

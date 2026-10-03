@@ -556,6 +556,14 @@ describe('auth enforcement (live enable)', () => {
     }
   });
 
+  // Update restarts the server: the owner's call, which nobody has with user accounts on.
+  it('refuses Update to a signed-in user and to another origin', async () => {
+    const auth = { Authorization: `Bearer ${token}` };
+    expect((await fetch(`${baseUrl}/api/update`, { method: 'POST', headers: auth })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/update`, { headers: auth })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/update`, { method: 'POST', headers: { ...auth, Origin: 'https://evil.example' } })).status).toBe(403);
+  });
+
   it('closes a WS handshake without a token (code 4401)', async () => {
     // The server accepts the socket then closes it with 4401 in the connection
     // handler, so the client sees a brief open followed by a 4401 close.
