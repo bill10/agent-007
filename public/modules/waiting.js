@@ -569,6 +569,7 @@ function renderVoicePick() {
   if (!pick) return;
   const voices = englishVoices(window.speechSynthesis?.getVoices?.() || []);
   pick.hidden = voices.length < 2;
+  document.getElementById('chat-voice-box').hidden = pick.hidden;
   const saved = savedVoiceURI();
   const auto = pickVoice(voices, null);
   const key = voices.map(v => v.voiceURI).join('|') + `#${saved}`;
@@ -584,6 +585,14 @@ function renderVoicePick() {
     pick.appendChild(opt);
   }
   pick.value = voices.some(v => v.voiceURI === saved) ? saved : '';
+  document.querySelector('#chat-voice-box .chat-voice-label').textContent = pick.selectedOptions[0]?.textContent || '';
+}
+
+// A password manager or AutoFill can pin its own overlay (the page's
+// address, in tiny type) to a form field. None of these fields is a login.
+function noAutofill(field) {
+  for (const a of ['data-1p-ignore', 'data-lpignore', 'data-bwignore']) field.setAttribute(a, 'true');
+  field.setAttribute('autocomplete', 'off');
 }
 
 function paintReadAloud() {
@@ -637,7 +646,10 @@ function readHead() {
   toggle.id = 'chat-autoread';
   toggle.type = 'button';
   toggle.innerHTML = SPEAKER_SVG;
-  toggle.append(el('span', null, 'Read new messages aloud'), el('span', 'chat-switch'));
+  // "Read aloud" on a phone, so the voice picker fits on the same row.
+  const label = el('span');
+  label.append('Read ', el('span', 'chat-wide', 'new messages '), 'aloud');
+  toggle.append(label, el('span', 'chat-switch'));
   toggle.title = 'Speak each new message from Billion as it arrives, while this tab is open';
   toggle.onclick = () => setAutoRead(!autoReadOn());
   const resume = el('button', 'chat-resume chat-control', 'Resume reading');
@@ -657,7 +669,14 @@ function readHead() {
   pick.setAttribute('aria-label', 'Reading voice');
   pick.hidden = true;
   pick.onchange = () => { setVoiceURI(pick.value); renderVoicePick(); };
-  head.append(toggle, resume, stop, pick);
+  noAutofill(pick);
+  // On a phone the select keeps the 16px iOS needs to not zoom, laid
+  // invisibly over a label in the tab's own type size.
+  const box = el('span', 'chat-voice-box');
+  box.id = 'chat-voice-box';
+  box.hidden = true;
+  box.append(el('span', 'chat-voice-label'), pick);
+  head.append(toggle, resume, stop, box);
   window.speechSynthesis?.addEventListener?.('voiceschanged', renderVoicePick);
   return head;
 }
@@ -709,6 +728,7 @@ function shell() {
     input.id = 'chat-input';
     input.rows = 1;
     input.setAttribute('aria-label', 'Message Billion');
+    noAutofill(input);
     input.oninput = () => { fitInput(input); renderSlashHint(); };
     input.onkeydown = (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -835,7 +855,9 @@ export function renderComposer() {
   }
   const running = billionRunning();
   input.placeholder = !running ? 'Start Billion to send'
-    : target ? `Answer Q${target.n}` : 'Message Billion, or /command to run one';
+    : target ? `Answer Q${target.n}`
+    // A phone's box is too narrow for the hint; typing / still shows how.
+    : window.matchMedia?.(PHONE).matches ? 'Message Billion' : 'Message Billion, or /command to run one';
   document.getElementById('chat-send').disabled = !!sending;
   document.getElementById('chat-send').textContent = sending ? 'Sending' : 'Send';
   renderAttached();
