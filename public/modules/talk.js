@@ -219,8 +219,10 @@ export function talkBar() {
   end.innerHTML = `${HANGUP_SVG}<span>End</span>`;
   end.title = 'End the conversation (Esc)';
   end.setAttribute('aria-label', 'End');
-  const gap = el('span', 'talk-gap');
-  call.append(state, timer, gap, skip, out, mute, end);
+  // The buttons wrap below the state as one group when a narrow phone has no room.
+  const controls = el('div', 'talk-controls');
+  controls.append(skip, out, mute, end);
+  call.append(state, timer, controls);
   bar.append(notes, call);
   queueMicrotask(paint);
   return bar;

@@ -2129,8 +2129,8 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .talk-bar { display: flex; flex-direction: column; gap: var(--chat-gap); font-size: 12px; }
 .talk-bar [hidden] { display: none; }
 .talk-notes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--chat-gap); }
-.talk-call { display: flex; align-items: center; gap: var(--chat-gap); min-height: var(--chat-control-h); }
-.talk-gap { flex: 1; }
+.talk-call { display: flex; flex-wrap: wrap; align-items: center; gap: 4px var(--chat-gap); min-height: var(--chat-control-h); }
+.talk-controls { display: flex; align-items: center; gap: var(--chat-gap); margin-left: auto; }
 .talk-btn {
   display: inline-flex;
   align-items: center;
@@ -2149,7 +2149,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .talk-mute[aria-pressed="true"] { color: var(--state-message); border-color: var(--state-message); }
 .talk-end { color: var(--state-disconnected); border-color: var(--state-disconnected); }
 .talk-end:hover { color: var(--state-disconnected); }
-.talk-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); min-width: 0; }
+.talk-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--text); white-space: nowrap; }
 .talk-state::before { content: ''; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); }
 .talk-timer { color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .talk-bar[data-state="listening"] .talk-state::before { background: var(--state-waiting); animation: talk-pulse 1.6s ease-in-out infinite; }
@@ -2164,8 +2164,8 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .talk-privacy { flex-basis: 100%; color: var(--text-dim); font-size: 11px; }
 @media (max-width: 700px) {
   .talk-bar { font-size: 13px; }
-  .talk-btn { min-height: var(--chat-control-h); padding: 0 8px; }
-  .talk-end span, .talk-mute span { display: none; }
+  .talk-btn { min-height: var(--chat-control-h); min-width: var(--chat-control-h); justify-content: center; padding: 0 8px; }
+  .talk-end span, .talk-mute span, .talk-output span { display: none; }
   .chat-compose-row { gap: 4px; }
   .chat-compose-row .chat-mic { width: 36px; }
   .chat-compose-row .waiting-send { padding-inline: 10px; }
