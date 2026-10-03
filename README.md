@@ -5,9 +5,9 @@
 
 **Manage your coding agents by talking to them, from your phone.**
 
-<img src="docs/phone-call-teaser.gif" width="360" alt="On a call with Billion in its phone tab, the owner says &quot;Add a dark-mode toggle to the settings page&quot;; Billion answers out loud, &quot;Got it, I'll put a card on the board&quot;">
+<img src="docs/phone-call-teaser.gif" width="360" alt="On a call with Billion in its phone tab, the owner says &quot;Hey Billion, add a dark mode toggle to the settings page&quot;; Billion answers out loud, &quot;Got it. I'll put a card on the board&quot;">
 
-*A Talk to Billion call, from the request to the merged PR: [watch the 66s video with sound](https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4). Scripted with stand-in agents and sped up; the voices are text-to-speech (`scripts/demo/phone-call.mjs`).*
+*A Talk to Billion call, from the request to the merged PR: [watch the 76s video with sound](https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4). Sped up. Voices are AI-generated; app screens are real (scripted with stand-in agents, `scripts/demo/phone-call.mjs`). The opening shot was generated with Veo.*
 
 Run your coding agents like a one-person company.
 

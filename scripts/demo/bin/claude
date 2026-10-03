@@ -52,7 +52,7 @@ if (argv.includes('--dangerously-skip-permissions')) {
       // The first turn is the request; the second waits on the merge, and the
       // status lines are what the call says meanwhile.
       if (turns.length === 1) {
-        await call('tell_owner', { text: 'Got it, I\'ll put a card on the board.', reply_to: voice[1] });
+        await call('tell_owner', { text: 'Got it. I\'ll put a card on the board.', reply_to: voice[1] });
         await call('post_job', { title: 'Add a dark-mode toggle to Settings', repo: 'shop', detail: 'A Dark mode switch on the settings page, remembered per browser. Tests for the toggle.' });
         await call('set_status', { text: 'A worker is on it' });
       }
@@ -61,12 +61,12 @@ if (argv.includes('--dangerously-skip-permissions')) {
       const pr = (await call('read_job', { id: card })).match(/pull\/(\d+)/)?.[1];
       await call('set_status', { text: `Reviewing PR ${pr}` });
       await step('Bash', `gh pr diff ${pr}`, 'Diff reads clean, tests pass', Number(process.env.DEMO_PACE_REVIEW || 2500));
-      await call('set_status', { text: 'CI passed' });
+      await call('set_status', { text: 'Tests passed, merging' });
       await sleep(Number(process.env.DEMO_PACE_REVIEW || 2500));
       say(`\x1b[32m●\x1b[39m Bash(gh pr merge ${pr} --squash)`);
       say(`  ${dim(`⎿  ${execFileSync('gh', ['pr', 'merge', pr, '--squash'], { encoding: 'utf8' }).trim()}`)}`);
       await call('set_status', { text: '' });
-      await call('tell_owner', { text: 'Merged. It\'s live after an update.', reply_to: turns.at(-1) });
+      await call('tell_owner', { text: 'Merged. It\'s live after the next update.', reply_to: turns.at(-1) });
     } else if (/^\[Owner via app\] Q\d+:/.test(line)) {
       await call('tell_owner', { text: 'Skipping it. The free tier holds until launch; I will ask again before then.' });
     } else if (line.startsWith('[Owner via app]')) {

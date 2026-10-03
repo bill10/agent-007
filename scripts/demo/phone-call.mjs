@@ -10,6 +10,11 @@
 // (the server's `say`, SAY_VOICE), captured as it played. Captions are burned
 // in, and the video says it is scripted, sped up and text-to-speech.
 //
+// DEMO_MEDIA=<folder> swaps in generated media where its files exist:
+// opening.mp4 (a cold open), owner1.wav and owner2.wav for the owner's lines,
+// billion1-4.wav dubbed over Billion's four lines where the page spoke them.
+// The video then says the voices are AI-generated.
+//
 // Needs macOS (say), Google Chrome, ffmpeg, and playwright:
 //   npm i --no-save playwright
 //   node scripts/demo/phone-call.mjs [out-dir]     (default: a temp folder)
@@ -17,7 +22,7 @@
 // Then docs/phone-call-teaser.gif is copied from out-dir, and the MP4 goes on
 // the latest release: gh release upload <tag> out-dir/phone-call.mp4 --clobber
 import { execFileSync } from 'child_process';
-import { mkdirSync, writeFileSync, statSync } from 'fs';
+import { mkdirSync, writeFileSync, statSync, existsSync } from 'fs';
 import { join } from 'path';
 import { chromium } from 'playwright';
 import { startScratchServer, sleep } from './scratch.mjs';
@@ -25,9 +30,17 @@ import { startScratchServer, sleep } from './scratch.mjs';
 const OWNER_VOICE = process.env.OWNER_VOICE || 'Evan (Enhanced)';
 const BILLION_VOICE = process.env.BILLION_VOICE || 'Ava (Premium)';
 const LINES = {
-  owner1: 'Add a dark-mode toggle to the settings page.',
+  owner1: 'Hey Billion, add a dark mode toggle to the settings page.',
   owner2: 'Thanks. Tell me when it\'s merged.',
 };
+const media = (name) => (process.env.DEMO_MEDIA && existsSync(join(process.env.DEMO_MEDIA, name)) ? join(process.env.DEMO_MEDIA, name) : null);
+// Billion's lines as the page spoke them → the generated take and its caption.
+const DUB = [
+  [/^Got it/, 'billion1.wav', 'Got it. I\'ll put a card on the board.'],
+  [/^Reviewing/, 'billion2.wav', 'Reviewing PR 42.'],
+  [/^Tests passed/, 'billion3.wav', 'Tests passed. Merging.'],
+  [/^Merged/, 'billion4.wav', 'Merged. It\'s live after the next update.'],
+];
 
 const { home, url } = await startScratchServer({
   port: 7117,
@@ -43,8 +56,8 @@ const duration = (f) => Number(execFileSync('ffprobe', ['-v', 'error', '-show_en
 // The owner's voice, made first so its length is known when it is "spoken".
 const ownerClips = {};
 for (const [key, text] of Object.entries(LINES)) {
-  const file = join(out, `${key}.aiff`);
-  execFileSync('say', ['-v', OWNER_VOICE, '-o', file, text]);
+  let file = media(`${key}.wav`);
+  if (!file) execFileSync('say', ['-v', OWNER_VOICE, '-o', (file = join(out, `${key}.aiff`)), text]);
   ownerClips[key] = { file, ms: duration(file) * 1000 };
 }
 
@@ -242,7 +255,7 @@ await ownerSays('owner2');
 await sleep(3500);
 cut('B');
 await cardIn('review');
-const ci = await heard(/CI passed/);
+const ci = await heard(/Tests passed/);
 cut('A', ci - 300);
 await heard(/Merged/);
 // 5. The card files away as merged. Its worker's tab closing takes the second
@@ -262,12 +275,22 @@ const [videoA, videoB] = [await filmA.stop(end), await filmB.stop(end)];
 await Promise.all([ctxA.close(), ctxB.close()]);
 
 // The captions: the owner's lines and what Billion said, as long as each was heard.
-for (const c of clips) captions.push({ who: 'Billion', text: c.text, at: c.at, ms: c.end - c.at, file: c.file });
+// A generated take plays in full unless the page cut that line off.
+for (const c of clips) {
+  const [, take, line] = DUB.find(([re, f]) => re.test(c.text) && media(f)) || [];
+  const heardMs = c.end - c.at;
+  const cutOff = heardMs < duration(c.file) * 1000 - 300;
+  captions.push(take
+    ? { who: 'Billion', text: line, at: c.at, file: media(take), ms: cutOff ? heardMs : undefined }
+    : { who: 'Billion', text: c.text, at: c.at, ms: heardMs, file: c.file });
+}
 captions.sort((a, b) => a.at - b.at);
 captions.forEach((c, i) => {
-  c.ms ??= duration(c.file) * 1000;
-  c.until = Math.min(c.at + c.ms + 700, captions[i + 1]?.at ?? Infinity);
+  const next = captions[i + 1]?.at ?? Infinity;
+  c.ms = Math.min(c.ms ?? duration(c.file) * 1000, next - c.at);
+  c.until = Math.min(c.at + c.ms + 700, next);
 });
+const dubbed = captions.some(c => c.file.startsWith(process.env.DEMO_MEDIA || '\0'));
 
 // --- Stills: the frame around the phone, the captions, the end card ---
 
@@ -280,11 +303,18 @@ async function render(file, html, size = { width: W, height: H }) {
   await still.setContent(`<body style="margin:0;${FONT}">${html}</body>`);
   await still.screenshot({ path: file, omitBackground: true });
 }
-const NOTE = 'Scripted demo with stand-in agents · sped up · voices are text-to-speech';
+const NOTE = dubbed
+  ? 'Sped up. Voices are AI-generated; app screens are real.<br>Scripted demo with stand-in agents.'
+  : 'Scripted demo with stand-in agents · sped up · voices are text-to-speech';
+const opening = media('opening.mp4');
+if (opening) {
+  await render(join(out, 'opening.png'), `<div style="position:absolute;bottom:90px;width:100%;text-align:center;color:#fff;font-size:28px;
+    text-shadow:0 1px 6px #000">Opening shot generated with Veo</div>`);
+}
 await render(join(out, 'frame.png'), `
   <div style="position:absolute;left:${screen.x}px;top:${screen.y}px;width:${screen.width}px;height:${screen.height}px;border-radius:48px;
     box-shadow:0 0 0 3px #2a2f37, 0 0 0 3000px #0b0d10"></div>
-  <div style="position:absolute;top:58px;width:100%;text-align:center;color:#8b93a1;font-size:26px">${NOTE}</div>`);
+  <div style="position:absolute;top:40px;width:100%;text-align:center;color:#8b93a1;font-size:26px;line-height:1.4">${NOTE}</div>`);
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 for (const [i, c] of captions.entries()) {
   c.png = join(out, `caption-${i}.png`);
@@ -328,7 +358,7 @@ captions.forEach((c, i) => {
   filters.push(`[${last}][${n}:v]overlay=0:${screen.y + screen.height}:enable='between(t,${s(c.at - first)},${s(c.until - first)})'[c${i}]`);
   last = `c${i}`;
 });
-filters.push(`[3:v]fps=30,format=yuv420p[endv]`, `[${last}]format=yuv420p[mainv]`, `[mainv][endv]concat=n=2:v=1:a=0[v]`);
+filters.push(`[3:v]fps=30,format=yuv420p,setsar=1[endv]`, `[${last}]format=yuv420p,setsar=1[mainv]`, `anullsrc=r=48000:cl=stereo,atrim=0:${END_SECONDS}[enda]`);
 // The voices, each where it was spoken.
 const audioStart = 4 + captions.length;
 captions.forEach((c, i) => {
@@ -336,7 +366,20 @@ captions.forEach((c, i) => {
   const delay = Math.max(0, Math.round(c.at - first));
   filters.push(`[${audioStart + i}:a]atrim=0:${s(c.ms)},aresample=48000,aformat=channel_layouts=stereo,adelay=${delay}|${delay}[a${i}]`);
 });
-filters.push(`${captions.map((_, i) => `[a${i}]`).join('')}amix=inputs=${captions.length}:normalize=0,apad,atrim=0:${s(total + END_SECONDS * 1000)}[a]`);
+filters.push(`${captions.map((_, i) => `[a${i}]`).join('')}amix=inputs=${captions.length}:normalize=0,apad,atrim=0:${s(total)}[maina]`);
+// The cold open, full-bleed: a portrait crop on the walker (the camera tracks her), its street sound kept.
+let OPEN_MS = 0;
+const parts = ['[mainv][maina]', '[endv][enda]'];
+if (opening) {
+  OPEN_MS = Math.round(duration(opening) * 1000);
+  const n = audioStart + captions.length;
+  inputs.push('-i', opening, ...looped(join(out, 'opening.png'), OPEN_MS / 1000));
+  filters.push(`[${n}:v]crop=ih*${W}/${H}:ih:'min(iw-ow,iw*0.28)':0,scale=${W}:${H},fps=30,format=yuv420p,setsar=1[ov]`,
+    `[ov][${n + 1}:v]overlay=0:0:shortest=1[openv]`,
+    `[${n}:a]aresample=48000,aformat=channel_layouts=stereo,volume=0.8[opena]`);
+  parts.unshift('[openv][opena]');
+}
+filters.push(`${parts.join('')}concat=n=${parts.length}:v=1:a=1[v][a]`);
 const mp4 = join(out, 'phone-call.mp4');
 ff(...inputs, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]',
   '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', mp4);
@@ -344,9 +387,9 @@ ff(...inputs, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]'
 // The README teaser: the request and Billion's answer, muted, captions burned in.
 const ask = captions.find(c => c.who === 'You');
 const answer = captions.find(c => c.at > ask.at && c.who === 'Billion' && /Got it/.test(c.text));
-const teaserFrom = ask.at - first - 400;
+const teaserFrom = OPEN_MS + ask.at - first - 400;
 const gif = join(out, 'phone-call-teaser.gif');
-ff('-ss', s(teaserFrom), '-t', s(Math.min(8000, answer.until - first + 300 - teaserFrom)), '-i', mp4, '-vf',
+ff('-ss', s(teaserFrom), '-t', s(Math.min(8000, OPEN_MS + answer.until - first + 300 - teaserFrom)), '-i', mp4, '-vf',
   'fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle', gif);
 console.log(`cuts: ${cuts.map(c => `${c.src}@${s(c.at - first)}`).join(' ')}`);
 for (const f of [mp4, gif]) console.log(`${f}  ${(statSync(f).size / 1e6).toFixed(1)} MB, ${duration(f).toFixed(1)} s`);
