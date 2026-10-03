@@ -267,6 +267,18 @@ describe('a reply\'s audio', () => {
     expect(tools.said).toEqual(['Reading and the progress box code', 'Running the tests']);
     _resetStatus();
   });
+
+  it('a transcript that is the progress phrase just spoken is dropped; a real sentence is not', async () => {
+    _resetStatus();
+    setBillionStatus('Running the tests');
+    const t = Date.now();
+    await voiceAudio('status', 0, { env: ENV, platform: 'darwin', now: t });
+    expect(await voiceSays('Running the tests.', { utterance: id(30), env: ENV, now: t + 1000 })).toEqual({ ok: true, echo: true });
+    expect(await voiceSays('the tests', { utterance: id(31), env: ENV, now: t + 1000 })).toEqual({ ok: true, echo: true });
+    expect((await voiceSays('Stop and merge the pull request', { utterance: id(32), env: ENV, now: t + 1000 })).id).toEqual(expect.any(String));
+    expect((await voiceSays('Running the tests', { utterance: id(33), env: ENV, now: t + 11000 })).id).toEqual(expect.any(String));
+    _resetStatus();
+  });
 });
 
 describe('the routes', () => {
