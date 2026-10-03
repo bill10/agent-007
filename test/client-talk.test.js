@@ -7,7 +7,7 @@
 // detector, fetch and the audio element are stand-ins.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  encodeWav, shouldSpeak, talkState, progressWait, talkStatus, PROGRESS_QUIET_MS, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, _resetTalk, _talkInternals,
+  encodeWav, shouldSpeak, talkState, progressWait, talkStatus, PROGRESS_QUIET_MS, talkBar, talkButton, startTalk, endTalk, talkHeard, setMuted, talkOn, earpieceId, _resetTalk, _talkInternals,
 } from '../public/modules/talk.js';
 import { setChatMessages, setBillionStatus } from '../public/modules/state.js';
 
@@ -23,6 +23,7 @@ class FakeAudio {
   set src(url) { this._src = url; this.blobText = blobs.get(url); }
   get src() { return this._src; }
   end() { this.onended?.(); }
+  setSinkId(id) { this.sinkId = id; return Promise.resolve(); }
 }
 const blobs = new Map();
 let blobN = 0;
@@ -71,6 +72,8 @@ beforeEach(() => {
 afterEach(() => {
   _resetTalk();
   vi.unstubAllGlobals();
+  delete navigator.audioSession;
+  try { localStorage.clear(); } catch {}
 });
 
 // The composer as waiting.js builds it: the bar above the row, the phone button in it.
@@ -373,5 +376,97 @@ describe('progress updates while Billion works', () => {
     await wait(300);
     expect(said()).toHaveLength(4);
     expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
+  });
+});
+
+describe('speaker or earpiece (iPhone)', () => {
+  const OUTPUTS = [
+    { kind: 'audioinput', label: 'iPhone Microphone', deviceId: 'mic' },
+    { kind: 'audiooutput', label: 'Speaker', deviceId: 'spk' },
+    { kind: 'audiooutput', label: 'iPhone', deviceId: 'rcv' },
+  ];
+  const outButton = () => bar().querySelector('.talk-output');
+  function iPhone() {
+    Object.defineProperty(navigator, 'audioSession', { value: { type: 'auto' }, configurable: true });
+    vi.stubGlobal('matchMedia', (q) => ({ matches: q === '(pointer: coarse)' }));
+    navigator.mediaDevices.enumerateDevices = vi.fn(async () => OUTPUTS);
+  }
+
+  it('earpieceId picks the receiver, never the loudspeaker or a mic', () => {
+    expect(earpieceId(OUTPUTS)).toBe('rcv');
+    expect(earpieceId([{ kind: 'audiooutput', label: 'Receiver', deviceId: 'r' }])).toBe('r');
+    expect(earpieceId(OUTPUTS.slice(0, 2))).toBe('');
+  });
+
+  it('a desktop browser shows no output button', async () => {
+    await talking();
+    expect(outButton().hidden).toBe(true);
+  });
+
+  it('defaults to Speaker, holds play-and-record for the call, and remembers Earpiece', async () => {
+    iPhone();
+    await talking();
+    expect(outButton().hidden).toBe(false);
+    expect(outButton().textContent).toBe('Speaker');
+    expect(navigator.audioSession.type).toBe('play-and-record');
+    expect(theAudio.sinkId).toBe('');
+    outButton().click();
+    await flush();
+    expect(outButton().textContent).toBe('Earpiece');
+    expect(theAudio.sinkId).toBe('rcv');
+    expect(localStorage.getItem('agent007-talk-output')).toBe('earpiece');
+    endTalk();
+    expect(navigator.audioSession.type).toBe('auto');
+    await talking();
+    await flush();
+    expect(outButton().textContent).toBe('Earpiece');
+    expect(theAudio.sinkId).toBe('rcv');
+    outButton().click();
+    await flush();
+    expect(theAudio.sinkId).toBe('');
+    expect(localStorage.getItem('agent007-talk-output')).toBe('speaker');
+  });
+
+  it('says so when the earpiece cannot be picked', async () => {
+    iPhone();
+    navigator.mediaDevices.enumerateDevices = vi.fn(async () => OUTPUTS.slice(0, 2));
+    localStorage.setItem('agent007-talk-output', 'earpiece');
+    await talking();
+    await flush();
+    expect(bar().querySelector('.talk-detail').textContent).toMatch(/does not let the page pick the earpiece/);
+  });
+});
+
+describe('the mic stays open for the call', () => {
+  const fakeStream = () => {
+    const track = { enabled: true, readyState: 'live', stop: vi.fn(function () { this.readyState = 'ended'; }) };
+    return { track, getTracks: () => [track] };
+  };
+
+  it('mute disables the track instead of stopping it; unmute re-enables the same stream', async () => {
+    const s = fakeStream();
+    navigator.mediaDevices.getUserMedia = vi.fn(async () => s);
+    await talking();
+    expect(await vadOpts.getStream()).toBe(s);
+    await vadOpts.pauseStream(s);
+    expect(s.track.enabled).toBe(false);
+    expect(s.track.stop).not.toHaveBeenCalled();
+    expect(await vadOpts.resumeStream(s)).toBe(s);
+    expect(s.track.enabled).toBe(true);
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('End stops the track, even while muted, and a stopped track is reopened on resume', async () => {
+    const s = fakeStream();
+    navigator.mediaDevices.getUserMedia = vi.fn(async () => s);
+    await talking();
+    await vadOpts.getStream();
+    setMuted(true);
+    await vadOpts.pauseStream(s);
+    endTalk();
+    expect(s.track.stop).toHaveBeenCalled();
+    const fresh = fakeStream();
+    navigator.mediaDevices.getUserMedia = vi.fn(async () => fresh);
+    expect(await vadOpts.resumeStream(s)).toBe(fresh);
   });
 });

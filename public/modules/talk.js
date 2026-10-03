@@ -22,6 +22,7 @@ const HEADERS = { 'X-Agent007-Talk': '1' };
 const SETUP_DOCS = 'https://github.com/bill10/agent-007/blob/main/docs/BILLION.md#voice';
 const STORE_KEY = 'agent007-talk';              // sessionStorage: survives the reload a reconnect does
 const CONSENT_KEY = 'agent007-talk-browser-stt'; // localStorage: the one-time notice was accepted
+const OUTPUT_KEY = 'agent007-talk-output';       // localStorage: 'speaker' or 'earpiece' (iPhone)
 export const IDLE_END_MS = 10 * 60 * 1000;
 // Progress updates while a turn waits: the first after a short quiet, then
 // each new status line as soon as nothing else is playing, never the same twice.
@@ -34,6 +35,12 @@ const SPEECH_THRESHOLD = 0.5;
 const SPEECH_THRESHOLD_PLAYING = 0.8;
 
 // --- Pure helpers, exported for tests ---
+
+// The receiver among the outputs iOS lists while the mic is open (the
+// loudspeaker is the default, chosen with an empty id).
+// ponytail: matched by label; switch to a device-type field if WebKit ever adds one.
+export const earpieceId = (devices) =>
+  devices.find(d => d.kind === 'audiooutput' && /receiver|earpiece|iphone/i.test(d.label) && !/speaker/i.test(d.label))?.deviceId || '';
 
 // 16 kHz float samples → a 16-bit mono WAV file, what whisper.cpp reads.
 export function encodeWav(samples, rate = SAMPLE_RATE) {
@@ -112,6 +119,8 @@ let hearing = false;      // the detector hears the owner speaking now: no updat
 let note = '';
 let noteLink = false;
 let audioEl = null;
+let micStream = null;     // the detector's mic: open for the whole call, muted by disabling it
+let output = 'speaker';   // where replies play on an iPhone: 'speaker' or 'earpiece'
 let audioCtx = null;      // the detector's, made inside the tap so iOS lets it run
 let silentUrl = null;     // a silent clip, played inside the tap to unlock audioEl
 let startGen = 0;         // bumped by every start and End: a start that awaited past one gives up
@@ -169,6 +178,8 @@ const PHONE_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" s
 const MIC_SVG = '<svg width="16" height="16" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" aria-hidden="true"><rect x="5" y="1.5" width="4" height="6.5" rx="2"/><path d="M2.8 6.5a4.2 4.2 0 0 0 8.4 0"/><line x1="7" y1="10.7" x2="7" y2="12.5"/>';
 const MIC_ICON = `${MIC_SVG}</svg>`;
 const MIC_OFF_ICON = `${MIC_SVG}<line x1="1.5" y1="1.5" x2="12.5" y2="12.5"/></svg>`;
+// A loudspeaker, for the iPhone's output button.
+const SPEAKER_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 6h2.5L8 3v10L4.5 10H2z"/><path d="M10.5 5.5a3.5 3.5 0 0 1 0 5M12.5 3.5a6.3 6.3 0 0 1 0 9"/></svg>';
 // The same handset turned down, for End.
 const HANGUP_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 9.5c0-1 1-2.100 6.500-2.100s6.500 1.100 6.500 2.100v1.200a.8.8 0 0 1-.9.8l-2.300-.4a.8.8 0 0 1-.7-.8V8.900a9 9 0 0 0-4.200 0v1.400a.8.8 0 0 1-.7.8l-2.300.4a.8.8 0 0 1-.9-.8z"/></svg>';
 
@@ -203,12 +214,13 @@ export function talkBar() {
   timer.setAttribute('role', 'timer');
   const skip = button('talk-skip', 'Interrupt', () => interrupt());
   const mute = button('talk-mute', '', () => setMuted(!muted));
+  const out = button('talk-output', '', () => setOutput(output === 'speaker' ? 'earpiece' : 'speaker'));
   const end = button('talk-end', '', () => endTalk());
   end.innerHTML = `${HANGUP_SVG}<span>End</span>`;
   end.title = 'End the conversation (Esc)';
   end.setAttribute('aria-label', 'End');
   const gap = el('span', 'talk-gap');
-  call.append(state, timer, gap, skip, mute, end);
+  call.append(state, timer, gap, skip, out, mute, end);
   bar.append(notes, call);
   queueMicrotask(paint);
   return bar;
@@ -265,6 +277,12 @@ function paint() {
   mute.lastChild.textContent = label;
   mute.setAttribute('aria-label', label);
   mute.setAttribute('aria-pressed', String(muted));
+  const out = q('.talk-output');
+  out.hidden = starting || !routable();
+  const speaker = output === 'speaker';
+  out.innerHTML = `${speaker ? SPEAKER_SVG : PHONE_SVG}<span>${speaker ? 'Speaker' : 'Earpiece'}</span>`;
+  out.title = speaker ? 'Replies play on the loudspeaker; tap for the earpiece' : 'Replies play on the earpiece; tap for the loudspeaker';
+  out.setAttribute('aria-label', `Output: ${speaker ? 'Speaker' : 'Earpiece'}`);
   const privacy = q('.talk-privacy');
   privacy.textContent = !on ? '' : consent
     ? 'whisper.cpp is not set up on the computer running Agent 007, so this browser\'s own speech recognition would hear you. It may send your audio to the browser\'s maker (Chrome: Google).'
@@ -320,6 +338,8 @@ export async function startTalk() {
   resumable = false;
   muted = false;
   hidden = document.hidden;
+  try { output = localStorage.getItem(OUTPUT_KEY) === 'earpiece' ? 'earpiece' : 'speaker'; } catch {}
+  if (routable()) try { navigator.audioSession.type = 'play-and-record'; } catch {}
   save();
   paint();
   let setup;
@@ -336,6 +356,7 @@ export async function startTalk() {
       mode = 'whisper';
       starting = false;
       if (tts === 'browser') note = `Replies are spoken by this browser: ${setup.ttsMissing}.`;
+      applyOutput();
       return ready();
     } catch (err) {
       console.warn('[talk] voice detector failed:', err);
@@ -343,6 +364,8 @@ export async function startTalk() {
       const v = vad;
       vad = null;
       v?.destroy?.().catch?.(() => {});
+      micStream?.getTracks().forEach(t => t.stop());
+      micStream = null;
       if (/NotAllowed|Permission|denied/i.test(`${err?.name} ${err?.message}`)) return failStart('Microphone access denied — allow it in your browser settings, then tap Talk to Billion again.');
       if (!recognitionCtor()) return failStart('The voice detector could not start in this browser.');
     }
@@ -380,6 +403,9 @@ export function endTalk({ keepNote = false, notice } = {}) {
   const v = vad;
   vad = null;
   v?.destroy?.().catch?.(() => {});
+  micStream?.getTracks().forEach(t => t.stop());
+  micStream = null;
+  if (routable()) try { navigator.audioSession.type = 'auto'; } catch {}
   const ctx = audioCtx;
   audioCtx = null;
   ctx?.close().catch(() => {});
@@ -410,6 +436,40 @@ function unlockAudio() {
   } catch {}
 }
 
+// --- Where replies play (iPhone) ---
+
+// iPhone Safari (and iPad) only: the Audio Session API is its tell. Desktop
+// browsers have one output here, and Android Chrome plays a call on the
+// loudspeaker with no way for a page to pick the earpiece.
+const routable = () => typeof navigator !== 'undefined' && 'audioSession' in navigator && !!window.matchMedia?.('(pointer: coarse)').matches;
+
+// iOS routes by the audio session. While the mic is open it is
+// play-and-record, which WebKit sends to the loudspeaker unless a page chose
+// the receiver (setSinkId with the receiver's id); when the mic stops it
+// falls back, so the route used to flip mid-call. The session type is pinned
+// for the call, the mic stays open (mute disables it), and the choice is set
+// on the one audio element replies play through. The browser's own voice
+// (speechSynthesis) cannot be routed.
+async function applyOutput() {
+  if (!on || !routable()) return;
+  try { navigator.audioSession.type = 'play-and-record'; } catch {}
+  let id = '';
+  if (output === 'earpiece') {
+    const devices = await navigator.mediaDevices.enumerateDevices?.().catch(() => []) || [];
+    id = earpieceId(devices);
+    if (!id || !audioEl?.setSinkId) return setNote('This browser does not let the page pick the earpiece; replies play on the speaker.');
+  }
+  await audioEl?.setSinkId?.(id).catch(err => console.warn('[talk] output not set', err));
+}
+
+export function setOutput(value) {
+  output = value;
+  try { localStorage.setItem(OUTPUT_KEY, value); } catch {}
+  if (note.startsWith('This browser does not let the page pick')) note = '';
+  applyOutput();
+  paint();
+}
+
 function armIdle() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => { if (on) endTalk({ notice: 'Talk ended — no speech for 10 minutes.' }); }, IDLE_END_MS);
@@ -429,10 +489,27 @@ function loadScript(src) {
 }
 
 // current: false once End (or another start) came while this one awaited.
+const MIC = { channelCount: 1, echoCancellation: true, autoGainControl: true, noiseSuppression: true };
 async function startVad(current) {
   if (!window.ort) await loadScript('/vendor/ort/ort.wasm.min.js');
   if (!window.vad) await loadScript('/vendor/vad/bundle.min.js');
+  let self = null;
   const v = await window.vad.MicVAD.new({
+    getStream: async () => (micStream = await navigator.mediaDevices.getUserMedia({ audio: MIC })),
+    // Mute only disables the track: stopping it would end iOS's
+    // play-and-record session and move the sound to another speaker
+    // mid-call. A hidden tab, End or a detector no longer ours stops it.
+    pauseStream: async (stream) => {
+      const keep = on && !hidden && vad === self;
+      for (const t of stream.getTracks()) { if (keep) t.enabled = false; else t.stop(); }
+    },
+    resumeStream: async (stream) => {
+      if (stream.getTracks().some(t => t.readyState === 'live')) {
+        for (const t of stream.getTracks()) t.enabled = true;
+        return stream;
+      }
+      return (micStream = await navigator.mediaDevices.getUserMedia({ audio: MIC }));
+    },
     model: 'v5',
     baseAssetPath: '/vendor/vad/',
     onnxWASMBasePath: '/vendor/ort/',
@@ -462,6 +539,7 @@ async function startVad(current) {
       sendAudio(audio);
     },
   });
+  self = v;
   if (!current()) { v.destroy().catch(() => {}); return; }
   vad = v;
   if (!muted && !hidden) await v.start();
@@ -477,6 +555,8 @@ function startMic() {
 
 function stopMic() {
   hearing = false;
+  // A muted mic is only disabled; a hidden tab closes it (start opens it again).
+  if (hidden) micStream?.getTracks().forEach(t => t.stop());
   if (mode === 'whisper') vad?.pause().catch(() => {});
   else stopRecognition();
 }
@@ -493,6 +573,7 @@ export function setMuted(value) {
 function beginBrowserRecognition() {
   note = '';
   noteLink = false;
+  applyOutput();
   ready();
 }
 

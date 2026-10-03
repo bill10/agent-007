@@ -1083,6 +1083,12 @@ working on it." after 20 seconds of nothing else to say), **Speaking**, **Muted*
 the transcript: your turns show as "(voice)" bubbles, Billion's replies as
 usual.
 
+On an iPhone the bar also has **Speaker** / **Earpiece**: where replies play
+for the whole call, remembered by that browser (Speaker by default). Mute
+silences the mic without closing it, so iOS no longer moves the sound between
+the loudspeaker and the earpiece mid-call. The browser's own voice (when the
+computer has no `say`) cannot be routed and goes where iOS sends it.
+
 - **Audio stays on this machine**: the end of each utterance is found in the
   browser by a small voice detector (Silero VAD, served by Agent 007 itself),
   the audio is transcribed on the computer running Agent 007 by whisper.cpp,
