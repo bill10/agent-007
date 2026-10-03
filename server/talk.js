@@ -13,7 +13,7 @@
 
 import { whisperSetup, transcribe, speechUnavailable, synthesize, MAX_NOTE_SECONDS } from './voice.js';
 import { chatMessages, ownerSays } from './owner.js';
-import { plainForSpeech, chunkForSpeech, progressPhrase } from '../public/modules/readaloud.js';
+import { plainForSpeech, chunkForSpeech, progressSpeech } from '../public/modules/readaloud.js';
 import { statusPayload } from './billion-status.js';
 
 // The page sends 16 kHz 16-bit mono WAV: Telegram's five minutes of it.
@@ -144,7 +144,7 @@ function cached(key, make) {
 // { status, error }. Reply id
 // 'status' is a short progress update made from Billion's status line now.
 export async function voiceAudio(id, index, { env = process.env, platform = process.platform, now = Date.now() } = {}) {
-  const phrase = id === 'status' ? progressPhrase(statusPayload(now)) : '';
+  const phrase = id === 'status' ? progressSpeech(statusPayload(now)) : '';
   const pieces = id === 'status' ? (phrase ? [phrase] : []) : speechPieces(voiceReply(id)?.text ?? '');
   if (!pieces.length) return { status: 404, error: 'No such reply.' };
   if (!(Number.isInteger(index) && index >= 0 && index < pieces.length)) return { status: 404, error: 'No such piece.' };

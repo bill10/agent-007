@@ -16,7 +16,7 @@
 // to the browser's maker; without `say`, the browser's speechSynthesis.
 import { chatMessages, billionStatus } from './state.js';
 import { stopVoice } from './voice.js';
-import { stopReading, plainForSpeech, chunkForSpeech, pickVoice, progressPhrase } from './readaloud.js';
+import { stopReading, plainForSpeech, chunkForSpeech, pickVoice, progressPhrase, progressSpeech } from './readaloud.js';
 
 const HEADERS = { 'X-Agent007-Talk': '1' };
 const SETUP_DOCS = 'https://github.com/bill10/agent-007/blob/main/docs/BILLION.md#voice';
@@ -656,7 +656,7 @@ function afterSpeech() {
 function sayProgress() {
   clearTimeout(progressTimer);
   if (!on || !thinkingFor() || hidden) return;
-  const phrase = progressPhrase(billionStatus);
+  const phrase = progressSpeech(billionStatus);
   const wait = progressWait(phrase, progress, Date.now());
   if (wait === null) return;
   if (wait > 0 || playing || uploads || hearing) {

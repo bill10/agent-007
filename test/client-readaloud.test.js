@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   plainForSpeech, speakableText, chunkForSpeech, pickVoice, englishVoices,
   toggleSpeak, readNew, stopReading, setAutoRead, resumeReading, autoReadOn,
-  needsResume, speakingMessage, queuedCount, _resetReadAloud, progressPhrase,
+  needsResume, speakingMessage, queuedCount, _resetReadAloud, progressPhrase, progressSpeech, progressHeading,
 } from '../public/modules/readaloud.js';
 
 describe('plainForSpeech', () => {
@@ -224,5 +224,15 @@ describe('the speaker', () => {
     readNew('m1', 'First.');
     stopReading();
     expect([speakingMessage(), queuedCount()]).toEqual([null, 0]);
+  });
+});
+
+describe('progressSpeech', () => {
+  it('says the status line, else the box heading of the current request, else nothing', () => {
+    expect(progressSpeech({ text: 'Drafting the reply', working: true, currentRequest: 'a' })).toBe('Drafting the reply');
+    expect(progressSpeech({ text: '', working: true, currentRequest: 'a' })).toBe('Working on your message');
+    expect(progressSpeech({ text: '', working: false, currentRequest: 'a' })).toBe('Starting on your message');
+    expect(progressSpeech({ text: '', working: true, currentRequest: null })).toBe('');
+    expect(progressHeading({ working: true }, false)).toBe('Answering your earlier message first…');
   });
 });

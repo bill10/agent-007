@@ -336,4 +336,42 @@ describe('progress updates while Billion works', () => {
     expect(said()).toHaveLength(3);
     expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
   });
+
+  it('speaks the box heading when there is no status line; a status line wins; each heading once', async () => {
+    await talking();
+    routes.audio = (id, i) => response(`${id}#${i}`, { headers: { 'X-Pieces': '1' } });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const heading = (working, text = '') => {
+      const s = { type: 'billion-status', text, working, currentRequest: 'm1', progress: { m1: [] } };
+      setBillionStatus(s);
+      talkStatus(s);
+    };
+    heading(false);
+    vadOpts.onSpeechEnd(new Float32Array(1600));
+    await wait(PROGRESS_QUIET_MS - 100);
+    expect(said()).toEqual([]);
+    await wait(100);
+    expect(said()).toEqual(['status#0']);
+    theAudio.end();
+    await wait(0);
+
+    heading(true);                                // "Starting…" -> "Working…"
+    await wait(300);
+    expect(said()).toHaveLength(2);
+    theAudio.end();
+    await wait(0);
+    heading(true);
+    await wait(5000);
+    expect(said()).toHaveLength(2);
+
+    heading(true, 'Reading the talk code');       // a status line wins
+    await wait(300);
+    expect(said()).toHaveLength(3);
+    theAudio.end();
+    await wait(0);
+    heading(true);                                // cleared: the heading again
+    await wait(300);
+    expect(said()).toHaveLength(4);
+    expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
+  });
 });

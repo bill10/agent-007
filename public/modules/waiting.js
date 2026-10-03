@@ -22,6 +22,7 @@ import {
   autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
   englishVoices, pickVoice, savedVoiceURI, setVoiceURI,
 } from './readaloud.js';
+import { progressHeading } from './readaloud.js';
 import { talkBar, talkButton, talkHeard, talkOn, endTalk } from './talk.js';
 
 const errors = new Map();   // question id -> { error, status }: why the last tap did not go through
@@ -339,7 +340,7 @@ function progressBox(m, first) {
   box.setAttribute('role', 'status');
   box.setAttribute('aria-live', 'polite');
   box.classList.toggle('active', first && !!s?.working);
-  box.append(el('p', 'chat-progress-head', first && s?.working ? 'Working on your message…' : first ? 'Starting on your message…' : 'Answering your earlier message first…'));
+  box.append(el('p', 'chat-progress-head', progressHeading(s, first)));
   const lines = (s?.progress?.[m.id] || m.workDetails || []).filter(line => typeof line === 'string' && line.trim());
   const list = el('ul', 'chat-progress-steps');
   for (const line of lines.length ? lines : [first && s?.working ? 'Working…' : 'Waiting to start…']) list.append(el('li', null, line));
