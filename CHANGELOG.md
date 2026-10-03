@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.53.3.0] - 2026-10-03
+
+### Fixed
+
+- **Talk no longer sends its own spoken progress lines as your words.** On speakers, the mic could pick up "Working on your message" and Billion received it as a voice turn. The server now drops a transcript that matches a progress phrase it handed the page in the last 10 seconds.
+
 ## [0.53.2.0] - 2026-10-03
 
 ### Fixed
