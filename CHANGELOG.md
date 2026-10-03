@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.53.1.0] - 2026-10-03
+
+### Changed
+
+- **Talk to Billion now speaks the progress box heading when Billion has not set a status line.** "Working on your message" or "Starting on your message" is said under the same rules as status updates (first after 0.8 s, newest only, never twice, never over you); a status line still wins.
+
 ## [0.53.0.0] - 2026-10-03
 
 ### Added
