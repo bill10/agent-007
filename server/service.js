@@ -332,7 +332,7 @@ async function install(ctx, { 'dry-run': dryRun } = {}) {
   const up = await waitForNewServer(ctx, null, 20_000);
   ctx.log(up ? `Running at http://localhost:${up.port} (pid ${up.pid}).` : `Not answering yet; see ${ctx.cmd('logs')}.`);
   // No old .env had ALLOWED_ORIGINS, and tailscale serve needs it: say the line to add.
-  for (const l of await ctx.remoteCheck().catch(() => [])) if (l.status === 'fail') ctx.err(`! ${l.text}.\n  ${l.fix}.`);
+  for (const l of await ctx.remoteCheck(ctx.port).catch(() => [])) if (l.status === 'fail') ctx.err(`! ${l.text}.\n  ${l.fix}.`);
   ctx.log(`Log: ${tilde(def.log)}\nCheck on it with ${ctx.cmd('status')}; remove it with ${ctx.cmd('uninstall')}.`);
   return 0;
 }
@@ -562,9 +562,9 @@ export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent0
       return r.stdout.match(/^n(.+)$/m)?.[1] || null;
     },
     // doctor's Remote access lines for this port, as the just-installed service reads its settings.
-    remoteCheck: async () => {
+    remoteCheck: async (port) => {
       const { checkRemote, defaultProbes } = await import('./doctor.js');
-      return checkRemote({ ...defaultProbes({ env: launchEnv, installCommand: cmd('install') }), port: Number(process.env.PORT || 7007) });
+      return checkRemote({ ...defaultProbes({ env: launchEnv, installCommand: cmd('install') }), port });
     },
     callServer,
     version: () => readFileSync(join(PKG_ROOT, 'VERSION'), 'utf8').trim(),
