@@ -4,6 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { setupRemote, addOrigin } from '../server/remote-setup.js';
 import { tailscaleBin, serveTargets, MAC_APP_CLI } from '../server/tailscale.js';
+import { originHost } from '../server/state.js';
 import { runCommand } from '../server/service.js';
 import { removeTempDir } from './temp-dir.js';
 
@@ -92,20 +93,38 @@ describe('setupRemote', () => {
     }
   });
 
-  it('never replaces another site on 443 without a yes', async () => {
-    const other = served('http://127.0.0.1:3000');
-    for (const opts of [{ answers: ['n'] }, { tty: false }]) {
-      const { ctx, server } = fakeCtx({ serve: other, ...opts });
-      expect(await setupRemote(ctx, server)).toBe(1);
-      expect(text(ctx)).toMatch(/already serves http:\/\/127\.0\.0\.1:3000/);
-      expect(text(ctx)).toContain(`--https=8443 ${PORT}`);
-      expect(changes(ctx)).toEqual([]);
-      expect(existsSync(envFile(ctx))).toBe(false);
+  const busy = (...ports) => ports.reduce((c, p) => {
+    const w = served('http://127.0.0.1:3000', NAME, p);
+    return { TCP: { ...c.TCP, ...w.TCP }, Web: { ...c.Web, ...w.Web } };
+  }, { TCP: {}, Web: {} });
+
+  it('leaves another site on 443 alone and uses the next free HTTPS port, without asking', async () => {
+    for (const [ports, p] of [[[443], 8443], [[443, 8443], 10000]]) {
+      const { ctx, server } = fakeCtx({ serve: busy(...ports) });
+      expect(await setupRemote(ctx, server)).toBe(0);
+      expect(ctx.asked).toEqual([]);
+      expect(changes(ctx)).toEqual([`serve --bg --https=${p} ${PORT}`]);
+      expect(readFileSync(envFile(ctx), 'utf8')).toContain(`ALLOWED_ORIGINS=${NAME}:${p}\n`);
+      expect(ctx.out.at(-1)).toBe(`Open https://${NAME}:${p} on any device in your tailnet.`);
       removeTempDir(ctx.home);
     }
-    const { ctx, server } = fakeCtx({ serve: other, answers: ['y'] });
+  });
+
+  it('stops without changes when every HTTPS port serves something else', async () => {
+    const { ctx, server } = fakeCtx({ serve: busy(443, 8443, 10000) });
+    expect(await setupRemote(ctx, server)).toBe(1);
+    expect(text(ctx)).toMatch(/Every HTTPS port.*http:\/\/127\.0\.0\.1:3000.*Nothing was changed/s);
+    expect(changes(ctx)).toEqual([]);
+    expect(existsSync(envFile(ctx))).toBe(false);
+    removeTempDir(ctx.home);
+  });
+
+  it('keeps this port when already served on a non-443 HTTPS port', async () => {
+    const mine = served(`http://127.0.0.1:${PORT}`, NAME, 8443);
+    const { ctx, server } = fakeCtx({ serve: { TCP: { ...busy(443).TCP, ...mine.TCP }, Web: { ...busy(443).Web, ...mine.Web } } });
     expect(await setupRemote(ctx, server)).toBe(0);
-    expect(changes(ctx)).toEqual([`serve --bg ${PORT}`]);
+    expect(changes(ctx)).toEqual([]);
+    expect(ctx.out.at(-1)).toBe(`Open https://${NAME}:8443 on any device in your tailnet.`);
     removeTempDir(ctx.home);
   });
 
@@ -199,6 +218,11 @@ describe('tailscale helpers', () => {
     expect([...t.names]).toEqual([NAME]);
     expect(t.targets).toEqual(['http://127.0.0.1:3000']);
     expect([...t.busyPorts]).toEqual(['8443']);
+    expect([...serveTargets(served(`http://localhost:${PORT}`, NAME, 8443), PORT).names]).toEqual([`${NAME}:8443`]);
+  });
+
+  it('the server lets a host:port ALLOWED_ORIGINS entry in by hostname', () => {
+    expect(originHost(`${NAME}:8443`)).toBe(NAME);
   });
 
   it('addOrigin merges and never removes', () => {
@@ -206,5 +230,7 @@ describe('tailscale helpers', () => {
     expect(addOrigin('a.example, b.example', NAME)).toBe(`a.example,b.example,${NAME}`);
     expect(addOrigin(`https://${NAME}`, NAME)).toBe(null);
     expect(addOrigin('*', NAME)).toBe(null);
+    expect(addOrigin('a.example', `${NAME}:8443`)).toBe(`a.example,${NAME}:8443`);
+    expect(addOrigin(NAME, `${NAME}:8443`)).toBe(null);
   });
 });

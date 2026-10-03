@@ -11,7 +11,7 @@ import { join } from 'path';
 import { parseEnv } from 'util';
 import { configDir, tilde } from './settings.js';
 import { originHost } from './state.js';
-import { serveTargets } from './tailscale.js';
+import { serveTargets, SERVE_HTTPS_PORTS } from './tailscale.js';
 import { setEnvLine } from './voice-setup.js';
 
 const TS_MS = 15_000;
@@ -23,9 +23,10 @@ const lastLine = (r) => (r.stderr || r.stdout || '').trim().split('\n').pop() ||
 const quote = (bin) => (/\s/.test(bin) ? `"${bin}"` : bin);
 
 // An ALLOWED_ORIGINS value with `name` added, or null when it already lets it in.
+// `name` may carry a port (`mini.ts.net:8443`); the server matches hostnames only, so any entry for the host counts.
 export function addOrigin(origins, name) {
   const entries = (origins || '').split(',').map(o => o.trim()).filter(Boolean);
-  if (entries.some(o => o === '*' || originHost(o) === name)) return null;
+  if (entries.some(o => o === '*' || originHost(o) === originHost(name))) return null;
   return [...entries, name].join(',');
 }
 
@@ -64,17 +65,22 @@ export async function setupRemote(ctx, server = {}) {
   // 2. What serve already does: keep this port if served, never take over 443 from something else.
   const cfg = json((await ts('serve', 'status', '--json')).stdout) || {};
   const { names, targets, busyPorts } = serveTargets(cfg, ctx.port);
-  const serve = `${cli} serve --bg ${ctx.port}`;
-  if (names.size) ctx.log(`✓ tailscale serve already sends https://${[...names][0]} to port ${ctx.port}; keeping it.`);
-  else {
-    if (busyPorts.has('443')) {
-      ctx.err(`! tailscale serve's HTTPS port (443) already serves ${targets.join(', ') || 'something else'}. Pointing it at Agent 007 replaces that.`);
-      const yes = !dry && ctx.tty && /^y/i.test((await ctx.ask(`Replace it with port ${ctx.port}? [y/N] `)).trim());
-      if (!yes) {
-        ctx.err(`Nothing was changed. To replace it yourself: ${serve}, then run ${ctx.cmd('install --remote')} again.
-  Or keep it and serve Agent 007 on another HTTPS port: ${cli} serve --bg --https=8443 ${ctx.port}`);
-        return 1;
-      }
+  // Another app on 443 is left alone: take the first HTTPS port Serve allows that nothing uses.
+  const https = SERVE_HTTPS_PORTS.find(p => !busyPorts.has(p));
+  if (!names.size && !https) {
+    ctx.err(`✗ Every HTTPS port tailscale serve allows (${SERVE_HTTPS_PORTS.join(', ')}) already serves something else (${targets.join(', ') || 'unknown'}). Nothing was changed.
+  Free one with ${cli} serve --https=<port> off, then run ${ctx.cmd('install --remote')} again.`);
+    return 1;
+  }
+  const serve = `${cli} serve --bg${https === '443' ? '' : ` --https=${https}`} ${ctx.port}`;
+  let host = name;
+  if (names.size) {
+    host = [...names][0];
+    ctx.log(`✓ tailscale serve already sends https://${host} to port ${ctx.port}; keeping it.`);
+  } else {
+    if (https !== '443') {
+      host = `${name}:${https}`;
+      ctx.log(`HTTPS port 443 already serves ${targets.join(', ') || 'something else'}; leaving it and using ${https} for Agent 007.`);
     }
     // 3. Background mode is kept by tailscaled, so it survives reboots without a terminal.
     if (dry) ctx.log(`Would run: ${serve}`);
@@ -82,7 +88,7 @@ export async function setupRemote(ctx, server = {}) {
       ctx.log(`Running: ${serve}`);
       ctx.log(`If Serve isn't enabled on your tailnet yet, Tailscale prints a link to enable it; open it and this continues (waiting up to ${SERVE_MS / 60_000} min, Ctrl-C to stop).`);
       // Echoed as it arrives: the enable link must show while tailscale is still waiting on it.
-      const r = await ctx.stream(bin, ['serve', '--bg', String(ctx.port)], { timeout: SERVE_MS, onData: (d) => ctx.write(d) });
+      const r = await ctx.stream(bin, ['serve', '--bg', ...(https === '443' ? [] : [`--https=${https}`]), String(ctx.port)], { timeout: SERVE_MS, onData: (d) => ctx.write(d) });
       const out = `${r.stdout}\n${r.stderr}`;
       const enable = out.match(/https:\/\/login\.tailscale\.com\/\S+/)?.[0];
       if (r.interrupted) {
@@ -99,16 +105,16 @@ export async function setupRemote(ctx, server = {}) {
           : `✗ tailscale serve failed (${lastLine(r)}).${/denied|operator|permission/i.test(out) && ctx.platform === 'linux' ? ` Let your user run it: sudo ${cli} set --operator=$USER, then run ${ctx.cmd('install --remote')} again.` : ` Run it yourself: ${serve}`}`);
         return 1;
       }
-      ctx.log(`✓ tailscale serve sends https://${name} to port ${ctx.port}.`);
+      ctx.log(`✓ tailscale serve sends https://${host} to port ${ctx.port}.`);
     }
   }
 
   // 4. Let https://<name> in: merge into ALLOWED_ORIGINS, never remove an entry.
   const file = join(configDir(ctx.env), '.env');
   const have = existsSync(file) ? parseEnv(readFileSync(file, 'utf8')).ALLOWED_ORIGINS : undefined;
-  const origins = addOrigin(have, name);
+  const origins = addOrigin(have, host);
   let changed = false;
-  if (!origins) ctx.log(`✓ ALLOWED_ORIGINS in ${tilde(file)} already lets ${name} in; skipping.`);
+  if (!origins) ctx.log(`✓ ALLOWED_ORIGINS in ${tilde(file)} already lets ${host} in; skipping.`);
   else if (dry) ctx.log(`Would set ALLOWED_ORIGINS=${origins} in ${tilde(file)}`);
   else {
     setEnvLine(file, 'ALLOWED_ORIGINS', origins);
@@ -119,13 +125,13 @@ export async function setupRemote(ctx, server = {}) {
   const clone = join(ctx.root, '.env');
   const before = ctx.env.ALLOWED_ORIGINS !== undefined ? ['your environment', ctx.env.ALLOWED_ORIGINS]
     : existsSync(clone) && parseEnv(readFileSync(clone, 'utf8')).ALLOWED_ORIGINS !== undefined ? [tilde(clone), parseEnv(readFileSync(clone, 'utf8')).ALLOWED_ORIGINS] : null;
-  if (before && addOrigin(before[1], name)) ctx.err(`! ALLOWED_ORIGINS is also set in ${before[0]}, which wins over ${tilde(file)}: add ${name} there too.`);
+  if (before && addOrigin(before[1], host)) ctx.err(`! ALLOWED_ORIGINS is also set in ${before[0]}, which wins over ${tilde(file)}: add ${host} there too.`);
 
   // 5. A running server reads ALLOWED_ORIGINS when it starts.
   if (changed && await server.running?.()) {
     ctx.log('Restarting Agent 007 so it lets the new name in.');
     await server.restart();
   } else if (dry && origins) ctx.log(`Would restart Agent 007 if it is running: ${ctx.cmd('restart')}`);
-  if (!dry) ctx.log(`Open https://${name} on any device in your tailnet.`);
+  if (!dry) ctx.log(`Open https://${host} on any device in your tailnet.`);
   return 0;
 }

@@ -14,14 +14,17 @@ export function tailscaleBin(env = process.env, { platform = process.platform, e
 }
 
 // From `tailscale serve status --json`: the names it sends to this port
-// (`mini.tail1.ts.net`), what else it serves, and the HTTPS ports in use for something else.
+// (`mini.tail1.ts.net`, or `mini.tail1.ts.net:8443` off the default HTTPS port), what else it serves, and the HTTPS ports in use for something else.
 export function serveTargets(cfg, port) {
   const proxy = new RegExp(`^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\]):${port}(/|$)`);
   const webs = [cfg, ...Object.values(cfg?.Foreground || {})].flatMap(c => Object.entries(c?.Web || {}));
   const ours = ([, web]) => Object.values(web?.Handlers || {}).some(h => proxy.test(h?.Proxy || ''));
-  const names = new Set(webs.filter(ours).map(([hostPort]) => hostPort.replace(/:\d+$/, '')));
+  const names = new Set(webs.filter(ours).map(([hostPort]) => hostPort.replace(/:443$/, '')));
   const others = webs.filter(w => !ours(w));
   const targets = [...new Set(others.flatMap(([, web]) => Object.values(web?.Handlers || {}).map(h => h?.Proxy || h?.Path || h?.Text && 'text').filter(Boolean)))];
   const busyPorts = new Set(others.map(([hostPort]) => hostPort.match(/:(\d+)$/)?.[1] || '443'));
   return { names, targets, busyPorts };
 }
+
+// The HTTPS ports `tailscale serve` accepts, in the order we try them.
+export const SERVE_HTTPS_PORTS = ['443', '8443', '10000'];

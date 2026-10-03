@@ -27,9 +27,10 @@ Then open `https://<host>.<tailnet>.ts.net` on any device in your tailnet. It:
    on macOS) and checks it is running and logged in. If not, it says what to do
    (install it, or `tailscale up`) and changes nothing;
 2. reads `tailscale serve status`: a port already served is kept, and another
-   site on the HTTPS port (443) is never replaced without a `y` (without a
-   terminal it stops and prints the command);
-3. runs `tailscale serve --bg <port>`, which tailscaled keeps across reboots. If
+   site on the HTTPS port (443) is never replaced: Agent 007 takes the next free
+   HTTPS port (8443, then 10000) and you open `https://<name>:8443`. If all
+   three are taken it says what uses them and stops;
+3. runs `tailscale serve --bg [--https=<port>] <port>`, which tailscaled keeps across reboots. If
    Serve is not enabled on your tailnet, it prints the link Tailscale gives to
    enable it;
 4. adds the host's ts.net name to `ALLOWED_ORIGINS` in `~/.agent-007/.env`,
