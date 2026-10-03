@@ -43,6 +43,14 @@ agent007 install
 
 Or run `agent007` in a terminal (`agent-007`, the older name, works too). See [Run it as a service](#run-it-as-a-service).
 
+To reach it from your phone or another machine, with [Tailscale](https://tailscale.com/download) installed and logged in:
+
+```bash
+agent007 install --remote   # then open https://<this machine>.<tailnet>.ts.net on any device in your tailnet
+```
+
+See [remote access](docs/REMOTE.md).
+
 Or run it from a clone:
 
 ```bash
@@ -65,12 +73,13 @@ One line per check (Node and node-pty, `claude` and `codex` installed and logged
 
 ### Run it as a service
 
-In a terminal, Agent 007 and every agent it runs stop when the terminal closes. On macOS and Linux, `agent007 install` (`npm start -- install` in a clone) registers a per-user service that starts it at login and brings it back if it stops: a LaunchAgent in `~/Library/LaunchAgents` on macOS, a systemd `--user` unit on Linux. It runs the copy you installed from, with the absolute path of your `node` and the `PATH` of your login shell captured at install time. `--dry-run` prints what it would write. In a terminal, `install` then asks whether to set up voice too.
+In a terminal, Agent 007 and every agent it runs stop when the terminal closes. On macOS and Linux, `agent007 install` (`npm start -- install` in a clone) registers a per-user service that starts it at login and brings it back if it stops: a LaunchAgent in `~/Library/LaunchAgents` on macOS, a systemd `--user` unit on Linux. It runs the copy you installed from, with the absolute path of your `node` and the `PATH` of your login shell captured at install time. `--dry-run` prints what it would write. In a terminal, `install` then asks whether to set up voice too, and remote access when Tailscale is installed.
 
 ```bash
-agent007 install           # the service, then asks: set up voice too? [y/N] (no question without a terminal)
+agent007 install           # the service, then asks: set up voice too? remote access? [y/N] (no question without a terminal)
 agent007 install --voice   # voice only: never touches the service; works on Windows too
-agent007 install --all     # the service and voice (--yes also accepts the default model's download)
+agent007 install --remote  # remote access over Tailscale only (see docs/REMOTE.md); --dry-run prints what it would do
+agent007 install --all     # the service, voice and remote access (--yes also accepts the default model's download)
 ```
 
 Voice is whisper.cpp, ffmpeg and a speech model, so Talk to Billion and Telegram voice notes are transcribed on your machine. `install --voice` runs `brew install whisper-cpp ffmpeg` on macOS (Linux and Windows: it prints the steps), asks which model (`ggml-base.en`, about 150 MB, or `ggml-small`, about 500 MB), downloads it to `~/.agent-007/whisper/` after you confirm, sets `WHISPER_MODEL` in `~/.agent-007/.env` and checks it by transcribing a test clip. Steps already done are skipped. From a clone, `npm start -- install --voice`.

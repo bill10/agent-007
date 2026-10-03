@@ -136,13 +136,13 @@ describe('setEnvLine', () => {
     const dir = mkdtempSync(join(tmpdir(), 'a007-env-'));
     const f = join(dir, '.env');
     writeFileSync(f, 'PORT=8000\n# WHISPER_MODEL=/old\nHOST=0.0.0.0\n');
-    expect(setEnvLine(f, '/m.bin')).toBe(true);
+    expect(setEnvLine(f, 'WHISPER_MODEL', '/m.bin')).toBe(true);
     expect(readFileSync(f, 'utf8')).toBe('PORT=8000\nWHISPER_MODEL=/m.bin\nHOST=0.0.0.0\n');
     writeFileSync(f, 'A=1\nWHISPER_MODEL=/old\nB=2');
-    setEnvLine(f, '/m.bin');
+    setEnvLine(f, 'WHISPER_MODEL', '/m.bin');
     expect(readFileSync(f, 'utf8')).toBe('A=1\nWHISPER_MODEL=/m.bin\nB=2');
     writeFileSync(f, 'A=1');
-    setEnvLine(f, '/m.bin');
+    setEnvLine(f, 'WHISPER_MODEL', '/m.bin');
     expect(readFileSync(f, 'utf8')).toBe('A=1\nWHISPER_MODEL=/m.bin\n');
     removeTempDir(dir);
   });
@@ -150,7 +150,7 @@ describe('setEnvLine', () => {
   it('creates the file from the template', () => {
     const dir = mkdtempSync(join(tmpdir(), 'a007-env-'));
     const f = join(dir, 'sub', '.env');
-    setEnvLine(f, '/m.bin');
+    setEnvLine(f, 'WHISPER_MODEL', '/m.bin');
     const t = readFileSync(f, 'utf8');
     expect(t).toContain('\nWHISPER_MODEL=/m.bin\n');
     expect(t).toContain('# WHISPER_CPP_BIN=');
@@ -160,7 +160,7 @@ describe('setEnvLine', () => {
 
 describe('install modes', () => {
   const base = (over) => fakeCtx({ present: ['whisper-cli', 'ffmpeg'], root: '/opt/app', bin: '/opt/app/bin/agent-007.js', execPath: '/opt/node', port: 7007, host: '127.0.0.1',
-    uid: 501, user: 'ada', portState: async () => 'free', readServer: () => null, callServer: async () => null, sleep: async () => {}, now: (() => { let t = 0; return () => (t += 1000); })(), version: () => '1', ...over });
+    uid: 501, user: 'ada', portState: async () => 'free', readServer: () => null, callServer: async () => null, sleep: async () => {}, now: (() => { let t = 0; return () => (t += 1000); })(), version: () => '1', tailscaleBin: () => null, ...over });
 
   it('--voice never touches the service', async () => {
     const c = base({ yes: false });
@@ -199,6 +199,19 @@ describe('install modes', () => {
     expect(all.asked).toEqual([]);
     expect(models(all)).toEqual(['ggml-base.en.bin']);
     expect(all.calls.some(x => x.startsWith('systemctl'))).toBe(true);
+    // --all goes on to remote access, which says what to do without Tailscale.
+    expect(text(all)).toMatch(/Tailscale is not installed/);
     removeTempDir(y.home); removeTempDir(all.home);
+  });
+
+  it('plain install offers remote access only where Tailscale is installed', async () => {
+    const ts = base({ platform: 'linux', answers: ['n', 'n'], tailscaleBin: () => '/usr/bin/tailscale' });
+    await runCommand('install', {}, ts);
+    expect(ts.asked[1]).toMatch(/^Set up remote access with Tailscale too\? .*\[y\/N\] $/);
+    expect(ts.calls.some(x => x.includes('tailscale'))).toBe(false);
+    const none = base({ platform: 'linux', answers: ['n', 'n'] });
+    await runCommand('install', {}, none);
+    expect(none.asked).toHaveLength(1);
+    removeTempDir(ts.home); removeTempDir(none.home);
   });
 });

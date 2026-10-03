@@ -31,19 +31,20 @@ function silentWav() {
   return Buffer.concat([h, data]);
 }
 
-// Sets WHISPER_MODEL in ~/.agent-007/.env and nothing else: replaces the live
-// line, else the template's commented one, else appends.
-export function setEnvLine(file, value) {
-  const line = `WHISPER_MODEL=${value}`;
+// Sets one key (WHISPER_MODEL, ALLOWED_ORIGINS) in ~/.agent-007/.env and
+// nothing else: replaces the live line, else the template's commented one,
+// else appends. Owner-only when this makes the file. True when it changed it.
+export function setEnvLine(file, key, value) {
+  const line = `${key}=${value}`;
   let text;
   try { text = readFileSync(file, 'utf8'); } catch { text = readFileSync(TEMPLATE, 'utf8'); }
-  const live = /^[ \t]*WHISPER_MODEL=.*$/m, commented = /^[ \t]*#[ \t]*WHISPER_MODEL=.*$/m;
+  const live = new RegExp(`^[ \\t]*${key}=.*$`, 'm'), commented = new RegExp(`^[ \\t]*#[ \\t]*${key}=.*$`, 'm');
   if (text.match(live)?.[0] === line) return false;
   text = live.test(text) ? text.replace(live, () => line)
     : commented.test(text) ? text.replace(commented, () => line)
     : `${text}${text.endsWith('\n') || !text ? '' : '\n'}${line}\n`;
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, text);
+  writeFileSync(file, text, { mode: 0o600 });
   return true;
 }
 
@@ -170,7 +171,7 @@ export async function setupVoice(ctx, server = {}) {
     ctx.err(`! Voice is not set up yet: no model. Run ${ctx.cmd('install --voice')} again.`);
     return 1;
   }
-  if (setEnvLine(join(configDir(ctx.env), '.env'), path)) ctx.log(`✓ Set WHISPER_MODEL=${tilde(path)} in ${tilde(join(configDir(ctx.env), '.env'))}.`);
+  if (setEnvLine(join(configDir(ctx.env), '.env'), 'WHISPER_MODEL', path)) ctx.log(`✓ Set WHISPER_MODEL=${tilde(path)} in ${tilde(join(configDir(ctx.env), '.env'))}.`);
   else ctx.log('✓ WHISPER_MODEL is already set to it; skipping.');
   if (!bin) {
     ctx.err(`✗ Voice is not working yet: whisper.cpp is not installed (see above). The model and setting are in place; run ${ctx.cmd('install --voice')} again after installing it.`);
