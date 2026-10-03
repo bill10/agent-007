@@ -182,7 +182,10 @@ const A = await ctxA.newPage();
 const B = await ctxB.newPage();
 const t0 = Date.now();
 // A touch, since video has no cursor: a ring where the finger lands.
+// The call bar's privacy line is hidden: the scratch server has no whisper.cpp,
+// so it would name the browser's recognition, which a real setup doesn't use.
 const STYLE = `#job-dispatcher-status { visibility: hidden }
+  #talk-bar .talk-privacy { display: none !important }
   .demo-tap { position: fixed; z-index: 99999; pointer-events: none; width: 44px; height: 44px; margin: -22px 0 0 -22px;
     border-radius: 50%; background: #fff4; border: 2px solid #fffc; animation: demo-tap .6s ease-out forwards }
   @keyframes demo-tap { from { transform: scale(.4); opacity: 1 } to { transform: scale(1.3); opacity: 0 } }`;
@@ -295,7 +298,7 @@ const dubbed = captions.some(c => c.file.startsWith(process.env.DEMO_MEDIA || '\
 // --- Stills: the frame around the phone, the captions, the end card ---
 
 const W = 1080, H = 1920;
-const screen = { width: 720, height: 1558, x: 180, y: 150 };
+const screen = { width: 766, height: 1658, x: 157, y: 100 };
 const FONT = `font-family: -apple-system, 'Helvetica Neue', sans-serif;`;
 const still = await browser.newPage({ viewport: { width: W, height: H } });
 async function render(file, html, size = { width: W, height: H }) {
@@ -304,7 +307,7 @@ async function render(file, html, size = { width: W, height: H }) {
   await still.screenshot({ path: file, omitBackground: true });
 }
 const NOTE = dubbed
-  ? 'Sped up. Voices are AI-generated; app screens are real.<br>Scripted demo with stand-in agents.'
+  ? 'Scripted demo · sped up · voices are AI-generated · opening shot generated with Veo'
   : 'Scripted demo with stand-in agents · sped up · voices are text-to-speech';
 const opening = media('opening.mp4');
 if (opening) {
@@ -314,14 +317,15 @@ if (opening) {
 await render(join(out, 'frame.png'), `
   <div style="position:absolute;left:${screen.x}px;top:${screen.y}px;width:${screen.width}px;height:${screen.height}px;border-radius:48px;
     box-shadow:0 0 0 3px #2a2f37, 0 0 0 3000px #0b0d10"></div>
-  <div style="position:absolute;top:40px;width:100%;text-align:center;color:#8b93a1;font-size:26px;line-height:1.4">${NOTE}</div>`);
+  <div style="position:absolute;top:34px;width:100%;text-align:center;color:#8b93a1;font-size:24px">${NOTE}</div>`);
+const band = H - screen.y - screen.height;   // the captions' strip under the phone
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
 for (const [i, c] of captions.entries()) {
   c.png = join(out, `caption-${i}.png`);
-  await render(c.png, `<div style="width:${W}px;height:212px;display:flex;align-items:center;justify-content:center;text-align:center;
-    padding:0 60px;box-sizing:border-box;font-size:42px;line-height:1.25;color:#f2f4f7">
+  await render(c.png, `<div style="width:${W}px;height:${band}px;display:flex;align-items:center;justify-content:center;text-align:center;
+    padding:0 40px;box-sizing:border-box;font-size:48px;line-height:1.2;color:#f2f4f7">
     <div><span style="color:${c.who === 'You' ? '#7cc4ff' : '#e0b04a'};font-weight:600">${c.who}:</span> ${esc(c.text)}</div></div>`,
-  { width: W, height: 212 });
+  { width: W, height: band });
 }
 const endCard = join(out, 'end.png');
 await render(endCard, `<div style="width:${W}px;height:${H}px;background:#0b0d10;color:#f2f4f7;display:flex;flex-direction:column;
