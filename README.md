@@ -108,8 +108,10 @@ Uncomment what you want, then restart. The ones people change:
 Highest wins: command-line flags (`--port`), then environment variables, then
 a `.env` in the directory you start it from, then `~/.agent-007/.env`. The full
 list is in [Configuration](#configuration) and `--help`.
-The service from `agent007 install` reads only `~/.agent-007/.env` (install
-copies over what the current folder's `.env` has and that file lacks).
+The service from `agent007 install` reads only `~/.agent-007/.env`. Install
+copies into it what that file lacks from the current folder's `.env`, the
+`.env` the last server loaded, or the folder a running Agent 007 was started
+in, and says if `tailscale serve` still needs an `ALLOWED_ORIGINS` line.
 
 The details and caveats of every feature -- phone layout, voice input, themes and more -- are in [docs/FEATURES.md](docs/FEATURES.md).
 
