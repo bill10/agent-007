@@ -160,7 +160,7 @@ describe('setEnvLine', () => {
 
 describe('install modes', () => {
   const base = (over) => fakeCtx({ present: ['whisper-cli', 'ffmpeg'], root: '/opt/app', bin: '/opt/app/bin/agent-007.js', execPath: '/opt/node', port: 7007, host: '127.0.0.1',
-    uid: 501, user: 'ada', portState: async () => 'free', readServer: () => null, callServer: async () => null, sleep: async () => {}, now: (() => { let t = 0; return () => (t += 1000); })(), version: () => '1', ...over });
+    uid: 501, user: 'ada', portState: async () => 'free', readServer: () => null, readLastServer: () => null, procCwd: async () => null, remoteCheck: async () => [], callServer: async () => null, sleep: async () => {}, now: (() => { let t = 0; return () => (t += 1000); })(), version: () => '1', ...over });
 
   it('--voice never touches the service', async () => {
     const c = base({ yes: false });

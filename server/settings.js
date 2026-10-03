@@ -12,11 +12,14 @@ export function configDir(env = process.env) {
   return env.AGENT007_CONFIG_DIR || join(homedir(), '.agent-007');
 }
 
+// The files loadSettings loaded, which the server records in server.json.
+export let settingsFiles = [];
+
 // ./.env first, then <config dir>/.env. process.loadEnvFile never overwrites a
 // variable that is already set, so the real environment beats ./.env, and
 // ./.env beats the config-dir file. Returns the files it loaded.
 export function loadSettings() {
-  const files = [];
+  const files = settingsFiles = [];
   if (existsSync('.env')) {
     process.loadEnvFile('.env');
     files.push(resolve('.env'));

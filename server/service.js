@@ -10,7 +10,7 @@
 
 import { execFile } from 'child_process';
 import {
-  closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync,
+  closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync,
 } from 'fs';
 import { homedir, userInfo } from 'os';
 import { createInterface } from 'readline';
@@ -19,7 +19,7 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { carryOverEnv, configDir, tilde } from './settings.js';
 import { setupVoice } from './voice-setup.js';
-import { callServer, pidAlive, readServerFile } from './control.js';
+import { callServer, lastServerFile, pidAlive, readServerFile } from './control.js';
 
 export const LABEL = 'com.bill10.agent-007';
 export const UNIT = 'agent-007.service';
@@ -255,6 +255,21 @@ export function formatUptime(sec) {
   return m ? `${m}m` : `${sec}s`;
 }
 
+// The .env files an old setup read, oldest guess last: ./.env here, the ones
+// the last server loaded (it records them), and, for a server too old to
+// record them, the ./.env of the folder a running one was started in.
+async function envSources(ctx) {
+  const files = [join(ctx.cwd, '.env'), ...(ctx.readLastServer()?.settings || [])];
+  const info = ctx.readServer();
+  let pid = info && !info.cwd && pidAlive(info.pid) ? info.pid : null;
+  if (!info && await ctx.portState(ctx.port, ctx.host) === 'agent-007') {
+    pid = Number((await ctx.run('lsof', ['-t', `-iTCP:${ctx.port}`, '-sTCP:LISTEN'], { timeout: MANAGER_MS })).stdout.split('\n')[0]) || null;
+  }
+  const cwd = pid && await ctx.procCwd(pid);
+  if (cwd) files.push(join(cwd, '.env'));
+  return [...new Set(files.map(f => resolve(f)))];
+}
+
 // --- Commands ---
 
 async function install(ctx, { 'dry-run': dryRun } = {}) {
@@ -266,6 +281,20 @@ async function install(ctx, { 'dry-run': dryRun } = {}) {
   if (installKind({ root: ctx.root, env: ctx.env }) === 'npx') {
     ctx.err(`An npx copy is temporary, so a service cannot run it. Install it first, then install the service:\n  npm install -g ${PKG_NAME}\n  agent007 install`);
     return 1;
+  }
+  const loginPath = await loginShellPath(ctx.run, ctx.env);
+  if (!loginPath) ctx.err(`! Could not read your login shell's PATH (${ctx.env.SHELL || '/bin/sh'}); using this terminal's.`);
+  const def = serviceDefinition({ kind, execPath: ctx.execPath, bin: ctx.bin, root: ctx.root, path: mergePath(ctx.execPath, loginPath || ctx.env.PATH), home: ctx.home, launchEnv: ctx.env });
+  // The service runs in its own folder, so the .env the old setup read (ALLOWED_ORIGINS
+  // for remote access, say) would stop applying. Before refusing over a server
+  // still running: its folder is easiest to find now. Key names only: values may be secrets.
+  if (!dryRun) {
+    const shared = join(configDir(ctx.env), '.env');
+    for (const from of await envSources(ctx)) {
+      if (resolve(dirname(from)) === resolve(def.cwd)) continue;
+      const copied = carryOverEnv(from, shared);
+      if (copied.length) ctx.log(`Copied ${copied.join(', ')} from ${tilde(from)} to ${tilde(shared)}: the service runs in ${tilde(def.cwd)}, where that .env is not read.`);
+    }
   }
   if (!dryRun) {
     const live = await liveServer(ctx);
@@ -281,9 +310,6 @@ async function install(ctx, { 'dry-run': dryRun } = {}) {
       }
     }
   }
-  const loginPath = await loginShellPath(ctx.run, ctx.env);
-  if (!loginPath) ctx.err(`! Could not read your login shell's PATH (${ctx.env.SHELL || '/bin/sh'}); using this terminal's.`);
-  const def = serviceDefinition({ kind, execPath: ctx.execPath, bin: ctx.bin, root: ctx.root, path: mergePath(ctx.execPath, loginPath || ctx.env.PATH), home: ctx.home, launchEnv: ctx.env });
   const text = kind === 'launchd' ? plist(def) : systemdUnit(def);
   const file = serviceFilePath(kind, ctx.home);
   if (dryRun) {
@@ -295,13 +321,6 @@ async function install(ctx, { 'dry-run': dryRun } = {}) {
   }
   mkdirSync(dirname(file), { recursive: true });
   mkdirSync(dirname(def.log), { recursive: true });
-  // The service does not run here, so this folder's ./.env (ALLOWED_ORIGINS
-  // for remote access, say) would stop applying. Key names only: values may be secrets.
-  if (resolve(def.cwd) !== resolve(ctx.cwd)) {
-    const shared = join(configDir(ctx.env), '.env');
-    const copied = carryOverEnv(join(ctx.cwd, '.env'), shared);
-    if (copied.length) ctx.log(`Copied ${copied.join(', ')} from ${tilde(join(ctx.cwd, '.env'))} to ${tilde(shared)}: the service runs in ${tilde(def.cwd)}, where that .env is not read.`);
-  }
   writeFileSync(file, text);
   try {
     await managerInstall(ctx, kind, file);
@@ -312,6 +331,8 @@ async function install(ctx, { 'dry-run': dryRun } = {}) {
   ctx.log(`Installed ${tilde(file)}.\nAgent 007 now starts when you log in and comes back if it stops.`);
   const up = await waitForNewServer(ctx, null, 20_000);
   ctx.log(up ? `Running at http://localhost:${up.port} (pid ${up.pid}).` : `Not answering yet; see ${ctx.cmd('logs')}.`);
+  // No old .env had ALLOWED_ORIGINS, and tailscale serve needs it: say the line to add.
+  for (const l of await ctx.remoteCheck().catch(() => [])) if (l.status === 'fail') ctx.err(`! ${l.text}.\n  ${l.fix}.`);
   ctx.log(`Log: ${tilde(def.log)}\nCheck on it with ${ctx.cmd('status')}; remove it with ${ctx.cmd('uninstall')}.`);
   return 0;
 }
@@ -533,6 +554,18 @@ export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent0
     host: process.env.HOST || '127.0.0.1',
     portState: async (...a) => (await import('./doctor.js')).portState(...a),
     readServer: () => readServerFile(),
+    readLastServer: () => readServerFile(lastServerFile(launchEnv)),
+    // The folder a process runs in; null when it cannot be read.
+    procCwd: async (pid) => {
+      if (process.platform === 'linux') { try { return readlinkSync(`/proc/${pid}/cwd`); } catch { return null; } }
+      const r = await run('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { timeout: MANAGER_MS });
+      return r.stdout.match(/^n(.+)$/m)?.[1] || null;
+    },
+    // doctor's Remote access lines for this port, as the just-installed service reads its settings.
+    remoteCheck: async () => {
+      const { checkRemote, defaultProbes } = await import('./doctor.js');
+      return checkRemote({ ...defaultProbes({ env: launchEnv, installCommand: cmd('install') }), port: Number(process.env.PORT || 7007) });
+    },
     callServer,
     version: () => readFileSync(join(PKG_ROOT, 'VERSION'), 'utf8').trim(),
     // The registry's `latest`, asked directly: npm's own packument cache can lag it by minutes.

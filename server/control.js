@@ -1,30 +1,36 @@
 // How `agent007 status` and `agent007 restart` reach a running server.
 //
 // The server writes <config dir>/server.json (0600) once it listens: pid,
-// port, host, version, how it runs (launchd, systemd or a terminal) and a
-// random token. The CLI reads that file and calls /control/status and
-// /control/restart with the token in a header, so only someone who can read
-// the owner's config dir can restart it. Origin-checked as well.
+// port, host, version, how it runs (launchd, systemd or a terminal), a
+// random token, and the folder it runs in and the .env files it loaded. The
+// CLI reads that file and calls /control/status and /control/restart with the
+// token in a header, so only someone who can read the owner's config dir can
+// restart it. Origin-checked as well.
 //
 // Imports nothing from state.js, so the CLI can load it without the server.
 
 import { timingSafeEqual } from 'crypto';
 import { readFileSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { configDir } from './settings.js';
+import { configDir, settingsFiles } from './settings.js';
 
 export const RESTART_EXIT = 75;
 export const CONTROL_HEADER = 'x-agent007-control';
 export const VERSION = readFileSync(new URL('../VERSION', import.meta.url), 'utf8').trim();
 
 export const serverFile = (env = process.env) => join(configDir(env), 'server.json');
+// Where the last server ran and the .env files it loaded. Kept after it stops,
+// so `agent007 install` can carry those settings over to the service.
+export const lastServerFile = (env = process.env) => join(configDir(env), 'last-server.json');
 
 export function writeServerFile({ port, host, token, service = process.env.AGENT007_SERVICE || null, file = serverFile() }) {
   mkdirSync(join(file, '..'), { recursive: true });
   // Removed first: mode applies only to a new file, and one left by a crash
   // (or made by hand) may be readable by others.
   rmSync(file, { force: true });
-  writeFileSync(file, JSON.stringify({ pid: process.pid, port: Number(port), host, version: VERSION, startedAt: Date.now(), service, token }, null, 2), { mode: 0o600 });
+  const where = { cwd: process.cwd(), settings: settingsFiles };
+  writeFileSync(file, JSON.stringify({ pid: process.pid, port: Number(port), host, version: VERSION, startedAt: Date.now(), service, token, ...where }, null, 2), { mode: 0o600 });
+  writeFileSync(join(file, '..', 'last-server.json'), JSON.stringify({ pid: process.pid, startedAt: Date.now(), service, ...where }, null, 2));
   // Only ours: a second server on another port may have written it since.
   process.on('exit', () => { if (readServerFile(file)?.pid === process.pid) rmSync(file, { force: true }); });
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFile, spawn } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { createServer } from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -42,6 +42,9 @@ function fakeCtx(over = {}) {
     host: '127.0.0.1',
     portState: async () => 'free',
     readServer: () => null,
+    readLastServer: () => null,
+    procCwd: async () => null,
+    remoteCheck: async () => [],
     callServer: async () => null,
     version: () => '1.0.0.0',
     sleep: async () => {},
@@ -213,6 +216,33 @@ describe('install / uninstall', () => {
     expect(await runCommand('install', {}, again)).toBe(0);
     expect(readFileSync(shared, 'utf8')).toBe(text);
     expect(again.out.join('\n')).not.toContain('Copied');
+  });
+
+  it('finds the old .env where the last server ran, or where an old one is running, from any folder', async () => {
+    const old = tmp('a007-svc-checkout-');
+    writeFileSync(join(old, '.env'), 'ALLOWED_ORIGINS=mac-mini.tail1.ts.net\n');
+    // The last server (stopped now) recorded the files it loaded.
+    const last = fakeCtx({ answer: loginShell, readLastServer: () => ({ cwd: old, settings: [join(old, '.env')] }) });
+    expect(await runCommand('install', {}, last)).toBe(0);
+    expect(readFileSync(join(last.home, '.agent-007', '.env'), 'utf8')).toContain('ALLOWED_ORIGINS=mac-mini.tail1.ts.net');
+    expect(last.out.join('\n')).toMatch(/Copied ALLOWED_ORIGINS from .*\.env to/);
+    // A server too old to record it, still running in a terminal: its folder, even though install then refuses.
+    const info = { pid: process.pid, port: 7007, token: 't' };
+    const running = fakeCtx({ readServer: () => info, callServer: async () => ({ pid: process.pid, port: 7007, service: null }), procCwd: async (pid) => (pid === process.pid ? old : null) });
+    expect(await runCommand('install', {}, running)).toBe(1);
+    expect(readFileSync(join(running.home, '.agent-007', '.env'), 'utf8')).toContain('ALLOWED_ORIGINS=mac-mini.tail1.ts.net');
+    // One this config does not know, found by its port.
+    const unknown = fakeCtx({ answer: (cmd, args) => (cmd === 'lsof' ? { stdout: '4242\n' } : loginShell(cmd, args)), portState: async () => 'agent-007', procCwd: async (pid) => (pid === 4242 ? old : null) });
+    expect(await runCommand('install', {}, unknown)).toBe(1);
+    expect(unknown.calls).toContain('lsof -t -iTCP:7007 -sTCP:LISTEN');
+    expect(readFileSync(join(unknown.home, '.agent-007', '.env'), 'utf8')).toContain('ALLOWED_ORIGINS=mac-mini.tail1.ts.net');
+  });
+
+  it("nothing to carry over and tailscale serve needs ALLOWED_ORIGINS: says the line to add", async () => {
+    const ctx = fakeCtx({ answer: loginShell, remoteCheck: async () => [{ status: 'ok', text: 'fine' }, { status: 'fail', text: 'tailscale serve sends https://m.ts.net to port 7007, but ALLOWED_ORIGINS does not list m.ts.net', fix: 'Add ALLOWED_ORIGINS=m.ts.net to ~/.agent-007/.env, then agent007 restart' }] });
+    expect(await runCommand('install', {}, ctx)).toBe(0);
+    expect(ctx.out.join('\n')).toContain('ERR ! tailscale serve sends https://m.ts.net to port 7007, but ALLOWED_ORIGINS does not list m.ts.net.\n  Add ALLOWED_ORIGINS=m.ts.net to ~/.agent-007/.env, then agent007 restart.');
+    expect(ctx.out.join('\n')).not.toContain('fine');
   });
 
   it('uninstall with nothing installed says so', async () => {
@@ -437,6 +467,7 @@ describe('restart in a terminal', () => {
     // Not execFileSync: the server's output has to keep arriving meanwhile.
     const cli = (args) => new Promise((done) => execFile(process.execPath, [join(ROOT, 'bin/agent-007.js'), ...args], { cwd: home, env, encoding: 'utf8' },
       (err, stdout, stderr) => done({ code: err ? err.code : 0, out: stdout + stderr })));
+    writeFileSync(join(home, '.env'), '# an old terminal setup\n');
     const child = spawn(process.execPath, [join(ROOT, 'bin/agent-007.js'), '--port', String(port)], { cwd: home, env });
     let out = '';
     child.stdout.on('data', d => { out += d; });
@@ -449,6 +480,10 @@ describe('restart in a terminal', () => {
       await until(() => readServerFile(join(cfg, 'server.json')), 'no server.json');
       const first = readServerFile(join(cfg, 'server.json'));
       expect(first.port).toBe(port);
+      // Where it runs and what it loaded, kept in last-server.json for install.
+      expect(realpathSync(first.cwd)).toBe(realpathSync(home));
+      expect(first.settings).toEqual([join(first.cwd, '.env')]);
+      expect(readServerFile(join(cfg, 'last-server.json'))).toMatchObject({ pid: first.pid, cwd: first.cwd, settings: first.settings });
       const status = await cli(['status']);
       expect(status.out).toContain('is running in a terminal');
       expect(status.code).toBe(0);
