@@ -3,7 +3,13 @@
 [![Tests (Ubuntu)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-ubuntu.yml)
 [![Tests (Windows)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml/badge.svg)](https://github.com/bill10/agent-007/actions/workflows/test-windows.yml)
 
-**Run your coding agents like a one-person company.**
+**Manage your coding agents by talking to them, from your phone.**
+
+<img src="docs/phone-call-teaser.gif" width="360" alt="On a call with Billion in its phone tab, the owner says &quot;Add a dark-mode toggle to the settings page&quot;; Billion answers out loud, &quot;Got it, I'll put a card on the board&quot;">
+
+*A Talk to Billion call, from the request to the merged PR: [watch the 66s video with sound](https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4). Scripted with stand-in agents and sped up; the voices are text-to-speech (`scripts/demo/phone-call.mjs`).*
+
+Run your coding agents like a one-person company.
 
 Agent 007 is the operations layer for Claude Code, Codex and other coding agents: it starts them, hands out the work, keeps them running, reviews what they ship, and calls you only when it matters. One command, in your browser.
 
