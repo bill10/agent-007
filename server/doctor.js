@@ -122,7 +122,9 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     settingsFile: join(configDir(env), '.env'),
     // `tailscale serve status --json`, or null without tailscale.
     tailscaleServe: () => new Promise((done) => {
-      const bin = commandPath('tailscale', env);
+      // The macOS app keeps its CLI inside the bundle, on PATH only if the owner installed it.
+      const app = '/Applications/Tailscale.app/Contents/MacOS/Tailscale';
+      const bin = commandPath('tailscale', env) || (process.platform === 'darwin' && existsSync(app) ? app : null);
       if (!bin) return done(null);
       execFile(bin, ['serve', 'status', '--json'], { timeout: NET_MS, encoding: 'utf8' }, (err, out) => {
         try { done(err ? null : JSON.parse(out)); } catch { done(null); }
@@ -437,10 +439,16 @@ export function checkService(p) {
 export async function checkRemote(p) {
   const cfg = await p.tailscaleServe();
   const proxy = new RegExp(`^https?://(localhost|127\\.0\\.0\\.1|\\[::1\\]):${p.port}(/|$)`);
-  const names = new Set([cfg, ...Object.values(cfg?.Foreground || {})].flatMap(c => Object.entries(c?.Web || {}))
-    .filter(([, web]) => Object.values(web?.Handlers || {}).some(h => proxy.test(h?.Proxy || '')))
+  if (!cfg) return [na('Tailscale not found, or `tailscale serve status` failed: remote access not checked')];
+  const webs = [cfg, ...Object.values(cfg.Foreground || {})].flatMap(c => Object.entries(c?.Web || {}));
+  const names = new Set(webs.filter(([, web]) => Object.values(web?.Handlers || {}).some(h => proxy.test(h?.Proxy || '')))
     .map(([hostPort]) => hostPort.replace(/:\d+$/, '')));
-  if (!names.size) return [];
+  if (!names.size) {
+    const targets = [...new Set(webs.flatMap(([, web]) => Object.values(web?.Handlers || {}).map(h => h?.Proxy || h?.Path || h?.Text && 'text').filter(Boolean)))];
+    return [targets.length
+      ? fail(`tailscale serve does not proxy port ${p.port} (it serves: ${targets.join(', ')})`, `Point it here: tailscale serve --bg ${p.port}`)
+      : na(`tailscale serve does not proxy port ${p.port} (it serves nothing): remote access is off`)];
+  }
   const svc = p.service() && parseServiceFile(p.service().text);
   const fromFile = (file) => (p.exists(file) ? parseEnv(p.readFile(file)).ALLOWED_ORIGINS : undefined);
   // A clone's service runs in the clone, so its ./.env counts too.
@@ -448,10 +456,11 @@ export async function checkRemote(p) {
     ? svc.env.ALLOWED_ORIGINS ?? fromFile(join(dirname(dirname(svc.args[1] || '/')), '.env')) ?? fromFile(p.settingsFile)
     : p.env.ALLOWED_ORIGINS;
   const allowed = (origins || '').split(',').map(o => o.trim()).filter(Boolean).map(o => (o === '*' ? o : originHost(o)));
+  const shown = origins ? [na(`ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''}: ${origins}`)] : [];
   return [...names].map(name => (allowed.includes('*') || allowed.includes(name)
     ? ok(`tailscale serve sends https://${name} to port ${p.port}, and ALLOWED_ORIGINS lets it in`)
     : fail(`tailscale serve sends https://${name} to port ${p.port}, but ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''} does not list ${name}: remote browsers are turned away`,
-      `Add ALLOWED_ORIGINS=${[origins, name].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`)));
+      `Add ALLOWED_ORIGINS=${[origins, name].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`))).concat(shown);
 }
 
 // --- Running them ---
