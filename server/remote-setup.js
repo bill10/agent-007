@@ -16,7 +16,7 @@ import { setEnvLine } from './voice-setup.js';
 
 const TS_MS = 15_000;
 // `tailscale serve` waits for the owner to enable Serve in the admin console; past this it gives up.
-const SERVE_MS = 120_000;
+const SERVE_MS = 300_000;
 
 const json = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const lastLine = (r) => (r.stderr || r.stdout || '').trim().split('\n').pop() || `exit ${r.code}`;
@@ -59,6 +59,8 @@ export async function setupRemote(ctx, server = {}) {
     return 1;
   }
 
+  ctx.log(`This machine is ${name}.`);
+
   // 2. What serve already does: keep this port if served, never take over 443 from something else.
   const cfg = json((await ts('serve', 'status', '--json')).stdout) || {};
   const { names, targets, busyPorts } = serveTargets(cfg, ctx.port);
@@ -78,9 +80,19 @@ export async function setupRemote(ctx, server = {}) {
     if (dry) ctx.log(`Would run: ${serve}`);
     else {
       ctx.log(`Running: ${serve}`);
-      const r = await ctx.run(bin, ['serve', '--bg', String(ctx.port)], { timeout: SERVE_MS });
+      ctx.log(`If Serve isn't enabled on your tailnet yet, Tailscale prints a link to enable it; open it and this continues (waiting up to ${SERVE_MS / 60_000} min, Ctrl-C to stop).`);
+      // Echoed as it arrives: the enable link must show while tailscale is still waiting on it.
+      const r = await ctx.stream(bin, ['serve', '--bg', String(ctx.port)], { timeout: SERVE_MS, onData: (d) => ctx.write(d) });
       const out = `${r.stdout}\n${r.stderr}`;
       const enable = out.match(/https:\/\/login\.tailscale\.com\/\S+/)?.[0];
+      if (r.interrupted) {
+        ctx.err(`Stopped. Nothing else was changed. Run ${ctx.cmd('install --remote')} again when Serve is enabled.`);
+        return 130;
+      }
+      if (r.timedOut) {
+        ctx.err(`✗ Gave up waiting for Serve to be enabled after ${SERVE_MS / 60_000} min.${enable ? ` Enable it here:\n  ${enable}` : ''}\n  Then run ${ctx.cmd('install --remote')} again (or ${serve}).`);
+        return 1;
+      }
       if (r.code) {
         ctx.err(enable
           ? `✗ Serve is not enabled on your tailnet. Enable it here, then run ${ctx.cmd('install --remote')} again:\n  ${enable}`
