@@ -28,6 +28,13 @@ function fakeCtx({ status = RUNNING, serve = {}, serveRun, answers = [], running
       if (args.join(' ') === 'serve status --json') return { code: 0, stdout: JSON.stringify(serve), stderr: '' };
       return serveRun || { code: 0, stdout: '', stderr: '' };
     },
+    write: (s) => out.push(`OUT ${s}`),
+    stream: async (cmd, args, o) => {
+      calls.push(args.join(' '));
+      const r = serveRun || { code: 0, stdout: '', stderr: '' };
+      if (r.stdout) o.onData(r.stdout);
+      return r;
+    },
     ask: async (q) => { asked.push(q); return answers.shift() ?? ''; },
     log: (s) => out.push(s), err: (s) => out.push(`ERR ${s}`),
     cmd: (s) => `agent007 ${s}`,
@@ -109,6 +116,43 @@ describe('setupRemote', () => {
     expect(text(ctx)).toContain(`Serve is not enabled on your tailnet. Enable it here, then run agent007 install --remote again:\n  ${url}`);
     expect(existsSync(envFile(ctx))).toBe(false);
     removeTempDir(ctx.home);
+  });
+
+  it('shows the enable link while tailscale is still waiting, and says which machine it is', async () => {
+    const url = 'https://login.tailscale.com/f/serve?node=abc123';
+    const { ctx, server } = fakeCtx();
+    let seenBeforeExit = false;
+    ctx.stream = async (cmd, args, o) => {
+      o.onData(`To enable, visit:\n ${url}\n`);
+      seenBeforeExit = ctx.out.some(l => l.includes(url));
+      return { code: 0, stdout: url, stderr: '' };
+    };
+    expect(await setupRemote(ctx, server)).toBe(0);
+    expect(seenBeforeExit).toBe(true);
+    expect(text(ctx)).toContain(`This machine is ${NAME}.`);
+    expect(text(ctx)).toMatch(/Tailscale prints a link to enable it/);
+    removeTempDir(ctx.home);
+  });
+
+  it('on timeout prints the link and the command to re-run; on Ctrl-C stops cleanly', async () => {
+    const url = 'https://login.tailscale.com/f/serve?node=abc123';
+    const t = fakeCtx({ serveRun: { code: -1, stdout: url, stderr: '', timedOut: true } });
+    expect(await setupRemote(t.ctx, t.server)).toBe(1);
+    expect(text(t.ctx)).toContain('Gave up waiting');
+    expect(text(t.ctx)).toContain(url);
+    expect(text(t.ctx)).toContain('agent007 install --remote');
+    const i = fakeCtx({ serveRun: { code: -1, stdout: '', stderr: '', interrupted: true } });
+    expect(await setupRemote(i.ctx, i.server)).toBe(130);
+    expect(existsSync(envFile(i.ctx))).toBe(false);
+    removeTempDir(t.ctx.home); removeTempDir(i.ctx.home);
+  });
+
+  it('stream: echoes a real child live, kills it on timeout', async () => {
+    const { stream } = await import('../server/service.js');
+    const seen = [];
+    const r = await stream(process.execPath, ['-e', "console.log('hello'); setInterval(()=>{},1000)"], { timeout: 700, onData: (d) => seen.push(d) });
+    expect(seen.join('')).toContain('hello');
+    expect(r.timedOut).toBe(true);
   });
 
   it('--dry-run reads status and prints what it would do, changing nothing', async () => {

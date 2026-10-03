@@ -8,7 +8,7 @@
 // through ctx (defaultContext below), so the tests stub launchctl, systemctl,
 // git and npm and never write outside a temp HOME.
 
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import {
   closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, rmSync, statSync, truncateSync, writeFileSync,
 } from 'fs';
@@ -526,9 +526,31 @@ function run(cmd, args, { timeout, cwd, env } = {}) {
   });
 }
 
+// Like run, but echoes the child's output as it arrives (onData) and still returns it. A timeout
+// or Ctrl-C kills the child; the result says which (timedOut / interrupted).
+export function stream(cmd, args, { timeout = 0, onData = () => {} } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '', stderr = '', timedOut = false, interrupted = false;
+    const onInt = () => { interrupted = true; child.kill(); };
+    process.once('SIGINT', onInt);
+    const timer = timeout ? setTimeout(() => { timedOut = true; child.kill(); }, timeout) : null;
+    const done = (code, extra = '') => {
+      clearTimeout(timer);
+      process.off('SIGINT', onInt);
+      resolve({ code, stdout, stderr: stderr + extra, timedOut, interrupted });
+    };
+    child.stdout.on('data', (d) => { stdout += d; onData(String(d)); });
+    child.stderr.on('data', (d) => { stderr += d; onData(String(d)); });
+    child.on('error', (e) => done(-1, e.message));
+    child.on('close', (code) => done(code ?? -1));
+  });
+}
+
 export function defaultContext({ launchEnv = process.env, cmd = (sub) => `agent007 ${sub}` } = {}) {
   return {
     run,
+    stream,
     platform: process.platform,
     home: homedir(),
     uid: process.getuid?.() ?? 0,
