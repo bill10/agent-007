@@ -100,13 +100,16 @@ export async function voiceSays(transcript, { utterance, echoOf, broadcast, env 
 
 // Progress phrases handed to the page lately: the mic hears them too, and they
 // carry no echo id. A transcript that is one of them (or, at two words or
-// more, part of one) is the page's own voice.
+// more, part of one) is the page's own voice, and so is a short one that is
+// mostly their words: whisper mishears "message" as "best".
 const PROGRESS_ECHO_MS = 10_000;
 const progressSpoken = [];   // { at, words }
 const heardProgress = (text, now) => {
   while (progressSpoken.length && now - progressSpoken[0].at > PROGRESS_ECHO_MS) progressSpoken.shift();
-  const got = words(text).join(' ');
-  return !!got && progressSpoken.some(p => got === p.words || (got.includes(' ') && p.words.includes(got)));
+  const w = words(text), got = w.join(' ');
+  // ponytail: word-set overlap, no ordering; swap for edit distance if it drops real turns.
+  const mostly = (p) => w.length > 1 && w.length <= 8 && w.filter(x => p.words.split(' ').includes(x)).length >= 0.6 * w.length;
+  return !!got && progressSpoken.some(p => got === p.words || (got.includes(' ') && p.words.includes(got)) || mostly(p));
 };
 
 // An utterance retried while its first try is still being transcribed waits
