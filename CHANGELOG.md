@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.54.2.0] - 2026-10-04
+
+### Fixed
+
+- **Talk to Billion no longer answers a mishearing of its own progress line.** "Working on your best" (whisper's take on the spoken "Working on your message") was sent as a voice turn. A short transcript that mostly overlaps a progress phrase spoken in the last 10 seconds is now dropped as echo; real short turns like "stop" still go through.
+
 ## [0.54.1.1] - 2026-10-03
 
 ### Added
