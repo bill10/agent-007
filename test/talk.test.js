@@ -279,6 +279,18 @@ describe('a reply\'s audio', () => {
     expect((await voiceSays('Running the tests', { utterance: id(33), env: ENV, now: t + 11000 })).id).toEqual(expect.any(String));
     _resetStatus();
   });
+
+  it('a short mishearing of the heading just spoken is dropped; a different request is not', async () => {
+    _resetStatus();
+    setBillionStatus('Running the tests');
+    const t = Date.now();
+    await voiceAudio('status', 0, { env: ENV, platform: 'darwin', now: t });
+    expect(await voiceSays('Running the best.', { utterance: id(34), env: ENV, now: t + 1000 })).toEqual({ ok: true, echo: true });
+    for (const [n, said] of [[35, 'work on the README'], [36, 'stop'], [37, 'what about groceries?']]) {
+      expect((await voiceSays(said, { utterance: id(n), env: ENV, now: t + 1000 })).id).toEqual(expect.any(String));
+    }
+    _resetStatus();
+  });
 });
 
 describe('the routes', () => {
