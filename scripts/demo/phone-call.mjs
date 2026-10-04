@@ -11,7 +11,8 @@
 // in, and the video says it is scripted, sped up and text-to-speech.
 //
 // DEMO_MEDIA=<folder> swaps in generated media where its files exist:
-// opening.mp4 (a cold open), owner1.wav and owner2.wav for the owner's lines,
+// opening.mp4 (a cold open whose own audio is the owner's first line, so owner1.wav
+// is not played again), owner1.wav and owner2.wav for the owner's lines,
 // billion1-4.wav dubbed over Billion's four lines where the page spoke them.
 // The video then says the voices are AI-generated.
 //
@@ -225,12 +226,18 @@ async function heard(re) {
 const cuts = [];
 const cut = (src, at = Date.now()) => cuts.push({ src, at });
 const captions = [];
+// With a cold open, owner1 is the opening's own audio: the UI segment skips the
+// silent wait (and the caption), and starts just before the request's bubble.
+const coldOpen = !!media('opening.mp4');
+let bubbleAt = 0;
 async function ownerSays(key) {
   await callState('listening');
   const at = Date.now();
-  captions.push({ who: 'You', text: LINES[key], at, file: ownerClips[key].file });
+  const inOpening = coldOpen && key === 'owner1';
+  if (!inOpening) captions.push({ who: 'You', text: LINES[key], at, file: ownerClips[key].file });
   await sleep(ownerClips[key].ms + 250);
   if (!await A.evaluate(t => window.__demoHear(t), LINES[key])) throw new Error('the call was not listening');
+  if (inOpening) bubbleAt = Date.now();
 }
 
 // 1. The Billion tab; the owner taps the phone button and the call bar comes up.
@@ -374,6 +381,12 @@ filters.push(`${captions.map((_, i) => `[a${i}]`).join('')}amix=inputs=${caption
 // The cold open, full-bleed: a portrait crop on the walker (the camera tracks her), its street sound kept.
 let OPEN_MS = 0;
 const parts = ['[mainv][maina]', '[endv][enda]'];
+// The UI segment picks up as the request's bubble appears, the line having been heard in the opening.
+const skip = opening && bubbleAt ? Math.max(0, bubbleAt - first - 300) : 0;
+if (skip) {
+  filters.push(`[mainv]trim=start=${s(skip)},setpts=PTS-STARTPTS[mainv2]`, `[maina]atrim=start=${s(skip)},asetpts=PTS-STARTPTS[maina2]`);
+  parts[0] = '[mainv2][maina2]';
+}
 if (opening) {
   OPEN_MS = Math.round(duration(opening) * 1000);
   const n = audioStart + captions.length;
@@ -389,11 +402,11 @@ ff(...inputs, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]'
   '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', mp4);
 
 // The README teaser: the request and Billion's answer, muted, captions burned in.
-const ask = captions.find(c => c.who === 'You');
-const answer = captions.find(c => c.at > ask.at && c.who === 'Billion' && /Got it/.test(c.text));
-const teaserFrom = OPEN_MS + ask.at - first - 400;
+const askAt = bubbleAt || captions.find(c => c.who === 'You').at;
+const answer = captions.find(c => c.at > askAt && c.who === 'Billion' && /Got it/.test(c.text));
+const teaserFrom = OPEN_MS + askAt - first - skip - 400;
 const gif = join(out, 'phone-call-teaser.gif');
-ff('-ss', s(teaserFrom), '-t', s(Math.min(8000, OPEN_MS + answer.until - first + 300 - teaserFrom)), '-i', mp4, '-vf',
+ff('-ss', s(teaserFrom), '-t', s(Math.min(8000, OPEN_MS + answer.until - first - skip + 300 - teaserFrom)), '-i', mp4, '-vf',
   'fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle', gif);
 console.log(`cuts: ${cuts.map(c => `${c.src}@${s(c.at - first)}`).join(' ')}`);
 for (const f of [mp4, gif]) console.log(`${f}  ${(statSync(f).size / 1e6).toFixed(1)} MB, ${duration(f).toFixed(1)} s`);
