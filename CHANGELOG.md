@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.54.2.1] - 2026-10-04
+
+### Changed
+
+- **The README opens on the phone pitch.** Under "Manage your coding agents by talking to them, from your phone." it now has a one-line subline, the teaser GIF linking to the 76 s video, and three bullets on what Agent 007 does.
+
+### Added
+
+- **docs/BUILT-BY-AGENTS.md.** How many merged PRs on agent-007 and finnamon came from board workers, what the owner did and what the agents did, and the `gh` command to count them again.
+- **docs/launch/.** A Show HN facts sheet (facts, caveats and likely questions, not a post), drafts for r/ClaudeAI, the r/selfhosted megathread and an X thread, and one-liners with a proposed GitHub description and topics. Nothing is posted and no repo setting is changed.
+
 ## [0.54.2.0] - 2026-10-04
 
 ### Fixed
