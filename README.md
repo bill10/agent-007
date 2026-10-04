@@ -15,9 +15,7 @@ The operations layer for Claude Code and Codex: agents take work from a board, o
 - **One manager agent, Billion.** Give it a goal: it posts the cards, reviews the diffs, merges the PRs, and brings you only what needs a person (money, access, security, anything irreversible) in a briefing twice a day.
 - **Talk to it from your phone.** Open it in your phone's browser over Tailscale (`agent007 install --remote`), tap Talk to Billion, and hear progress spoken back. One command installs it as a service; Settings has an Update button.
 
-Run your coding agents like a one-person company.
-
-Agent 007 is the operations layer for Claude Code, Codex and other coding agents: it starts them, hands out the work, keeps them running, reviews what they ship, and calls you only when it matters. One command, in your browser.
+### The Billion tab
 
 ![In the Billion chat tab the owner types "Ship dark mode and fix the login bug"; Billion replies, two cards appear on the job board and two agents walk to their desks and work in their terminals; Billion merges the first pull request and the card files away, asks one question with Skip recommended, the owner taps Skip, and the chat ends on what shipped with the board empty](docs/billion-demo.gif)
 
