@@ -5,13 +5,17 @@
 
 **Manage your coding agents by talking to them, from your phone.**
 
-<img src="docs/phone-call-teaser.gif" width="360" alt="On a call with Billion in its phone tab, the owner says &quot;Hey Billion, add a dark mode toggle to the settings page&quot;; Billion answers out loud, &quot;Got it. I'll put a card on the board&quot;">
+The operations layer for Claude Code and Codex: agents take work from a board, one manager agent reviews and merges what they ship, and you hear about it on a call.
+
+<a href="https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4"><img src="docs/phone-call-teaser.gif" width="360" alt="On a call with Billion in its phone tab, the owner says &quot;Hey Billion, add a dark mode toggle to the settings page&quot;; Billion answers out loud, &quot;Got it. I'll put a card on the board&quot;"></a>
 
 *A Talk to Billion call, from the request to the merged PR: [watch the 76s video with sound](https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4). Scripted demo with stand-in agents, sped up; voices are AI-generated and the opening shot was generated with Veo (`scripts/demo/phone-call.mjs`).*
 
-Run your coding agents like a one-person company.
+- **A job board your agents work from.** Each card gets its own git worktree, a Claude Code or Codex worker and a real terminal you can type into, and ends as a pull request (or a summary, for work that isn't code).
+- **One manager agent, Billion.** Give it a goal: it posts the cards, reviews the diffs, merges the PRs, and brings you only what needs a person (money, access, security, anything irreversible) in a briefing twice a day.
+- **Talk to it from your phone.** Open it in your phone's browser over Tailscale (`agent007 install --remote`), tap Talk to Billion, and hear progress spoken back. One command installs it as a service; Settings has an Update button.
 
-Agent 007 is the operations layer for Claude Code, Codex and other coding agents: it starts them, hands out the work, keeps them running, reviews what they ship, and calls you only when it matters. One command, in your browser.
+### The Billion tab
 
 ![In the Billion chat tab the owner types "Ship dark mode and fix the login bug"; Billion replies, two cards appear on the job board and two agents walk to their desks and work in their terminals; Billion merges the first pull request and the card files away, asks one question with Skip recommended, the owner taps Skip, and the chat ends on what shipped with the board empty](docs/billion-demo.gif)
 
