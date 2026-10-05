@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.54.3.0] - 2026-10-05
+
+### Fixed
+
+- **Hanging up a Talk call no longer opens the phone keyboard.** The end of a call used to focus the message box; it now focuses the Talk button, so the chat stays in view and keyboard users still land somewhere predictable.
+
 ## [0.54.2.1] - 2026-10-04
 
 ### Changed
