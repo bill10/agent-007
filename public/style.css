@@ -1415,48 +1415,30 @@ body {
 .waiting-list > * { width: 100%; max-width: 760px; margin-inline: auto; }
 .waiting-empty { color: var(--text-dim); font-size: 12px; padding: 24px 2px; }
 
+/* The bar's open questions chip: the count, "!" when one is blocking. It
+   opens the Open questions panel, and stays lit while the panel is open. */
 .chat-strip {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-dark);
+  gap: 5px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 999px;
   flex-shrink: 0;
   cursor: pointer;
 }
 .chat-strip[hidden] { display: none; }
-.chat-strip:hover { background: color-mix(in srgb, var(--accent) 8%, var(--bg-dark)); }
-.chat-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.chat-strip-head {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 700;
-}
-.chat-strip-chevron { color: var(--accent); display: inline-block; transition: transform 0.15s ease-out; }
-.chat-strip[aria-expanded="true"] .chat-strip-chevron { transform: rotate(180deg); }
-.chat-strip.hinting .chat-strip-chevron { animation: chat-strip-nudge 0.5s ease-in-out 2; }
-@keyframes chat-strip-nudge { 50% { transform: translateY(3px); } }
-.chat-strip-hint { flex-shrink: 0; margin-left: auto; color: var(--accent); font-size: 11px; }
-.chat-strip-items { display: flex; gap: 6px; min-width: 0; overflow: hidden; }
-.chat-strip-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 4px;
-  max-width: 260px;
-  padding: 3px 8px;
-  font-size: 11px;
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  flex-shrink: 0;
-}
-.chat-strip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-strip:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.chat-strip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-strip-count { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+.chat-strip .waiting-urgent { font-size: 12px; color: var(--accent); }
+.chat-strip[aria-expanded="true"] { color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); }
+.chat-strip[aria-expanded="true"] .chat-strip-count, .chat-strip[aria-expanded="true"] .waiting-urgent { color: inherit; }
 
 /* The Open questions panel: over the thread (the box stays below); the
    whole screen on a phone. */
@@ -1570,8 +1552,8 @@ body {
   .chat-questions-by button { min-height: 44px; font-size: 13px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .chat-questions, .chat-strip.hinting .chat-strip-chevron { animation: none; }
-  .chat-strip-chevron, .chat-questions-chevron { transition: none; }
+  .chat-questions { animation: none; }
+  .chat-questions-chevron { transition: none; }
 }
 
 .chat-msg { display: flex; }
@@ -1657,23 +1639,35 @@ body {
 .waiting-error[hidden] { display: none; }
 
 
-/* The Billion tab's status line, its two views, and "This round"
-   (public/modules/round.js). The status line and the view switch sit over
-   both views; everything else in the board belongs to one of them. */
-.waiting-board[data-sub="round"] > :not(.billion-status):not(.billion-subtabs):not(.round-view) { display: none !important; }
+/* The Billion tab's bar (public/modules/round.js, waiting.js): one row over
+   both views with the Briefing/Chat switch, the status line, and the Chat
+   view's chip and speaker. On a phone the status line drops to a quiet
+   second line under the controls. Everything else in the board belongs to
+   one of the two views. */
+.waiting-board[data-sub="round"] > :not(.billion-bar):not(.round-view),
+.waiting-board[data-sub="round"] .chat-head { display: none !important; }
 .waiting-board[data-sub="chat"] > .round-view { display: none; }
 
-.billion-status {
+:root { --bar-control-h: 32px; }
+@media (max-width: 700px) { :root { --bar-control-h: 40px; } }
+.billion-bar-control { min-height: var(--bar-control-h); }
+.billion-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  min-height: 30px;
+  gap: 12px;
   padding: 6px 12px;
   flex-shrink: 0;
-  font-size: 12px;
-  color: var(--text-muted);
   background: var(--bg-dark);
   border-bottom: 1px solid var(--border);
+}
+.billion-status {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 .billion-status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .billion-status-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--state-idle); }
@@ -1682,25 +1676,43 @@ body {
 .billion-status[data-mood="off"] .billion-status-dot { background: var(--state-disconnected); }
 @keyframes billion-status-pulse { 50% { opacity: 0.35; } }
 
-.billion-subtabs { display: flex; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-panel); }
+/* Briefing | Chat: a segmented control, the picked view a lit segment. */
+.billion-subtabs {
+  display: inline-flex;
+  flex-shrink: 0;
+  padding: 2px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
 .billion-subtabs button {
-  flex: 1;
-  max-width: 200px;
-  min-height: 36px;
+  min-height: calc(var(--bar-control-h) - 6px);
   padding: 0 14px;
   font: inherit;
-  font-size: 11px;
-  letter-spacing: 1px;
-  text-transform: uppercase;
+  font-size: 12px;
   color: var(--text-dim);
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: 5px;
   cursor: pointer;
 }
 .billion-subtabs button:hover { color: var(--text); }
-.billion-subtabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
-.billion-subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.billion-subtabs button[aria-selected="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-panel)); font-weight: 700; }
+.billion-subtabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* A narrow pane (a phone, or a slim desktop split): the status line gets
+   its own full-width line under the controls, two lines at most. */
+.waiting-board { container: billion / inline-size; }
+@container billion (max-width: 720px) {
+  .billion-bar { flex-wrap: wrap; row-gap: 5px; padding: 6px 12px 7px; }
+  .billion-status { order: 3; flex-basis: 100%; }
+  .billion-status-text { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .billion-status { align-items: flex-start; }
+  .billion-status-dot { margin-top: 0.45em; }
+}
+@media (max-width: 700px) {
+  .billion-subtabs button { padding: 0 16px; font-size: 13px; }
+  .chat-strip { font-size: 13px; }
+}
 
 .round-view { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; padding: 14px 12px 24px; }
 .round-page { max-width: 760px; margin-inline: auto; display: flex; flex-direction: column; gap: 14px; }
@@ -1821,7 +1833,6 @@ body {
 .round-earlier-what { flex-shrink: 0; max-width: 40%; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (max-width: 700px) {
-  .billion-subtabs button { max-width: none; min-height: 44px; }
   .round-reply-input { font-size: 16px; }
   .round-reply-send { min-height: 44px; }
   .round-view { padding: 12px 16px 24px; }
@@ -1967,29 +1978,68 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .waiting-board.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
 
 /* Read aloud and dictation (readaloud.js, voice.js's chat target). The
-   header sits above the question strip, in the flow, so nothing overlaps. */
+   bar's end holds the chip, Resume and Stop when they apply, and the
+   speaker, whose popover has the switch and the voice picker. */
 .chat-head {
   display: flex;
   align-items: center;
   gap: var(--chat-gap);
-  flex-wrap: wrap;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-dark);
+  margin-left: auto;
   flex-shrink: 0;
 }
-.chat-autoread, .chat-resume, .chat-stop-reading {
+.chat-resume, .chat-stop-reading, .chat-read-menu {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 0 8px;
+  padding: 0 10px;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chat-read-menu { width: var(--bar-control-h); padding: 0; border-radius: 50%; }
+.chat-read-menu:hover, .chat-stop-reading:hover { color: var(--text); border-color: var(--border); }
+.chat-read-menu.on { color: var(--accent); }
+.chat-read-menu:focus-visible, .chat-resume:focus-visible, .chat-stop-reading:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-resume { color: var(--accent-contrast); background: var(--accent); font-weight: 700; }
+.chat-resume[hidden], .chat-stop-reading[hidden], .chat-voice-pick[hidden], .chat-voice-box[hidden] { display: none; }
+
+/* The speaker's popover, in the top layer under its button (waiting.js
+   places it). */
+.chat-read-pop {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(280px, calc(100vw - 16px));
+  padding: 6px;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+.chat-read-pop:popover-open { display: flex; flex-direction: column; gap: 2px; }
+.chat-autoread {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--text);
+  background: none;
   border: none;
+  border-radius: 5px;
   cursor: pointer;
 }
+.chat-autoread:hover { background: var(--bg-dark); }
 .chat-switch {
   position: relative;
   width: 26px;
@@ -2009,30 +2059,19 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   background: var(--text-dim);
   transition: left 0.15s;
 }
-.chat-autoread.on { color: var(--accent); }
 .chat-autoread.on .chat-switch { background: var(--accent); }
 .chat-autoread.on .chat-switch::after { left: 14px; background: var(--accent-contrast); }
 @media (prefers-reduced-motion: reduce) { .chat-switch::after { transition: none; } }
-.chat-autoread:hover, .chat-stop-reading:hover { color: var(--text); }
-.chat-resume {
-  color: var(--accent-contrast);
-  background: var(--accent);
-  border-radius: 3px;
-  font-weight: 700;
-}
-.chat-resume[hidden], .chat-stop-reading[hidden], .chat-voice-pick[hidden], .chat-voice-box[hidden] { display: none; }
-/* The picker's phone label (below); on desktop the select stands alone. */
-.chat-voice-box { display: contents; }
-.chat-voice-label { display: none; }
+.chat-voice-box { display: flex; align-items: center; gap: 10px; padding: 0 0 0 8px; font-size: 12px; color: var(--text-muted); }
 .chat-voice-pick {
-  margin-left: auto;
-  max-width: 220px;
+  flex: 1;
+  min-width: 0;
   font: inherit;
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--bg-panel);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-dark);
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 5px;
 }
 .chat-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .chat-speak {
@@ -2088,33 +2127,12 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   .chat-mic.listening, .chat-voice .voice-indicator-dot { animation: none; }
 }
 @media (max-width: 700px) {
-  .chat-autoread, .chat-resume, .chat-stop-reading { padding: 0 6px; }
   .chat-file-remove { min-width: 32px; min-height: 32px; }
   /* Beside the 16px inputs iOS needs, 11px labels looked lost. */
-  .waiting-send, .chat-autoread, .chat-resume, .chat-stop-reading { font-size: 13px; }
-  /* One row: "Read aloud" on the left, the voice on the right. The select
-     keeps iOS's 16px (no zoom on tap) but is invisible over a 13px label,
-     the whole 44px row its tap target. */
-  .chat-head { padding: 0 6px; }
+  .waiting-send, .chat-autoread, .chat-resume, .chat-stop-reading, .chat-voice-box { font-size: 13px; }
   .chat-wide { display: none; }
-  .chat-voice-box { position: relative; display: flex; align-items: center; min-width: 0; margin-left: auto; min-height: var(--chat-control-h); }
-  .chat-voice-label {
-    display: block;
-    position: relative;
-    min-width: 0;
-    padding: 5px 22px 5px 8px;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-size: 13px;
-    color: var(--text-muted);
-    background: var(--bg-panel);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-  }
-  .chat-voice-label::after { content: '▾'; position: absolute; right: 7px; }
-  .chat-voice-box:focus-within .chat-voice-label { border-color: var(--accent); }
-  .chat-voice-pick { position: absolute; inset: 0; width: 100%; max-width: none; margin: 0; opacity: 0; }
+  /* 16px, or iOS zooms the page when the picker is tapped. */
+  .chat-voice-pick { font-size: 16px; }
   /* The text box gets the row: tighter edges and a Send only as wide as
      its word, so "Message Billion" fits at 360px. */
   .chat-compose { padding-inline: 8px; }

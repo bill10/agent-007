@@ -991,10 +991,18 @@ terminal panel on this tab.
   small uppercase "recommended" tag, then *Reply* (an underlined accent
   link) and *Dismiss*. Once answered the buttons collapse to "you answered:
   ..." in italic `--text-muted`, with an *Undo* link for a minute.
-- The strip lists open questions as small outline chips, blocking first, then
-  normal, then low, oldest first within each; tapping one scrolls the thread
-  to it, flashes it and points the box at it (an outline under `prefers-reduced-motion`). Hidden
-  when none are open. "New messages ↓" (an accent pill) appears when a
+- One bar (`.billion-bar`, `--bg-dark`, hairline bottom border) tops both
+  views: *Briefing | Chat* as a segmented control (`--bg-panel` track, the
+  picked segment accent text on a 14% accent tint), then the status line
+  (12px `--text-muted`, a 7px state dot), then, in Chat only, the open
+  questions chip and the speaker. Bar controls carry `.billion-bar-control`
+  (`--bar-control-h`: 32px, 40px on phones). When the tab is narrower than
+  720px (`@container billion`), the status line drops to a full-width line
+  under the controls, two lines at most.
+- The open questions chip (`.chat-strip`) is a pill: the count in bold
+  accent, "open questions" (just "open" on a phone), a "!" when one is
+  blocking, an accent-tinted fill and border; filled accent while the panel
+  is open. Hidden when none are open. "New messages ↓" (an accent pill) appears when a
   message arrives while scrolled up.
 - The text box: a textarea with an accent Send button. Enter sends,
   Shift+Enter is a new line. It sends a plain message unless the owner
@@ -1007,18 +1015,20 @@ terminal panel on this tab.
   own: `.chat-mic`, a square outline button beside the textarea that pulses `--state-recording` red while listening (`mic-pulse`).
   What is being heard shows greyed and italic in a line above the box
   (`.chat-voice`), with the same red dot; notices and errors drop the dot.
-- One control height and one gap for the tab's two control rows: the
-  textarea, mic and Send, and the header's toggle, Resume, Stop and voice
-  picker all carry `.chat-control` (`min-height: var(--chat-control-h)`,
+- One control height and one gap for the composer row and the read-aloud
+  menu: the textarea, mic and Send, and the menu's switch and voice picker
+  all carry `.chat-control` (`min-height: var(--chat-control-h)`,
   40px, 44px on phones) and sit `--chat-gap` (6px) apart. The composer row
   is bottom-aligned: a multi-line message grows the box upward and mic and
   Send stay beside its last line, where the caret is. The mic's glyph is
   16px at a 1.05 stroke, the same 1.2px line as the header's gear and theme
   icons.
-- A header row above the question strip (`.chat-head`, `--bg-dark`, hairline
-  bottom border) holds *Read new messages aloud* (a small switch, accent when
-  on), *Resume reading (N new)* as an accent pill after a reload, *Stop*
-  while reading, and the voice picker pushed to the right.
+- The bar's end (`.chat-head`) holds the chip, *Resume reading (N new)* as an
+  accent pill after a reload, *Stop* while reading, and a round speaker
+  button (accent while reading new messages aloud is on). The speaker opens
+  a native popover (`.chat-read-pop`, `--bg-panel`, 8px radius, a soft
+  offset shadow) under it: *Read new messages aloud* with its small switch,
+  and "Voice" with the picker ("Auto (Evan)" or a named voice).
 - Each message from Billion has a speaker button (`.chat-speak`, 40px hit
   area, `--text-dim`) in its time row; it turns accent and becomes a stop
   square while that message is spoken.
@@ -1028,8 +1038,8 @@ terminal panel on this tab.
   hidden while the notice bar says Billion cannot hear you.
 - Phones: choices and the `.chat-control` rows are 44px tall; the input is
   16px so iOS does not zoom, and Send and the header's labels 13px beside it;
-  bubbles go up to 88% wide. The header row wraps, so the voice picker drops
-  to its own line, right-aligned, rather than clipping its name.
+  bubbles go up to 88% wide. The voice picker is 16px in its popover so iOS
+  does not zoom when it is tapped.
 
 ## Interactive Behaviors
 

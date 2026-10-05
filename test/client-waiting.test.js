@@ -408,55 +408,40 @@ describe('Undo', () => {
   });
 });
 
-describe('the pinned strip', () => {
+describe('the open questions chip', () => {
   beforeEach(() => { setQuestionsOpen(false, { focus: false }); localStorage.clear(); showWaiting(); });
-  const at = (hoursAgo) => new Date(Date.now() - hoursAgo * 3600e3).toISOString();
 
-  it('lists open questions blocking, then normal, then low, oldest first within each, and hides when none are open', () => {
-    questions(
-      open(1, { urgency: 'low', at: at(9) }),
-      open(2, { at: at(8) }),                         // saved before urgency: normal
-      open(3, { urgency: 'blocking', at: at(1) }),
-      open(4, { urgency: 'normal', at: at(10) }),
-      open(5, { urgency: 'blocking', at: at(5) }),
-      open(6, { urgency: 'low', at: at(20) }),
-      { ...open(7), status: 'answered', answer: 'a' },
-    );
+  it('counts the open questions, "!" when one is blocking, and hides when none are open', () => {
+    questions(open(1, { urgency: 'low' }), open(2), { ...open(3), status: 'answered', answer: 'a' });
     const strip = document.getElementById('chat-strip');
-    expect(strip.hidden).toBe(false);
-    expect([...strip.querySelectorAll('.waiting-card-n')].map(n => n.textContent)).toEqual(['! Q5', '! Q3', 'Q4', 'Q2', 'Q6', 'Q1']);
+    expect([strip.hidden, strip.textContent, strip.classList.contains('blocking')]).toEqual([false, '2open questions', false]);
+    expect(strip.querySelector('.chat-wide').textContent).toBe(' questions');   // a phone shows "2 open"
+    questions(open(1), open(2, { urgency: 'blocking' }));
+    expect([strip.textContent, strip.classList.contains('blocking')]).toEqual(['!2open questions', true]);
+    expect(strip.getAttribute('aria-label')).toBe('2 open questions, blocking: show them by project');
+    questions(open(1));
+    expect(strip.textContent).toBe('1open question');
     questions({ ...open(7), status: 'answered', answer: 'a' });
     expect(strip.hidden).toBe(true);
     expect(strip.children.length).toBe(0);
   });
 
-  it('is one button, "N open questions" with a chevron, that opens and closes the panel by click, Enter and Space', () => {
+  it('is a button in the bar that opens and closes the panel, saying which', () => {
+    document.body.innerHTML = '<div id="terminal-empty"></div><div id="job-board"></div><div id="waiting-board" style="display:none"><div id="billion-bar"><div id="billion-subtabs"></div><div id="billion-status"></div></div><div id="waiting-list"></div></div>';
+    _resetComposer();
+    showWaiting();
     questions(open(1), open(2), open(3));
     const strip = document.getElementById('chat-strip');
-    expect([strip.tagName, strip.getAttribute('role'), strip.tabIndex, strip.getAttribute('aria-expanded')]).toEqual(['DIV', 'button', 0, 'false']);
-    expect(strip.querySelector('.chat-strip-head').textContent).toBe('\u25be3 open questions');
-    expect(strip.querySelectorAll('button')).toHaveLength(0);   // no buttons inside a button
+    expect(strip.closest('#billion-bar')).not.toBeNull();
+    expect([strip.tagName, strip.type, strip.getAttribute('aria-controls'), strip.getAttribute('aria-expanded')]).toEqual(['BUTTON', 'button', 'chat-questions', 'false']);
+    expect(strip.getAttribute('aria-label')).toBe('3 open questions: show them by project');
     strip.click();
     expect(document.getElementById('chat-questions').hidden).toBe(false);
-    expect(strip.getAttribute('aria-expanded')).toBe('true');
-    strip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    expect([strip.getAttribute('aria-expanded'), strip.getAttribute('aria-label')]).toEqual(['true', '3 open questions: hide them by project']);
+    strip.click();
     expect(document.getElementById('chat-questions').hidden).toBe(true);
-    strip.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
-    expect(document.getElementById('chat-questions').hidden).toBe(false);
   });
 
-  it('says "tap to see all" the first time it shows in this browser, until opened, then never again', () => {
-    questions(open(1));
-    const hint = () => document.querySelector('#chat-strip .chat-strip-hint');
-    expect(hint().textContent).toBe('tap to see all');
-    expect(document.getElementById('chat-strip').classList.contains('hinting')).toBe(true);
-    renderWaiting();
-    expect(hint()).not.toBeNull();   // still this page's first strip
-    setQuestionsOpen(true);
-    setQuestionsOpen(false);
-    expect(hint()).toBeNull();
-    expect(localStorage.getItem('agent007-questions-hint')).toBe('1');
-  });
   it('marks blocking with a bold "!", leaves normal plain, and dims low', () => {
     questions(open(1, { urgency: 'blocking' }), open(2, { urgency: 'normal' }), open(3, { urgency: 'low' }));
     const n = (id) => bubbleOf(id).querySelector('.waiting-card-n');
@@ -547,20 +532,31 @@ describe('read aloud and dictation in the tab', () => {
     stopReading();
   });
 
-  it('the voice picker shows when there is a choice, its phone label naming the voice picked', () => {
+  it('the bar\'s speaker opens a menu with the switch and the voice, and shows when reading is on', () => {
+    const menu = document.getElementById('chat-read-menu');
+    const pop = document.getElementById('chat-read-pop');
+    expect([menu.type, menu.getAttribute('popovertarget'), pop.hasAttribute('popover')]).toEqual(['button', 'chat-read-pop', true]);
+    expect(pop.contains(document.getElementById('chat-autoread'))).toBe(true);
+    expect(pop.contains(document.getElementById('chat-voice-pick'))).toBe(true);
+    expect([menu.getAttribute('aria-label'), menu.classList.contains('on')]).toEqual(['Read aloud settings, off', false]);
+    document.getElementById('chat-autoread').click();
+    expect([menu.getAttribute('aria-label'), menu.classList.contains('on')]).toEqual(['Read aloud settings, on', true]);
+  });
+
+  it('the voice picker shows when there is a choice, "Auto" naming the voice it would pick', () => {
     const box = document.getElementById('chat-voice-box');
-    const label = () => box.querySelector('.chat-voice-label').textContent;
     renderWaiting();
     expect(box.hidden).toBe(true);
     const voices = ['Albert', 'Samantha'].map((name, i) => ({ name, lang: 'en-US', voiceURI: `v${i}`, localService: true }));
     window.speechSynthesis.getVoices = () => voices;
     renderWaiting();
     expect(box.hidden).toBe(false);
-    expect(label()).toMatch(/^Voice: auto/);
     const pick = document.getElementById('chat-voice-pick');
+    expect(pick.selectedOptions[0].textContent).toMatch(/^Auto/);
+    expect(box.tagName).toBe('LABEL');
     pick.value = 'v1';
     pick.onchange();
-    expect(label()).toBe('Samantha');
+    expect(pick.selectedOptions[0].textContent).toBe('Samantha');
   });
 
   it('the box and the voice picker are not login fields to a password manager', () => {
@@ -569,16 +565,20 @@ describe('read aloud and dictation in the tab', () => {
     }
   });
 
-  it('the box, mic and Send, and the header controls, share one control height token', () => {
-    for (const id of ['chat-input', 'chat-mic', 'chat-send', 'chat-autoread', 'chat-resume', 'chat-stop-reading', 'chat-voice-pick']) {
+  it('the box, mic and Send, and the read-aloud menu share one control height token, the bar\'s controls another', () => {
+    for (const id of ['chat-input', 'chat-mic', 'chat-send', 'chat-autoread', 'chat-voice-pick']) {
       expect(document.getElementById(id).classList.contains('chat-control'), id).toBe(true);
+    }
+    for (const id of ['chat-strip', 'chat-resume', 'chat-stop-reading', 'chat-read-menu']) {
+      expect(document.getElementById(id).classList.contains('billion-bar-control'), id).toBe(true);
     }
     const css = readFileSync('public/style.css', 'utf8');
     expect(css).toMatch(/\.chat-control \{ min-height: var\(--chat-control-h\); \}/);
+    expect(css).toMatch(/\.billion-bar-control \{ min-height: var\(--bar-control-h\); \}/);
     expect(css).toMatch(/\.chat-mic \{[^}]*width: var\(--chat-control-h\);/);
     // No rule anywhere, media queries included, gives one of them its own
     // height to drift from the token.
-    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-voice-pick)(?![-\w])/;
+    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-voice-pick|\.chat-strip|\.chat-read-menu)(?![-\w])/;
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => controls.test(sel));
     expect(rules.length).toBeGreaterThan(5);
     for (const [, sel, body] of rules) expect(body, sel.trim()).not.toMatch(/(^|[\s;])(min-|max-)?height:/);
@@ -841,7 +841,7 @@ describe('the Open questions panel', () => {
     expect(by()).toEqual([['by project', 'false'], ['by type', 'true']]);
     expect(localStorage.getItem('agent007-questions-by')).toBe('type');
     // The strip's label names the grouping.
-    expect(document.getElementById('chat-strip').getAttribute('aria-label')).toBe('6 open questions: hide them by type');
+    expect(document.getElementById('chat-strip').getAttribute('aria-label')).toBe('6 open questions, blocking: hide them by type');
     expand();
     // The same rows, regrouped; a question with no type is "other".
     expect(sections()).toEqual([

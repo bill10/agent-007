@@ -7,7 +7,7 @@
 // Billion's terminal as [Owner via app] (server/owner.js ownerSays). Shares the
 // terminal viewport with the terminals and the job board, like Jobs does.
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
-// each, and "Read new messages aloud" in the header), and the box has its own
+// each, and "Read new messages aloud" behind the bar's speaker), and the box has its own
 // mic (voice.js with the CHAT_VOICE target), all in the browser and free.
 // "Talk to Billion" (talk.js) is a hands-free voice conversation over the same thread.
 import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionStatus } from './state.js';
@@ -545,15 +545,19 @@ function paintSpeakButton(btn) {
   btn.innerHTML = speaking ? STOP_SVG : SPEAKER_SVG;
 }
 
-// The header: "Read new messages aloud", the one-tap "Resume reading" after
-// a reload, and the voice picker.
+// The bar's read-aloud controls: the speaker that opens "Read new messages
+// aloud" and the voice picker, the one-tap "Resume reading" after a reload,
+// and Stop while something is read.
 function renderReadHead() {
-  const head = document.getElementById('chat-head');
-  if (!head) return;
   const toggle = document.getElementById('chat-autoread');
+  if (!toggle) return;
   const on = autoReadOn();
   toggle.setAttribute('aria-pressed', String(on));
   toggle.classList.toggle('on', on);
+  const menu = document.getElementById('chat-read-menu');
+  menu.classList.toggle('on', on);
+  menu.setAttribute('aria-label', `Read aloud settings, ${on ? 'on' : 'off'}`);
+  menu.title = on ? 'Reading new messages aloud: tap for the switch and the voice' : 'Read aloud: tap for the switch and the voice';
   const resume = document.getElementById('chat-resume');
   const waiting = needsResume();
   resume.hidden = !waiting;
@@ -576,7 +580,7 @@ function renderVoicePick() {
   if (pick.dataset.key === key) return;
   pick.dataset.key = key;
   pick.innerHTML = '';
-  const first = el('option', null, auto ? `Voice: auto (${auto.name})` : 'Voice: auto');
+  const first = el('option', null, auto ? `Auto (${auto.name})` : 'Auto');
   first.value = '';
   pick.appendChild(first);
   for (const v of voices) {
@@ -585,7 +589,6 @@ function renderVoicePick() {
     pick.appendChild(opt);
   }
   pick.value = voices.some(v => v.voiceURI === saved) ? saved : '';
-  document.querySelector('#chat-voice-box .chat-voice-label').textContent = pick.selectedOptions[0]?.textContent || '';
 }
 
 // A password manager or AutoFill can pin its own overlay (the page's
@@ -639,66 +642,85 @@ export const CHAT_VOICE = {
 
 export const toggleChatVoice = () => toggleVoice(CHAT_VOICE);
 
+// The Chat view's end of the bar: the open questions chip, Resume reading
+// and Stop when they apply, and a speaker that opens a small menu with
+// "Read new messages aloud" and the voice picker. Built once.
 function readHead() {
   const head = el('div', 'chat-head');
   head.id = 'chat-head';
-  const toggle = el('button', 'chat-autoread chat-control');
-  toggle.id = 'chat-autoread';
-  toggle.type = 'button';
-  toggle.innerHTML = SPEAKER_SVG;
-  // "Read aloud" on a phone, so the voice picker fits on the same row.
-  const label = el('span');
-  label.append('Read ', el('span', 'chat-wide', 'new messages '), 'aloud');
-  toggle.append(label, el('span', 'chat-switch'));
-  toggle.title = 'Speak each new message from Billion as it arrives, while this tab is open';
-  toggle.onclick = () => setAutoRead(!autoReadOn());
-  const resume = el('button', 'chat-resume chat-control', 'Resume reading');
+  if (!readAloudSupported()) return head;
+  const resume = el('button', 'chat-resume billion-bar-control', 'Resume reading');
   resume.id = 'chat-resume';
   resume.type = 'button';
   resume.title = 'The browser lets a page speak only after a tap: tap to go on reading new messages aloud';
   resume.hidden = true;
   resume.onclick = () => resumeReading();
-  const stop = el('button', 'chat-stop-reading chat-control', 'Stop');
+  const stop = el('button', 'chat-stop-reading billion-bar-control', 'Stop');
   stop.id = 'chat-stop-reading';
   stop.type = 'button';
   stop.setAttribute('aria-label', 'Stop reading aloud');
   stop.hidden = true;
   stop.onclick = () => stopReading();
+
+  const pop = el('div', 'chat-read-pop');
+  pop.id = 'chat-read-pop';
+  pop.setAttribute('popover', '');
+  pop.setAttribute('role', 'group');
+  pop.setAttribute('aria-label', 'Read aloud');
+  const toggle = el('button', 'chat-autoread chat-control');
+  toggle.id = 'chat-autoread';
+  toggle.type = 'button';
+  toggle.append(el('span', null, 'Read new messages aloud'), el('span', 'chat-switch'));
+  toggle.title = 'Speak each new message from Billion as it arrives, while this tab is open';
+  toggle.onclick = () => setAutoRead(!autoReadOn());
   const pick = el('select', 'chat-voice-pick chat-control');
   pick.id = 'chat-voice-pick';
   pick.setAttribute('aria-label', 'Reading voice');
   pick.hidden = true;
   pick.onchange = () => { setVoiceURI(pick.value); renderVoicePick(); };
   noAutofill(pick);
-  // On a phone the select keeps the 16px iOS needs to not zoom, laid
-  // invisibly over a label in the tab's own type size.
-  const box = el('span', 'chat-voice-box');
+  const box = el('label', 'chat-voice-box');
   box.id = 'chat-voice-box';
   box.hidden = true;
-  box.append(el('span', 'chat-voice-label'), pick);
-  head.append(toggle, resume, stop, box);
+  box.append(el('span', 'chat-voice-label', 'Voice'), pick);
+  pop.append(toggle, box);
+
+  // The popover sits in the top layer, so it is placed under its button here.
+  const menu = el('button', 'chat-read-menu billion-bar-control');
+  menu.id = 'chat-read-menu';
+  menu.type = 'button';
+  menu.innerHTML = SPEAKER_SVG;
+  menu.setAttribute('popovertarget', pop.id);
+  pop.addEventListener('beforetoggle', (e) => {
+    if (e.newState !== 'open') return;
+    const r = menu.getBoundingClientRect();
+    pop.style.top = `${r.bottom + 4}px`;
+    pop.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+  });
+  head.append(resume, stop, menu, pop);
   window.speechSynthesis?.addEventListener?.('voiceschanged', renderVoicePick);
   return head;
 }
 
-// The strip, the thread's scroller, the jump and the text box, built once:
+// The bar's controls, the thread's scroller, the jump and the text box, built once:
 // the box lives outside what re-renders, so a broadcast never eats a draft.
 function shell() {
   const board = document.getElementById('waiting-board');
   const list = document.getElementById('waiting-list');
   if (!board || !list) return null;
   if (!document.getElementById('chat-compose')) {
-    // The whole strip is one button: it opens the Open questions panel.
-    const strip = el('div', 'chat-strip');
+    // The open questions chip opens the Open questions panel.
+    const strip = el('button', 'chat-strip billion-bar-control');
     strip.id = 'chat-strip';
-    strip.setAttribute('role', 'button');
-    strip.tabIndex = 0;
+    strip.type = 'button';
     strip.setAttribute('aria-controls', 'chat-questions');
     strip.hidden = true;
     strip.onclick = () => setQuestionsOpen(!panelOpen);
-    strip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); strip.onclick(); } };
-    board.insertBefore(strip, list);
-    if (readAloudSupported()) board.insertBefore(readHead(), strip);
+    const head = readHead();
+    head.prepend(strip);
+    const bar = document.getElementById('billion-bar');
+    if (bar) bar.appendChild(head);
+    else board.prepend(head);
     // The panel covers the thread only, so the box stays below it.
     const body = el('div', 'chat-body');
     board.insertBefore(body, list);
@@ -869,37 +891,28 @@ export function renderComposer() {
   renderTelegram();
 }
 
-// The strip: a one-line summary of the open questions, and the button that
-// opens the Open questions panel.
+// The chip: how many questions are open, "!" when one is blocking.
 function renderStrip() {
   const strip = document.getElementById('chat-strip');
   const open = openItems();
   strip.hidden = !open.length;
   strip.innerHTML = '';
   if (!open.length) return;
-  // "tap to see all" the first time the strip shows in this browser, until opened.
-  if (!hint && !panelOpen && store.get(HINT_KEY) !== '1') { hint = true; store.set(HINT_KEY, '1'); }
-  const count = `${open.length} open question${open.length === 1 ? '' : 's'}`;
+  const many = open.length === 1 ? '' : 's';
   strip.setAttribute('aria-expanded', String(panelOpen));
-  strip.setAttribute('aria-label', `${count}: ${panelOpen ? 'hide' : 'show'} them by ${groupBy}`);
-  strip.classList.toggle('hinting', hint);
-  const head = el('span', 'chat-strip-head');
-  head.append(el('span', 'chat-strip-chevron', '▾'), count);
-  const items = el('span', 'chat-strip-items');
-  for (const item of open) {
-    const chip = el('span', 'chat-strip-item');
-    chip.append(qLabel(item), ' ', el('span', 'chat-strip-text', item.text));
-    items.appendChild(chip);
-  }
-  strip.append(head, items);
-  if (hint) strip.appendChild(el('span', 'chat-strip-hint', 'tap to see all'));
+  const blocking = open.some(q => q.urgency === 'blocking');
+  strip.setAttribute('aria-label', `${open.length} open question${many}${blocking ? ', blocking' : ''}: ${panelOpen ? 'hide' : 'show'} them by ${groupBy}`);
+  strip.classList.toggle('blocking', blocking);
+  if (blocking) strip.appendChild(el('b', 'waiting-urgent', '!'));
+  const label = el('span', 'chat-strip-label');
+  label.append('open', el('span', 'chat-wide', ` question${many}`));
+  strip.append(el('span', 'chat-strip-count', String(open.length)), label);
 }
 
 // --- The Open questions panel: open questions by project or by type, answered
-// in place. Opened from the strip or the tab's badge; open or closed, the
+// in place. Opened from the bar's chip or the tab's badge; open or closed, the
 // grouping and each section's open or closed are kept per browser.
 const PANEL_KEY = 'agent007-questions-open';
-const HINT_KEY = 'agent007-questions-hint';
 const BY_KEY = 'agent007-questions-by';
 const SECTION_KEY = (by, name) => `agent007-questions-section:${by}:${name}`;
 const store = {
@@ -907,7 +920,6 @@ const store = {
   set(key, value) { try { localStorage.setItem(key, value); } catch {} },
 };
 let panelOpen, groupBy;
-let hint = false;
 const PHONE = '(max-width: 700px)';
 
 const openItems = () => waitingItems.filter(item => item.status === 'open').sort(byUrgency);
@@ -942,7 +954,6 @@ _reloadQuestionPrefs();
 
 export function setQuestionsOpen(open, { focus = true } = {}) {
   panelOpen = open;
-  hint = false;
   store.set(PANEL_KEY, open ? '1' : '0');
   renderWaiting();
   if (focus) document.getElementById(open ? 'chat-questions-close' : 'chat-strip')?.focus();
