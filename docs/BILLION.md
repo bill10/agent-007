@@ -821,7 +821,8 @@ animated activity dot. Worker updates and server notices do not close a request.
 *Earlier layout shown above: progress now sits inside each pending message,
 uses explicit summaries, and folds under the answer as Work details.*
 
-**Status line.** One line at the top of both views: what Billion is doing and
+**Status line.** One line in the bar at the top of both views, beside the
+*Briefing | Chat* switch (under it on a phone or a narrow pane): what Billion is doing and
 what is running, "Working: reviewing PR #120 · 3 workers running · next briefing
 3:30 pm". Billion sets its part with `set_status` (up to 140 characters;
 gone after 30 minutes without an update); the server adds "Thinking…" while
@@ -844,17 +845,16 @@ Telegram channel. Billion's `notify_owner` questions, its `tell_owner`
 replies and your messages, from the tab and from Telegram, are one
 conversation there, newest at the bottom; the last 500 messages are kept in
 `~/.agent-007/chat.json`, with open questions and unanswered owner requests
-retained until answered. Open questions also pin to a strip at the top of
-the tab ("7 open questions ▾", blocking first, then oldest). The strip is one
-button: tap it (or the tab's badge) and the **Open questions** panel slides
+retained until answered. Open questions also show as a chip in the bar at
+the top of the tab ("7 open questions", "7 open" on a phone, with a "!" when
+one is blocking). Tap it (or the tab's badge) and the **Open questions** panel slides
 over the thread, one section per project with its open count, the project
 with a blocking question first, then the one whose question has waited
 longest. Each row is a question's urgency mark, Q-number, first line and age,
 with its choices (recommended first) and *Reply*, which sets the box below to
 answer it; tap a row's text to jump to its bubble. × or Esc goes back to the
-chat; on a phone the panel fills the screen and *Reply* closes it. The first
-time the strip shows it says "tap to see all", and the browser remembers
-whether the panel was open. Billion names the project with `notify_owner`'s
+chat; on a phone the panel fills the screen and *Reply* closes it. The
+browser remembers whether the panel was open. Billion names the project with `notify_owner`'s
 `project` (a repo's folder name on the board, or `general`); left out, the
 server reads it off a GitHub URL or a repo's name in the text, else
 `general`. A name not on the board is kept, lower-cased. A switch at the
@@ -1044,12 +1044,13 @@ runs in the browser (`speechSynthesis` and the Web Speech API's
   Not yet; recommended: Done"). Long messages are spoken sentence by sentence,
   so Chrome's cut-off after about 15 seconds of one utterance never truncates
   them. The voice is the best English one the browser lists (en-US first,
-  Premium, Enhanced, Siri or Google voices before the rest); the picker at the
-  top of the tab changes it and the browser remembers the choice.
-- **Read new messages aloud**: the switch at the top of the tab (off by
+  Premium, Enhanced, Siri or Google voices before the rest); the picker in the
+  Settings window (the gear, *Voice for reading messages aloud* under *Read aloud*) changes it, and the browser remembers the choice.
+- **Read new messages aloud**: the speaker button in the bar at the top of the tab ("Read aloud" beside it when the tab is wide enough), one tap on and one off, with a brief "Read aloud: on" or "Read aloud: off" to confirm (accent while on; off by
   default, remembered by the browser). While it is on and the tab is showing,
   each new message from Billion is spoken as it arrives, one after another,
-  never over each other. Browsers let a page speak only after a tap on it: the
+  never over each other. Tapping the speaker while anything is being read
+  stops it and turns reading off; tap again to turn it back on. Browsers let a page speak only after a tap on it: the
   switch's own tap counts, but after a reload the tab shows **Resume reading**
   (with how many messages are waiting) until you tap it once. Leaving the
   Billion tab (or the phone's Billion view) stops reading.
