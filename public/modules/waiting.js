@@ -546,8 +546,7 @@ function paintSpeakButton(btn) {
 }
 
 // The bar's read-aloud controls: the speaker that turns "read new messages
-// aloud" on and off, the one-tap "Resume reading" after a reload, and Stop
-// while something is read.
+// aloud" on and off, and the one-tap "Resume reading" after a reload.
 function renderReadHead() {
   const toggle = document.getElementById('chat-autoread');
   if (!toggle) return;
@@ -559,8 +558,6 @@ function renderReadHead() {
   resume.hidden = !waiting;
   const queued = queuedCount();
   resume.textContent = queued ? `Resume reading (${queued} new)` : 'Resume reading';
-  const stop = document.getElementById('chat-stop-reading');
-  stop.hidden = speakingMessage() === null && !queued || waiting;
 }
 
 // A password manager or AutoFill can pin its own overlay (the page's
@@ -626,8 +623,8 @@ function toast(text) {
 }
 
 // The Chat view's end of the bar: the open questions chip, Resume reading
-// and Stop when they apply, and the speaker that turns reading new messages
-// aloud on and off. Built once.
+// when the browser wants a tap first, and the speaker that turns reading new
+// messages aloud on and off. Built once.
 function readHead() {
   const head = el('div', 'chat-head');
   head.id = 'chat-head';
@@ -638,12 +635,6 @@ function readHead() {
   resume.title = 'The browser lets a page speak only after a tap: tap to go on reading new messages aloud';
   resume.hidden = true;
   resume.onclick = () => resumeReading();
-  const stop = el('button', 'chat-stop-reading billion-bar-control', 'Stop');
-  stop.id = 'chat-stop-reading';
-  stop.type = 'button';
-  stop.setAttribute('aria-label', 'Stop reading aloud');
-  stop.hidden = true;
-  stop.onclick = () => stopReading();
   const toggle = el('button', 'chat-autoread billion-bar-control');
   toggle.id = 'chat-autoread';
   toggle.type = 'button';
@@ -653,11 +644,15 @@ function readHead() {
   toggle.title = 'Read new messages aloud';
   toggle.innerHTML = SPEAKER_SVG;
   toggle.appendChild(el('span', 'chat-autoread-label', 'Read aloud'));
+  // While something is being read, a tap means "be quiet": it stops the
+  // speech and leaves reading new messages aloud off.
   toggle.onclick = () => {
-    setAutoRead(!autoReadOn());
+    const speaking = speakingMessage() !== null || queuedCount() > 0;
+    if (speaking) stopReading();
+    setAutoRead(speaking ? false : !autoReadOn());
     toast(`Read aloud: ${autoReadOn() ? 'on' : 'off'}`);
   };
-  head.append(resume, stop, toggle);
+  head.append(resume, toggle);
   return head;
 }
 

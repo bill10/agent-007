@@ -12,7 +12,7 @@ import { updateTabs, switchToSession, removeSession, setupUpload } from '../publ
 import { readFileSync } from 'node:fs';
 import { showWaiting, renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, leaveWaiting, answerTarget, replyToQuestion, setBillionNotice, _resetComposer, questionGroups, setQuestionsOpen, setTelegramState, setGroupBy, _reloadQuestionPrefs } from '../public/modules/waiting.js';
 import { voiceTarget, stopVoice, setupVoice } from '../public/modules/voice.js';
-import { _resetReadAloud, speakingMessage, stopReading } from '../public/modules/readaloud.js';
+import { _resetReadAloud, speakingMessage, stopReading, autoReadOn } from '../public/modules/readaloud.js';
 
 const open = (n, extra = {}) => ({ id: `w${n}`, n, text: `Question ${n}?`, at: new Date().toISOString(), status: 'open', ...extra });
 const bubbleOf = (qid) => document.querySelector(`.chat-msg[data-q="${qid}"]`);
@@ -551,6 +551,30 @@ describe('read aloud and dictation in the tab', () => {
     expect(css).toMatch(/@container billion \(max-width: 720px\) \{\s*\.chat-autoread \{[^}]*\}\s*\.chat-autoread-label \{ display: none; \}/);
   });
 
+  it('a tap on the speaker while something is read stops it and leaves reading off; the next tap turns it on', () => {
+    const toggle = document.getElementById('chat-autoread');
+    const note = document.getElementById('chat-toast');
+    expect(document.getElementById('chat-stop-reading')).toBeNull();   // no Stop in the bar
+    // Off, with one message being read from its own speaker.
+    setChatMessages([billion('m1', 'Long.')]);
+    renderWaiting();
+    document.querySelector('.chat-speak').click();
+    expect(speakingMessage()).toBe('m1');
+    toggle.click();
+    expect([speakingMessage(), toggle.getAttribute('aria-pressed'), note.textContent]).toEqual([null, 'false', 'Read aloud: off']);
+    expect(window.speechSynthesis.cancel).toHaveBeenCalled();
+    // On, and reading a new message as it arrives.
+    toggle.click();
+    expect([toggle.getAttribute('aria-pressed'), note.textContent]).toEqual(['true', 'Read aloud: on']);
+    spoken.at(-1).onend();                          // the confirmation
+    handleChatMessage(billion('m2', 'Second.'));
+    expect(speakingMessage()).toBe('m2');
+    toggle.click();
+    expect([speakingMessage(), toggle.getAttribute('aria-pressed'), autoReadOn(), note.textContent]).toEqual([null, 'false', false, 'Read aloud: off']);
+    toggle.click();
+    expect([toggle.getAttribute('aria-pressed'), note.textContent]).toEqual(['true', 'Read aloud: on']);
+  });
+
   it('each tap on the speaker says the new state in a toast, which goes after a moment', () => {
     vi.useFakeTimers();
     try {
@@ -580,7 +604,7 @@ describe('read aloud and dictation in the tab', () => {
     for (const id of ['chat-input', 'chat-mic', 'chat-send']) {
       expect(document.getElementById(id).classList.contains('chat-control'), id).toBe(true);
     }
-    for (const id of ['chat-strip', 'chat-resume', 'chat-stop-reading', 'chat-autoread']) {
+    for (const id of ['chat-strip', 'chat-resume', 'chat-autoread']) {
       expect(document.getElementById(id).classList.contains('billion-bar-control'), id).toBe(true);
     }
     const css = readFileSync('public/style.css', 'utf8');
@@ -589,7 +613,7 @@ describe('read aloud and dictation in the tab', () => {
     expect(css).toMatch(/\.chat-mic \{[^}]*width: var\(--chat-control-h\);/);
     // No rule anywhere, media queries included, gives one of them its own
     // height to drift from the token.
-    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-strip)(?![-\w])/;
+    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-strip)(?![-\w])/;
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => controls.test(sel));
     expect(rules.length).toBeGreaterThan(5);
     for (const [, sel, body] of rules) expect(body, sel.trim()).not.toMatch(/(^|[\s;])(min-|max-)?height:/);

@@ -1023,9 +1023,10 @@ terminal panel on this tab.
   16px at a 1.05 stroke, the same 1.2px line as the header's gear and theme
   icons.
 - The bar's end (`.chat-head`) holds the chip, *Resume reading (N new)* as an
-  accent pill after a reload, *Stop* while reading, and a round speaker
-  button (`#chat-autoread`) that is the *read new messages aloud* switch
-  itself: one tap on, one off. Icon plus "Read aloud" when the tab is 720px
+  accent pill when the browser wants a tap before it speaks (after a
+  reload), and a round speaker button (`#chat-autoread`) that is the *read
+  new messages aloud* switch itself: one tap on, one off. There is no Stop:
+  a tap while anything is being read stops it and leaves the switch off. Icon plus "Read aloud" when the tab is 720px
   or wider, icon only (round) below that. Its name and tooltip are "Read new
   messages aloud" and `aria-pressed` carries the state; accent on a 14%
   accent tint while on. Each tap shows a toast (`.chat-toast`: a `--bg-panel`

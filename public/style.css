@@ -1993,7 +1993,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 .waiting-board.dropping { outline: 2px dashed var(--accent); outline-offset: -6px; }
 
 /* Read aloud and dictation (readaloud.js, voice.js's chat target). The
-   bar's end holds the chip, Resume and Stop when they apply, and the
+   bar's end holds the chip, Resume when the browser wants a tap first, and the
    speaker, which turns reading new messages aloud on and off (accent while
    on). The voice is picked in Settings. */
 .chat-head {
@@ -2003,7 +2003,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   margin-left: auto;
   flex-shrink: 0;
 }
-.chat-resume, .chat-stop-reading, .chat-autoread {
+.chat-resume, .chat-autoread {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2024,11 +2024,11 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   .chat-autoread { width: var(--bar-control-h); padding: 0; border-radius: 50%; }
   .chat-autoread-label { display: none; }
 }
-.chat-autoread:hover, .chat-stop-reading:hover { color: var(--text); border-color: var(--border); }
+.chat-autoread:hover { color: var(--text); border-color: var(--border); }
 .chat-autoread.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
-.chat-autoread:focus-visible, .chat-resume:focus-visible, .chat-stop-reading:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-autoread:focus-visible, .chat-resume:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chat-resume { color: var(--accent-contrast); background: var(--accent); font-weight: 700; }
-.chat-resume[hidden], .chat-stop-reading[hidden] { display: none; }
+.chat-resume[hidden] { display: none; }
 /* What a tap just did ("Read aloud: on"), at the top of the thread. */
 .chat-toast {
   position: absolute;
@@ -2106,7 +2106,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 @media (max-width: 700px) {
   .chat-file-remove { min-width: 32px; min-height: 32px; }
   /* Beside the 16px inputs iOS needs, 11px labels looked lost. */
-  .waiting-send, .chat-resume, .chat-stop-reading { font-size: 13px; }
+  .waiting-send, .chat-resume { font-size: 13px; }
   .chat-wide { display: none; }
   /* The text box gets the row: tighter edges and a Send only as wide as
      its word, so "Message Billion" fits at 360px. */

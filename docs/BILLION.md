@@ -1049,7 +1049,8 @@ runs in the browser (`speechSynthesis` and the Web Speech API's
 - **Read new messages aloud**: the speaker button in the bar at the top of the tab ("Read aloud" beside it when the tab is wide enough), one tap on and one off, with a brief "Read aloud: on" or "Read aloud: off" to confirm (accent while on; off by
   default, remembered by the browser). While it is on and the tab is showing,
   each new message from Billion is spoken as it arrives, one after another,
-  never over each other. Browsers let a page speak only after a tap on it: the
+  never over each other. Tapping the speaker while anything is being read
+  stops it and turns reading off; tap again to turn it back on. Browsers let a page speak only after a tap on it: the
   switch's own tap counts, but after a reload the tab shows **Resume reading**
   (with how many messages are waiting) until you tap it once. Leaving the
   Billion tab (or the phone's Billion view) stops reading.
