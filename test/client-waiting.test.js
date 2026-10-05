@@ -532,20 +532,42 @@ describe('read aloud and dictation in the tab', () => {
     stopReading();
   });
 
-  it('the bar\'s speaker is the read-aloud switch itself: one tap on, one off, accent and labelled', () => {
+  it('the bar\'s speaker is the read-aloud switch itself: one tap on, one off, named, labelled and accent', () => {
     const toggle = document.getElementById('chat-autoread');
     expect(toggle.closest('#chat-head')).not.toBeNull();
-    expect(toggle.hasAttribute('popovertarget')).toBe(false);
     expect(document.querySelector('[popover]')).toBeNull();
-    expect([toggle.type, toggle.querySelector('svg') !== null]).toEqual(['button', true]);
-    expect([toggle.getAttribute('aria-pressed'), toggle.getAttribute('aria-label'), toggle.classList.contains('on')]).toEqual(['false', 'Read aloud: off', false]);
+    expect([toggle.type, toggle.querySelector('svg') !== null, toggle.querySelector('.chat-autoread-label').textContent]).toEqual(['button', true, 'Read aloud']);
+    expect([toggle.getAttribute('aria-label'), toggle.title]).toEqual(['Read new messages aloud', 'Read new messages aloud']);
+    expect([toggle.getAttribute('aria-pressed'), toggle.classList.contains('on')]).toEqual(['false', false]);
     toggle.click();
-    expect([toggle.getAttribute('aria-pressed'), toggle.getAttribute('aria-label'), toggle.classList.contains('on')]).toEqual(['true', 'Read aloud: on', true]);
-    expect(localStorage.getItem('agent007-read-aloud')).toBe('1');
+    expect([toggle.getAttribute('aria-pressed'), toggle.classList.contains('on'), localStorage.getItem('agent007-read-aloud')]).toEqual(['true', true, '1']);
+    expect(toggle.getAttribute('aria-label')).toBe('Read new messages aloud');   // the name stays; aria-pressed carries the state
     toggle.click();
-    expect([toggle.getAttribute('aria-pressed'), toggle.getAttribute('aria-label'), localStorage.getItem('agent007-read-aloud')]).toEqual(['false', 'Read aloud: off', null]);
+    expect([toggle.getAttribute('aria-pressed'), toggle.classList.contains('on'), localStorage.getItem('agent007-read-aloud')]).toEqual(['false', false, null]);
     // The voice is picked in Settings, not here.
     expect(document.querySelector('#waiting-board select')).toBeNull();
+    // The word shows only where the bar has room.
+    const css = readFileSync('public/style.css', 'utf8');
+    expect(css).toMatch(/@container billion \(max-width: 720px\) \{\s*\.chat-autoread \{[^}]*\}\s*\.chat-autoread-label \{ display: none; \}/);
+  });
+
+  it('each tap on the speaker says the new state in a toast, which goes after a moment', () => {
+    vi.useFakeTimers();
+    try {
+      const note = document.getElementById('chat-toast');
+      expect([note.hidden, note.getAttribute('role')]).toEqual([true, 'status']);
+      renderWaiting();
+      expect(note.hidden).toBe(true);   // a render alone says nothing
+      document.getElementById('chat-autoread').click();
+      expect([note.hidden, note.textContent]).toEqual([false, 'Read aloud: on']);
+      vi.advanceTimersByTime(1000);
+      document.getElementById('chat-autoread').click();
+      expect([note.hidden, note.textContent]).toEqual([false, 'Read aloud: off']);
+      vi.advanceTimersByTime(1500);
+      expect(note.hidden).toBe(false);   // the second tap restarted the clock
+      vi.advanceTimersByTime(400);
+      expect(note.hidden).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 
   it('the box is not a login field to a password manager', () => {

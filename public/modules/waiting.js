@@ -554,8 +554,6 @@ function renderReadHead() {
   const on = autoReadOn();
   toggle.setAttribute('aria-pressed', String(on));
   toggle.classList.toggle('on', on);
-  toggle.setAttribute('aria-label', `Read aloud: ${on ? 'on' : 'off'}`);
-  toggle.title = on ? 'Reading new messages aloud: tap to stop' : 'Read each new message from Billion aloud as it arrives, while this tab is open';
   const resume = document.getElementById('chat-resume');
   const waiting = needsResume();
   resume.hidden = !waiting;
@@ -616,6 +614,17 @@ export const CHAT_VOICE = {
 
 export const toggleChatVoice = () => toggleVoice(CHAT_VOICE);
 
+let toastTimer = null;
+const TOAST_MS = 1800;
+function toast(text) {
+  const note = document.getElementById('chat-toast');
+  if (!note) return;
+  note.textContent = text;
+  note.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { note.hidden = true; }, TOAST_MS);
+}
+
 // The Chat view's end of the bar: the open questions chip, Resume reading
 // and Stop when they apply, and the speaker that turns reading new messages
 // aloud on and off. Built once.
@@ -638,8 +647,16 @@ function readHead() {
   const toggle = el('button', 'chat-autoread billion-bar-control');
   toggle.id = 'chat-autoread';
   toggle.type = 'button';
+  // Named for what it does; aria-pressed says whether it is on. The word
+  // shows beside the icon where the bar has room (style.css).
+  toggle.setAttribute('aria-label', 'Read new messages aloud');
+  toggle.title = 'Read new messages aloud';
   toggle.innerHTML = SPEAKER_SVG;
-  toggle.onclick = () => setAutoRead(!autoReadOn());
+  toggle.appendChild(el('span', 'chat-autoread-label', 'Read aloud'));
+  toggle.onclick = () => {
+    setAutoRead(!autoReadOn());
+    toast(`Read aloud: ${autoReadOn() ? 'on' : 'off'}`);
+  };
   head.append(resume, stop, toggle);
   return head;
 }
@@ -673,6 +690,13 @@ function shell() {
         setQuestionsOpen(false);
       }
     });
+
+    // A short-lived line over the thread saying what a tap just did.
+    const note = el('div', 'chat-toast');
+    note.id = 'chat-toast';
+    note.setAttribute('role', 'status');
+    note.hidden = true;
+    body.appendChild(note);
 
     const jump = el('button', 'chat-jump', 'New messages ↓');
     jump.id = 'chat-jump';

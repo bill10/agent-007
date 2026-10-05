@@ -21,11 +21,11 @@ beforeEach(() => {
 });
 
 describe('the Settings voice row', () => {
-  it('sits in the Settings window under "Read aloud", a labelled select that is no login field', () => {
+  it('sits in the Settings window under "Read aloud", a select labelled "Voice for reading messages aloud" that is no login field', () => {
     expect(html.indexOf('id="voice-settings"')).toBeGreaterThan(html.indexOf('id="settings-panel"'));
     expect(html.indexOf('id="voice-settings"')).toBeLessThan(html.indexOf('id="account-panel"'));
     expect(box().querySelector('h2').textContent).toBe('Read aloud');
-    expect(pick().closest('label').textContent).toBe('Voice');
+    expect(pick().closest('label').textContent).toBe('Voice for reading messages aloud');
     expect(pick().getAttribute('autocomplete')).toBe('off');
     const css = readFileSync('public/style.css', 'utf8');
     expect(css).toMatch(/@media \(max-width: 700px\) \{ \.settings-voice-pick \{ font-size: 16px;/);

@@ -701,9 +701,8 @@ body {
 .telegram-settings[hidden] { display: none; }
 .voice-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
 .voice-settings[hidden] { display: none; }
-.settings-voice { display: flex; align-items: center; gap: 10px; color: var(--text-muted); }
+.settings-voice { display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); }
 .settings-voice-pick {
-  flex: 1;
   min-width: 0;
   min-height: 32px;
   font: inherit;
@@ -2019,12 +2018,38 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   cursor: pointer;
   white-space: nowrap;
 }
-.chat-autoread { width: var(--bar-control-h); padding: 0; border-radius: 50%; }
+/* Icon and "Read aloud" where the bar has room; icon only in a narrow pane. */
+.chat-autoread { padding: 0 12px 0 9px; }
+@container billion (max-width: 720px) {
+  .chat-autoread { width: var(--bar-control-h); padding: 0; border-radius: 50%; }
+  .chat-autoread-label { display: none; }
+}
 .chat-autoread:hover, .chat-stop-reading:hover { color: var(--text); border-color: var(--border); }
 .chat-autoread.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .chat-autoread:focus-visible, .chat-resume:focus-visible, .chat-stop-reading:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chat-resume { color: var(--accent-contrast); background: var(--accent); font-weight: 700; }
 .chat-resume[hidden], .chat-stop-reading[hidden] { display: none; }
+/* What a tap just did ("Read aloud: on"), at the top of the thread. */
+.chat-toast {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  padding: 5px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  animation: chat-toast-in 0.16s ease-out;
+}
+.chat-toast[hidden] { display: none; }
+@keyframes chat-toast-in { from { opacity: 0; transform: translate(-50%, -4px); } }
+@media (prefers-reduced-motion: reduce) { .chat-toast { animation: none; } }
 .chat-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .chat-speak {
   display: inline-flex;

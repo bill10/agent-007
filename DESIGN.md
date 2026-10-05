@@ -1025,11 +1025,15 @@ terminal panel on this tab.
 - The bar's end (`.chat-head`) holds the chip, *Resume reading (N new)* as an
   accent pill after a reload, *Stop* while reading, and a round speaker
   button (`#chat-autoread`) that is the *read new messages aloud* switch
-  itself: one tap on, one off, `aria-pressed` and "Read aloud: on/off",
-  accent icon on a 14% accent tint while on.
+  itself: one tap on, one off. Icon plus "Read aloud" when the tab is 720px
+  or wider, icon only (round) below that. Its name and tooltip are "Read new
+  messages aloud" and `aria-pressed` carries the state; accent on a 14%
+  accent tint while on. Each tap shows a toast (`.chat-toast`: a `--bg-panel`
+  pill with a soft shadow, centred at the top of the thread, `role=status`,
+  1.8s) saying "Read aloud: on" or "Read aloud: off".
 - The voice picker lives in Settings (the gear), under its own "Read aloud"
-  head (`.voice-settings`, hairline top border like Telegram's): "Voice" and
-  a select ("Auto · Evan" or a named voice), 32px, 16px type and 40px on
+  head (`.voice-settings`, hairline top border like Telegram's): "Voice for
+  reading messages aloud" above a select ("Auto · Evan" or a named voice), 32px, 16px type and 40px on
   phones so iOS does not zoom. Hidden while the browser offers one voice or
   none.
 - Each message from Billion has a speaker button (`.chat-speak`, 40px hit

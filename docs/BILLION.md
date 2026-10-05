@@ -1045,8 +1045,8 @@ runs in the browser (`speechSynthesis` and the Web Speech API's
   so Chrome's cut-off after about 15 seconds of one utterance never truncates
   them. The voice is the best English one the browser lists (en-US first,
   Premium, Enhanced, Siri or Google voices before the rest); the picker in the
-  Settings window (the gear, under *Read aloud*) changes it, and the browser remembers the choice.
-- **Read new messages aloud**: the speaker button in the bar at the top of the tab, one tap on and one off (accent while on; off by
+  Settings window (the gear, *Voice for reading messages aloud* under *Read aloud*) changes it, and the browser remembers the choice.
+- **Read new messages aloud**: the speaker button in the bar at the top of the tab ("Read aloud" beside it when the tab is wide enough), one tap on and one off, with a brief "Read aloud: on" or "Read aloud: off" to confirm (accent while on; off by
   default, remembered by the browser). While it is on and the tab is showing,
   each new message from Billion is spoken as it arrives, one after another,
   never over each other. Browsers let a page speak only after a tap on it: the
