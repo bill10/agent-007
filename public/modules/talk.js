@@ -247,7 +247,9 @@ function paint() {
   const wasHidden = row?.hidden;
   if (row) row.hidden = inCall;
   if (inCall && !wasHidden) q('.talk-end').focus();
-  else if (!inCall && wasHidden) document.getElementById('chat-input')?.focus();
+  // After hang-up focus the phone button, never the box: on a phone the box
+  // would pop the keyboard over the thread.
+  else if (!inCall && wasHidden) document.getElementById('chat-talk')?.focus({ preventScroll: true });
   const phone = document.getElementById('chat-talk');
   if (phone) {
     phone.title = resumable ? 'Resume talking to Billion' : 'Talk to Billion: a hands-free conversation (speak, hear its reply, speak again)';

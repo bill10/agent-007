@@ -379,6 +379,17 @@ describe('progress updates while Billion works', () => {
   });
 });
 
+describe('hang up focus', () => {
+  it.each([['coarse', true], ['fine', false]])('does not focus the textarea on a %s pointer; the Talk button gets it', async (_, coarse) => {
+    vi.stubGlobal('matchMedia', (q) => ({ matches: coarse && q === '(pointer: coarse)' }));
+    await talking();
+    endTalk();
+    await flush();
+    expect(document.activeElement).not.toBe(document.getElementById('chat-input'));
+    expect(document.activeElement).toBe(document.getElementById('chat-talk'));
+  });
+});
+
 describe('speaker or earpiece (iPhone)', () => {
   const OUTPUTS = [
     { kind: 'audioinput', label: 'iPhone Microphone', deviceId: 'mic' },
