@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.54.3.1] - 2026-10-05
+
+### Fixed
+
+- **Clarify account switching setup.** Keep the auto-switch toggle and account discovery visible at the top of Settings, compact account actions, collapse manual folder entry, and explain when two selected accounts are required.
+
 ## [0.54.3.0] - 2026-10-05
 
 ### Fixed
