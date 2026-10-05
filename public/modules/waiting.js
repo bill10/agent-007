@@ -7,7 +7,8 @@
 // Billion's terminal as [Owner via app] (server/owner.js ownerSays). Shares the
 // terminal viewport with the terminals and the job board, like Jobs does.
 // Billion's messages can be read aloud (readaloud.js: a speaker button on
-// each, and "Read new messages aloud" behind the bar's speaker), and the box has its own
+// each, and the bar's speaker turns on reading new messages aloud; the voice
+// is picked in Settings), and the box has its own
 // mic (voice.js with the CHAT_VOICE target), all in the browser and free.
 // "Talk to Billion" (talk.js) is a hands-free voice conversation over the same thread.
 import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionStatus } from './state.js';
@@ -20,7 +21,6 @@ import { patchChildren, rev, atBottom } from './dom-patch.js';
 import {
   readAloudSupported, speakableText, toggleSpeak, readNew, speakingMessage, stopReading,
   autoReadOn, setAutoRead, needsResume, resumeReading, queuedCount, onReadAloudChange,
-  englishVoices, pickVoice, savedVoiceURI, setVoiceURI,
 } from './readaloud.js';
 import { progressHeading } from './readaloud.js';
 import { talkBar, talkButton, talkHeard, talkOn, endTalk } from './talk.js';
@@ -545,19 +545,17 @@ function paintSpeakButton(btn) {
   btn.innerHTML = speaking ? STOP_SVG : SPEAKER_SVG;
 }
 
-// The bar's read-aloud controls: the speaker that opens "Read new messages
-// aloud" and the voice picker, the one-tap "Resume reading" after a reload,
-// and Stop while something is read.
+// The bar's read-aloud controls: the speaker that turns "read new messages
+// aloud" on and off, the one-tap "Resume reading" after a reload, and Stop
+// while something is read.
 function renderReadHead() {
   const toggle = document.getElementById('chat-autoread');
   if (!toggle) return;
   const on = autoReadOn();
   toggle.setAttribute('aria-pressed', String(on));
   toggle.classList.toggle('on', on);
-  const menu = document.getElementById('chat-read-menu');
-  menu.classList.toggle('on', on);
-  menu.setAttribute('aria-label', `Read aloud settings, ${on ? 'on' : 'off'}`);
-  menu.title = on ? 'Reading new messages aloud: tap for the switch and the voice' : 'Read aloud: tap for the switch and the voice';
+  toggle.setAttribute('aria-label', `Read aloud: ${on ? 'on' : 'off'}`);
+  toggle.title = on ? 'Reading new messages aloud: tap to stop' : 'Read each new message from Billion aloud as it arrives, while this tab is open';
   const resume = document.getElementById('chat-resume');
   const waiting = needsResume();
   resume.hidden = !waiting;
@@ -565,30 +563,6 @@ function renderReadHead() {
   resume.textContent = queued ? `Resume reading (${queued} new)` : 'Resume reading';
   const stop = document.getElementById('chat-stop-reading');
   stop.hidden = speakingMessage() === null && !queued || waiting;
-  renderVoicePick();
-}
-
-function renderVoicePick() {
-  const pick = document.getElementById('chat-voice-pick');
-  if (!pick) return;
-  const voices = englishVoices(window.speechSynthesis?.getVoices?.() || []);
-  pick.hidden = voices.length < 2;
-  document.getElementById('chat-voice-box').hidden = pick.hidden;
-  const saved = savedVoiceURI();
-  const auto = pickVoice(voices, null);
-  const key = voices.map(v => v.voiceURI).join('|') + `#${saved}`;
-  if (pick.dataset.key === key) return;
-  pick.dataset.key = key;
-  pick.innerHTML = '';
-  const first = el('option', null, auto ? `Auto · ${auto.name}` : 'Auto');
-  first.value = '';
-  pick.appendChild(first);
-  for (const v of voices) {
-    const opt = el('option', null, v.name);
-    opt.value = v.voiceURI;
-    pick.appendChild(opt);
-  }
-  pick.value = voices.some(v => v.voiceURI === saved) ? saved : '';
 }
 
 // A password manager or AutoFill can pin its own overlay (the page's
@@ -643,8 +617,8 @@ export const CHAT_VOICE = {
 export const toggleChatVoice = () => toggleVoice(CHAT_VOICE);
 
 // The Chat view's end of the bar: the open questions chip, Resume reading
-// and Stop when they apply, and a speaker that opens a small menu with
-// "Read new messages aloud" and the voice picker. Built once.
+// and Stop when they apply, and the speaker that turns reading new messages
+// aloud on and off. Built once.
 function readHead() {
   const head = el('div', 'chat-head');
   head.id = 'chat-head';
@@ -661,44 +635,12 @@ function readHead() {
   stop.setAttribute('aria-label', 'Stop reading aloud');
   stop.hidden = true;
   stop.onclick = () => stopReading();
-
-  const pop = el('div', 'chat-read-pop');
-  pop.id = 'chat-read-pop';
-  pop.setAttribute('popover', '');
-  pop.setAttribute('role', 'group');
-  pop.setAttribute('aria-label', 'Read aloud');
-  const toggle = el('button', 'chat-autoread chat-control');
+  const toggle = el('button', 'chat-autoread billion-bar-control');
   toggle.id = 'chat-autoread';
   toggle.type = 'button';
-  toggle.append(el('span', null, 'Read new messages aloud'), el('span', 'chat-switch'));
-  toggle.title = 'Speak each new message from Billion as it arrives, while this tab is open';
+  toggle.innerHTML = SPEAKER_SVG;
   toggle.onclick = () => setAutoRead(!autoReadOn());
-  const pick = el('select', 'chat-voice-pick chat-control');
-  pick.id = 'chat-voice-pick';
-  pick.setAttribute('aria-label', 'Reading voice');
-  pick.hidden = true;
-  pick.onchange = () => { setVoiceURI(pick.value); renderVoicePick(); };
-  noAutofill(pick);
-  const box = el('label', 'chat-voice-box');
-  box.id = 'chat-voice-box';
-  box.hidden = true;
-  box.append(el('span', 'chat-voice-label', 'Voice'), pick);
-  pop.append(toggle, box);
-
-  // The popover sits in the top layer, so it is placed under its button here.
-  const menu = el('button', 'chat-read-menu billion-bar-control');
-  menu.id = 'chat-read-menu';
-  menu.type = 'button';
-  menu.innerHTML = SPEAKER_SVG;
-  menu.setAttribute('popovertarget', pop.id);
-  pop.addEventListener('beforetoggle', (e) => {
-    if (e.newState !== 'open') return;
-    const r = menu.getBoundingClientRect();
-    pop.style.top = `${r.bottom + 4}px`;
-    pop.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
-  });
-  head.append(resume, stop, menu, pop);
-  window.speechSynthesis?.addEventListener?.('voiceschanged', renderVoicePick);
+  head.append(resume, stop, toggle);
   return head;
 }
 

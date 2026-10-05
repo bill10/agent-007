@@ -1,11 +1,13 @@
 // The Settings panel behind the gear in the terminal header. "Agents &
 // accounts" shows the server's last scan of installed agent CLIs and their
 // login folders (GET /api/agent-accounts); Refresh rescans (POST). "Telegram"
-// shows the connected chat, with Change. On top, this copy's version and,
-// when npm has a newer one, Update.
+// shows the connected chat, with Change. "Read aloud" picks the voice the
+// Billion tab reads in. On top, this copy's version and, when npm has a
+// newer one, Update.
 
 import { authHeaders, showLogin, escapeHtml } from './auth.js';
 import { send } from './ws.js';
+import { readAloudSupported, englishVoices, pickVoice, savedVoiceURI, setVoiceURI } from './readaloud.js';
 
 const tilde = (p, home) => (home && /^[\\/]/.test(p.slice(home.length)) && p.startsWith(home) ? `~${p.slice(home.length)}` : p);
 
@@ -64,6 +66,33 @@ export function renderTelegramSettings(state) {
     change.onclick = () => send({ type: 'telegram-forget' });
     box.querySelector('.settings-section-head').appendChild(change);
   }
+}
+
+// "Read aloud": the voice picker, "Auto · <the voice it would pick>" then
+// every English voice, remembered by this browser (readaloud.js). Shown only
+// when there is a choice.
+export function renderVoiceSettings() {
+  const box = document.getElementById('voice-settings');
+  const pick = document.getElementById('voice-pick');
+  if (!box || !pick) return;
+  const voices = readAloudSupported() ? englishVoices(window.speechSynthesis.getVoices?.() || []) : [];
+  box.hidden = voices.length < 2;
+  const saved = savedVoiceURI();
+  const key = voices.map(v => v.voiceURI).join('|') + `#${saved}`;
+  if (pick.dataset.key === key) return;
+  pick.dataset.key = key;
+  const auto = pickVoice(voices, null);
+  const first = document.createElement('option');
+  first.value = '';
+  first.textContent = auto ? `Auto · ${auto.name}` : 'Auto';
+  pick.replaceChildren(first, ...voices.map(v => {
+    const opt = document.createElement('option');
+    opt.value = v.voiceURI;
+    opt.textContent = v.name;
+    return opt;
+  }));
+  pick.value = voices.some(v => v.voiceURI === saved) ? saved : '';
+  pick.onchange = () => { setVoiceURI(pick.value); renderVoiceSettings(); };
 }
 
 // The version line (GET /api/update, server/self-update.js) and where an
@@ -126,8 +155,10 @@ export function setupSettings() {
   const open = (show) => {
     panel.hidden = !show;
     btn.setAttribute('aria-expanded', String(show));
-    if (show) { place(); load(); }
+    if (show) { renderVoiceSettings(); place(); load(); }
   };
+  renderVoiceSettings();
+  window.speechSynthesis?.addEventListener?.('voiceschanged', renderVoiceSettings);
 
   // Version and Update. Polled every 2s while an update runs: the server
   // going away is the restart, and its coming back the end of it.

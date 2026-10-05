@@ -1015,9 +1015,8 @@ terminal panel on this tab.
   own: `.chat-mic`, a square outline button beside the textarea that pulses `--state-recording` red while listening (`mic-pulse`).
   What is being heard shows greyed and italic in a line above the box
   (`.chat-voice`), with the same red dot; notices and errors drop the dot.
-- One control height and one gap for the composer row and the read-aloud
-  menu: the textarea, mic and Send, and the menu's switch and voice picker
-  all carry `.chat-control` (`min-height: var(--chat-control-h)`,
+- One control height and one gap for the composer row: the textarea, mic
+  and Send all carry `.chat-control` (`min-height: var(--chat-control-h)`,
   40px, 44px on phones) and sit `--chat-gap` (6px) apart. The composer row
   is bottom-aligned: a multi-line message grows the box upward and mic and
   Send stay beside its last line, where the caret is. The mic's glyph is
@@ -1025,21 +1024,23 @@ terminal panel on this tab.
   icons.
 - The bar's end (`.chat-head`) holds the chip, *Resume reading (N new)* as an
   accent pill after a reload, *Stop* while reading, and a round speaker
-  button (accent while reading new messages aloud is on). The speaker opens
-  a native popover (`.chat-read-pop`, `--bg-panel`, 8px radius, a soft
-  offset shadow) under it: *Read new messages aloud* with its small switch,
-  and "Voice" with the picker ("Auto · Evan" or a named voice).
+  button (`#chat-autoread`) that is the *read new messages aloud* switch
+  itself: one tap on, one off, `aria-pressed` and "Read aloud: on/off",
+  accent icon on a 14% accent tint while on.
+- The voice picker lives in Settings (the gear), under its own "Read aloud"
+  head (`.voice-settings`, hairline top border like Telegram's): "Voice" and
+  a select ("Auto · Evan" or a named voice), 32px, 16px type and 40px on
+  phones so iOS does not zoom. Hidden while the browser offers one voice or
+  none.
 - Each message from Billion has a speaker button (`.chat-speak`, 40px hit
   area, `--text-dim`) in its time row; it turns accent and becomes a stop
   square while that message is spoken.
-- `prefers-reduced-motion: reduce` stops the mic pulse, the dot and the
-  switch's slide.
+- `prefers-reduced-motion: reduce` stops the mic pulse and the dot.
 - Empty: "Nothing here yet. Say something to Billion." in `--text-dim`,
   hidden while the notice bar says Billion cannot hear you.
 - Phones: choices and the `.chat-control` rows are 44px tall; the input is
   16px so iOS does not zoom, and Send and the header's labels 13px beside it;
-  bubbles go up to 88% wide. The voice picker is 16px in its popover so iOS
-  does not zoom when it is tapped.
+  bubbles go up to 88% wide.
 
 ## Interactive Behaviors
 

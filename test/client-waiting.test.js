@@ -532,44 +532,33 @@ describe('read aloud and dictation in the tab', () => {
     stopReading();
   });
 
-  it('the bar\'s speaker opens a menu with the switch and the voice, and shows when reading is on', () => {
-    const menu = document.getElementById('chat-read-menu');
-    const pop = document.getElementById('chat-read-pop');
-    expect([menu.type, menu.getAttribute('popovertarget'), pop.hasAttribute('popover')]).toEqual(['button', 'chat-read-pop', true]);
-    expect(pop.contains(document.getElementById('chat-autoread'))).toBe(true);
-    expect(pop.contains(document.getElementById('chat-voice-pick'))).toBe(true);
-    expect([menu.getAttribute('aria-label'), menu.classList.contains('on')]).toEqual(['Read aloud settings, off', false]);
-    document.getElementById('chat-autoread').click();
-    expect([menu.getAttribute('aria-label'), menu.classList.contains('on')]).toEqual(['Read aloud settings, on', true]);
+  it('the bar\'s speaker is the read-aloud switch itself: one tap on, one off, accent and labelled', () => {
+    const toggle = document.getElementById('chat-autoread');
+    expect(toggle.closest('#chat-head')).not.toBeNull();
+    expect(toggle.hasAttribute('popovertarget')).toBe(false);
+    expect(document.querySelector('[popover]')).toBeNull();
+    expect([toggle.type, toggle.querySelector('svg') !== null]).toEqual(['button', true]);
+    expect([toggle.getAttribute('aria-pressed'), toggle.getAttribute('aria-label'), toggle.classList.contains('on')]).toEqual(['false', 'Read aloud: off', false]);
+    toggle.click();
+    expect([toggle.getAttribute('aria-pressed'), toggle.getAttribute('aria-label'), toggle.classList.contains('on')]).toEqual(['true', 'Read aloud: on', true]);
+    expect(localStorage.getItem('agent007-read-aloud')).toBe('1');
+    toggle.click();
+    expect([toggle.getAttribute('aria-pressed'), toggle.getAttribute('aria-label'), localStorage.getItem('agent007-read-aloud')]).toEqual(['false', 'Read aloud: off', null]);
+    // The voice is picked in Settings, not here.
+    expect(document.querySelector('#waiting-board select')).toBeNull();
   });
 
-  it('the voice picker shows when there is a choice, "Auto · name" naming the voice it would pick', () => {
-    const box = document.getElementById('chat-voice-box');
-    renderWaiting();
-    expect(box.hidden).toBe(true);
-    const voices = ['Albert', 'Samantha'].map((name, i) => ({ name, lang: 'en-US', voiceURI: `v${i}`, localService: true }));
-    window.speechSynthesis.getVoices = () => voices;
-    renderWaiting();
-    expect(box.hidden).toBe(false);
-    const pick = document.getElementById('chat-voice-pick');
-    expect(pick.selectedOptions[0].textContent).toMatch(/^Auto · /);
-    expect(box.tagName).toBe('LABEL');
-    pick.value = 'v1';
-    pick.onchange();
-    expect(pick.selectedOptions[0].textContent).toBe('Samantha');
-  });
-
-  it('the box and the voice picker are not login fields to a password manager', () => {
-    for (const id of ['chat-input', 'chat-voice-pick']) {
+  it('the box is not a login field to a password manager', () => {
+    for (const id of ['chat-input']) {
       expect(document.getElementById(id).getAttribute('autocomplete'), id).toBe('off');
     }
   });
 
-  it('the box, mic and Send, and the read-aloud menu share one control height token, the bar\'s controls another', () => {
-    for (const id of ['chat-input', 'chat-mic', 'chat-send', 'chat-autoread', 'chat-voice-pick']) {
+  it('the box, mic and Send share one control height token, the bar\'s controls another', () => {
+    for (const id of ['chat-input', 'chat-mic', 'chat-send']) {
       expect(document.getElementById(id).classList.contains('chat-control'), id).toBe(true);
     }
-    for (const id of ['chat-strip', 'chat-resume', 'chat-stop-reading', 'chat-read-menu']) {
+    for (const id of ['chat-strip', 'chat-resume', 'chat-stop-reading', 'chat-autoread']) {
       expect(document.getElementById(id).classList.contains('billion-bar-control'), id).toBe(true);
     }
     const css = readFileSync('public/style.css', 'utf8');
@@ -578,7 +567,7 @@ describe('read aloud and dictation in the tab', () => {
     expect(css).toMatch(/\.chat-mic \{[^}]*width: var\(--chat-control-h\);/);
     // No rule anywhere, media queries included, gives one of them its own
     // height to drift from the token.
-    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-voice-pick|\.chat-strip|\.chat-read-menu)(?![-\w])/;
+    const controls = /(#chat-input|\.chat-mic|\.waiting-send|\.chat-autoread|\.chat-resume|\.chat-stop-reading|\.chat-strip)(?![-\w])/;
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, sel]) => controls.test(sel));
     expect(rules.length).toBeGreaterThan(5);
     for (const [, sel, body] of rules) expect(body, sel.trim()).not.toMatch(/(^|[\s;])(min-|max-)?height:/);

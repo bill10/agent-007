@@ -699,6 +699,22 @@ body {
 .account-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
 .telegram-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
 .telegram-settings[hidden] { display: none; }
+.voice-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
+.voice-settings[hidden] { display: none; }
+.settings-voice { display: flex; align-items: center; gap: 10px; color: var(--text-muted); }
+.settings-voice-pick {
+  flex: 1;
+  min-width: 0;
+  min-height: 32px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.settings-voice-pick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* 16px, or iOS zooms the page when the picker is tapped. */
+@media (max-width: 700px) { .settings-voice-pick { font-size: 16px; min-height: 40px; } }
 .settings-telegram { line-height: 1.4; color: var(--text-muted); overflow-wrap: anywhere; }
 .account-intro { margin-bottom: 8px; line-height: 1.4; }
 .account-body { display: flex; flex-direction: column; gap: 8px; }
@@ -1979,7 +1995,8 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 
 /* Read aloud and dictation (readaloud.js, voice.js's chat target). The
    bar's end holds the chip, Resume and Stop when they apply, and the
-   speaker, whose popover has the switch and the voice picker. */
+   speaker, which turns reading new messages aloud on and off (accent while
+   on). The voice is picked in Settings. */
 .chat-head {
   display: flex;
   align-items: center;
@@ -1987,7 +2004,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   margin-left: auto;
   flex-shrink: 0;
 }
-.chat-resume, .chat-stop-reading, .chat-read-menu {
+.chat-resume, .chat-stop-reading, .chat-autoread {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2002,77 +2019,12 @@ a.chat-file-chip:hover { border-color: var(--accent); }
   cursor: pointer;
   white-space: nowrap;
 }
-.chat-read-menu { width: var(--bar-control-h); padding: 0; border-radius: 50%; }
-.chat-read-menu:hover, .chat-stop-reading:hover { color: var(--text); border-color: var(--border); }
-.chat-read-menu.on { color: var(--accent); }
-.chat-read-menu:focus-visible, .chat-resume:focus-visible, .chat-stop-reading:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-autoread { width: var(--bar-control-h); padding: 0; border-radius: 50%; }
+.chat-autoread:hover, .chat-stop-reading:hover { color: var(--text); border-color: var(--border); }
+.chat-autoread.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.chat-autoread:focus-visible, .chat-resume:focus-visible, .chat-stop-reading:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chat-resume { color: var(--accent-contrast); background: var(--accent); font-weight: 700; }
-.chat-resume[hidden], .chat-stop-reading[hidden], .chat-voice-pick[hidden], .chat-voice-box[hidden] { display: none; }
-
-/* The speaker's popover, in the top layer under its button (waiting.js
-   places it). */
-.chat-read-pop {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  width: min(280px, calc(100vw - 16px));
-  padding: 6px;
-  color: var(--text);
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
-}
-.chat-read-pop:popover-open { display: flex; flex-direction: column; gap: 2px; }
-.chat-autoread {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 8px;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  color: var(--text);
-  background: none;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.chat-autoread:hover { background: var(--bg-dark); }
-.chat-switch {
-  position: relative;
-  width: 26px;
-  height: 14px;
-  border-radius: 7px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-.chat-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--text-dim);
-  transition: left 0.15s;
-}
-.chat-autoread.on .chat-switch { background: var(--accent); }
-.chat-autoread.on .chat-switch::after { left: 14px; background: var(--accent-contrast); }
-@media (prefers-reduced-motion: reduce) { .chat-switch::after { transition: none; } }
-.chat-voice-box { display: flex; align-items: center; gap: 10px; padding: 0 0 0 8px; font-size: 12px; color: var(--text-muted); }
-.chat-voice-pick {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-}
+.chat-resume[hidden], .chat-stop-reading[hidden] { display: none; }
 .chat-meta-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .chat-speak {
   display: inline-flex;
@@ -2129,10 +2081,8 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 @media (max-width: 700px) {
   .chat-file-remove { min-width: 32px; min-height: 32px; }
   /* Beside the 16px inputs iOS needs, 11px labels looked lost. */
-  .waiting-send, .chat-autoread, .chat-resume, .chat-stop-reading, .chat-voice-box { font-size: 13px; }
+  .waiting-send, .chat-resume, .chat-stop-reading { font-size: 13px; }
   .chat-wide { display: none; }
-  /* 16px, or iOS zooms the page when the picker is tapped. */
-  .chat-voice-pick { font-size: 16px; }
   /* The text box gets the row: tighter edges and a Send only as wide as
      its word, so "Message Billion" fits at 360px. */
   .chat-compose { padding-inline: 8px; }
