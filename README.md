@@ -234,11 +234,11 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 
 ### Rotating Claude accounts
 
-Open **Settings → Claude accounts → Find logged-in accounts**. Each account
+Open **Settings → Auto-switch accounts → Find logged-in accounts**. Each account
 must have its own Claude Code login folder (for example, sign in with
 `CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`). You can also add a
-folder explicitly. **Automatic rotation turns on by default once two accounts
-are added.** Arrange their order and save any changes. An explicitly saved off
+folder under **Add an account folder manually**. **Automatic rotation turns on by default once two accounts
+are added.** Arrange their order and click **Save settings** to apply changes. An explicitly saved off
 setting stays off, including after a restart or another account discovery. **Switch now** selects an account manually.
 
 At a hard usage limit on Billion or a Claude worker, the app selects the next
@@ -266,7 +266,7 @@ Avoid using a source login folder concurrently: its copied refresh token can
 become stale. Discovery does not overwrite a maintained login with that stale
 copy. An interrupted switch offers **Restore previous login**, which leaves
 automatic rotation off until you enable it again. If a conversation fails to
-restart, fix the reported startup problem, then choose **Settings → Claude
+restart, fix the reported startup problem, then choose **Settings → Auto-switch
 accounts → Retry paused Claude conversations**. Queued messages are retained
 for that retry; it restarts the app's Claude sessions without changing the login.
 Nothing is retired or deleted. Rotation controls require Billion enabled and app user
@@ -392,7 +392,7 @@ public/
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation into the terminal or the Billion tab's text box)
     auth.js        Login tokens, presence, HTML escaping
-    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Claude account)
+    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Auto-switch accounts)
     account.js     Claude account rotation settings (discovery, inclusion, order, fallback, recovery)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser

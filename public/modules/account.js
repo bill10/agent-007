@@ -6,6 +6,7 @@ let state = {};
 let draft = { enabled: false, fallback: true, accounts: [] };
 let lastError = null;
 let folderDraft = '';
+let manualFolderOpen = false;
 export function handleAccountState(msg) {
   state = msg;
   draft = structuredClone(msg.rotation || { enabled: false, fallback: true, accounts: [] });
@@ -35,12 +36,10 @@ export function renderAccount() {
     const wrap = document.createElement('label'), input = document.createElement('input');
     wrap.className = 'rotation-toggle'; input.type = 'checkbox'; input.checked = checked;
     input.onchange = () => onchange(input.checked);
-    wrap.append(input, document.createTextNode(label)); parent.append(wrap); return input;
+    const caption = document.createElement('span'); caption.textContent = label;
+    wrap.append(input, caption); parent.append(wrap); return input;
   };
-  text(draft.pending ? 'A switch was interrupted. Restore the previous login before continuing.'
-    : draft.enabled ? 'Automatic rotation is on. Claude conversations and settings stay in place.'
-    : draft.defaultSettings ? 'Automatic rotation starts when at least two accounts are added.'
-    : 'Automatic rotation is off. Choose accounts and enable it to rotate at usage limits.', draft.pending ? 'account-error' : 'account-status');
+  if (draft.pending) text('A switch was interrupted. Restore the previous login before continuing.', 'account-error');
   if (draft.error) text(draft.error, 'account-error');
   if (lastError) text(lastError, 'account-error');
   if (draft.pending) {
@@ -49,12 +48,31 @@ export function renderAccount() {
   }
   if (draft.damaged) return;
   if (draft.resumePending) button(body, 'Retry paused Claude conversations', 'rotation-resume', () => transmit('rotation-resume'));
+  const enabledCount = () => draft.accounts.filter(a => a.enabled).length;
+  const auto = checkbox(body, 'Auto-switch accounts at usage limits', draft.enabled, on => { draft.enabled = on; updateControls(); });
+  auto.id = 'account-auto-switch';
+  const hint = text('', 'account-status'); hint.id = 'account-auto-switch-hint'; hint.setAttribute('aria-live', 'polite');
+  auto.setAttribute('aria-describedby', hint.id);
+  const discover = button(body, 'Find logged-in accounts', 'rotation-discover', () => transmit('rotation-discover'));
+  discover.classList.add('account-discover');
+  let saveButton;
+  function updateControls() {
+    auto.disabled = enabledCount() < 2 && !draft.enabled;
+    hint.textContent = draft.accounts.length < 2 ? (draft.defaultSettings
+      ? 'Finding two logged-in accounts enables auto-switching. You can turn it off here.'
+      : 'Find at least two logged-in accounts, then enable auto-switching.')
+      : enabledCount() < 2 ? 'Select at least two accounts to enable automatic switching.'
+      : 'Use the selected accounts in the order below. Save settings to apply changes.';
+    if (saveButton) saveButton.disabled = draft.enabled && enabledCount() < 2;
+  }
+  updateControls();
   const accounts = document.createElement('div'); accounts.className = 'rotation-accounts'; body.append(accounts);
   draft.accounts.forEach((a, index) => {
     const row = document.createElement('div'); row.className = 'rotation-account'; accounts.append(row);
-    checkbox(row, a.email, a.enabled, on => { a.enabled = on; });
+    const identity = document.createElement('div'); identity.className = 'account-identity'; row.append(identity);
+    checkbox(identity, a.email, a.enabled, on => { a.enabled = on; updateControls(); });
     const status = document.createElement('span'); status.className = 'settings-dim';
-    status.textContent = a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''); row.append(status);
+    status.textContent = a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''); identity.append(status);
     if (a.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; row.append(error); }
     const controls = document.createElement('div'); controls.className = 'account-actions'; row.append(controls);
     const up = button(controls, 'Move up', 'rotation-up', () => {
@@ -67,19 +85,22 @@ export function renderAccount() {
       if (confirm(`Switch to ${a.email}? The app's Claude sessions will restart in their existing conversations.`)) transmit('rotation-switch', { id: a.id });
     });
   });
-  const discover = document.createElement('div'); discover.className = 'account-actions'; body.append(discover);
-  button(discover, 'Find logged-in accounts', 'rotation-discover', () => transmit('rotation-discover'));
-  const input = document.createElement('input'); input.className = 'account-folder'; input.value = folderDraft; input.oninput = () => { folderDraft = input.value; }; input.placeholder = '~/.claude-work'; input.setAttribute('aria-label', 'Claude account config folder'); discover.append(input);
-  button(discover, 'Add folder', 'rotation-add', () => { if (input.value.trim()) transmit('rotation-add', { folder: input.value.trim() }); });
+  const manual = document.createElement('details'); manual.className = 'account-manual'; manual.open = manualFolderOpen;
+  manual.ontoggle = () => { manualFolderOpen = manual.open; };
+  const summary = document.createElement('summary'); summary.textContent = 'Add an account folder manually'; manual.append(summary); body.append(manual);
+  const folderControls = document.createElement('div'); folderControls.className = 'account-folder-controls'; manual.append(folderControls);
+  const label = document.createElement('label'); label.htmlFor = 'account-config-folder'; label.textContent = 'Claude config folder'; folderControls.append(label);
+  const input = document.createElement('input'); input.id = 'account-config-folder'; input.className = 'account-folder'; input.value = folderDraft; input.oninput = () => { folderDraft = input.value; }; input.placeholder = '~/.claude-work'; folderControls.append(input);
+  button(folderControls, 'Add folder', 'rotation-add', () => { if (input.value.trim()) transmit('rotation-add', { folder: input.value.trim() }); });
   if (draft.accounts.length) {
-    text('Accounts are used in the order above. Source folders supply logins; Claude keeps using its current settings and history. Avoid running the same login from a source folder while rotation is enabled.', 'settings-dim');
-    checkbox(body, 'Automatic rotation', draft.enabled, on => { draft.enabled = on; });
+    text('Close Claude sessions outside this app before switching. Avoid using these account folders separately while auto-switching is on.', 'settings-dim');
     checkbox(body, 'Fall back to Codex when Claude accounts are unavailable', draft.fallback, on => { draft.fallback = on; });
-    button(body, 'Save rotation settings', 'rotation-configure', () => {
-      if (draft.enabled && !state.rotation?.enabled && !confirm('Enable automatic account rotation at usage limits? This restarts the app’s Claude sessions with their conversations preserved.')) return;
+    saveButton = button(body, 'Save settings', 'rotation-configure', () => {
+      if (draft.enabled && !state.rotation?.enabled && !confirm('Enable automatic account switching? When an account hits its usage limit, the app’s Claude sessions restart on the next account with their conversations preserved.')) return;
       transmit('rotation-configure', { enabled: draft.enabled, fallback: draft.fallback, accounts: draft.accounts.map(({ id, enabled }) => ({ id, enabled })) });
     });
   }
+  updateControls();
   // Recover an unfinished switch made by an older app version. The migration
   // controls are replaced; its backup remains usable until recovery is done.
   if (['switching', 'rollback failed'].includes(state.status) || (state.status === 'migrated' && !draft.accounts.length)) {

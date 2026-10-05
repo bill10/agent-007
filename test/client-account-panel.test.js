@@ -39,14 +39,21 @@ describe('account rotation settings', () => {
     expect(document.querySelector('[data-action="rotation-discover"]').disabled).toBe(true);
   });
 
-  it('explains that the default starts once two accounts are added', () => {
+  it('shows the disabled auto-switch control before discovery', () => {
     show({ enabled: false, defaultSettings: true, fallback: true, accounts: [] });
-    expect(document.body.textContent).toContain('starts when at least two accounts are added');
+    expect(document.body.textContent).toContain('Finding two logged-in accounts enables auto-switching');
+    expect(document.querySelector('#account-auto-switch').disabled).toBe(true);
+    expect(document.querySelector('.account-manual').open).toBe(false);
     expect(send).not.toHaveBeenCalled();
+  });
+  it('directs a single-account setup to discovery rather than selecting a missing account', () => {
+    show({ enabled: false, defaultSettings: false, accounts: [account('a', 'a@x')] });
+    expect(document.querySelector('#account-auto-switch').disabled).toBe(true);
+    expect(document.querySelector('#account-auto-switch-hint').textContent).toContain('Find at least two');
   });
   it('offers discovery and custom folders without enabling rotation', () => {
     show({ enabled: false, fallback: true, accounts: [] });
-    expect(document.body.textContent).toContain('rotation is off');
+    expect(document.querySelector('#account-auto-switch').checked).toBe(false);
     click('rotation-add'); expect(send).not.toHaveBeenCalled();
     document.querySelector('.account-folder').value = ' ~/.claude-work ';
     click('rotation-add'); expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-add', folder: '~/.claude-work' });
@@ -57,10 +64,60 @@ describe('account rotation settings', () => {
     show({ enabled: false, fallback: true, active: 'a', accounts: [account('a', 'a@x', 'Active'), account('b', 'b@x'), account('c', 'c@x')] });
     document.querySelectorAll('[data-action="rotation-up"]')[2].click();
     const boxes = document.querySelectorAll('input[type="checkbox"]');
-    boxes[2].click(); boxes[3].click(); boxes[4].click();
+    boxes[3].click(); boxes[0].click(); boxes[4].click();
     click('rotation-configure');
     expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-configure', enabled: true, fallback: false, accounts: [{ id: 'a', enabled: true }, { id: 'c', enabled: true }, { id: 'b', enabled: false }] });
     expect(window.confirm).toHaveBeenCalledTimes(1);
+  });
+  it('prevents enabling or saving auto-switch with fewer than two selected accounts but allows turning it off', () => {
+    show({ enabled: true, active: 'a', accounts: [account('a', 'a@x'), account('b', 'b@x')] });
+    document.querySelectorAll('.rotation-account input')[1].click();
+    expect(document.querySelector('[data-action="rotation-configure"]').disabled).toBe(true);
+    const auto = document.querySelector('#account-auto-switch');
+    expect(auto.disabled).toBe(false);
+    auto.click();
+    expect(auto.disabled).toBe(true);
+    click('rotation-configure');
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ enabled: false }));
+  });
+  it('unlocks automatic switching when a second account is selected and blocks duplicate saves', () => {
+    show({ enabled: false, accounts: [account('a', 'a@x'), { ...account('b', 'b@x'), enabled: false }] });
+    const auto = document.querySelector('#account-auto-switch');
+    expect(auto.disabled).toBe(true);
+    expect(document.getElementById(auto.getAttribute('aria-describedby')).textContent).toContain('Select at least two');
+    document.querySelectorAll('.rotation-account input')[1].click();
+    expect(auto.disabled).toBe(false);
+    auto.click();
+    click('rotation-configure'); click('rotation-configure');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
+  });
+  it('keeps the draft editable when enabling automatic switching is cancelled', () => {
+    show({ enabled: false, accounts: [account('a', 'a@x'), account('b', 'b@x')] });
+    document.querySelector('#account-auto-switch').click();
+    window.confirm.mockReturnValue(false);
+    click('rotation-configure');
+    expect(send).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-action="rotation-configure"]').disabled).toBe(false);
+    expect(document.querySelector('#account-auto-switch').checked).toBe(true);
+  });
+  it('keeps manual folder entry expanded after an error and collapsed after closing it', () => {
+    const rotation = { enabled: false, accounts: [] };
+    show(rotation);
+    const manual = document.querySelector('.account-manual');
+    manual.open = true; manual.dispatchEvent(new Event('toggle'));
+    const input = document.querySelector('.account-folder');
+    input.value = '/missing/account'; input.dispatchEvent(new Event('input'));
+    click('rotation-add');
+    handleAccountError({ message: 'Folder not found' });
+    expect(document.querySelector('.account-manual').open).toBe(true);
+    expect(document.querySelector('.account-folder').value).toBe('/missing/account');
+    const restored = document.querySelector('.account-manual');
+    restored.open = false; restored.dispatchEvent(new Event('toggle'));
+    show(rotation);
+    expect(document.querySelector('.account-manual').open).toBe(false);
+    document.querySelector('.account-folder').value = '';
+    document.querySelector('.account-folder').dispatchEvent(new Event('input'));
   });
   it('switches by account id, renders emails as text, and keeps errors visible after state updates', () => {
     const rotation = { enabled: true, active: 'a', accounts: [account('a', 'a@x'), account('b', '<img src=x>')] };
