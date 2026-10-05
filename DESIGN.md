@@ -1028,7 +1028,7 @@ terminal panel on this tab.
   button (accent while reading new messages aloud is on). The speaker opens
   a native popover (`.chat-read-pop`, `--bg-panel`, 8px radius, a soft
   offset shadow) under it: *Read new messages aloud* with its small switch,
-  and "Voice" with the picker ("Auto (Evan)" or a named voice).
+  and "Voice" with the picker ("Auto · Evan" or a named voice).
 - Each message from Billion has a speaker button (`.chat-speak`, 40px hit
   area, `--text-dim`) in its time row; it turns accent and becomes a stop
   square while that message is spoken.

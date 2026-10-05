@@ -580,7 +580,7 @@ function renderVoicePick() {
   if (pick.dataset.key === key) return;
   pick.dataset.key = key;
   pick.innerHTML = '';
-  const first = el('option', null, auto ? `Auto (${auto.name})` : 'Auto');
+  const first = el('option', null, auto ? `Auto · ${auto.name}` : 'Auto');
   first.value = '';
   pick.appendChild(first);
   for (const v of voices) {

@@ -543,7 +543,7 @@ describe('read aloud and dictation in the tab', () => {
     expect([menu.getAttribute('aria-label'), menu.classList.contains('on')]).toEqual(['Read aloud settings, on', true]);
   });
 
-  it('the voice picker shows when there is a choice, "Auto" naming the voice it would pick', () => {
+  it('the voice picker shows when there is a choice, "Auto · name" naming the voice it would pick', () => {
     const box = document.getElementById('chat-voice-box');
     renderWaiting();
     expect(box.hidden).toBe(true);
@@ -552,7 +552,7 @@ describe('read aloud and dictation in the tab', () => {
     renderWaiting();
     expect(box.hidden).toBe(false);
     const pick = document.getElementById('chat-voice-pick');
-    expect(pick.selectedOptions[0].textContent).toMatch(/^Auto/);
+    expect(pick.selectedOptions[0].textContent).toMatch(/^Auto · /);
     expect(box.tagName).toBe('LABEL');
     pick.value = 'v1';
     pick.onchange();
