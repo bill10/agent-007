@@ -6,7 +6,7 @@
 // call, posts one card and says its progress until it merges); started
 // as a board worker it prints a few lines of work, opens a PR with the stub gh
 // and calls finish_job. Every step goes through the board's real MCP tools.
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 
 const argv = process.argv.slice(2);
@@ -53,8 +53,13 @@ if (argv.includes('--dangerously-skip-permissions')) {
       // status lines are what the call says meanwhile.
       if (turns.length === 1) {
         await call('tell_owner', { text: 'Got it. I\'ll put a card on the board.', reply_to: voice[1] });
-        await call('post_job', { title: 'Add a dark-mode toggle to Settings', repo: 'shop', detail: 'A Dark mode switch on the settings page, remembered per browser. Tests for the toggle.' });
-        await call('set_status', { text: 'A worker is on it' });
+        // The phone demo films the card landing in To do: it says when, by this
+        // file. The turn ends meanwhile, or the call would say it is still working.
+        (async () => {
+          while (process.env.DEMO_SCRIPT === 'phone' && !existsSync(`${process.env.HOME}/demo-post-card`)) await sleep(100);
+          await call('post_job', { title: 'Add a dark-mode toggle to Settings', repo: 'shop', detail: 'A Dark mode switch on the settings page, remembered per browser. Tests for the toggle.' });
+          await call('set_status', { text: 'A worker is on it' });
+        })();
       }
     } else if (process.env.DEMO_SCRIPT === 'phone' && /is in Review/.test(line)) {
       const card = line.match(/\(card ([^,\s]+),/)?.[1];

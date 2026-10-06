@@ -1,34 +1,43 @@
-// Records the phone-call demo (docs/phone-call-teaser.gif and phone-call.mp4):
-// a Talk to Billion call on a phone, from the spoken request to the merged PR.
-// Same scratch server as record.mjs (scratch.mjs, stub claude and gh), run
-// with DEMO_SCRIPT=phone. Two phones are recorded at once, one on the call and
-// one on the Jobs tab, and the video cuts between them without dropping time,
-// so the soundtrack stays where it happened.
+// Records the phone-call demo (phone-call.mp4, and docs/phone-call-teaser.gif
+// cut from it): a Talk to Billion call on a phone, from the spoken request to
+// the merged PR. Same scratch server as record.mjs (scratch.mjs, stub claude
+// and gh), run with DEMO_SCRIPT=phone. Two phones are recorded at once, one on
+// the call and one on the Jobs tab, and the edit cuts between them without
+// dropping time, so the soundtrack stays where it happened.
 //
 // The owner's lines are macOS `say` (OWNER_VOICE) fed to the page as its
 // speech recognition's result; Billion's are the audio the page itself played
-// (the server's `say`, SAY_VOICE), captured as it played. Captions are burned
-// in, and the video says it is scripted, sped up and text-to-speech.
+// (the server's `say`, SAY_VOICE), captured as it played.
 //
-// DEMO_MEDIA=<folder> swaps in generated media where its files exist:
-// opening.mp4 (a cold open: the owner on the street lifts her phone; its own
-// audio is dropped and owner1 plays over it as a voice-over, caption and all),
+// DEMO_MEDIA=<folder> swaps in generated voices where its files exist:
 // owner1.wav and owner2.wav for the owner's lines (one voice), billion1-4.wav
 // dubbed over Billion's four lines where the page spoke them (another voice).
-// The video then says the voices are AI-generated.
 //
-// Waits where nothing happens on screen (the worker typing on, the board's scan)
-// are cut out of the video, as the disclosure says it is sped up.
+// The video starts on the tap that opens the call; waits where nothing happens
+// on screen (the call bar listening, the dispatcher's debounce, the worker
+// typing on, the board's scan) are cut out of it.
 //
-// Needs macOS (say), Google Chrome, ffmpeg, and playwright:
+// This script records. The video itself is a HyperFrames composition in
+// scripts/demo/launch/ (product-launch-video skill): this script leaves the two
+// phones' films, the voices and edit.json (the cut, each line with its word
+// timings) in launch/assets/, and launch/build.mjs writes launch/index.html
+// from them: a title beat, the phones with crossfades at each cut, karaoke
+// captions, the end card and the disclosure line.
+//
+// Needs macOS (say), Google Chrome, ffmpeg, playwright, and HyperFrames (npx,
+// Node 22; its local whisper times the captions' words):
 //   npm i --no-save playwright
-//   node scripts/demo/phone-call.mjs [out-dir]     (default: a temp folder)
+//   node scripts/demo/phone-call.mjs [out-dir]     (raw frames; default: a temp folder)
+//   node scripts/demo/launch/build.mjs             (edit.json → index.html; run again to restyle)
+//   npx hyperframes@0.8.137 render scripts/demo/launch --fps 30 --quality high -o out/phone-call.mp4
 //
-// Then docs/phone-call-teaser.gif is copied from out-dir, and the MP4 goes on
-// the latest release: gh release upload <tag> out-dir/phone-call.mp4 --clobber
+// The README teaser is the request and Billion's answer from that MP4, muted:
+//   ffmpeg -ss 0.9 -t 7 -i out/phone-call.mp4 -vf "fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" docs/phone-call-teaser.gif
+// and the MP4 goes on the latest release: gh release upload <tag> out/phone-call.mp4 --clobber
 import { execFileSync } from 'child_process';
-import { mkdirSync, writeFileSync, statSync, existsSync } from 'fs';
-import { join, resolve } from 'path';
+import { mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, existsSync } from 'fs';
+import { join, resolve, dirname, extname } from 'path';
+import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import { startScratchServer, sleep } from './scratch.mjs';
 
@@ -165,7 +174,7 @@ function film(page, name) {
     const cdp = await page.context().newCDPSession(page);
     while (rolling) {
       const at = Date.now();
-      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 88 });
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 88, clip: { x: 0, y: 0, ...phone, scale: 2 } });
       const file = join(dir, `${String(frames.length).padStart(5, '0')}.jpg`);
       writeFileSync(file, Buffer.from(data, 'base64'));
       frames.push({ at, file });
@@ -238,19 +247,12 @@ const cut = (src, at = Date.now()) => cuts.push({ src, at });
 const captions = [];
 // Spans of dead air cut out of the video: [from, to], real time.
 const drops = [];
-// With a cold open, owner1 is its voice-over: the UI segment skips the silent
-// wait (and the caption), and starts just before the request's bubble.
-const coldOpen = !!media('opening.mp4');
-let bubbleAt = 0;
 let askedAt = 0;   // when the request reached the page
 async function ownerSays(key) {
   await callState('listening');
-  const at = Date.now();
-  const inOpening = coldOpen && key === 'owner1';
-  if (!inOpening) captions.push({ who: 'You', text: LINES[key], at, file: ownerClips[key].file });
-  if (!inOpening) await sleep(ownerClips[key].ms + 250);
+  captions.push({ who: 'You', text: LINES[key], at: Date.now(), file: ownerClips[key].file });
+  await sleep(ownerClips[key].ms + 250);
   if (!await A.evaluate(t => window.__demoHear(t), LINES[key])) throw new Error('the call was not listening');
-  if (inOpening) bubbleAt = Date.now();
   if (key === 'owner1') askedAt = Date.now();
 }
 
@@ -259,8 +261,10 @@ await B.locator('.terminal-tab.board-tab:not(.waiting-tab)').click();   // the s
 await sleep(1500);
 cut('A');
 await sleep(2500);
+const tapAt = Date.now();
 await tap(A, A.locator('#chat-talk'), 0);
 await callState('listening');
+const listeningAt = Date.now();
 await sleep(2000);
 // 2. The request, and Billion's answer.
 await ownerSays('owner1');
@@ -268,12 +272,17 @@ const reply = await heard(/Got it/);
 // The wait while the server voices the reply, its text already on screen.
 drops.push([askedAt + 700, reply.at - 250]);
 await sleep(Math.max(0, reply.end + GAP - Date.now()));
-// 3. The board: the card lands and a worker picks it up.
+// 3. The board: the card lands in To do, and the dispatcher hands it to a worker.
 cut('B');
+await sleep(300);
+writeFileSync(join(home, 'demo-post-card'), '');
+await cardIn('todo');
+const todoAt = Date.now();
 await cardIn('in-progress');
-await sleep(800);
+drops.push([todoAt + 1000, Date.now() - 150]);   // the dispatcher's debounce, down to a beat
+await sleep(500);
 await tap(B, B.locator('.job-card-live').first());
-await sleep(2500);
+await sleep(1900);
 await tap(B, B.locator('.terminal-tab.board-tab:not(.waiting-tab)'), 0);
 // 4. "Tell me when it's merged": the call waits on the work and says how it goes.
 cut('A');
@@ -304,7 +313,7 @@ await sleep(1500);
 const end = Date.now();
 
 const [videoA, videoB] = [await filmA.stop(end), await filmB.stop(end)];
-await Promise.all([ctxA.close(), ctxB.close()]);
+await browser.close();
 
 // The captions: the owner's lines and what Billion said, as long as each was heard.
 // A generated take plays in full up to the next line: the page stops a status
@@ -321,8 +330,10 @@ captions.forEach((c, i) => {
   c.ms = Math.min(c.ms ?? duration(c.file) * 1000, next - c.at);
   c.until = Math.min(c.at + Math.max(c.ms + GAP, 1200), next);
 });
-// The UI segment picks up as the request's bubble appears, the line having been heard in the opening.
-if (coldOpen && bubbleAt) drops.unshift([cuts[0].at, bubbleAt - 300]);
+// The video starts just before the tap on Talk, and the call bar's wait for
+// the first line is cut to a beat.
+const first = cuts[0].at;
+drops.unshift([first, tapAt - 700], [listeningAt + 900, captions[0].at - 300]);
 // A drop never takes a line or its caption with it.
 for (const d of drops) {
   for (const c of captions) {
@@ -330,126 +341,61 @@ for (const d of drops) {
     if (c.at >= d[0] && c.at < d[1]) d[1] = c.at - 300;
   }
 }
-const dubbed = captions.some(c => c.file.startsWith(process.env.DEMO_MEDIA || '\0'));
 
-// --- Stills: the frame around the phone, the captions, the end card ---
+// --- The edit, for scripts/demo/launch (HyperFrames) ---
 
-const W = 1080, H = 1920;
-const screen = { width: 766, height: 1658, x: 157, y: 100 };
-const FONT = `font-family: -apple-system, 'Helvetica Neue', sans-serif;`;
-const still = await browser.newPage({ viewport: { width: W, height: H } });
-async function render(file, html, size = { width: W, height: H }) {
-  await still.setViewportSize(size);
-  await still.setContent(`<body style="margin:0;${FONT}">${html}</body>`);
-  await still.screenshot({ path: file, omitBackground: true });
+const assets = join(dirname(fileURLToPath(import.meta.url)), 'launch', 'assets');
+rmSync(assets, { recursive: true, force: true });
+mkdirSync(assets, { recursive: true });
+// Each phone's film at a steady 30 fps, its clock starting at its first frame.
+const films = { A: filmA, B: filmB };
+for (const [src, list] of [['A', videoA], ['B', videoB]]) {
+  ff('-f', 'concat', '-safe', '0', '-i', list, '-fps_mode', 'cfr', '-r', '30', '-c:v', 'libx264', '-crf', '16', '-pix_fmt', 'yuv420p', join(assets, `phone-${src.toLowerCase()}.mp4`));
 }
-const NOTE = dubbed
-  ? 'Scripted demo · sped up · voices are AI-generated · opening shot generated with Veo'
-  : 'Scripted demo with stand-in agents · sped up · voices are text-to-speech';
-const opening = media('opening.mp4');
-// The cold open's voice-over: owner1 from when the phone is at her ear, the clip cut soon after it.
-const OPEN_VO_AT = 1600;
-const OPEN_MS = opening ? Math.round(Math.min(duration(opening) * 1000, OPEN_VO_AT + ownerClips.owner1.ms + 900)) : 0;
-const openCaption = opening && { who: 'You', text: LINES.owner1, file: ownerClips.owner1.file, ms: ownerClips.owner1.ms };
-if (opening) {
-  await render(join(out, 'opening.png'), `<div style="position:absolute;top:34px;width:100%;text-align:center;color:#fff;font-size:28px;
-    text-shadow:0 1px 6px #000">Opening shot generated with Veo</div>`);
-}
-await render(join(out, 'frame.png'), `
-  <div style="position:absolute;left:${screen.x}px;top:${screen.y}px;width:${screen.width}px;height:${screen.height}px;border-radius:48px;
-    box-shadow:0 0 0 3px #2a2f37, 0 0 0 3000px #0b0d10"></div>
-  <div style="position:absolute;top:34px;width:100%;text-align:center;color:#8b93a1;font-size:24px">${NOTE}</div>`);
-const band = H - screen.y - screen.height;   // the captions' strip under the phone
-const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
-for (const [i, c] of [...captions, openCaption].filter(Boolean).entries()) {
-  c.png = join(out, `caption-${i}.png`);
-  await render(c.png, `<div style="width:${W}px;height:${band}px;display:flex;align-items:center;justify-content:center;text-align:center;
-    padding:0 40px;box-sizing:border-box;font-size:48px;line-height:1.2;color:#f2f4f7;text-shadow:0 0 4px #000,0 2px 12px #000">
-    <div><span style="color:${c.who === 'You' ? '#7cc4ff' : '#e0b04a'};font-weight:600">${c.who}:</span> ${esc(c.text)}</div></div>`,
-  { width: W, height: band });
-}
-const endCard = join(out, 'end.png');
-await render(endCard, `<div style="width:${W}px;height:${H}px;background:#0b0d10;color:#f2f4f7;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:34px;text-align:center">
-  <div style="font-size:84px;font-weight:700">Agent 007</div>
-  <div style="font-size:46px;color:#c9ced6">Talk to your coding agents.</div>
-  <div style="margin-top:50px;font-size:38px;color:#e0b04a">github.com/bill10/agent-007</div>
-  <div style="font-size:38px;font-family:ui-monospace,Menlo,monospace;color:#f2f4f7">npx @bill10/agent-007</div>
-  <div style="position:absolute;bottom:80px;font-size:26px;color:#8b93a1">${NOTE}</div></div>`);
-await browser.close();
-
-// --- The cut ---
-
-const s = (ms) => (ms / 1000).toFixed(3);
-const first = cuts[0].at;
-const total = end - first;
-const END_SECONDS = 4;
-const looped = (png, seconds = total / 1000) => ['-loop', '1', '-t', String(seconds), '-i', png];
-const inputs = ['-f', 'concat', '-safe', '0', '-i', videoA, '-f', 'concat', '-safe', '0', '-i', videoB, ...looped(join(out, 'frame.png')), ...looped(endCard, END_SECONDS)];
-const filters = [];
-cuts.forEach((c, i) => {
-  const to = cuts[i + 1]?.at ?? end;
-  const offset = (c.src === 'A' ? filmA : filmB).frames[0].at;
-  filters.push(`[${c.src === 'A' ? 0 : 1}:v]trim=start=${s(c.at - offset)}:end=${s(to - offset)},setpts=PTS-STARTPTS,fps=30,scale=${screen.width}:${screen.height}[seg${i}]`);
-});
-filters.push(`${cuts.map((_, i) => `[seg${i}]`).join('')}concat=n=${cuts.length}:v=1:a=0[phone]`);
-filters.push(`color=c=#0b0d10:s=${W}x${H}:r=30:d=${s(total)}[bg]`);
-filters.push(`[bg][phone]overlay=${screen.x}:${screen.y}:shortest=1[v0]`);
-filters.push(`[v0][2:v]overlay=0:0:shortest=1[v1]`);
-let last = 'v1';
-captions.forEach((c, i) => {
-  inputs.push(...looped(c.png));
-  const n = 4 + i;
-  filters.push(`[${last}][${n}:v]overlay=0:${screen.y + screen.height}:enable='between(t,${s(c.at - first)},${s(c.until - first)})'[c${i}]`);
-  last = `c${i}`;
-});
-filters.push(`[3:v]fps=30,format=yuv420p,setsar=1[endv]`, `[${last}]format=yuv420p,setsar=1[mainv]`, `anullsrc=r=48000:cl=stereo,atrim=0:${END_SECONDS}[enda]`);
-// The voices, each where it was spoken.
-const audioStart = 4 + captions.length;
-captions.forEach((c, i) => {
-  inputs.push('-i', c.file);
-  const delay = Math.max(0, Math.round(c.at - first));
-  filters.push(`[${audioStart + i}:a]atrim=0:${s(c.ms)},aresample=48000,aformat=channel_layouts=stereo,adelay=${delay}|${delay}[a${i}]`);
-});
-filters.push(`${captions.map((_, i) => `[a${i}]`).join('')}amix=inputs=${captions.length}:normalize=0,apad,atrim=0:${s(total)}[maina]`);
-// The dead air comes out: what is left of the main segment, back to back.
-const kept = [];
+// Recording time (ms since the first cut) → the video's, the dead air gone.
+const cutOut = drops.map(d => d.map(t => t - first)).filter(([a, b]) => b - a > 500).sort((x, y) => x[0] - y[0]);
+const keep = [];
 let from = 0;
-for (const [a, b] of drops.map(d => d.map(t => t - first)).filter(([a, b]) => b - a > 500).sort((x, y) => x[0] - y[0])) {
-  kept.push([from, a]);
+for (const [a, b] of cutOut) {
+  if (a > from) keep.push([from, a]);
   from = Math.max(from, b);
 }
-kept.push([from, total]);
-const keep = kept.filter(([a, b]) => b - a > 0);
-// Where a moment of the recording lands in the main segment.
-const mapT = (t) => t - drops.map(d => d.map(x => x - first)).filter(([a, b]) => b - a > 500 && b <= t).reduce((n, [a, b]) => n + b - a, 0);
-filters.push(`[mainv]split=${keep.length}${keep.map((_, i) => `[mv${i}]`).join('')}`, `[maina]asplit=${keep.length}${keep.map((_, i) => `[ma${i}]`).join('')}`);
-keep.forEach(([a, b], i) => filters.push(`[mv${i}]trim=start=${s(a)}:end=${s(b)},setpts=PTS-STARTPTS[kv${i}]`, `[ma${i}]atrim=start=${s(a)}:end=${s(b)},asetpts=PTS-STARTPTS[ka${i}]`));
-filters.push(`${keep.map((_, i) => `[kv${i}][ka${i}]`).join('')}concat=n=${keep.length}:v=1:a=1[mainv2][maina2]`);
-const parts = ['[mainv2][maina2]', '[endv][enda]'];
-// The cold open, full-bleed: a portrait crop on the walker (the camera tracks her). Its own
-// audio is dropped; owner1 plays over it, captioned like every other line.
-if (opening) {
-  const n = audioStart + captions.length;
-  inputs.push('-i', opening, ...looped(join(out, 'opening.png'), OPEN_MS / 1000), ...looped(openCaption.png, OPEN_MS / 1000), '-i', openCaption.file);
-  filters.push(`[${n}:v]trim=0:${s(OPEN_MS)},setpts=PTS-STARTPTS,crop=ih*${W}/${H}:ih:'min(iw-ow,iw*0.28)':0,scale=${W}:${H},fps=30,format=yuv420p,setsar=1[ov]`,
-    `[ov][${n + 1}:v]overlay=0:0:shortest=1[ov1]`,
-    `[ov1][${n + 2}:v]overlay=0:${screen.y + screen.height}:enable='between(t,${s(OPEN_VO_AT)},${s(OPEN_VO_AT + openCaption.ms + GAP)})'[openv]`,
-    `[${n + 3}:a]aresample=48000,aformat=channel_layouts=stereo,adelay=${OPEN_VO_AT}|${OPEN_VO_AT},apad,atrim=0:${s(OPEN_MS)}[opena]`);
-  parts.unshift('[openv][opena]');
+keep.push([from, end - first]);
+const mapT = (t) => t - cutOut.filter(([, b]) => b <= t).reduce((n, [a, b]) => n + b - a, 0);
+// The segments: a new one at every cut between the phones and every drop.
+const segments = [];
+for (const [a, b] of keep) {
+  const marks = [a, ...cuts.map(c => c.at - first).filter(t => t > a && t < b), b];
+  for (let i = 0; i < marks.length - 1; i++) {
+    const src = cuts.findLast(c => c.at - first <= marks[i]).src;
+    segments.push({ src: `phone-${src.toLowerCase()}.mp4`, phone: src === 'A' ? 'call' : 'board',
+      from: (first + marks[i] - films[src].frames[0].at) / 1000, start: mapT(marks[i]) / 1000, duration: (marks[i + 1] - marks[i]) / 1000 });
+  }
 }
-filters.push(`${parts.join('')}concat=n=${parts.length}:v=1:a=1[v][a]`);
-const mp4 = join(out, 'phone-call.mp4');
-ff(...inputs, '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]',
-  '-c:v', 'libx264', '-preset', 'slow', '-crf', '20', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', mp4);
-
-// The README teaser: the request and Billion's answer, muted, captions burned in.
-const askAt = bubbleAt || captions.find(c => c.who === 'You').at;
-const answer = captions.find(c => c.at > askAt && c.who === 'Billion' && /Got it/.test(c.text));
-const teaserFrom = opening ? OPEN_VO_AT - 300 : mapT(askAt - first) - 400;
-const gif = join(out, 'phone-call-teaser.gif');
-ff('-ss', s(teaserFrom), '-t', s(Math.min(10000, OPEN_MS + mapT(answer.until - first) + 300 - teaserFrom)), '-i', mp4, '-vf',
-  'fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle', gif);
-console.log(`cuts: ${cuts.map(c => `${c.src}@${s(c.at - first)}`).join(' ')}; kept: ${keep.map(k => k.map(s).join('-')).join(' ')}`);
-for (const f of [mp4, gif]) console.log(`${f}  ${(statSync(f).size / 1e6).toFixed(1)} MB, ${duration(f).toFixed(1)} s`);
+// Each line's words, timed by HyperFrames' local whisper where it heard as many
+// words as the line has; spread over the line by length where it didn't.
+function wordsOf(file, text, seconds) {
+  const words = text.split(/\s+/);
+  let heard = [];
+  try {
+    const { transcriptPath } = JSON.parse(execFileSync('npx', ['-y', 'hyperframes@0.8.137', 'transcribe', file, '--json'], { cwd: out, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+    heard = JSON.parse(readFileSync(transcriptPath, 'utf8'));
+  } catch {}
+  if (heard.length === words.length) return words.map((w, i) => ({ text: w, start: heard[i].start, end: heard[i].end }));
+  const [from, to] = heard.length ? [heard[0].start, heard.at(-1).end] : [0, seconds];
+  const chars = words.reduce((n, w) => n + w.length + 1, 0);
+  let at = 0;
+  return words.map(w => ({ text: w, start: from + (at / chars) * (to - from), end: from + ((at += w.length + 1) / chars) * (to - from) }));
+}
+const lines = captions.map((c, i) => {
+  const voice = `voice-${i + 1}${extname(c.file)}`;
+  copyFileSync(c.file, join(assets, voice));
+  const start = mapT(c.at - first) / 1000;
+  return { who: c.who, text: c.text, voice, start, duration: c.ms / 1000, end: mapT(c.until - first) / 1000,
+    words: wordsOf(c.file, c.text, c.ms / 1000).map(w => ({ ...w, start: start + w.start, end: start + w.end })) };
+});
+const total = mapT(end - first) / 1000;
+writeFileSync(join(assets, 'edit.json'), JSON.stringify({ total, dubbed: captions.some(c => c.file.startsWith(process.env.DEMO_MEDIA || '\0')), segments, lines }, null, 2));
+console.log(`cuts: ${cuts.map(c => `${c.src}@${((c.at - first) / 1000).toFixed(1)}`).join(' ')}; ${segments.length} segments, ${total.toFixed(1)} s`);
+await import('./launch/build.mjs');
 process.exit(0);
