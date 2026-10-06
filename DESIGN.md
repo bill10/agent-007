@@ -629,7 +629,7 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   the board default wears nothing, because the chip's job is to say "this one is
   different". What runs the card is the exception to that rule: every card
   opens its chips with one agent·model pill, "claude · opus-5-5" or
-  "codex · gpt-5.5" (just "claude" or "codex" on the CLI's default model;
+  "codex · gpt-5.5" ("claude · default" / "codex · default" on the CLI's default model;
   the redundant "claude-" prefix is dropped from the label and kept in the
   tooltip). Chipping only the non-default CLI left a Claude card with a bare
   model id and a Codex card with two pills. `read_job` still says

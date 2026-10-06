@@ -561,7 +561,7 @@ describe('job form', () => {
 
   it('shows codex on the card and pre-fills the agent when editing', () => {
     handleJobsList({ jobs: [JOB({ agent: 'codex' })], settings: { running: false, maxPerRepo: 2 } });
-    expect(cards()[0].querySelector('.job-card-runs-on').textContent).toBe('codex');
+    expect(cards()[0].querySelector('.job-card-runs-on').textContent).toBe('codex · default');
     cards()[0].querySelector('.job-card-actions button').click();
     expect(document.getElementById('job-agent').value).toBe('codex');
   });
@@ -622,7 +622,7 @@ describe('job form', () => {
     // The type is on the title line, not in the lower row.
     expect(cards()[0].querySelector('.job-card-title .job-card-type').textContent).toBe('recurring');
     handleJobsList({ jobs: [JOB({ agent: 'claude' })], settings: { running: false, maxPerRepo: 2 } });
-    expect([...cards()[0].querySelector('.job-card-chips').children].map(c => c.textContent)).toEqual(['claude']);
+    expect([...cards()[0].querySelector('.job-card-chips').children].map(c => c.textContent)).toEqual(['claude · default']);
     expect(cards()[0].querySelectorAll('.job-card-type')).toHaveLength(0);
   });
 
@@ -631,7 +631,9 @@ describe('job form', () => {
     const pill = document.querySelector('[data-job-id="job-1"] .job-card-runs-on');
     expect(pill.textContent).toBe('claude · opus-5-5');
     expect(pill.title).toContain('claude-opus-5-5');
-    expect(document.querySelector('[data-job-id="job-2"] .job-card-runs-on').textContent).toBe('codex');
+    const plain = document.querySelector('[data-job-id="job-2"] .job-card-runs-on');
+    expect(plain.textContent).toBe('codex · default');
+    expect(plain.title).toBe("Runs the CLI's default model");
   });
 
   // A screenshot pasted into Details becomes a named base64 attachment on the

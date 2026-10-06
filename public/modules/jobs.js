@@ -320,15 +320,19 @@ function renderCard(job) {
   const chips = document.createElement('div');
   chips.className = 'job-card-chips';
   // First and on every card: what runs it, CLI and model in one pill
-  // ("claude · opus-5-5", "codex · gpt-5.5", or just "claude" on the CLI's
-  // default model). Only the non-default CLI used to get a chip, so a Claude
+  // ("claude · opus-5-5", "codex · gpt-5.5", "claude · default" on the
+  // CLI's default model). Only the non-default CLI used to get a chip, so a Claude
   // card showed a bare model id and a Codex card two pills. The "claude-"
   // prefix is dropped from the label as redundant; the tooltip keeps the id.
   const cli = job.agent === 'codex' ? 'codex' : 'claude';
   const runsOn = document.createElement('span');
   runsOn.className = 'job-card-runs-on';
-  runsOn.textContent = job.model ? `${cli} · ${cli === 'claude' ? job.model.replace(/^claude-/, '') : job.model}` : cli;
-  runsOn.title = `Runs on ${cli === 'codex' ? 'Codex' : 'Claude Code'}, ${job.model ? `model ${job.model}` : "the CLI's default model"}`;
+  // No model set reads "claude · default": a bare "claude" looked as if
+  // something were missing.
+  runsOn.textContent = `${cli} · ${job.model ? (cli === 'claude' ? job.model.replace(/^claude-/, '') : job.model) : 'default'}`;
+  runsOn.title = job.model
+    ? `Runs on ${cli === 'codex' ? 'Codex' : 'Claude Code'}, model ${job.model}`
+    : "Runs the CLI's default model";
   chips.appendChild(runsOn);
   // The job's type (recurring, scheduled, a schedule's run) rides inline on
   // the title line, so the card says what kind of job it is at the very top.
