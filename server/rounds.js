@@ -11,7 +11,7 @@
 
 import { readFileSync, writeFileSync, renameSync } from 'fs';
 import { join } from 'path';
-import { CONFIG_DIR, config, PORT } from './state.js';
+import { CONFIG_DIR, config, PORT, parsePublicUrl } from './state.js';
 
 export const DEFAULT_ROUNDS = ['08:30', '15:30'];
 export const DEFAULT_MAX_PER_PROJECT = 2;
@@ -182,10 +182,11 @@ export function setRoundBrief(text, which = 'next') {
   return { ok: true, which, cleared: !body };
 }
 
-// Where a Telegram round message links to: APP_URL, else the first
-// ALLOWED_ORIGINS entry (the address the owner's phone already uses), else none.
+// Where a Telegram round message links to: PUBLIC_URL (APP_URL, its older
+// name), else the first ALLOWED_ORIGINS entry (the address the owner's phone
+// already uses), else none.
 export function appLink(env = process.env) {
-  const direct = (env.APP_URL || '').trim();
+  const direct = parsePublicUrl(env.PUBLIC_URL) || (env.APP_URL || '').trim();
   if (direct) return direct;
   const first = (env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).find(s => s && s !== '*');
   if (!first) return '';

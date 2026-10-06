@@ -28,6 +28,7 @@ import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
 import { updateInfo, startUpdate } from './self-update.js';
 import { busyWorkers } from './control.js';
+import { noteProxy, accessEmail } from './proxy.js';
 import { createRequire } from 'module';
 
 // --- Origin Check Middleware (B2) ---
@@ -111,6 +112,7 @@ const VENDOR = [
 export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAgent } = {}) {
   // The tab's "N waiting" follows the queue.
   const withView = (result) => { if (result.ok) broadcast?.(roundView()); return result; };
+  app.use(noteProxy);
   app.use(express_static(staticDir));
   // Talk to Billion's voice detector, served from this app, never a CDN: the
   // Silero VAD bundle, its worklet and model, and the onnxruntime-web build it runs on.
@@ -356,7 +358,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   // Settings' version line and Update button (server/self-update.js). Restarting
   // the server is the owner's call, as switching the Claude account is.
   const ownerOnly = (req, res, next) => (authEnabled() ? res.status(403).json({ error: 'Only the owner updates Agent 007, and with user accounts on nobody does.' }) : next());
-  app.get('/api/update', ownerOnly, async (req, res) => res.json(await updateInfo({ workers: busyWorkers(sessions) })));
+  // accessEmail: who Cloudflare Access let in, for the panel to show (server/proxy.js).
+  app.get('/api/update', ownerOnly, async (req, res) => res.json({ ...await updateInfo({ workers: busyWorkers(sessions) }), accessEmail: accessEmail(req) }));
   app.post('/api/update', ownerOnly, (req, res) => {
     const result = startUpdate();
     res.status(result.error ? 409 : 202).json(result);

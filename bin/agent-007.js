@@ -21,7 +21,8 @@ const HELP = `Usage: agent007 [--port <n>]
        agent007 adduser "Display Name"
        agent007 handover
        agent007 doctor
-       agent007 install [--dry-run | --voice | --remote | --all [--yes]] | uninstall | status
+       agent007 install [--dry-run | --voice | --remote | --public-url <url> | --all [--yes]]
+       agent007 uninstall | status
        agent007 restart [--now] | logs [-f] [-n <lines>] | update [--now]
 
 Starts Agent 007 at http://localhost:7007 (or --port). agent-007 is the same
@@ -54,6 +55,13 @@ Run it as a service (macOS and Linux):
                    restart. Needs Tailscale installed and logged in; never
                    replaces another site on the HTTPS port without asking.
                    --dry-run prints what it would do
+  install --public-url <url>
+                   Remote access through a reverse proxy or tunnel you run
+                   (Cloudflare Tunnel + Access, caddy over WireGuard), no
+                   Tailscale: PUBLIC_URL=<url> in ~/.agent-007/.env, then the
+                   service, bound to 127.0.0.1. Point the proxy at
+                   http://127.0.0.1:<port>; docs/REMOTE.md. With --all, takes
+                   the place of Tailscale
   install --all    The service, voice and remote access, no questions;
                    --yes also accepts the default model's download
   uninstall        Stop and remove the service; ~/.agent-007 is kept
@@ -75,6 +83,9 @@ Settings (default in brackets):
                           or over Tailscale [127.0.0.1]
   ALLOWED_ORIGINS         Extra hostnames the browser may use, comma-separated,
                           e.g. your tailnet name [none]
+  PUBLIC_URL              The https address a reverse proxy or tunnel serves
+                          the app at; allowed as an origin and used in links
+                          (docs/REMOTE.md) [none]
   CLAUDE_PERMISSION_MODE  Mode Claude Code agents start in: auto, acceptEdits,
                           bypassPermissions, manual, dontAsk, plan [Claude's own]
   CODEX_PERMISSION_MODE   The same for Codex agents [Codex's own]
@@ -125,6 +136,7 @@ try {
       now: { type: 'boolean' },
       voice: { type: 'boolean' },
       remote: { type: 'boolean' },
+      'public-url': { type: 'string' },
       all: { type: 'boolean' },
       yes: { type: 'boolean', short: 'y' },
       follow: { type: 'boolean', short: 'f' },
@@ -155,6 +167,11 @@ if (values.port !== undefined) {
   // Before the files load, which never overwrite a variable already set.
   process.env.PORT = String(port);
   launchEnv.PORT = String(port);
+}
+// Starting with it is PUBLIC_URL for this run; install writes it to the settings file instead.
+if (values['public-url'] !== undefined && positionals[0] !== 'install') {
+  process.env.PUBLIC_URL = values['public-url'];
+  launchEnv.PUBLIC_URL = values['public-url'];
 }
 if (positionals.length && !['init', 'adduser', 'handover', 'doctor', ...SERVICE_COMMANDS].includes(positionals[0])) {
   console.error(`Unknown command: ${positionals[0]}\n\n${HELP}`);

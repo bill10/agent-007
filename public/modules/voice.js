@@ -310,7 +310,7 @@ export function toggleVoice(to = TERMINAL) {
     return;
   }
   if (!window.isSecureContext) {
-    refuse('Voice input needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve)');
+    refuse('Voice input needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve or a reverse proxy)');
     return;
   }
   const why = to.unavailable();

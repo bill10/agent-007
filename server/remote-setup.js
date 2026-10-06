@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { parseEnv } from 'util';
 import { configDir, tilde } from './settings.js';
-import { originHost } from './state.js';
+import { originHost, parsePublicUrl, WILDCARD_BIND_HOSTS } from './state.js';
 import { serveTargets, SERVE_HTTPS_PORTS } from './tailscale.js';
 import { setEnvLine } from './voice-setup.js';
 
@@ -133,5 +133,35 @@ export async function setupRemote(ctx, server = {}) {
     await server.restart();
   } else if (dry && origins) ctx.log(`Would restart Agent 007 if it is running: ${ctx.cmd('restart')}`);
   if (!dry) ctx.log(`Open https://${host} on any device in your tailnet.`);
+  return 0;
+}
+
+// `agent007 install --public-url <url>`: remote access through a reverse proxy
+// or tunnel the owner runs (docs/REMOTE.md), no Tailscale. Writes PUBLIC_URL to
+// ~/.agent-007/.env; the service install that follows (server/service.js)
+// starts the server with it. Resolves 0 when it is set.
+export function setupProxy(ctx, raw) {
+  const dry = Boolean(ctx['dry-run']);
+  const url = parsePublicUrl(raw);
+  if (!url) {
+    ctx.err(`✗ --public-url needs the http(s) address your proxy serves, e.g. https://agent.example.com, not "${raw}". Nothing was changed.`);
+    return 2;
+  }
+  const file = join(configDir(ctx.env), '.env');
+  const have = existsSync(file) ? parseEnv(readFileSync(file, 'utf8')).PUBLIC_URL : undefined;
+  if (parsePublicUrl(have) === url) ctx.log(`✓ PUBLIC_URL in ${tilde(file)} is already ${url}.`);
+  else if (dry) ctx.log(`Would set PUBLIC_URL=${url} in ${tilde(file)}`);
+  else {
+    setEnvLine(file, 'PUBLIC_URL', url);
+    ctx.log(`✓ Set PUBLIC_URL=${url} in ${tilde(file)}.`);
+  }
+  // Read before that file, as ALLOWED_ORIGINS above.
+  const clone = join(ctx.root, '.env');
+  const before = ctx.env.PUBLIC_URL !== undefined ? ['your environment', ctx.env.PUBLIC_URL]
+    : existsSync(clone) && parseEnv(readFileSync(clone, 'utf8')).PUBLIC_URL !== undefined ? [tilde(clone), parseEnv(readFileSync(clone, 'utf8')).PUBLIC_URL] : null;
+  if (before && parsePublicUrl(before[1]) !== url) ctx.err(`! PUBLIC_URL is also set in ${before[0]} (${before[1]}), which wins over ${tilde(file)}: change it there too.`);
+  if (!url.startsWith('https:')) ctx.err('! That is not https: browsers keep the microphone (voice input, Talk to Billion) to https pages and localhost.');
+  if (WILDCARD_BIND_HOSTS.includes(ctx.host)) ctx.err(`! HOST=${ctx.host} lets anyone who reaches port ${ctx.port} past the proxy. Set HOST=127.0.0.1 (or the WireGuard address) in ${tilde(file)}.`);
+  ctx.log(`Point your proxy or tunnel at http://127.0.0.1:${ctx.port}, keeping the Host header and WebSocket upgrades (docs/REMOTE.md has cloudflared, caddy and nginx configs). The proxy must sign people in: Agent 007 trusts whoever it lets through.`);
   return 0;
 }

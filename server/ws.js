@@ -5,7 +5,7 @@ import { basename, join } from 'path';
 import {
   config, sessions, orphans, adoptingOrphans,
   codenamePool, colorCycler, nextSessionId,
-  GIT_USER_TIMEOUT, isAllowedOrigin,
+  GIT_USER_TIMEOUT, isAllowedOrigin, PUBLIC_URL,
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
@@ -338,11 +338,12 @@ function denyControl(ws, name, ownerId) {
 
 // --- Setup ---
 // Both sides normalised through URL, so a default port written one way and
-// not the other still matches.
-function fromBrowser(req) {
+// not the other still matches. PUBLIC_URL's page counts too: a proxy may pass
+// its own Host (nginx's default) rather than the browser's.
+export function fromBrowser(req) {
   const origin = req.headers.origin;
   if (!origin || !isAllowedOrigin(origin)) return false;
-  try { return new URL(origin).host === new URL(`http://${req.headers.host}`).host; } catch { return false; }
+  try { return new URL(origin).host === new URL(`http://${req.headers.host}`).host || new URL(origin).origin === PUBLIC_URL; } catch { return false; }
 }
 
 // To the sockets of the owner's own pages only (fromBrowser above).

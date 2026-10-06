@@ -101,6 +101,8 @@ export function renderVoiceSettings() {
 const UPDATE_CMD = 'agent007 update';
 export function renderVersion(info, step = null) {
   const lines = [`<div><span class="settings-version-name">Agent 007</span> ${escapeHtml(info.version)}</div>`];
+  // Who Cloudflare Access let in (server/proxy.js): its header, not verified here.
+  if (info.accessEmail) lines.push(`<div class="settings-dim">Signed in through Cloudflare Access as ${escapeHtml(info.accessEmail)}</div>`);
   if (step === 'done') {
     lines.push(`<div class="settings-version-new">Updated to ${escapeHtml(info.version)}. Reload the page to use it.</div>`,
       '<button type="button" class="settings-refresh" data-update="reload">Reload</button>');

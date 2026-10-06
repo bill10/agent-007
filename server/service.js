@@ -19,7 +19,7 @@ import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { carryOverEnv, configDir, tilde } from './settings.js';
 import { setupVoice } from './voice-setup.js';
-import { setupRemote } from './remote-setup.js';
+import { setupRemote, setupProxy } from './remote-setup.js';
 import { tailscaleBin } from './tailscale.js';
 import { callServer, pidAlive, readServerFile } from './control.js';
 
@@ -332,6 +332,15 @@ async function uninstall(ctx) {
   return 0;
 }
 
+// Which remote access a running server is in, and what its proxy last sent
+// (server/proxy.js). Tailscale is doctor's to check: it asks tailscale itself.
+export function remoteLines(s, now = Date.now()) {
+  const p = s.proxy;
+  const seen = p && `last forwarded request ${formatUptime(Math.round((now - p.at) / 1000))} ago: ${p.proto} from ${p.ip}${p.email ? `, Cloudflare Access user ${p.email}` : ''}`;
+  if (s.publicUrl) return [`  remote: reverse proxy at ${s.publicUrl} (PUBLIC_URL)`, `  proxy headers: ${seen || 'none since the start; open the address, then run status again'}`];
+  return [`  remote: no PUBLIC_URL (local only, or Tailscale, which doctor checks)`, ...(seen ? [`  proxy headers: ${seen}`] : [])];
+}
+
 async function status(ctx) {
   const kind = serviceKind(ctx.platform);
   const file = serviceFilePath(kind, ctx.home);
@@ -342,7 +351,7 @@ async function status(ctx) {
     const s = live.status;
     lines.push(`Agent 007 ${s.version} is running ${s.service ? `as a service (${s.service})` : 'in a terminal'}.`,
       `  pid ${s.pid}, port ${s.port}, up ${formatUptime(s.uptime)}`,
-      `  workers running: ${s.workers}`);
+      `  workers running: ${s.workers}`, ...remoteLines(s, ctx.now()));
   } else if (installed) {
     const st = await managerState(ctx, kind);
     lines.push(`Agent 007 is not answering. ${kind} says: ${st.state || 'not loaded'}${st.pid ? ` (pid ${st.pid})` : ''}.`);
@@ -489,14 +498,22 @@ async function update(ctx, opts = {}) {
 }
 
 // install: the service, voice, remote access, or all three (see bin/agent-007.js HELP).
+// --public-url is remote access through the owner's own proxy: PUBLIC_URL,
+// then the service, and never Tailscale.
 async function installWithExtras(ctx, opts = {}) {
   const { voice, remote, all, yes } = opts;
+  const proxy = opts['public-url'];
   if ([voice, remote, all].filter(Boolean).length > 1) { ctx.err('Use one of --voice, --remote or --all.'); return 2; }
+  if (proxy !== undefined && (voice || remote)) { ctx.err('--public-url sets up remote access through your own proxy; use it alone or with --all, not with --voice or --remote (Tailscale).'); return 2; }
   const server = { running: async () => Boolean(await liveServer(ctx)), restart: () => restart(ctx, {}) };
   const setVoice = () => setupVoice({ ...ctx, yes: Boolean(yes) }, server);
-  const setRemote = () => setupRemote({ ...ctx, yes: Boolean(yes), tty: ctx.tty && !all, 'dry-run': Boolean(opts['dry-run']) }, server);
+  const setRemote = proxy !== undefined ? async () => 0 : () => setupRemote({ ...ctx, yes: Boolean(yes), tty: ctx.tty && !all, 'dry-run': Boolean(opts['dry-run']) }, server);
   if (voice) return setVoice();
   if (remote) return setRemote();
+  if (proxy !== undefined) {
+    const set = setupProxy({ ...ctx, 'dry-run': Boolean(opts['dry-run']) }, proxy);
+    if (set) return set;
+  }
   let code = await install(ctx, opts);
   if (opts['dry-run']) return all ? (await setRemote()) || code : code;
   if (code && !all) return code;
@@ -507,7 +524,7 @@ async function installWithExtras(ctx, opts = {}) {
   if (!ctx.tty) return code;
   if (/^y/i.test((await ctx.ask('Set up voice too? Downloads whisper.cpp and a ~150 MB speech model. [y/N] ')).trim())) code = (await setVoice()) || code;
   // Offered only where Tailscale is installed: without it there is nothing to set up yet.
-  if (ctx.tailscaleBin?.() && /^y/i.test((await ctx.ask('Set up remote access with Tailscale too? Serves Agent 007 at https://<this machine>.ts.net to your tailnet. [y/N] ')).trim())) code = (await setRemote()) || code;
+  if (proxy === undefined && ctx.tailscaleBin?.() && /^y/i.test((await ctx.ask('Set up remote access with Tailscale too? Serves Agent 007 at https://<this machine>.ts.net to your tailnet. [y/N] ')).trim())) code = (await setRemote()) || code;
   return code;
 }
 
