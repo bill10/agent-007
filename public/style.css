@@ -2586,7 +2586,8 @@ select.job-mode-danger {
 
 /* Scheduled cards. The chip rides in the title line and the schedule gets its
    own row, so the cron text never competes with the title for the same space. */
-.job-card-type {
+.job-card-type,
+.job-card-runs-on {
   padding: 1px 6px;
   font-size: 10px;
   font-weight: 400;
@@ -2672,8 +2673,9 @@ select.job-mode-danger {
 .job-card-agent-name { color: var(--text); font-weight: 600; }
 /* Trailing separators: a wrap leaves the dot at a line's end, never its start. */
 .job-card-agent > :not(:last-child)::after { content: ' ·'; }
-/* On Review and Finished the model rides on the agent line, a tier quieter. */
-.job-card-model { color: var(--text-muted); }
+/* What runs the card leads the chips: the same pill, in ink, since it is
+   on every card and the kind chips after it are the exceptions. */
+.job-card-runs-on { color: var(--text); }
 
 .job-card-status {
   display: inline-flex;
@@ -2852,7 +2854,7 @@ select.job-mode-danger {
   .job-card-where { font-size: 12px; }
   .job-card-meta, .job-card-schedule, .job-card-run, .job-card-agent, .job-card-attachment,
   .job-card-error, .job-card-retired, .job-card-held, .job-card-lastrun,
-  .job-card-finished, .job-card-type { font-size: 11px; }
+  .job-card-finished, .job-card-type, .job-card-runs-on { font-size: 11px; }
   .job-card-detail, .job-card-result { font-size: 12px; }
   .job-card-status, .job-card-pr { min-height: 32px; padding: 4px 12px; font-size: 12px; border-radius: 16px; }
   .job-card-actions { gap: 8px; }

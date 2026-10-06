@@ -627,9 +627,13 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   a text selection on the card are all excluded.
 - A card that carries its own permission mode wears it as a chip; a card left on
   the board default wears nothing, because the chip's job is to say "this one is
-  different". A Codex card wears a `codex` chip on the same reasoning, and
-  `read_job` says `runs on: codex` only for one, since Claude Code is the
-  default. `bypassPermissions` takes `--state-disconnected` instead of the
+  different". What runs the card is the exception to that rule: every card
+  opens its chips with one agent·model pill, "claude · opus-5-5" or
+  "codex · gpt-5.5" (just "claude" or "codex" on the CLI's default model;
+  the redundant "claude-" prefix is dropped from the label and kept in the
+  tooltip). Chipping only the non-default CLI left a Claude card with a bare
+  model id and a Codex card with two pills. `read_job` still says
+  `runs on: codex` only for a Codex card, since Claude Code is the default. `bypassPermissions` takes `--state-disconnected` instead of the
   routine chip gold, on the card and on both selects, since it is the one mode
   with nothing reviewing the agent and it otherwise reads as just another entry
   in a list of six. The colour sits on the closed select, not on the `<option>`
@@ -640,12 +644,14 @@ progress card saying "needs you" instead of a schedule silently losing firings.
 - Order on a card depends on its column (`ORDER` in `public/modules/jobs.js`),
   as agreed with the owner. To do: title, repo, when it runs, who posted it
   and when ("posted by Billion · 2h ago"), then the smaller kind chips
-  (recurring, codex, the model, no PR, a permission mode) and any blocker
+  (the agent·model pill first, then no PR, recurring, a permission mode) and any blocker
   warning, then detail and attachments. In progress: title, status badge,
   repo · branch, agent · started, then any error, the chips and the rest.
-  Review and Finished: title, PR pill, repo · branch, agent · model ·
-  started (the model moves off the chips onto the agent line, a tier
-  quieter), then the agent's summary on a no-PR card. Actions are always
+  Review and Finished: title, PR pill, repo · branch, agent · started, the
+  chips (so the agent·model pill reads straight after the agent), then the
+  agent's summary on a no-PR card. The chips row always opens with the
+  agent·model pill; the kind chips (no PR, recurring, scheduled, a
+  permission mode) follow it. Actions are always
   last. The repo is bold with a repo glyph and the branch beside it carries a
   branch glyph, so the pair reads as "repo, branch" without a label.
 - Every To do card says when it runs: "runs Tue 8:00 PM · in 5h" for a

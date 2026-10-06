@@ -273,11 +273,14 @@ function renderFinishedToggle(count) {
 // What each column's card says first, agreed with the owner: a To do card is
 // about where and when it will run and who asked; an In progress card about
 // how its agent is doing, where; a Review card about its PR, and for a card
-// with no PR, the agent's summary. Kind chips and the rest come after.
+// with no PR, the agent's summary. The chips row always opens with the
+// agent·model pill; the kind chips come after it.
 const ORDER = {
   todo: ['title', 'state', 'where', 'run', 'sched', 'meta', 'chips', 'errors', 'detail', 'files', 'agent', 'result', 'notes', 'actions'],
   'in-progress': ['title', 'state', 'where', 'agent', 'errors', 'chips', 'meta', 'detail', 'files', 'result', 'notes', 'run', 'sched', 'actions'],
-  review: ['title', 'state', 'where', 'agent', 'result', 'notes', 'errors', 'chips', 'meta', 'detail', 'files', 'run', 'sched', 'actions'],
+  // The chips follow the agent line here, so "Falcon · started 2h ago" reads
+  // straight on into the pill saying what it ran on.
+  review: ['title', 'state', 'where', 'agent', 'chips', 'result', 'notes', 'errors', 'meta', 'detail', 'files', 'run', 'sched', 'actions'],
 };
 ORDER.done = ORDER.review;
 
@@ -315,8 +318,17 @@ function renderCard(job) {
   // the facts a glance is for.
   const chips = document.createElement('div');
   chips.className = 'job-card-chips';
-  // Review and Finished name the model on the agent line instead.
-  const modelOnAgentLine = job.state === 'review' || job.state === 'done';
+  // First and on every card: what runs it, CLI and model in one pill
+  // ("claude · opus-5-5", "codex · gpt-5.5", or just "claude" on the CLI's
+  // default model). Only the non-default CLI used to get a chip, so a Claude
+  // card showed a bare model id and a Codex card two pills. The "claude-"
+  // prefix is dropped from the label as redundant; the tooltip keeps the id.
+  const cli = job.agent === 'codex' ? 'codex' : 'claude';
+  const runsOn = document.createElement('span');
+  runsOn.className = 'job-card-runs-on';
+  runsOn.textContent = job.model ? `${cli} · ${cli === 'claude' ? job.model.replace(/^claude-/, '') : job.model}` : cli;
+  runsOn.title = `Runs on ${cli === 'codex' ? 'Codex' : 'Claude Code'}, ${job.model ? `model ${job.model}` : "the CLI's default model"}`;
+  chips.appendChild(runsOn);
   if (isScheduled(job)) {
     // A chip rather than a whole second column: a scheduled card is still an
     // ordinary card in the same queue, and splitting the board would hide it
@@ -343,13 +355,6 @@ function renderCard(job) {
     chip.title = 'Posted by its schedule';
     chips.appendChild(chip);
   }
-  if (job.agent === 'codex') {
-    const chip = document.createElement('span');
-    chip.className = 'job-card-type';
-    chip.textContent = 'codex';
-    chip.title = 'Runs on Codex instead of Claude Code';
-    chips.appendChild(chip);
-  }
   // A chip marks the setting that differs from its type's default: no PR on a
   // one-time card, PR runs on a schedule.
   if (isScheduled(job) && job.requiresPr === true) {
@@ -364,13 +369,6 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'no PR';
     chip.title = 'Finishes with a summary from its agent instead of a pull request';
-    chips.appendChild(chip);
-  }
-  if (job.model && !modelOnAgentLine) {
-    const chip = document.createElement('span');
-    chip.className = 'job-card-type';
-    chip.textContent = job.model;
-    chip.title = `Runs on the ${job.model} model instead of the CLI's default`;
     chips.appendChild(chip);
   }
   if (job.permissionMode) {
@@ -463,12 +461,11 @@ function renderCard(job) {
   // branch it works in. The branch itself is on the repo line, not here: it is
   // a fact about the job, not about the agent, and gating it on the name left
   // a finished card showing nothing at all once the name was lost.
-  if (job.agentName || job.startedAt || (job.model && modelOnAgentLine)) {
+  if (job.agentName || job.startedAt) {
     const agentEl = document.createElement('div');
     agentEl.className = 'job-card-agent';
     const parts = [];
     if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
-    if (job.model && modelOnAgentLine) parts.push(`<span class="job-card-model" title="Ran on the ${escapeHtml(job.model)} model">${escapeHtml(job.model)}</span>`);
     if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
     agentEl.innerHTML = parts.join(' ');
     put('agent', agentEl);
