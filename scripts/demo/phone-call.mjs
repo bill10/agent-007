@@ -13,9 +13,9 @@
 // owner1.wav and owner2.wav for the owner's lines (one voice), billion1-4.wav
 // dubbed over Billion's four lines where the page spoke them (another voice).
 //
-// The video starts on the request; waits where nothing happens on screen (the
-// call coming up, the dispatcher's debounce, the worker typing on, the board's
-// scan) are cut out of it.
+// The video starts on the tap that opens the call; waits where nothing happens
+// on screen (the call bar listening, the dispatcher's debounce, the worker
+// typing on, the board's scan) are cut out of it.
 //
 // This script records. The video itself is a HyperFrames composition in
 // scripts/demo/launch/ (product-launch-video skill): this script leaves the two
@@ -261,8 +261,10 @@ await B.locator('.terminal-tab.board-tab:not(.waiting-tab)').click();   // the s
 await sleep(1500);
 cut('A');
 await sleep(2500);
+const tapAt = Date.now();
 await tap(A, A.locator('#chat-talk'), 0);
 await callState('listening');
+const listeningAt = Date.now();
 await sleep(2000);
 // 2. The request, and Billion's answer.
 await ownerSays('owner1');
@@ -328,9 +330,10 @@ captions.forEach((c, i) => {
   c.ms = Math.min(c.ms ?? duration(c.file) * 1000, next - c.at);
   c.until = Math.min(c.at + Math.max(c.ms + GAP, 1200), next);
 });
-// The video starts on the request: the call coming up is cut.
+// The video starts just before the tap on Talk, and the call bar's wait for
+// the first line is cut to a beat.
 const first = cuts[0].at;
-drops.unshift([first, captions[0].at - 300]);
+drops.unshift([first, tapAt - 700], [listeningAt + 900, captions[0].at - 300]);
 // A drop never takes a line or its caption with it.
 for (const d of drops) {
   for (const c of captions) {

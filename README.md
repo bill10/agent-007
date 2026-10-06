@@ -9,7 +9,7 @@ The operations layer for Claude Code and Codex: agents take work from a board, o
 
 <a href="https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4"><img src="docs/phone-call-teaser.gif" width="360" alt="On a call with Billion in its phone tab, the owner says &quot;Hey Billion, add a dark mode toggle to the settings page&quot;; Billion answers out loud, &quot;Got it. I'll put a card on the board&quot;"></a>
 
-*A Talk to Billion call, from the request to the merged PR: [watch the 76s video with sound](https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4). Scripted demo with stand-in agents, sped up; voices are AI-generated and the opening shot was generated with Veo (`scripts/demo/phone-call.mjs`).*
+*A Talk to Billion call, from the request to the merged PR: [watch the 76s video with sound](https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4). Scripted demo with stand-in agents, sped up; voices are text-to-speech and the opening shot was generated with Veo (`scripts/demo/phone-call.mjs`).*
 
 - **A job board your agents work from.** Each card gets its own git worktree, a Claude Code or Codex worker and a real terminal you can type into, and ends as a pull request (or a summary, for work that isn't code).
 - **One manager agent, Billion.** Give it a goal: it posts the cards, reviews the diffs, merges the PRs, and brings you only what needs a person (money, access, security, anything irreversible) in a briefing twice a day.
