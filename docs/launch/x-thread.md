@@ -1,7 +1,7 @@
 # X thread draft
 
 Not posted. Five posts, each under 280 characters. Attach `phone-call.mp4`
-(v0.54.1.0 release asset, 76 s) natively to post 1 rather than linking it: X
+(v0.54.1.0 release asset, 38 s) natively to post 1 rather than linking it: X
 plays native video inline and ranks it above links. Put the repo link in post
 5, not post 1. Edit into your own voice.
 
