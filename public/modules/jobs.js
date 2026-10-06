@@ -291,7 +291,12 @@ function renderCard(job) {
 
   const title = document.createElement('div');
   title.className = 'job-card-title';
-  title.textContent = job.title;
+  // The text gets its own box so the chips below can wrap as one row under
+  // it rather than trailing off the title's last word.
+  const titleText = document.createElement('span');
+  titleText.className = 'job-card-title-text';
+  titleText.textContent = job.title;
+  title.appendChild(titleText);
   if (isScheduled(job)) {
     // A chip rather than a whole second column: a scheduled card is still an
     // ordinary card in the same queue, and splitting the board would hide it
@@ -365,6 +370,42 @@ function renderCard(job) {
   }
   card.appendChild(title);
 
+  // Status second, straight under the title: whether the agent needs you, or
+  // where the pull request is, is what a glance at a card is for. The
+  // metadata and the chrome come after.
+  const stateRow = document.createElement('div');
+  stateRow.className = 'job-card-state';
+  if (status) {
+    const badge = document.createElement('button');
+    badge.className = `job-card-status job-status-${status}`;
+    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml((STATUS_TEXT[status] || status))}`;
+    const canJump = !!liveAgentId;
+    badge.title = canJump
+      ? `Open ${job.agentName}'s terminal`
+      : 'This agent is no longer running';
+    badge.onclick = (e) => {
+      e.stopPropagation();
+      if (canJump) switchToSession(liveAgentId);
+    };
+    if (!canJump) badge.disabled = true;
+    stateRow.appendChild(badge);
+  }
+
+  // The URL comes from `gh pr list`, but it still ends up in an href, and a
+  // non-http scheme there (javascript:, data:) executes on click. Cheap guard.
+  const prHref = /^https?:\/\//i.test(String(job.prUrl || '')) ? job.prUrl : null;
+  if (prHref) {
+    const pr = document.createElement('a');
+    pr.className = 'job-card-pr';
+    pr.href = prHref;
+    pr.target = '_blank';
+    pr.rel = 'noopener noreferrer';
+    pr.textContent = job.prNumber ? `PR #${job.prNumber}` : 'View PR';
+    stateRow.appendChild(pr);
+  }
+
+  if (stateRow.childElementCount) card.appendChild(stateRow);
+
   const meta = document.createElement('div');
   meta.className = 'job-card-meta';
   // "Who posted it" is up to three facts: the person it belongs to, the agent
@@ -382,7 +423,8 @@ function renderCard(job) {
       ? `<span class="job-card-via">edited by ${escapeHtml(job.editedByAgent)} ${relativeTime(job.editedAt)}</span>`
       : null,
   ].filter(Boolean).join(' · ');
-  meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
+  const slug = escapeHtml(repoSlug(job.repoPath));
+  meta.innerHTML = `<span class="job-card-repo" title="${slug}">${slug}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
 
   // Sent back to To do: held a minute so it can be edited before re-dispatch.
@@ -426,7 +468,7 @@ function renderCard(job) {
     // Coerced, not trusted: this lands in innerHTML, and job records come from
     // config.json, which a person can edit by hand.
     const runs = Number(job.runCount) || 0;
-    if (runs) bits.push(`<span class="job-card-runs">· ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
+    if (runs) bits.push(`<span class="job-card-runs">ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
     // Where its latest run is, so the schedule points at the card to look at.
     const latest = job.lastRunJobId ? jobs.get(job.lastRunJobId) : null;
     const column = latest && (COLUMNS.find(c => c.state === latest.state)?.label || (latest.state === 'done' ? 'Finished' : null));
@@ -501,26 +543,10 @@ function renderCard(job) {
     agentEl.className = 'job-card-agent';
     const parts = [];
     if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
-    if (job.branchName) parts.push(`<span class="job-card-branch">${escapeHtml(job.branchName)}</span>`);
-    if (job.startedAt) parts.push(`<span class="job-card-since">· started ${relativeTime(job.startedAt)}</span>`);
+    if (job.branchName) parts.push(`<span class="job-card-branch" title="${escapeHtml(job.branchName)}">${escapeHtml(job.branchName)}</span>`);
+    if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
     agentEl.innerHTML = parts.join(' ');
     card.appendChild(agentEl);
-  }
-
-  if (status) {
-    const badge = document.createElement('button');
-    badge.className = `job-card-status job-status-${status}`;
-    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml((STATUS_TEXT[status] || status))}`;
-    const canJump = !!liveAgentId;
-    badge.title = canJump
-      ? `Open ${job.agentName}'s terminal`
-      : 'This agent is no longer running';
-    badge.onclick = (e) => {
-      e.stopPropagation();
-      if (canJump) switchToSession(liveAgentId);
-    };
-    if (!canJump) badge.disabled = true;
-    card.appendChild(badge);
   }
 
   // What the agent reported through finish_job. On a card that opens no PR
@@ -573,19 +599,6 @@ function renderCard(job) {
         ? `PR closed without merging ${relativeTime(job.prClosedAt)}`
         : `finished ${relativeTime(job.doneAt)}`;
     card.appendChild(fin);
-  }
-
-  // The URL comes from `gh pr list`, but it still ends up in an href, and a
-  // non-http scheme there (javascript:, data:) executes on click. Cheap guard.
-  const prHref = /^https?:\/\//i.test(String(job.prUrl || '')) ? job.prUrl : null;
-  if (prHref) {
-    const pr = document.createElement('a');
-    pr.className = 'job-card-pr';
-    pr.href = prHref;
-    pr.target = '_blank';
-    pr.rel = 'noopener noreferrer';
-    pr.textContent = job.prNumber ? `PR #${job.prNumber}` : 'View PR';
-    card.appendChild(pr);
   }
 
   // Moot once the card has its pull request.

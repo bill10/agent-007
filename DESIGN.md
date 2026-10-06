@@ -123,8 +123,9 @@ because the stock brights wash out on the cream ground.
   - 11px — explorer items (files, agents), form labels, panel labels (REPOS,
     the job columns, Finished; uppercase, letter-spacing: 2px), the job board
     toolbar's labels. 11px is the floor for labels that name a field or a
-    section; 10px stays on the branch names and diff/loading text above, 9px
-    on some badges, form hints and card metadata
+    section; 10px stays on the branch names and diff/loading text above, and
+    on job card metadata, chips and actions (11px on a phone); 9px on some
+    badges and form hints
   - 12px — terminal tabs, form inputs, repo/branch in terminal header
   - 13px — terminal header agent info
   - 14px — app title (bold, letter-spacing: 1px)
@@ -634,6 +635,19 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   in a list of six. The colour sits on the closed select, not on the `<option>`
   (Safari ignores option colours), so the warning survives the dropdown closing.
 - Card actions are hidden until hover/focus-within, so a full board stays scannable.
+  A touch screen (`hover: none`) has no hover, so there they always show, and
+  under 700px they are 40px tall for a thumb.
+- Order on a card: title (with its chips on a row beneath), then the state row
+  (live status badge and the PR link, as matching pills), then repo and who
+  posted it, schedule, detail, attachments, agent line, summary, notes, errors,
+  actions. Title first, status second, chrome last.
+- A long repo name or branch truncates with an ellipsis and keeps the full
+  text in its tooltip; a title never truncates. Chips keep their case, since
+  model ids and permission modes are case-sensitive identifiers.
+- Card text sits on `--text-muted`, never `--text-dim` and never under an
+  opacity: dim misses 4.5:1 on the card ground in both themes. Status and
+  error text is the state colour mixed a fifth of the way toward `--text`,
+  for the same reason; the border keeps the raw state colour.
 - Two error lines can appear, and they are independent. `lastError` carries what
   happened to the job (a dispatch failure, or "agent lost" after a restart);
   `prCheckError` carries why the board cannot check for the pull request at all.
