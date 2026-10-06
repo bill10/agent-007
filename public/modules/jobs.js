@@ -104,7 +104,7 @@ function clockTime(iso) {
   const far = then - Date.now() > 6 * 24 * 60 * 60 * 1000;
   return new Date(then).toLocaleString([], {
     weekday: 'short', ...(far ? { month: 'short', day: 'numeric' } : {}),
-    hour: '2-digit', minute: '2-digit',
+    hour: 'numeric', minute: '2-digit',
   });
 }
 
@@ -410,11 +410,16 @@ function renderCard(job) {
   meta.className = 'job-card-meta';
   // "Who posted it" is up to three facts: the person it belongs to, the agent
   // that typed it (when one did — see the board's MCP tool), and when. Any of
-  // the first two can be absent, so filter rather than branch.
+  // the first two can be absent. Said in words ("posted by Billion"), since a
+  // bare "bill · via Billion" left the owner guessing which was the author.
+  const by = job.postedByName && job.postedByAgent
+    ? `${escapeHtml(job.postedByName)} <span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>`
+    : job.postedByAgent
+      ? `<span class="job-card-via">${escapeHtml(job.postedByAgent)}</span>`
+      : job.postedByName ? escapeHtml(job.postedByName) : null;
   const posted = [
-    job.postedByName ? escapeHtml(job.postedByName) : null,
-    job.postedByAgent ? `<span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>` : null,
-    relativeTime(job.postedAt),
+    by ? `posted by ${by}` : null,
+    by ? relativeTime(job.postedAt) : `posted ${relativeTime(job.postedAt)}`,
     // An agent can rewrite a To do card through the board's edit_job tool, and
     // that text becomes the next agent's prompt. The card would otherwise still
     // read as the work of whoever queued it, so the rewrite says so on the card
@@ -427,44 +432,15 @@ function renderCard(job) {
   meta.innerHTML = `<span class="job-card-repo" title="${slug}">${slug}</span><span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
 
-  // Sent back to To do: held a minute so it can be edited before re-dispatch.
-  if (isHeld(job)) {
-    const held = document.createElement('div');
-    held.className = 'job-card-held';
-    const tick = () => {
-      const secs = Math.ceil((Date.parse(job.holdUntil) - Date.now()) / 1000);
-      held.textContent = secs > 0 ? `held · dispatching in ${secs}s` : 'dispatching';
-      if (secs > 0) setTimeout(() => { if (held.isConnected) tick(); }, 1000);
-    };
-    tick();
-    card.appendChild(held);
-  }
-
-  if (startsLater(job)) {
-    const when = document.createElement('div');
-    when.className = 'job-card-schedule';
-    when.innerHTML = `<span class="job-card-next">${escapeHtml(dateTime(job.runAt))} · ${escapeHtml(untilTime(job.runAt))}</span>`;
-    card.appendChild(when);
-  }
+  const run = renderRunLine(job);
+  if (run) card.appendChild(run);
 
   if (isScheduled(job)) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
     // Its schedule in words, with the cron kept in the tooltip.
+    // When it next fires is the run line above (renderRunLine).
     const bits = [`<span class="job-card-cron" title="${escapeHtml(job.schedule || '')}">${escapeHtml(job.scheduleWords || job.schedule || '')}</span>`];
-    if (job.state === 'done') {
-      // Archived: it will not fire again, and its note below says why.
-    } else if (job.paused) {
-      // The stored nextRunAt is not shown: it is the due time the pause is
-      // holding, and resuming re-arms from that moment instead of running it.
-      bits.push('<span class="job-card-next job-card-paused">paused</span>');
-    } else if (job.nextRunAt) {
-      bits.push(`<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
-    } else {
-      // nextCronIso returned nothing: a valid expression that matches no date
-      // that will ever come round, such as 30 February.
-      bits.push('<span class="job-card-next">never fires again</span>');
-    }
     // Coerced, not trusted: this lands in innerHTML, and job records come from
     // config.json, which a person can edit by hand.
     const runs = Number(job.runCount) || 0;
@@ -654,6 +630,54 @@ function renderCard(job) {
   }
 
   return card;
+}
+
+// When a To do card goes out, in words, on every To do card: its time for a
+// scheduled or recurring one, and for an ordinary queued one where it stands
+// in its repo's queue. Mirrors selectDispatchableJobs in lib/jobs.js (oldest
+// first, per-repo cap, live agents only), which public/ cannot import.
+function renderRunLine(job) {
+  if (job.state !== 'todo') return null;
+  const line = document.createElement('div');
+  line.className = 'job-card-run';
+  const say = (text, waiting = false, title = '') => {
+    line.innerHTML = `<span class="job-card-next${waiting ? ' job-card-paused' : ''}">${escapeHtml(text)}</span>`;
+    if (title) line.title = title;
+  };
+  if (job.paused) {
+    // The stored due time is not shown: resuming re-arms from that moment
+    // instead of running it, so a countdown would be a promise not kept.
+    say('paused', true);
+  } else if (isScheduled(job)) {
+    if (job.nextRunAt) say(`runs ${clockTime(job.nextRunAt)} · ${untilTime(job.nextRunAt)}`);
+    // nextCronIso returned nothing: a valid expression that matches no date
+    // that will ever come round, such as 30 February.
+    else say('never fires again', true);
+  } else if (isHeld(job)) {
+    // Sent back to To do: held a minute so it can be edited before re-dispatch.
+    const tick = () => {
+      const secs = Math.ceil((Date.parse(job.holdUntil) - Date.now()) / 1000);
+      say(secs > 0 ? `runs in ${secs}s · held so it can be edited` : 'runs next');
+      if (secs > 0) setTimeout(() => { if (line.isConnected) tick(); }, 1000);
+    };
+    tick();
+  } else if (startsLater(job)) {
+    say(`runs ${dateTime(job.runAt)} · ${untilTime(job.runAt)}`);
+  } else if (!boardSettings.running) {
+    say('queued · board stopped', true, 'Nothing is dispatched until the board is started');
+  } else {
+    const queue = [...jobs.values()]
+      .filter(j => j.state === 'todo' && !isScheduled(j) && !j.paused && !isHeld(j) && !startsLater(j) && j.repoPath === job.repoPath)
+      .sort((a, b) => String(a.postedAt).localeCompare(String(b.postedAt)));
+    const inFlight = [...jobs.values()]
+      .filter(j => j.state === 'in-progress' && j.repoPath === job.repoPath && agents.has(j.agentSessionId)).length;
+    const free = Math.max(0, (Number(boardSettings.maxPerRepo) || 1) - inFlight);
+    const ahead = queue.indexOf(job) - free;
+    if (ahead < 0) say('runs next', false, 'Goes out on the board\'s next scan');
+    else say(`runs when a slot frees${ahead ? ` (${ahead} ahead)` : ''}`, true,
+      `This repo is at its limit of ${boardSettings.maxPerRepo} agent${boardSettings.maxPerRepo === 1 ? '' : 's'} at once`);
+  }
+  return line;
 }
 
 function isHeld(job) {

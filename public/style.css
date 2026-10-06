@@ -2544,6 +2544,9 @@ select.job-mode-danger {
   white-space: nowrap;
   color: var(--text);
 }
+/* Who posted it gets a line of its own under the repo, so "posted by"
+   never runs on from a long repo name. */
+.job-card-posted { display: block; }
 /* Posted by an agent rather than typed into the form. Accent-tinted so a board
    full of cards still shows at a glance which ones a machine queued. */
 .job-card-via { color: var(--accent); }
@@ -2572,7 +2575,8 @@ select.job-mode-danger {
   color: var(--state-disconnected);
   border-color: var(--state-disconnected);
 }
-.job-card-schedule {
+.job-card-schedule,
+.job-card-run {
   display: flex;
   gap: 2px 6px;
   flex-wrap: wrap;
@@ -2584,6 +2588,8 @@ select.job-mode-danger {
 /* The page is already set in a mono stack, so cron text needs no font of its
    own — just enough contrast to read as the machine-readable bit. */
 .job-card-cron { color: var(--text-muted); }
+/* Trailing, so a wrap leaves the dot at the end of a line, not the start. */
+.job-card-cron:has(+ .job-card-runs)::after { content: ' ·'; }
 .job-card-next { color: var(--accent); }
 /* A paused schedule is not a countdown: drop the accent so the card reads as
    held rather than as the next one about to go. */
@@ -2811,7 +2817,7 @@ select.job-mode-danger {
   /* The owner reads the board on a phone: a step up, and thumb-sized targets. */
   .job-card { padding: 12px; gap: 8px; }
   .job-card-title { font-size: 14px; }
-  .job-card-meta, .job-card-schedule, .job-card-agent, .job-card-attachment,
+  .job-card-meta, .job-card-schedule, .job-card-run, .job-card-agent, .job-card-attachment,
   .job-card-error, .job-card-retired, .job-card-held, .job-card-lastrun,
   .job-card-finished, .job-card-type { font-size: 11px; }
   .job-card-detail, .job-card-result { font-size: 12px; }

@@ -1124,7 +1124,7 @@ describe('scheduled cards', () => {
     const card = cards()[0];
     expect(card.querySelector('.job-card-type').textContent).toBe('recurring');
     expect(card.querySelector('.job-card-cron').textContent).toBe('0 9 * * 1-5');
-    expect(card.querySelector('.job-card-next').textContent).toMatch(/next .*·.*in 2h/);
+    expect(card.querySelector('.job-card-next').textContent).toMatch(/^runs .*·.*in 2h/);
   });
 
   it('says a recurring schedule in words and keeps the cron in the tooltip', () => {
@@ -1407,5 +1407,31 @@ describe('an archived run whose PR was closed', () => {
     const text = document.querySelector('[data-job-id="r"] .job-card-finished').textContent;
     expect(text).toMatch(/PR closed without merging/);
     expect(text).not.toMatch(/^merged/);
+  });
+});
+
+describe('the run line on a To do card', () => {
+  const runText = (id) => document.querySelector(`[data-job-id="${id}"] .job-card-run`)?.textContent;
+  const at = (min) => new Date(Date.now() - min * 60_000).toISOString();
+
+  it('says the board is stopped rather than promising a run', () => {
+    handleJobsList({ jobs: [JOB()], settings: { running: false } });
+    expect(runText('job-1')).toBe('queued · board stopped');
+  });
+
+  it('says "runs next" while the repo has a free slot, and the queue behind a full one', () => {
+    agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    const busy = JOB({ id: 'busy', state: 'in-progress', agentSessionId: 's1', postedAt: at(90) });
+    const queued = [1, 2, 3].map(i => JOB({ id: `q${i}`, postedAt: at(60 - i) }));
+    handleJobsList({ jobs: [busy, ...queued], settings: { running: true, maxPerRepo: 2 } });
+    expect(runText('q1')).toBe('runs next');
+    expect(runText('q2')).toBe('runs when a slot frees');
+    expect(runText('q3')).toBe('runs when a slot frees (1 ahead)');
+    expect(runText('busy')).toBeUndefined();
+  });
+
+  it('gives a scheduled card its start time', () => {
+    handleJobsList({ jobs: [JOB({ runAt: new Date(Date.now() + 2 * 3600_000).toISOString() })], settings: { running: true } });
+    expect(runText('job-1')).toMatch(/^runs .*\d.* · in 2h$/);
   });
 });

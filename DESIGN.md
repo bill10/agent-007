@@ -638,9 +638,19 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   A touch screen (`hover: none`) has no hover, so there they always show, and
   under 700px they are 40px tall for a thumb.
 - Order on a card: title (with its chips on a row beneath), then the state row
-  (live status badge and the PR link, as matching pills), then repo and who
-  posted it, schedule, detail, attachments, agent line, summary, notes, errors,
-  actions. Title first, status second, chrome last.
+  (live status badge and the PR link, as matching pills), then the repo and,
+  on its own line, who posted it in words ("posted by Billion · 2h ago",
+  "posted by bill via Onyx"), then the run line, schedule, detail,
+  attachments, agent line, summary, notes, errors, actions. Title first,
+  status second, chrome last.
+- Every To do card says when it runs: "runs Tue 8:00 PM · in 5h" for a
+  schedule or a one-time card with a start time, "runs in 45s · held so it
+  can be edited" after a send-back, "paused", and for an ordinary card its
+  place in its repo's queue: "runs next" while the repo has a free slot,
+  "runs when a slot frees (N ahead)" behind a full one, "queued · board
+  stopped" while the dispatcher is off. The queue is worked out on the client
+  the way `selectDispatchableJobs` orders it (oldest first, per-repo cap,
+  live agents only).
 - A long repo name or branch truncates with an ellipsis and keeps the full
   text in its tooltip; a title never truncates. Chips keep their case, since
   model ids and permission modes are case-sensitive identifiers.

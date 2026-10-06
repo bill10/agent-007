@@ -86,13 +86,19 @@ describe('a card an agent posted', () => {
     expect(postedLine().querySelector('.job-card-via').textContent).toBe('via Onyx');
   });
 
-  it('leads with the agent when no human owns the terminal yet', () => {
+  it('names the agent as the author when no human owns the terminal yet', () => {
     // Auth is off by default, so a session has no owner and postedByName is
-    // null. A naive join would leave a stray leading separator: "· via Mirage".
+    // null: the card reads "posted by Mirage", not "via Mirage" with no one
+    // in front of it.
     handleJobsList({ jobs: [JOB({ postedByAgent: 'Mirage' })], settings: {} });
     const text = postedLine().textContent;
-    expect(text.startsWith('via Mirage')).toBe(true);
-    expect(text).not.toContain('· via Mirage');
+    expect(text.startsWith('posted by Mirage · ')).toBe(true);
+    expect(text).not.toContain('via');
+  });
+
+  it('says who posted it in words', () => {
+    handleJobsList({ jobs: [JOB({ postedByName: 'Bill', postedByAgent: 'Onyx' })], settings: {} });
+    expect(postedLine().textContent.startsWith('posted by Bill via Onyx · ')).toBe(true);
   });
 
   it('says when an agent rewrote the card, not only who queued it', () => {
