@@ -19,8 +19,8 @@ superlatives. The hook above already fits that shape.
 ## Links
 
 - Repo: https://github.com/bill10/agent-007 (MIT)
-- Video, 76 s with sound: https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4
-  (scripted demo with stand-in agents, sped up, AI voices, Veo opening shot;
+- Video, 38 s with sound: https://github.com/bill10/agent-007/releases/download/v0.54.1.0/phone-call.mp4
+  (scripted demo with stand-in agents, sped up, AI voices;
   say so if you link it)
 - Built by agents, with the counts and how to reproduce them: [docs/BUILT-BY-AGENTS.md](../BUILT-BY-AGENTS.md)
 - Remote access over Tailscale: [docs/REMOTE.md](../REMOTE.md)

@@ -15,7 +15,7 @@ Edit it into your own voice before posting; the AI-use line at the end stays.
 
 **Body:**
 
-[76 s video: asking for a change on a call, hearing it merged]
+[38 s video: asking for a change on a call, hearing it merged]
 
 **What I built:** Agent 007, a free, MIT-licensed web app that runs Claude Code
 (and Codex) for you:

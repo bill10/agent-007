@@ -31,8 +31,8 @@
 //   node scripts/demo/launch/build.mjs             (edit.json → index.html; run again to restyle)
 //   npx hyperframes@0.8.137 render scripts/demo/launch --fps 30 --quality high -o out/phone-call.mp4
 //
-// The README teaser is the request and Billion's answer from that MP4, muted:
-//   ffmpeg -ss 0.9 -t 7 -i out/phone-call.mp4 -vf "fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" docs/phone-call-teaser.gif
+// The README teaser is the setup line, the tap on Talk and the request from that MP4, muted:
+//   ffmpeg -ss 1.2 -t 7.3 -i out/phone-call.mp4 -vf "fps=10,scale=480:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=48:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle" docs/phone-call-teaser.gif
 // and the MP4 goes on the latest release: gh release upload <tag> out/phone-call.mp4 --clobber
 import { execFileSync } from 'child_process';
 import { mkdirSync, writeFileSync, readFileSync, copyFileSync, rmSync, existsSync } from 'fs';

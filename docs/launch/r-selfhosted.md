@@ -31,7 +31,7 @@ your own machine, and talk to them from your phone.
 - MIT, free, early (v0.54), one maintainer. macOS and Linux; Windows runs it
   in a terminal.
 
-Repo and 76 s demo video: https://github.com/bill10/agent-007
+Repo and 38 s demo video: https://github.com/bill10/agent-007
 
 *AI disclosure: written mostly by Claude Code and Codex agents (counts in
 docs/BUILT-BY-AGENTS.md); this comment drafted with Claude, edited by me.*
