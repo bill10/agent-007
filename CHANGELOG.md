@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.56.0.1] - 2026-10-06
+
+### Changed
+
+- **The phone-call demo's disclosure says "voices are text-to-speech".** The README caption under the video now names the voices as what they are, text-to-speech, instead of "AI-generated".
+
 ## [0.56.0.0] - 2026-10-06
 
 ### Added
