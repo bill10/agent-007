@@ -615,10 +615,12 @@ describe('job form', () => {
     expect(document.getElementById('job-permission-mode-field').querySelector('option[value="plan"]').hidden).toBe(false);
   });
 
-  it('leads the chips with the agent·model pill, then the kind chips, and only the pill on a plain card', () => {
+  it('puts the type on the title line, and leads the lower chips with the agent·model pill', () => {
     handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', agent: 'codex', model: 'gpt-5.5', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
     const chips = [...cards()[0].querySelector('.job-card-chips').children].map(c => c.textContent);
-    expect(chips).toEqual(['codex · gpt-5.5', 'recurring', 'plan']);
+    expect(chips).toEqual(['codex · gpt-5.5', 'plan']);
+    // The type is on the title line, not in the lower row.
+    expect(cards()[0].querySelector('.job-card-title .job-card-type').textContent).toBe('recurring');
     handleJobsList({ jobs: [JOB({ agent: 'claude' })], settings: { running: false, maxPerRepo: 2 } });
     expect([...cards()[0].querySelector('.job-card-chips').children].map(c => c.textContent)).toEqual(['claude']);
     expect(cards()[0].querySelectorAll('.job-card-type')).toHaveLength(0);

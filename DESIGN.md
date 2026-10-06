@@ -642,16 +642,18 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   A touch screen (`hover: none`) has no hover, so there they always show, and
   under 700px they are 40px tall for a thumb.
 - Order on a card depends on its column (`ORDER` in `public/modules/jobs.js`),
-  as agreed with the owner. To do: title, repo, when it runs, who posted it
+  as agreed with the owner. The job's type pill (recurring, scheduled, run)
+  rides inline on the title line, so the card says what kind of job it is at
+  the very top. To do: title, repo, when it runs, who posted it
   and when ("posted by Billion · 2h ago"), then the smaller kind chips
-  (the agent·model pill first, then no PR, recurring, a permission mode) and any blocker
+  (the agent·model pill first, then no PR, then a permission mode) and any blocker
   warning, then detail and attachments. In progress: title, status badge,
   repo · branch, agent · started, then any error, the chips and the rest.
   Review and Finished: title, PR pill, repo · branch, agent · started, the
   chips (so the agent·model pill reads straight after the agent), then the
-  agent's summary on a no-PR card. The chips row always opens with the
-  agent·model pill; the kind chips (no PR, recurring, scheduled, a
-  permission mode) follow it. Actions are always
+  agent's summary on a no-PR card. The lower chip row always opens with the
+  agent·model pill; no PR (or PR runs on a schedule) and a permission mode
+  follow it. Actions are always
   last. The repo is bold with a repo glyph and the branch beside it carries a
   branch glyph, so the pair reads as "repo, branch" without a label.
 - Every To do card says when it runs: "runs Tue 8:00 PM · in 5h" for a

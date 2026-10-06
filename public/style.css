@@ -2498,28 +2498,30 @@ select.job-mode-danger {
 .job-card.status-gone { border-left-color: var(--state-disconnected); }
 
 .job-card-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 4px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
-/* The kind chips: their own row, placed per column (ORDER in jobs.js). */
+/* The type pill (recurring, scheduled, run) sits inline after the title's
+   last word. */
+.job-card-title > .job-card-type {
+  display: inline-block;
+  margin-left: 6px;
+  /* middle, not a baseline nudge: with overflow hidden the pill's baseline
+     is its bottom edge, which floated it above the title's text. */
+  vertical-align: middle;
+  font-weight: 400;
+}
+/* The lower chip row: the agent·model pill, then no PR and a permission
+   mode, placed per column (ORDER in jobs.js). */
 .job-card-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 /* The facts a glance is for sit close; the chips, detail and summary
    after them are a separate group. */
 .job-card-meta + .job-card-chips,
 .job-card-chips + .job-card-detail,
 .job-card-meta + .job-card-detail { margin-top: 3px; }
-/* The title takes its whole line. */
-.job-card-title-text {
-  flex: 1 0 100%;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
 
 /* Status second: the live badge and the PR link, right under the title. */
 .job-card-state {

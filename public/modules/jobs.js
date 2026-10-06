@@ -274,7 +274,8 @@ function renderFinishedToggle(count) {
 // about where and when it will run and who asked; an In progress card about
 // how its agent is doing, where; a Review card about its PR, and for a card
 // with no PR, the agent's summary. The chips row always opens with the
-// agent·model pill; the kind chips come after it.
+// agent·model pill; no PR and a permission mode come after it. The type
+// pill (recurring, scheduled, run) is on the title line.
 const ORDER = {
   todo: ['title', 'state', 'where', 'run', 'sched', 'meta', 'chips', 'errors', 'detail', 'files', 'agent', 'result', 'notes', 'actions'],
   'in-progress': ['title', 'state', 'where', 'agent', 'errors', 'chips', 'meta', 'detail', 'files', 'result', 'notes', 'run', 'sched', 'actions'],
@@ -313,9 +314,9 @@ function renderCard(job) {
   titleText.className = 'job-card-title-text';
   titleText.textContent = job.title;
   title.appendChild(titleText);
-  // The kind chips (recurring, codex, the model, no PR, a permission mode)
-  // are a row of their own, placed per column below (ORDER), smaller than
-  // the facts a glance is for.
+  // The lower chip row: the agent·model pill, then no PR / PR runs and a
+  // permission mode, placed per column below (ORDER), smaller than the facts
+  // a glance is for. The job's type pill is on the title line instead.
   const chips = document.createElement('div');
   chips.className = 'job-card-chips';
   // First and on every card: what runs it, CLI and model in one pill
@@ -329,6 +330,8 @@ function renderCard(job) {
   runsOn.textContent = job.model ? `${cli} · ${cli === 'claude' ? job.model.replace(/^claude-/, '') : job.model}` : cli;
   runsOn.title = `Runs on ${cli === 'codex' ? 'Codex' : 'Claude Code'}, ${job.model ? `model ${job.model}` : "the CLI's default model"}`;
   chips.appendChild(runsOn);
+  // The job's type (recurring, scheduled, a schedule's run) rides inline on
+  // the title line, so the card says what kind of job it is at the very top.
   if (isScheduled(job)) {
     // A chip rather than a whole second column: a scheduled card is still an
     // ordinary card in the same queue, and splitting the board would hide it
@@ -338,7 +341,7 @@ function renderCard(job) {
     // job.once: an old once schedule, archived after it fired (#178-#188).
     chip.textContent = job.once ? 'scheduled' : 'recurring';
     chip.title = job.once ? 'Ran once at its date' : 'Posts a run card each time it comes due; the runs are the cards that move';
-    chips.appendChild(chip);
+    title.appendChild(chip);
   }
   // Only while it waits: once started it is an ordinary one-time card.
   if (startsLater(job)) {
@@ -346,14 +349,14 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'scheduled';
     chip.title = 'Waits in To do and starts at this time; this card is the job';
-    chips.appendChild(chip);
+    title.appendChild(chip);
   }
   if (job.scheduleId) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = 'run';
     chip.title = 'Posted by its schedule';
-    chips.appendChild(chip);
+    title.appendChild(chip);
   }
   // A chip marks the setting that differs from its type's default: no PR on a
   // one-time card, PR runs on a schedule.
