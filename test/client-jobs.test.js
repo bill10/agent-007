@@ -448,7 +448,7 @@ describe('the per-job permission mode', () => {
 
   it('puts an overriding mode on the card face', () => {
     handleJobsList({ jobs: [JOB({ permissionMode: 'bypassPermissions' })], settings: { running: false, maxPerRepo: 2 } });
-    expect(cards()[0].querySelector('.job-card-title').textContent).toContain('bypassPermissions');
+    expect(cards()[0].querySelector('.job-card-chips').textContent).toContain('bypassPermissions');
   });
 
   it('shows both the scheduled chip and the permission-mode chip together', () => {
@@ -1444,5 +1444,28 @@ describe('the run line on a To do card', () => {
   it('gives a scheduled card its start time', () => {
     handleJobsList({ jobs: [JOB({ runAt: new Date(Date.now() + 2 * 3600_000).toISOString() })], settings: { running: true } });
     expect(runText('job-1')).toMatch(/^runs .*\d.* · in 2h$/);
+  });
+});
+
+describe('what each column says first', () => {
+  const order = (card) => [...card.children].map(el => el.className.split(' ')[0]);
+
+  it('a To do card: title, repo, when it runs, who posted it, then the chips', () => {
+    handleJobsList({ jobs: [JOB({ model: 'opus', requiresPr: false })], settings: { running: true } });
+    expect(order(cards()[0]).slice(0, 5)).toEqual(['job-card-title', 'job-card-where', 'job-card-run', 'job-card-meta', 'job-card-chips']);
+  });
+
+  it('an In progress card: title, status, repo and branch, agent', () => {
+    agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({ jobs: [JOB({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper', branchName: 'b', startedAt: new Date().toISOString() })], settings: {} });
+    expect(order(cards()[0]).slice(0, 4)).toEqual(['job-card-title', 'job-card-state', 'job-card-where', 'job-card-agent']);
+  });
+
+  it('a Review card: title, PR, repo and branch, agent with its model, then the summary', () => {
+    handleJobsList({ jobs: [JOB({ state: 'review', prUrl: 'https://gh/o/r/pull/3', prNumber: 3, agentName: 'Echo', branchName: 'b', model: 'opus', resultSummary: 'Done.' })], settings: {} });
+    const card = cards()[0];
+    expect(order(card).slice(0, 5)).toEqual(['job-card-title', 'job-card-state', 'job-card-where', 'job-card-agent', 'job-card-result']);
+    expect(card.querySelector('.job-card-agent .job-card-model').textContent).toBe('opus');
+    expect([...card.querySelectorAll('.job-card-type')].map(c => c.textContent)).not.toContain('opus');
   });
 });

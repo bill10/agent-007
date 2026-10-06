@@ -2507,7 +2507,14 @@ select.job-mode-danger {
   color: var(--text);
   line-height: 1.35;
 }
-/* The title takes its whole line; the chips wrap as one row beneath it. */
+/* The kind chips: their own row, placed per column (ORDER in jobs.js). */
+.job-card-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+/* The facts a glance is for sit close; the chips, detail and summary
+   after them are a separate group. */
+.job-card-meta + .job-card-chips,
+.job-card-chips + .job-card-detail,
+.job-card-meta + .job-card-detail { margin-top: 3px; }
+/* The title takes its whole line. */
 .job-card-title-text {
   flex: 1 0 100%;
   min-width: 0;
@@ -2663,7 +2670,10 @@ select.job-mode-danger {
 }
 /* "Viper · started 12m ago": the worker, under the repo and branch. */
 .job-card-agent-name { color: var(--text); font-weight: 600; }
-.job-card-agent-name ~ .job-card-since::before { content: '· '; }
+/* Trailing separators: a wrap leaves the dot at a line's end, never its start. */
+.job-card-agent > :not(:last-child)::after { content: ' ·'; }
+/* On Review and Finished the model rides on the agent line, a tier quieter. */
+.job-card-model { color: var(--text-muted); }
 
 .job-card-status {
   display: inline-flex;

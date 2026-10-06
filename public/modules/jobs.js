@@ -270,8 +270,21 @@ function renderFinishedToggle(count) {
   btn.classList.toggle('showing', showingFinished);
 }
 
+// What each column's card says first, agreed with the owner: a To do card is
+// about where and when it will run and who asked; an In progress card about
+// how its agent is doing, where; a Review card about its PR, and for a card
+// with no PR, the agent's summary. Kind chips and the rest come after.
+const ORDER = {
+  todo: ['title', 'state', 'where', 'run', 'sched', 'meta', 'chips', 'errors', 'detail', 'files', 'agent', 'result', 'notes', 'actions'],
+  'in-progress': ['title', 'state', 'where', 'agent', 'errors', 'chips', 'meta', 'detail', 'files', 'result', 'notes', 'run', 'sched', 'actions'],
+  review: ['title', 'state', 'where', 'agent', 'result', 'notes', 'errors', 'chips', 'meta', 'detail', 'files', 'run', 'sched', 'actions'],
+};
+ORDER.done = ORDER.review;
+
 function renderCard(job) {
   const card = document.createElement('div');
+  const slots = {};
+  const put = (slot, el) => { (slots[slot] ||= []).push(el); };
   const status = liveStatus(job);
   card.className = 'job-card' + (status ? ` status-${status}` : '');
   card.dataset.jobId = job.id;
@@ -297,6 +310,13 @@ function renderCard(job) {
   titleText.className = 'job-card-title-text';
   titleText.textContent = job.title;
   title.appendChild(titleText);
+  // The kind chips (recurring, codex, the model, no PR, a permission mode)
+  // are a row of their own, placed per column below (ORDER), smaller than
+  // the facts a glance is for.
+  const chips = document.createElement('div');
+  chips.className = 'job-card-chips';
+  // Review and Finished name the model on the agent line instead.
+  const modelOnAgentLine = job.state === 'review' || job.state === 'done';
   if (isScheduled(job)) {
     // A chip rather than a whole second column: a scheduled card is still an
     // ordinary card in the same queue, and splitting the board would hide it
@@ -306,7 +326,7 @@ function renderCard(job) {
     // job.once: an old once schedule, archived after it fired (#178-#188).
     chip.textContent = job.once ? 'scheduled' : 'recurring';
     chip.title = job.once ? 'Ran once at its date' : 'Posts a run card each time it comes due; the runs are the cards that move';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   // Only while it waits: once started it is an ordinary one-time card.
   if (startsLater(job)) {
@@ -314,21 +334,21 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'scheduled';
     chip.title = 'Waits in To do and starts at this time; this card is the job';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   if (job.scheduleId) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = 'run';
     chip.title = 'Posted by its schedule';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   if (job.agent === 'codex') {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = 'codex';
     chip.title = 'Runs on Codex instead of Claude Code';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   // A chip marks the setting that differs from its type's default: no PR on a
   // one-time card, PR runs on a schedule.
@@ -337,21 +357,21 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'PR runs';
     chip.title = 'Each run opens a pull request';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   if (!isScheduled(job) && job.requiresPr === false) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = 'no PR';
     chip.title = 'Finishes with a summary from its agent instead of a pull request';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
-  if (job.model) {
+  if (job.model && !modelOnAgentLine) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = job.model;
     chip.title = `Runs on the ${job.model} model instead of the CLI's default`;
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   if (job.permissionMode) {
     // Only when the card overrides the board. The mode decides how much its
@@ -366,9 +386,9 @@ function renderCard(job) {
     chip.title = job.agent === 'codex'
       ? `This job runs on Codex in ${job.permissionMode}, mapped onto Codex's sandbox and approval flags, instead of the board's setting`
       : `This job runs with --permission-mode ${job.permissionMode} instead of the board's setting`;
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
-  card.appendChild(title);
+  put('title', title);
 
   // Status second, straight under the title: whether the agent needs you, or
   // where the pull request is, is what a glance at a card is for. The
@@ -404,7 +424,7 @@ function renderCard(job) {
     stateRow.appendChild(pr);
   }
 
-  if (stateRow.childElementCount) card.appendChild(stateRow);
+  if (stateRow.childElementCount) put('state', stateRow);
 
   const meta = document.createElement('div');
   meta.className = 'job-card-meta';
@@ -437,27 +457,28 @@ function renderCard(job) {
   const slug = escapeHtml(repoSlug(job.repoPath));
   where.innerHTML = `<span class="job-card-repo" title="Repository: ${slug}">${slug}</span>`
     + (job.branchName ? `<span class="job-card-branch" title="Branch: ${escapeHtml(job.branchName)}">${escapeHtml(job.branchName)}</span>` : '');
-  card.appendChild(where);
+  put('where', where);
 
   // Which agent is doing the work, and since when, straight under the repo and
   // branch it works in. The branch itself is on the repo line, not here: it is
   // a fact about the job, not about the agent, and gating it on the name left
   // a finished card showing nothing at all once the name was lost.
-  if (job.agentName || job.startedAt) {
+  if (job.agentName || job.startedAt || (job.model && modelOnAgentLine)) {
     const agentEl = document.createElement('div');
     agentEl.className = 'job-card-agent';
     const parts = [];
     if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
+    if (job.model && modelOnAgentLine) parts.push(`<span class="job-card-model" title="Ran on the ${escapeHtml(job.model)} model">${escapeHtml(job.model)}</span>`);
     if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
     agentEl.innerHTML = parts.join(' ');
-    card.appendChild(agentEl);
+    put('agent', agentEl);
   }
 
   meta.innerHTML = `<span class="job-card-posted">${posted}</span>`;
-  card.appendChild(meta);
+  put('meta', meta);
 
   const run = renderRunLine(job);
-  if (run) card.appendChild(run);
+  if (run) put('run', run);
 
   if (isScheduled(job)) {
     const sched = document.createElement('div');
@@ -473,7 +494,7 @@ function renderCard(job) {
     const latest = job.lastRunJobId ? jobs.get(job.lastRunJobId) : null;
     const column = latest && (COLUMNS.find(c => c.state === latest.state)?.label || (latest.state === 'done' ? 'Finished' : null));
     sched.innerHTML = bits.join(' ');
-    card.appendChild(sched);
+    put('sched', sched);
     // The way to the card to look at: its agent when it has a live one,
     // otherwise the card itself on the board.
     if (column) {
@@ -487,7 +508,7 @@ function renderCard(job) {
         if (latest.state === 'done' && !showingFinished) { showingFinished = true; renderBoard(); }
         document.querySelector(`[data-job-id="${CSS.escape(latest.id)}"]`)?.scrollIntoView({ block: 'nearest' });
       };
-      card.appendChild(link);
+      put('sched', link);
     }
 
     const status = renderScheduleStatus(job.scheduleStatus, (id) => {
@@ -500,7 +521,7 @@ function renderCard(job) {
       expanded: openScheduleEvidence.has(job.id),
       onToggle: open => open ? openScheduleEvidence.add(job.id) : openScheduleEvidence.delete(job.id),
     });
-    if (status) card.appendChild(status);
+    if (status) put('sched', status);
 
     // A firing it held off (see scheduleHold), said out loud: a schedule that
     // quietly stops posting runs is the failure this is here to prevent.
@@ -508,7 +529,7 @@ function renderCard(job) {
       const skip = document.createElement('div');
       skip.className = 'job-card-held';
       skip.textContent = `held off ${relativeTime(job.lastSkipAt)}: ${job.lastSkipReason}`;
-      card.appendChild(skip);
+      put('sched', skip);
     }
   }
 
@@ -516,7 +537,7 @@ function renderCard(job) {
     const detail = document.createElement('div');
     detail.className = 'job-card-detail';
     detail.textContent = job.detail;
-    card.appendChild(detail);
+    put('detail', detail);
   }
 
   if (Array.isArray(job.attachments) && job.attachments.length) {
@@ -531,7 +552,7 @@ function renderCard(job) {
       link.textContent = a.name;
       files.appendChild(link);
     }
-    card.appendChild(files);
+    put('files', files);
   }
 
   // What the agent reported through finish_job. On a card that opens no PR
@@ -545,7 +566,7 @@ function renderCard(job) {
     result.setAttribute('role', 'region');
     result.setAttribute('aria-label', 'Agent summary');
     result.title = '';   // the card's "open terminal" tooltip does not apply here
-    card.appendChild(result);
+    put('result', result);
   }
 
   // How many runs of the same schedule this one replaced in Review, and on an
@@ -557,7 +578,7 @@ function renderCard(job) {
     note.textContent = job.supersededBy
       ? 'superseded by a newer run'
       : `filed ${job.supersededRuns} earlier run${job.supersededRuns === 1 ? '' : 's'} to Finished`;
-    card.appendChild(note);
+    put('notes', note);
   }
 
   // A Review card keeps its agent until it is done, so a missing one went with
@@ -566,7 +587,7 @@ function renderCard(job) {
     const note = document.createElement('div');
     note.className = 'job-card-retired';
     note.textContent = 'agent closed';
-    card.appendChild(note);
+    put('notes', note);
   }
 
   if (job.state === 'done' && job.archivedAt) {
@@ -574,7 +595,7 @@ function renderCard(job) {
     fin.className = 'job-card-finished';
     fin.textContent = `archived ${relativeTime(job.archivedAt)}${job.archivedBy ? ` by ${job.archivedBy}` : ''}`
       + `${job.archivedReason ? `: ${job.archivedReason}` : ''}`;
-    card.appendChild(fin);
+    put('notes', fin);
   } else if (job.state === 'done') {
     const fin = document.createElement('div');
     fin.className = 'job-card-finished';
@@ -583,7 +604,7 @@ function renderCard(job) {
       : job.prClosedAt
         ? `PR closed without merging ${relativeTime(job.prClosedAt)}`
         : `finished ${relativeTime(job.doneAt)}`;
-    card.appendChild(fin);
+    put('notes', fin);
   }
 
   // Moot once the card has its pull request.
@@ -591,21 +612,21 @@ function renderCard(job) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = "This repo has no GitHub remote, so the job can't open a pull request; add one, or set its Pull request to Not required";
-    card.appendChild(err);
+    put('errors', err);
   }
 
   if (job.noShipSkill && !prHref) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = `${job.noShipSkill === 'codex' ? 'Codex' : 'Claude Code'} has no ship skill, so the job can't open a pull request; install gstack (github.com/garrytan/gstack) and run its setup, or set its Pull request to Not required`;
-    card.appendChild(err);
+    put('errors', err);
   }
 
   if (job.lastError) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = job.lastError;
-    card.appendChild(err);
+    put('errors', err);
   }
 
   // Shown alongside lastError, never instead of it: "the agent is gone" and
@@ -615,10 +636,12 @@ function renderCard(job) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = job.prCheckError;
-    card.appendChild(err);
+    put('errors', err);
   }
 
-  card.appendChild(renderCardActions(job));
+  if (chips.childElementCount) put('chips', chips);
+  put('actions', renderCardActions(job));
+  for (const slot of ORDER[job.state] || ORDER.todo) for (const el of slots[slot] || []) card.appendChild(el);
 
   if (liveAgentId) {
     // Pointer affordance only. The card holds buttons and a link, so giving it

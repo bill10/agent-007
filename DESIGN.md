@@ -637,14 +637,17 @@ progress card saying "needs you" instead of a schedule silently losing firings.
 - Card actions are hidden until hover/focus-within, so a full board stays scannable.
   A touch screen (`hover: none`) has no hover, so there they always show, and
   under 700px they are 40px tall for a thumb.
-- Order on a card: title (with its chips on a row beneath), then the state row
-  (live status badge and the PR link, as matching pills), then where the
-  work happens as one pair, the repo (bold, with a repo glyph) and, once there
-  is one, its branch (with a branch glyph), then the agent doing it with its
-  start time ("Viper · started 12m ago"), then who posted it in words
-  ("posted by Billion · 2h ago", "posted by bill via Onyx"), then the run
-  line, schedule, detail, attachments, summary, notes, errors, actions.
-  Title first, status second, chrome last.
+- Order on a card depends on its column (`ORDER` in `public/modules/jobs.js`),
+  as agreed with the owner. To do: title, repo, when it runs, who posted it
+  and when ("posted by Billion · 2h ago"), then the smaller kind chips
+  (recurring, codex, the model, no PR, a permission mode) and any blocker
+  warning, then detail and attachments. In progress: title, status badge,
+  repo · branch, agent · started, then any error, the chips and the rest.
+  Review and Finished: title, PR pill, repo · branch, agent · model ·
+  started (the model moves off the chips onto the agent line, a tier
+  quieter), then the agent's summary on a no-PR card. Actions are always
+  last. The repo is bold with a repo glyph and the branch beside it carries a
+  branch glyph, so the pair reads as "repo, branch" without a label.
 - Every To do card says when it runs: "runs Tue 8:00 PM · in 5h" for a
   schedule or a one-time card with a start time, "runs in 45s · held so it
   can be edited" after a send-back, "paused", and for an ordinary card its
