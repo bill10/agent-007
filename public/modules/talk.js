@@ -330,7 +330,7 @@ export async function startTalk() {
   }
   note = '';
   noteLink = false;
-  if (!window.isSecureContext) return setNote('Talking needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve).');
+  if (!window.isSecureContext) return setNote('Talking needs HTTPS or localhost — see docs/REMOTE.md (tailscale serve or a reverse proxy).');
   if (!navigator.mediaDevices?.getUserMedia) return setNote('This browser has no microphone API, so it cannot talk to Billion.');
   stopVoice();
   stopReading();

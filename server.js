@@ -22,7 +22,7 @@ import { mkdirSync, readFileSync } from 'fs';
 import { randomBytes } from 'crypto';
 
 import {
-  PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, sessions,
+  PORT, HOST, LOOPBACK_HOSTS, WILDCARD_BIND_HOSTS, WORKTREE_DIR, PUBLIC_URL, sessions,
   codenamePool, colorCycler, nextSessionId,
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
@@ -30,6 +30,7 @@ import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktre
 import { createSessionFromConfig, killSessionProcesses, blockClaudeSpawns } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes, checkOrigin } from './server/http.js';
+import { proxySeen } from './server/proxy.js';
 import { controlRoutes, writeServerFile, busyWorkers, RESTART_EXIT, VERSION } from './server/control.js';
 import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch, ghEnvForRepo, retireSpentSchedules, convertOnceSchedules } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
@@ -58,6 +59,9 @@ import { agentAccounts, refreshAgentAccounts } from './server/agent-accounts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
+// A reverse proxy on this machine (docs/REMOTE.md) is believed about the
+// browser's scheme and address (X-Forwarded-Proto/For); nobody else is.
+app.set('trust proxy', 'loopback');
 const server = createServer(app);
 const wss = new WebSocketServer({ server, verifyClient });
 
@@ -73,7 +77,7 @@ const controlToken = randomBytes(32).toString('hex');
 controlRoutes(app, {
   token: controlToken,
   checkOrigin,
-  status: () => ({ pid: process.pid, version: VERSION, port: Number(PORT), service: process.env.AGENT007_SERVICE || null, uptime: Math.round(process.uptime()), sessions: sessions.size, workers: busyWorkers(sessions) }),
+  status: () => ({ pid: process.pid, version: VERSION, port: Number(PORT), service: process.env.AGENT007_SERVICE || null, uptime: Math.round(process.uptime()), sessions: sessions.size, workers: busyWorkers(sessions), publicUrl: PUBLIC_URL, proxy: proxySeen() }),
   restart: () => gracefulShutdown({ restart: true }),
 });
 
@@ -664,6 +668,8 @@ async function startup() {
     const displayHost = WILDCARD_BIND_HOSTS.includes(HOST) ? 'localhost' : bracket(HOST);
     writeServerFile({ port: PORT, host: HOST, token: controlToken });
     console.log(`\n  Agent 007 is running at http://${displayHost}:${PORT}`);
+    if (PUBLIC_URL) console.log(`  Behind a reverse proxy at ${PUBLIC_URL} (PUBLIC_URL); the proxy is what keeps strangers out.`);
+    else if (process.env.PUBLIC_URL?.trim()) console.warn(`  PUBLIC_URL=${process.env.PUBLIC_URL.trim()} is not an http(s) URL; ignored`);
     if (!LOOPBACK_HOSTS.includes(HOST)) {
       console.log(`  Listening on ${bracket(HOST)}:${PORT} — reachable from other machines. Keep this behind Tailscale/a trusted network.`);
     }

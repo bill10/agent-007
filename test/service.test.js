@@ -215,6 +215,20 @@ describe('install / uninstall', () => {
     expect(again.out.join('\n')).not.toContain('Copied');
   });
 
+  it('install --public-url: PUBLIC_URL in the settings file, then the service, never Tailscale', async () => {
+    const asked = [];
+    const ctx = fakeCtx({ answer: loginShell, tailscaleBin: () => '/usr/bin/tailscale', tty: true, ask: async (q) => { asked.push(q); return ''; } });
+    expect(await runCommand('install', { 'public-url': 'https://agent.example.com' }, ctx)).toBe(0);
+    expect(readFileSync(join(ctx.home, '.agent-007', '.env'), 'utf8')).toContain('PUBLIC_URL=https://agent.example.com');
+    expect(existsSync(join(ctx.home, '.config', 'systemd', 'user', UNIT))).toBe(true);
+    expect(ctx.calls.some(c => c.includes('tailscale'))).toBe(false);
+    expect(asked.join()).not.toContain('Tailscale');
+    expect(await runCommand('install', { 'public-url': 'nope' }, fakeCtx())).toBe(2);
+    const both = fakeCtx();
+    expect(await runCommand('install', { 'public-url': 'https://a.example', remote: true }, both)).toBe(2);
+    expect(both.out.join('\n')).toContain('not with --voice or --remote');
+  });
+
   it('uninstall with nothing installed says so', async () => {
     const ctx = fakeCtx();
     expect(await runCommand('uninstall', {}, ctx)).toBe(0);

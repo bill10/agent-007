@@ -16,7 +16,7 @@ import { execFile } from 'child_process';
 import { createServer } from 'net';
 import path, { dirname, join } from 'path';
 import { parseEnv } from 'util';
-import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS, originHost } from './state.js';
+import { CONFIG_PATH, WORKTREE_DIR, PORT, HOST, WILDCARD_BIND_HOSTS, originHost, parsePublicUrl } from './state.js';
 import { refreshAgentAccounts } from './agent-accounts.js';
 import { commandPath, INSTALL_HINTS } from './command-path.js';
 import { billionAgent, billionRuns } from './billion.js';
@@ -25,7 +25,8 @@ import { telegramGetMe } from './owner.js';
 import { gitExec, resolveBaseBranch } from './git.js';
 import { configDir, tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
-import { installedService, parseServiceFile } from './service.js';
+import { installedService, parseServiceFile, remoteLines } from './service.js';
+import { callServer } from './control.js';
 import { tailscaleBin, serveTargets } from './tailscale.js';
 import { whisperSetup } from './voice.js';
 import { skillHomes, skillsDirs, skillDir } from './skills.js';
@@ -118,6 +119,8 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     npmLatest,
     telegramGetMe: () => telegramGetMe(env),
     service: () => installedService(),
+    // The running server's /control/status (agent007 status), or null.
+    serverStatus: () => callServer('/control/status'),
     whichIn: (cmd, PATH) => commandPath(cmd, { PATH }),
     installCommand,
     settingsFile: join(configDir(env), '.env'),
@@ -436,26 +439,53 @@ export function checkService(p) {
 // service reads its own settings (its unit's env, then ~/.agent-007/.env), not
 // this shell's ./.env, so with one installed those are what count.
 export async function checkRemote(p) {
+  const svc = p.service() && parseServiceFile(p.service().text);
+  const fromFile = (file, key) => (p.exists(file) ? parseEnv(p.readFile(file))[key] : undefined);
+  // A clone's service runs in the clone, so its ./.env counts too.
+  const setting = (key) => (svc
+    ? svc.env[key] ?? fromFile(join(dirname(dirname(svc.args[1] || '/')), '.env'), key) ?? fromFile(p.settingsFile, key)
+    : p.env[key]);
+  const proxy = await checkProxy(p, setting, Boolean(svc));
   const cfg = await p.tailscaleServe();
-  if (!cfg) return [na('Tailscale not found, or `tailscale serve status` failed: remote access not checked')];
+  if (!cfg) return proxy.length ? proxy : [na('Tailscale not found, or `tailscale serve status` failed, and no PUBLIC_URL: remote access not checked')];
   const { names, targets } = serveTargets(cfg, p.port);
   if (!names.size) {
-    return [targets.length
+    return proxy.length ? proxy : [targets.length
       ? fail(`tailscale serve does not proxy port ${p.port} (it serves: ${targets.join(', ')})`, `Point it here: tailscale serve --bg ${p.port}`)
-      : na(`tailscale serve does not proxy port ${p.port} (it serves nothing): remote access is off`)];
+      : na(`tailscale serve does not proxy port ${p.port} (it serves nothing), and no PUBLIC_URL: remote access is off`)];
   }
-  const svc = p.service() && parseServiceFile(p.service().text);
-  const fromFile = (file) => (p.exists(file) ? parseEnv(p.readFile(file)).ALLOWED_ORIGINS : undefined);
-  // A clone's service runs in the clone, so its ./.env counts too.
-  const origins = svc
-    ? svc.env.ALLOWED_ORIGINS ?? fromFile(join(dirname(dirname(svc.args[1] || '/')), '.env')) ?? fromFile(p.settingsFile)
-    : p.env.ALLOWED_ORIGINS;
+  const origins = setting('ALLOWED_ORIGINS');
   const allowed = (origins || '').split(',').map(o => o.trim()).filter(Boolean).map(o => (o === '*' ? o : originHost(o)));
   const shown = origins ? [na(`ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''}: ${origins}`)] : [];
   return [...names].map(name => (allowed.includes('*') || allowed.includes(originHost(name))
     ? ok(`tailscale serve sends https://${name} to port ${p.port}, and ALLOWED_ORIGINS lets it in`)
     : fail(`tailscale serve sends https://${name} to port ${p.port}, but ALLOWED_ORIGINS${svc ? ' (as the service reads it)' : ''} does not list ${originHost(name)}: remote browsers are turned away`,
-      `Add ALLOWED_ORIGINS=${[origins, originHost(name)].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`))).concat(shown);
+      `Add ALLOWED_ORIGINS=${[origins, originHost(name)].filter(Boolean).join(',')} to ${tilde(p.settingsFile)}, then ${svc ? p.installCommand.replace(/install$/, 'restart') : 'restart Agent 007'}`))).concat(shown, proxy);
+}
+
+// Reverse-proxy mode (PUBLIC_URL, docs/REMOTE.md): the address, the port kept
+// off the network, and whether the running server has had a request through
+// the proxy. Nothing when PUBLIC_URL is unset.
+async function checkProxy(p, setting, svc) {
+  const raw = setting('PUBLIC_URL');
+  if (!raw?.trim()) return [];
+  const where = svc ? ' (as the service reads it)' : '';
+  const url = parsePublicUrl(raw);
+  if (!url) return [fail(`PUBLIC_URL${where}=${raw} is not an http(s) URL, so the server ignores it`, `Set PUBLIC_URL=https://<your proxy's hostname> in ${tilde(p.settingsFile)}`)];
+  const host = setting('HOST') || '127.0.0.1';
+  const lines = [
+    url.startsWith('https:')
+      ? ok(`remote access: reverse proxy at ${url} (PUBLIC_URL${where})`)
+      : fail(`remote access: reverse proxy at ${url}, which is not https: browsers keep the microphone (voice, Talk) to https and localhost`, 'Terminate https at the proxy and set PUBLIC_URL to the https address'),
+  ];
+  if (WILDCARD_BIND_HOSTS.includes(host)) lines.push(fail(`HOST=${host}: port ${p.port} is reachable without going through the proxy, which is what signs people in`, `Set HOST=127.0.0.1 (or the WireGuard address) in ${tilde(p.settingsFile)}`));
+  const s = await p.serverStatus?.();
+  if (!s) lines.push(na('Agent 007 is not running here: proxy headers not checked'));
+  else if (s.publicUrl !== url) lines.push(fail(`the running server has PUBLIC_URL ${s.publicUrl || 'unset'}, not ${url}`, svc ? p.installCommand.replace(/install$/, 'restart') : 'Restart Agent 007'));
+  else if (!s.proxy) lines.push(na(`no request has come through the proxy since the server started: open ${url}, then run doctor again`));
+  else if (s.proxy.proto !== 'https') lines.push(fail(`the proxy forwards requests as ${s.proxy.proto}, not https (X-Forwarded-Proto)`, 'Have the proxy send X-Forwarded-Proto: https (cloudflared and caddy do by default)'));
+  else lines.push(ok(remoteLines(s, Date.now())[1].trim()));
+  return lines;
 }
 
 // --- Running them ---

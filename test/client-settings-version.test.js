@@ -13,6 +13,11 @@ describe('Settings version line', () => {
     expect(d.querySelector('[data-update="start"]').textContent).toBe('Update');
   });
 
+  it('shows who Cloudflare Access let in, as text', () => {
+    expect(text(renderVersion({ version: '1.0.0.0', kind: 'npm', accessEmail: '<b>ada@example.com</b>' })).textContent).toContain('Signed in through Cloudflare Access as <b>ada@example.com</b>');
+    expect(text(renderVersion({ version: '1.0.0.0', kind: 'npm' })).textContent).not.toContain('Cloudflare');
+  });
+
   it('shows no button when current, or for npx', () => {
     expect(text(renderVersion({ version: '1.0.0.0', kind: 'npm' })).querySelector('button')).toBeNull();
     const npx = text(renderVersion({ version: '1.0.0.0', kind: 'npx', latest: '2.0.0.0' }));

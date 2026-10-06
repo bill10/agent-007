@@ -59,7 +59,7 @@ To reach it from your phone or another machine, with [Tailscale](https://tailsca
 agent007 install --remote   # then open https://<this machine>.<tailnet>.ts.net on any device in your tailnet
 ```
 
-See [remote access](docs/REMOTE.md).
+On a VM behind Cloudflare Tunnel + Access, caddy or nginx instead: `agent007 install --public-url https://agent.example.com`. See [remote access](docs/REMOTE.md).
 
 Or run it from a clone:
 
@@ -89,13 +89,14 @@ In a terminal, Agent 007 and every agent it runs stop when the terminal closes. 
 agent007 install           # the service, then asks: set up voice too? remote access? [y/N] (no question without a terminal)
 agent007 install --voice   # voice only: never touches the service; works on Windows too
 agent007 install --remote  # remote access over Tailscale only (see docs/REMOTE.md); --dry-run prints what it would do
+agent007 install --public-url https://agent.example.com  # the service behind your own reverse proxy or tunnel, no Tailscale
 agent007 install --all     # the service, voice and remote access (--yes also accepts the default model's download)
 ```
 
 Voice is whisper.cpp, ffmpeg and a speech model, so Talk to Billion and Telegram voice notes are transcribed on your machine. `install --voice` runs `brew install whisper-cpp ffmpeg` on macOS (Linux and Windows: it prints the steps), asks which model (`ggml-base.en`, about 150 MB, or `ggml-small`, about 500 MB), downloads it to `~/.agent-007/whisper/` after you confirm, sets `WHISPER_MODEL` in `~/.agent-007/.env` and checks it by transcribing a test clip. Steps already done are skipped. From a clone, `npm start -- install --voice`.
 
 ```bash
-agent007 status      # running or not, as a service or in a terminal, pid, version, port, uptime, workers
+agent007 status      # running or not, as a service or in a terminal, pid, version, port, uptime, workers, remote access
 agent007 restart     # waits for board workers mid-step to finish it (--now: don't wait)
 agent007 logs -f     # ~/.agent-007/logs/server.log, kept to 5 MB plus one older copy
 agent007 update      # git pull --ff-only in a clone, npm install -g in an install; then restart
@@ -213,6 +214,7 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `PORT` | `7007` | Listen port |
 | `HOST` | `127.0.0.1` | Bind interface. Use `0.0.0.0` only behind Tailscale/a trusted network |
 | `ALLOWED_ORIGINS` | *(none)* | Comma-separated extra origins for the cross-origin check (`localhost` is always allowed) |
+| `PUBLIC_URL` | *(none)* | The https address a reverse proxy or tunnel you run serves the app at (Cloudflare Tunnel, caddy, nginx). Allowed as an origin and used in the links the app sends. Keep `HOST` on `127.0.0.1`. See [docs/REMOTE.md](docs/REMOTE.md#cloudflare-tunnel--access) |
 | `CLAUDE_PERMISSION_MODE` | *(the CLI's own)* | Permission mode every Claude Code agent the app starts runs in (`auto`, `acceptEdits`, `bypassPermissions`, `manual`, `dontAsk`, `plan`). Flags in the command, a card's own mode or a mode picked in the board's dropdown win over it |
 | `CODEX_PERMISSION_MODE` | *(the CLI's own)* | The same for Codex agents, mapped onto Codex's sandbox and approval flags |
 | `AGENT_MESSAGING` | *(guarded)* | `open` lets any of your agents message any other. By default an agent that asks before acting cannot message one that never asks |
@@ -229,8 +231,8 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `TRUST_BOARD_WORKTREES` | *(on)* | Board-dispatched Claude Code and Codex workers skip the workspace-trust dialog, so queued jobs start unattended. That also lets the repo's own `.claude/settings.json` (or Codex project config, hooks and exec policies) apply without asking. `0` (or `false`/`off`/`no`) keeps the dialog. Hand-started agents always keep it |
 
 > **Running remotely?** The server spawns real shells, so never expose it to the
-> open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
-> Tailscale setup.
+> open internet. See [docs/REMOTE.md](docs/REMOTE.md) for Tailscale, Cloudflare
+> Tunnel + Access, and WireGuard.
 
 ### Rotating Claude accounts
 
@@ -291,7 +293,8 @@ distinct color and shows up in the presence indicator.
 
 > Login establishes **identity**, not isolation — every logged-in user can still
 > spawn their own shells on the host. Only issue tokens to people you'd give an
-> SSH login, and keep the server behind Tailscale/a trusted network.
+> SSH login, and keep the server behind Tailscale, an authenticating proxy or a
+> trusted network.
 >
 > Each agent is owned by the user who spawned it. You have full control of your
 > own agents and are **read-only** on everyone else's — you see their live
@@ -356,6 +359,7 @@ server/
   pty.js           PTY lifecycle (spawn, handlers, state detection; closing a session kills every process group under it, detached background jobs included)
   ws.js            WebSocket (message routing, broadcast, origin check, shared terminal sizing)
   http.js          HTTP routes (/api/browse, /api/jobs, /api/agent-accounts, job attachment and Billion chat file downloads, /mcp, origin + auth gates)
+  proxy.js         What a reverse proxy sends (X-Forwarded-Proto/For, the Cloudflare Access email), for status, doctor and Settings
   agent-accounts.js  Installed agent CLIs and the accounts each is logged in with (Settings panel; read-only)
   mcp.js           The board's MCP server (post_job, list_jobs, read_job, edit_job, finish_job, list_agents, send_message, withdraw_message; Billion also gets billion_ready, add_repo, close_job, answer_permission, read_approval, notify_owner, read_agent_screen)
   messages.js      Agent-to-agent messages and board notices (who can reach whom, rate limit, queued until the recipient rests at its prompt)

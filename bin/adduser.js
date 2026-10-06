@@ -12,6 +12,7 @@ import { dirname } from 'path';
 import {
   USERS_PATH, USER_COLORS, hashToken, generateToken, newUserId, normalizeUsers,
 } from '../server/auth.js';
+import { parsePublicUrl } from '../server/state.js';
 
 const displayName = process.argv.slice(2).join(' ').trim();
 if (!displayName) {
@@ -61,7 +62,7 @@ console.log(`\n  Created user "${displayName}" (${user.id}, ${user.color})`);
 console.log(`\n  Login token (shown once — copy it now):\n`);
 console.log(`      ${token}\n`);
 console.log('  Log in by opening the app and pasting the token, or visit:');
-console.log(`      http://localhost:${process.env.PORT || 7007}/?token=${token}\n`);
+console.log(`      ${parsePublicUrl(process.env.PUBLIC_URL) || `http://localhost:${process.env.PORT || 7007}`}/?token=${token}\n`);
 if (first) {
   console.log('  This is the first user — the server now REQUIRES login.');
   console.log('  Restart is not required (users are re-read live), but open sessions');

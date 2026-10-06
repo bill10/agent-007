@@ -43,7 +43,23 @@ export function originHost(entry) {
   try { return new URL(withScheme).hostname; } catch { return null; }
 }
 const originHostsFromEnv = rawOrigins.filter(o => o !== '*').map(originHost).filter(Boolean);
-const ALLOWED_ORIGIN_HOSTS = new Set([...DEFAULT_ORIGIN_HOSTS, ...originHostsFromEnv]);
+
+// PUBLIC_URL: the address a reverse proxy or tunnel (Cloudflare Tunnel, caddy
+// over WireGuard; docs/REMOTE.md) serves this server at, e.g.
+// https://agent.example.com. Its hostname is let in as an ALLOWED_ORIGINS
+// entry is, and the links the app sends out (Telegram rounds) use it. Only the
+// origin counts: the app is served from /, so a path would break it.
+// null when unset or not an http(s) URL.
+export function parsePublicUrl(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  try {
+    const url = new URL(s);
+    return ['http:', 'https:'].includes(url.protocol) && url.hostname ? url.origin : null;
+  } catch { return null; }
+}
+export const PUBLIC_URL = parsePublicUrl(process.env.PUBLIC_URL);
+const ALLOWED_ORIGIN_HOSTS = new Set([...DEFAULT_ORIGIN_HOSTS, ...originHostsFromEnv, ...(PUBLIC_URL ? [new URL(PUBLIC_URL).hostname] : [])]);
 
 // Shared origin gate for both HTTP (server/http.js) and WS (server/ws.js).
 // Requests with no Origin header (same-origin browser requests, curl, native WS

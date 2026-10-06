@@ -166,6 +166,26 @@ describe('doctor checks', () => {
     expect((await checkRemote(svc({ '/h/.agent-007/.env': 'ALLOWED_ORIGINS=other,mini.tail1.ts.net\n' })))[1].text).toBe('ALLOWED_ORIGINS (as the service reads it): other,mini.tail1.ts.net');
   });
 
+  it('remote: reverse-proxy mode says its address, a wildcard HOST, and whether proxy headers arrive', async () => {
+    const noTs = { tailscaleServe: async () => null, settingsFile: '/h/.agent-007/.env' };
+    const url = 'https://agent.example.com';
+    const seen = { at: Date.now() - 5000, proto: 'https', ip: '203.0.113.9', email: 'ada@example.com' };
+    const run = (env, serverStatus) => checkRemote(probes({ ...noTs, env, serverStatus }));
+    expect(await run({ PUBLIC_URL: url }, async () => ({ publicUrl: url, proxy: seen }))).toEqual([
+      { status: 'ok', text: `remote access: reverse proxy at ${url} (PUBLIC_URL)` },
+      { status: 'ok', text: 'proxy headers: last forwarded request 5s ago: https from 203.0.113.9, Cloudflare Access user ada@example.com' }]);
+    expect((await run({ PUBLIC_URL: url }, async () => ({ publicUrl: url, proxy: null })))[1]).toMatchObject({ status: 'na', text: expect.stringContaining('no request has come through the proxy') });
+    expect((await run({ PUBLIC_URL: url }, async () => ({ publicUrl: url, proxy: { ...seen, proto: 'http' } })))[1]).toMatchObject({ status: 'fail', text: expect.stringContaining('as http, not https') });
+    expect((await run({ PUBLIC_URL: url }, async () => ({ publicUrl: null, proxy: null })))[1]).toMatchObject({ status: 'fail', text: expect.stringContaining('has PUBLIC_URL unset') });
+    expect((await run({ PUBLIC_URL: url }, async () => null))[1]).toMatchObject({ status: 'na', text: expect.stringContaining('not running') });
+    expect(statuses(await run({ PUBLIC_URL: url, HOST: '0.0.0.0' }, async () => null))).toEqual(['ok', 'fail', 'na']);
+    expect(statuses(await run({ PUBLIC_URL: 'http://agent.example.com' }, async () => null))).toEqual(['fail', 'na']);
+    expect(await run({ PUBLIC_URL: 'nope' })).toEqual([{ status: 'fail', text: expect.stringContaining('not an http(s) URL'), fix: expect.stringContaining('/h/.agent-007/.env') }]);
+    // Tailscale's lines come first when both are set up.
+    const both = await checkRemote(probes({ tailscaleServe: async () => ({ Web: { 'mini.tail1.ts.net:443': { Handlers: { '/': { Proxy: 'http://127.0.0.1:7007' } } } } }), env: { PUBLIC_URL: url, ALLOWED_ORIGINS: 'mini.tail1.ts.net' }, serverStatus: async () => null }));
+    expect(both.map(l => l.text.split(' ')[0])).toEqual(['tailscale', 'ALLOWED_ORIGINS:', 'remote', 'Agent']);
+  });
+
   it('service: nothing when none is installed; ✗ for a gone node or bin, or a CLI its PATH misses', () => {
     expect(checkService(probes())).toEqual([]);
     const text = plist({ args: ['/n/node', '/a/bin/agent-007.js'], env: { PATH: '/svc' }, cwd: '/a', log: '/l' });

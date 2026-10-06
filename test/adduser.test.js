@@ -5,10 +5,10 @@ import { writeFileSync, readFileSync, rmSync } from 'fs';
 // USERS points at the hermetic per-file path from test/setup.js.
 const USERS = process.env.AGENT007_USERS_PATH;
 
-function run(args, expectOk = true) {
+function run(args, expectOk = true, env = {}) {
   try {
     const out = execFileSync('node', ['bin/adduser.js', ...args], {
-      env: { ...process.env, AGENT007_USERS_PATH: USERS }, encoding: 'utf8',
+      env: { ...process.env, AGENT007_USERS_PATH: USERS, ...env }, encoding: 'utf8',
     });
     return { code: 0, out };
   } catch (e) {
@@ -28,13 +28,18 @@ describe('adduser CLI', () => {
   });
 
   it('creates the first user and warns login is now required', () => {
-    const r = run(['Alice']);
+    const r = run(['Alice'], true, { PUBLIC_URL: '', PORT: '7123' });
     expect(r.out).toMatch(/first user/i);
+    expect(r.out).toMatch(/http:\/\/localhost:7123\/\?token=/);
     const u = users();
     expect(u).toHaveLength(1);
     expect(u[0].displayName).toBe('Alice');
     expect(u[0].color).toBe('#d4a847');   // USER_COLORS[0]
     expect(u[0].tokenHash).toHaveLength(64);
+  });
+
+  it("links to PUBLIC_URL when the app is behind a proxy", () => {
+    expect(run(['Ada'], true, { PUBLIC_URL: 'https://agent.example.com/' }).out).toMatch(/ https:\/\/agent\.example\.com\/\?token=/);
   });
 
   it('appends a second user with the next color and no first-user notice', () => {
