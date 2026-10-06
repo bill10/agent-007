@@ -428,8 +428,32 @@ function renderCard(job) {
       ? `<span class="job-card-via">edited by ${escapeHtml(job.editedByAgent)} ${relativeTime(job.editedAt)}</span>`
       : null,
   ].filter(Boolean).join(' · ');
+  // Where the work happens, as one pair: the repo the card is about and, once
+  // there is one, the branch the work is on. They used to sit on separate
+  // rows (repo in the posted line, branch on the agent's) and read as two
+  // unrelated facts.
+  const where = document.createElement('div');
+  where.className = 'job-card-where';
   const slug = escapeHtml(repoSlug(job.repoPath));
-  meta.innerHTML = `<span class="job-card-repo" title="${slug}">${slug}</span><span class="job-card-posted">${posted}</span>`;
+  where.innerHTML = `<span class="job-card-repo" title="Repository: ${slug}">${slug}</span>`
+    + (job.branchName ? `<span class="job-card-branch" title="Branch: ${escapeHtml(job.branchName)}">${escapeHtml(job.branchName)}</span>` : '');
+  card.appendChild(where);
+
+  // Which agent is doing the work, and since when, straight under the repo and
+  // branch it works in. The branch itself is on the repo line, not here: it is
+  // a fact about the job, not about the agent, and gating it on the name left
+  // a finished card showing nothing at all once the name was lost.
+  if (job.agentName || job.startedAt) {
+    const agentEl = document.createElement('div');
+    agentEl.className = 'job-card-agent';
+    const parts = [];
+    if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
+    if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
+    agentEl.innerHTML = parts.join(' ');
+    card.appendChild(agentEl);
+  }
+
+  meta.innerHTML = `<span class="job-card-posted">${posted}</span>`;
   card.appendChild(meta);
 
   const run = renderRunLine(job);
@@ -508,21 +532,6 @@ function renderCard(job) {
       files.appendChild(link);
     }
     card.appendChild(files);
-  }
-
-  // Who worked on it, and where the work is (requirement 3). Rendered whenever
-  // EITHER is known: the branch is a fact about the job, not about the agent,
-  // and gating it on the name left a finished card showing nothing at all once
-  // the name was lost.
-  if (job.agentName || job.branchName || job.startedAt) {
-    const agentEl = document.createElement('div');
-    agentEl.className = 'job-card-agent';
-    const parts = [];
-    if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
-    if (job.branchName) parts.push(`<span class="job-card-branch" title="${escapeHtml(job.branchName)}">${escapeHtml(job.branchName)}</span>`);
-    if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
-    agentEl.innerHTML = parts.join(' ');
-    card.appendChild(agentEl);
   }
 
   // What the agent reported through finish_job. On a card that opens no PR

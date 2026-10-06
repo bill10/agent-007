@@ -1099,8 +1099,19 @@ describe('a finished card still shows its record', () => {
     });
     const row = document.querySelector('.job-card-agent');
     expect(row.textContent).toMatch(/Phantom/);
-    expect(row.textContent).toMatch(/bill10\/x/);
     expect(row.textContent).toMatch(/started/);
+    // The branch pairs with the repo, not with the agent.
+    expect(document.querySelector('.job-card-where').textContent).toBe('alphabill10/x');
+    expect(row.textContent).not.toMatch(/bill10\/x/);
+  });
+
+  it('pairs the repo with the branch on one line, ahead of the agent', () => {
+    handleJobsList({ jobs: [JOB({ state: 'review', agentName: 'Phantom', branchName: 'bill10/x' })], settings: {} });
+    const card = document.querySelector('.job-card');
+    const where = card.querySelector('.job-card-where');
+    expect(where.querySelector('.job-card-repo').textContent).toBe('alpha');
+    expect(where.querySelector('.job-card-branch').title).toBe('Branch: bill10/x');
+    expect(where.compareDocumentPosition(card.querySelector('.job-card-agent')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders no agent row at all when neither is known', () => {

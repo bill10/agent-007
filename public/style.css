@@ -2533,20 +2533,46 @@ select.job-mode-danger {
   line-height: 1.4;
   color: var(--text-muted);
 }
-/* A long repo name truncates rather than breaking mid-word; the tooltip has it. */
-.job-card-repo {
-  display: inline-block;
-  vertical-align: top;
-  margin-right: 6px;
-  max-width: 100%;
+/* Where the work happens: the repo, read as the project, paired with the
+   branch once there is one. Each carries a drawn glyph so the pair reads as
+   "repo, branch" without a label. A long name truncates rather than breaking
+   mid-word; the tooltip has it. The repo gives way less than the branch. */
+.job-card-where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.job-card-repo,
+.job-card-branch {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
 }
-/* Who posted it gets a line of its own under the repo, so "posted by"
-   never runs on from a long repo name. */
-.job-card-posted { display: block; }
+.job-card-repo { flex: 0 1 auto; font-weight: 600; color: var(--text); }
+/* Beside a branch, the repo keeps at most 70% so the branch stays readable. */
+.job-card-repo:has(+ .job-card-branch) { max-width: 70%; }
+.job-card-branch { flex: 1 1 0; color: var(--text-muted); }
+.job-card-repo::before,
+.job-card-branch::before {
+  content: '';
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 4px;
+  width: 11px;
+  height: 11px;
+  background: var(--text-muted);
+  -webkit-mask: var(--glyph) center / contain no-repeat;
+          mask: var(--glyph) center / contain no-repeat;
+}
+/* A repo: a book with a bookmark, GitHub's own picture for one. */
+.job-card-repo { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'%3E%3Cpath d='M3 13.5V3a1.5 1.5 0 0 1 1.5-1.5H13v10H4.5A1.5 1.5 0 0 0 3 13a1.5 1.5 0 0 0 1.5 1.5H13'/%3E%3Cpath d='M6 11.5v3.5l1.25-1 1.25 1v-3.5'/%3E%3C/svg%3E"); }
+/* A branch: two commits forking. */
+.job-card-branch { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.5'%3E%3Ccircle cx='4.5' cy='3.5' r='1.75'/%3E%3Ccircle cx='4.5' cy='12.5' r='1.75'/%3E%3Ccircle cx='11.5' cy='5' r='1.75'/%3E%3Cpath d='M4.5 5.25v5.5M11.5 6.75c0 3-7 2-7 4'/%3E%3C/svg%3E"); }
+
 /* Posted by an agent rather than typed into the form. Accent-tinted so a board
    full of cards still shows at a glance which ones a machine queued. */
 .job-card-via { color: var(--accent); }
@@ -2635,13 +2661,9 @@ select.job-mode-danger {
   color: var(--text-muted);
   white-space: nowrap;
 }
-/* "Viper · started 12m ago" on the first line and the branch on its own
-   line under it, truncated with a tooltip, rather than breaking a branch
-   name mid-word or leaving "· started" stranded at the start of a line. */
+/* "Viper · started 12m ago": the worker, under the repo and branch. */
 .job-card-agent-name { color: var(--text); font-weight: 600; }
-.job-card-since { order: 1; }
 .job-card-agent-name ~ .job-card-since::before { content: '· '; }
-.job-card-branch { order: 2; flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
 .job-card-status {
   display: inline-flex;
@@ -2817,6 +2839,7 @@ select.job-mode-danger {
   /* The owner reads the board on a phone: a step up, and thumb-sized targets. */
   .job-card { padding: 12px; gap: 8px; }
   .job-card-title { font-size: 14px; }
+  .job-card-where { font-size: 12px; }
   .job-card-meta, .job-card-schedule, .job-card-run, .job-card-agent, .job-card-attachment,
   .job-card-error, .job-card-retired, .job-card-held, .job-card-lastrun,
   .job-card-finished, .job-card-type { font-size: 11px; }

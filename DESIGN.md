@@ -638,11 +638,13 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   A touch screen (`hover: none`) has no hover, so there they always show, and
   under 700px they are 40px tall for a thumb.
 - Order on a card: title (with its chips on a row beneath), then the state row
-  (live status badge and the PR link, as matching pills), then the repo and,
-  on its own line, who posted it in words ("posted by Billion · 2h ago",
-  "posted by bill via Onyx"), then the run line, schedule, detail,
-  attachments, agent line, summary, notes, errors, actions. Title first,
-  status second, chrome last.
+  (live status badge and the PR link, as matching pills), then where the
+  work happens as one pair, the repo (bold, with a repo glyph) and, once there
+  is one, its branch (with a branch glyph), then the agent doing it with its
+  start time ("Viper · started 12m ago"), then who posted it in words
+  ("posted by Billion · 2h ago", "posted by bill via Onyx"), then the run
+  line, schedule, detail, attachments, summary, notes, errors, actions.
+  Title first, status second, chrome last.
 - Every To do card says when it runs: "runs Tue 8:00 PM · in 5h" for a
   schedule or a one-time card with a start time, "runs in 45s · held so it
   can be edited" after a send-back, "paused", and for an ordinary card its
@@ -652,7 +654,7 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   the way `selectDispatchableJobs` orders it (oldest first, per-repo cap,
   live agents only).
 - A long repo name or branch truncates with an ellipsis and keeps the full
-  text in its tooltip; a title never truncates. Chips keep their case, since
+  text in its tooltip (beside a branch the repo takes at most 70%); a title never truncates. Chips keep their case, since
   model ids and permission modes are case-sensitive identifiers.
 - Card text sits on `--text-muted`, never `--text-dim` and never under an
   opacity: dim misses 4.5:1 on the card ground in both themes. Status and
