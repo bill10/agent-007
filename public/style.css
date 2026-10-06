@@ -2475,8 +2475,9 @@ select.job-mode-danger {
 .job-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 9px 10px;
+  gap: 6px;
+  padding: 10px 10px 9px;
+  min-width: 0;
   background: var(--bg-dark);
   border: 1px solid var(--border);
   border-left: 2px solid var(--border);
@@ -2498,37 +2499,110 @@ select.job-mode-danger {
 
 .job-card-title {
   font-size: 12px;
+  font-weight: 600;
   color: var(--text);
   line-height: 1.35;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+/* The type pill (recurring, scheduled, run) sits inline after the title's
+   last word. */
+.job-card-title > .job-card-type {
+  display: inline-block;
+  margin-left: 6px;
+  /* middle, not a baseline nudge: with overflow hidden the pill's baseline
+     is its bottom edge, which floated it above the title's text. */
+  vertical-align: middle;
+  font-weight: 400;
+}
+/* The lower chip row: the agent·model pill, then no PR and a permission
+   mode, placed per column (ORDER in jobs.js). */
+.job-card-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+/* The facts a glance is for sit close; the chips, detail and summary
+   after them are a separate group. */
+.job-card-meta + .job-card-chips,
+.job-card-chips + .job-card-detail,
+.job-card-meta + .job-card-detail { margin-top: 3px; }
+
+/* Status second: the live badge and the PR link, right under the title. */
+.job-card-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
+/* Card metadata. --text-muted rather than --text-dim: at this size dim
+   misses 4.5:1 on the card ground in both themes. The tiers come from size
+   and weight instead. */
 .job-card-meta {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 9px;
-  color: var(--text-dim);
+  /* Inline flow, not flex: a posted line too long for the column wraps word
+     by word after the repo instead of dropping whole onto its own line. */
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
-.job-card-repo { color: var(--text-muted); }
+/* Where the work happens: the repo, read as the project, paired with the
+   branch once there is one. Each carries a drawn glyph so the pair reads as
+   "repo, branch" without a label. A long name truncates rather than breaking
+   mid-word; the tooltip has it. The repo gives way less than the branch. */
+.job-card-where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.job-card-repo,
+.job-card-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.job-card-repo { flex: 0 1 auto; font-weight: 600; color: var(--text); }
+/* Beside a branch, the repo keeps at most 70% so the branch stays readable. */
+.job-card-repo:has(+ .job-card-branch) { max-width: 70%; }
+.job-card-branch { flex: 1 1 0; color: var(--text-muted); }
+.job-card-repo::before,
+.job-card-branch::before {
+  content: '';
+  display: inline-block;
+  vertical-align: -1px;
+  margin-right: 4px;
+  width: 11px;
+  height: 11px;
+  background: var(--text-muted);
+  -webkit-mask: var(--glyph) center / contain no-repeat;
+          mask: var(--glyph) center / contain no-repeat;
+}
+/* A repo: a book with a bookmark, GitHub's own picture for one. */
+.job-card-repo { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.5' stroke-linejoin='round'%3E%3Cpath d='M3 13.5V3a1.5 1.5 0 0 1 1.5-1.5H13v10H4.5A1.5 1.5 0 0 0 3 13a1.5 1.5 0 0 0 1.5 1.5H13'/%3E%3Cpath d='M6 11.5v3.5l1.25-1 1.25 1v-3.5'/%3E%3C/svg%3E"); }
+/* A branch: two commits forking. */
+.job-card-branch { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.5'%3E%3Ccircle cx='4.5' cy='3.5' r='1.75'/%3E%3Ccircle cx='4.5' cy='12.5' r='1.75'/%3E%3Ccircle cx='11.5' cy='5' r='1.75'/%3E%3Cpath d='M4.5 5.25v5.5M11.5 6.75c0 3-7 2-7 4'/%3E%3C/svg%3E"); }
+
 /* Posted by an agent rather than typed into the form. Accent-tinted so a board
    full of cards still shows at a glance which ones a machine queued. */
-.job-card-via { color: var(--accent); opacity: 0.85; }
+.job-card-via { color: var(--accent); }
 
 /* Scheduled cards. The chip rides in the title line and the schedule gets its
    own row, so the cron text never competes with the title for the same space. */
-.job-card-type {
-  margin-left: 6px;
-  padding: 1px 5px;
-  font-size: 9px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  opacity: 0.75;
+.job-card-type,
+.job-card-runs-on {
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.4;
+  /* No uppercase: model ids and permission modes are case-sensitive
+     identifiers, and "BYPASSPERMISSIONS" is unreadable. */
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
   white-space: nowrap;
-  vertical-align: 1px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* Same reason as select.job-mode-danger: a card that will dispatch with no
    permission check must not wear the same gold pill as the routine
@@ -2537,26 +2611,29 @@ select.job-mode-danger {
   color: var(--state-disconnected);
   border-color: var(--state-disconnected);
 }
-.job-card-schedule {
+.job-card-schedule,
+.job-card-run {
   display: flex;
-  gap: 6px;
+  gap: 2px 6px;
   flex-wrap: wrap;
   align-items: baseline;
-  font-size: 9px;
-  color: var(--text-dim);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
 }
 /* The page is already set in a mono stack, so cron text needs no font of its
    own — just enough contrast to read as the machine-readable bit. */
 .job-card-cron { color: var(--text-muted); }
-.job-card-next { color: var(--accent); opacity: 0.85; }
+/* Trailing, so a wrap leaves the dot at the end of a line, not the start. */
+.job-card-cron:has(+ .job-card-runs)::after { content: ' ·'; }
+.job-card-next { color: var(--accent); }
 /* A paused schedule is not a countdown: drop the accent so the card reads as
    held rather than as the next one about to go. */
 .job-card-paused { color: var(--text-muted); }
-.job-card-runs { opacity: 0.8; }
 
 .job-card-detail {
-  font-size: 10px;
-  color: var(--text-dim);
+  font-size: 11px;
+  color: var(--text-muted);
   line-height: 1.45;
   /* Cards stay scannable: the full text lives in the agent's prompt, this is
      only a reminder of what the job was. */
@@ -2571,7 +2648,7 @@ select.job-mode-danger {
 /* What the agent reported through finish_job. Scrolls rather than clamps: on
    a card with no PR this is the result, so none of it may be cut off. */
 .job-card-result {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text);
   line-height: 1.45;
   max-height: 12em;
@@ -2581,26 +2658,34 @@ select.job-mode-danger {
   border-left: 2px solid var(--border);
   padding-left: 6px;
 }
-.job-card-result:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.job-card-result:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .job-card-agent {
   display: flex;
-  gap: 6px;
   flex-wrap: wrap;
+  gap: 0 6px;
   align-items: baseline;
-  font-size: 9px;
-  color: var(--text-dim);
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
-.job-card-agent-name { color: var(--text-muted); font-weight: 600; }
-.job-card-branch { color: var(--text-dim); opacity: 0.85; }
+/* "Viper · started 12m ago": the worker, under the repo and branch. */
+.job-card-agent-name { color: var(--text); font-weight: 600; }
+/* Trailing separators: a wrap leaves the dot at a line's end, never its start. */
+.job-card-agent > :not(:last-child)::after { content: ' ·'; }
+/* What runs the card leads the chips: the same pill, in ink, since it is
+   on every card and the kind chips after it are the exceptions. */
+.job-card-runs-on { color: var(--text); }
 
 .job-card-status {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  align-self: flex-start;
-  padding: 2px 7px;
-  font-size: 9px;
+  padding: 2px 8px;
+  font-size: 10px;
+  line-height: 1.4;
   font-family: inherit;
   color: var(--text-muted);
   background: transparent;
@@ -2609,7 +2694,7 @@ select.job-mode-danger {
   cursor: pointer;
 }
 .job-card-status:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.job-card-status:disabled { cursor: default; opacity: 0.65; }
+.job-card-status:disabled { cursor: default; }
 .job-status-dot {
   width: 5px;
   height: 5px;
@@ -2617,10 +2702,14 @@ select.job-mode-danger {
   background: currentColor;
   flex-shrink: 0;
 }
-.job-status-running { color: var(--state-working); border-color: var(--state-working); }
-.job-status-needs-input { color: var(--state-message); border-color: var(--state-message); }
-.job-status-stalled { color: var(--text-dim); }
-.job-status-gone { color: var(--state-disconnected); border-color: var(--state-disconnected); }
+/* The border carries the state colour; the label is mixed a fifth of the way
+   toward the ink, since the raw state hues miss 4.5:1 as 10px text (the red
+   in dark, the orange and amber in light). */
+.job-status-running { color: color-mix(in srgb, var(--state-working) 80%, var(--text)); border-color: var(--state-working); }
+.job-status-needs-input { color: color-mix(in srgb, var(--state-message) 80%, var(--text)); border-color: var(--state-message); }
+.job-status-needs-input { background: color-mix(in srgb, var(--state-message) 12%, transparent); }
+.job-status-stalled { color: var(--text-muted); }
+.job-status-gone { color: color-mix(in srgb, var(--state-disconnected) 80%, var(--text)); border-color: var(--state-disconnected); }
 
 /* Only the "needs you" badge pulses. A card that is merely quiet should not
    compete for attention with one that is actually blocking on the user. */
@@ -2630,29 +2719,51 @@ select.job-mode-danger {
   50% { opacity: 0.3; }
 }
 
-.job-card-attachments { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.job-card-attachments { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .job-card-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   font-size: 10px;
   color: var(--accent);
   text-decoration: none;
   overflow-wrap: anywhere;
 }
-.job-card-attachment::before { content: '\1F4CE\00a0'; }
-.job-card-attachment:hover { text-decoration: underline; }
+/* A drawn paperclip in the link's own colour, not the emoji: the emoji
+   rendered grey in one theme and full colour in another. */
+.job-card-attachment::before {
+  content: '';
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 7.5l-5.6 5.6a3.5 3.5 0 0 1-5-5l6-6a2.3 2.3 0 0 1 3.3 3.3l-6 6a1.2 1.2 0 0 1-1.7-1.7l5.5-5.5'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M13.5 7.5l-5.6 5.6a3.5 3.5 0 0 1-5-5l6-6a2.3 2.3 0 0 1 3.3 3.3l-6 6a1.2 1.2 0 0 1-1.7-1.7l5.5-5.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.job-card-attachment:hover { text-decoration: underline; text-underline-offset: 2px; }
 
+/* Same pill as the status badge, so the two read as one row of state. */
 .job-card-pr {
-  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
   font-size: 10px;
+  line-height: 1.4;
   color: var(--accent);
   text-decoration: none;
+  border: 1px solid var(--accent);
+  border-radius: 10px;
 }
-.job-card-pr:hover { text-decoration: underline; }
+.job-card-pr::after { content: '\00a0\2197'; }
+.job-card-pr:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 .job-card-error {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1.4;
-  color: var(--state-disconnected);
-  word-break: break-word;
+  /* Mixed toward the ink: the raw red is 3.9:1 on the dark card. */
+  color: color-mix(in srgb, var(--state-disconnected) 80%, var(--text));
+  overflow-wrap: anywhere;
 }
 
 .job-card-actions {
@@ -2667,10 +2778,10 @@ select.job-mode-danger {
 .job-card:focus-within .job-card-actions { opacity: 1; }
 
 .job-card-btn {
-  padding: 2px 6px;
-  font-size: 9px;
+  padding: 3px 8px;
+  font-size: 10px;
   font-family: inherit;
-  color: var(--text-dim);
+  color: var(--text-muted);
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 3px;
@@ -2678,12 +2789,17 @@ select.job-mode-danger {
 }
 .job-card-btn:hover { color: var(--accent); border-color: var(--accent); }
 .job-card-btn.danger:hover { color: var(--state-disconnected); border-color: var(--state-disconnected); }
+/* One ring for everything on a card that takes focus. */
+.job-card-btn:focus-visible,
+.job-card-status:focus-visible,
+.job-card-pr:focus-visible,
+.job-card-attachment:focus-visible,
+.job-card-lastrun:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Narrow panels: stack the columns instead of crushing them to unreadable
-   widths (the terminal panel is resizable down to 300px). */
-@media (max-width: 700px) {
-  .job-columns { flex-direction: column; overflow-y: auto; }
-  .job-column { min-height: 140px; }
+/* No hover on a touch screen, so the actions would only show after tapping
+   into the card: show them, at a thumb's size. */
+@media (hover: none) {
+  .job-card-actions { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2692,21 +2808,21 @@ select.job-mode-danger {
 }
 
 .job-card-retired {
-  font-size: 9px;
-  color: var(--text-dim);
-  opacity: 0.8;
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 /* Why a schedule held off a firing. Above retired metadata: it often says
    what to do ("waiting on PR #12" — go merge it). */
 .job-card-held {
-  font-size: 9px;
-  color: var(--text-dim);
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 /* The schedule's link to its latest run. */
 .job-card-lastrun {
-  font-size: 9px;
+  align-self: flex-start;
+  font-size: 10px;
   color: var(--accent);
   background: none;
   border: none;
@@ -2715,16 +2831,36 @@ select.job-mode-danger {
   text-align: left;
   font-family: inherit;
 }
-.job-card-lastrun:hover { text-decoration: underline; }
+.job-card-lastrun:hover { text-decoration: underline; text-underline-offset: 2px; }
 
 
 /* Every card in the archive carries this line, so a colour here would be pure
    decoration — it differentiates nothing. Matches .job-card-retired exactly:
-   both are 9px card metadata that has stopped being actionable. */
+   both are card metadata that has stopped being actionable. */
 .job-card-finished {
-  font-size: 9px;
-  color: var(--text-dim);
-  opacity: 0.8;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Narrow panels: stack the columns instead of crushing them to unreadable
+   widths (the terminal panel is resizable down to 300px). */
+@media (max-width: 700px) {
+  .job-columns { flex-direction: column; overflow-y: auto; }
+  /* Each column as tall as its cards, so the one outer list scrolls; flexed
+     to a third of the screen each, every column was its own clipped scroller. */
+  .job-column { flex: none; min-height: 0; }
+  .job-cards { overflow: visible; }
+  /* The owner reads the board on a phone: a step up, and thumb-sized targets. */
+  .job-card { padding: 12px; gap: 8px; }
+  .job-card-title { font-size: 14px; }
+  .job-card-where { font-size: 12px; }
+  .job-card-meta, .job-card-schedule, .job-card-run, .job-card-agent, .job-card-attachment,
+  .job-card-error, .job-card-retired, .job-card-held, .job-card-lastrun,
+  .job-card-finished, .job-card-type, .job-card-runs-on { font-size: 11px; }
+  .job-card-detail, .job-card-result { font-size: 12px; }
+  .job-card-status, .job-card-pr { min-height: 32px; padding: 4px 12px; font-size: 12px; border-radius: 16px; }
+  .job-card-actions { gap: 8px; }
+  .job-card-btn { min-height: 40px; padding: 8px 12px; font-size: 12px; }
 }
 
 .rotation-accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0; }

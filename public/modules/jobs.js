@@ -104,7 +104,7 @@ function clockTime(iso) {
   const far = then - Date.now() > 6 * 24 * 60 * 60 * 1000;
   return new Date(then).toLocaleString([], {
     weekday: 'short', ...(far ? { month: 'short', day: 'numeric' } : {}),
-    hour: '2-digit', minute: '2-digit',
+    hour: 'numeric', minute: '2-digit',
   });
 }
 
@@ -270,8 +270,25 @@ function renderFinishedToggle(count) {
   btn.classList.toggle('showing', showingFinished);
 }
 
+// What each column's card says first, agreed with the owner: a To do card is
+// about where and when it will run and who asked; an In progress card about
+// how its agent is doing, where; a Review card about its PR, and for a card
+// with no PR, the agent's summary. The chips row always opens with the
+// agent·model pill; no PR and a permission mode come after it. The type
+// pill (recurring, scheduled, run) is on the title line.
+const ORDER = {
+  todo: ['title', 'state', 'where', 'run', 'sched', 'meta', 'chips', 'errors', 'detail', 'files', 'agent', 'result', 'notes', 'actions'],
+  'in-progress': ['title', 'state', 'where', 'agent', 'errors', 'chips', 'meta', 'detail', 'files', 'result', 'notes', 'run', 'sched', 'actions'],
+  // The chips follow the agent line here, so "Falcon · started 2h ago" reads
+  // straight on into the pill saying what it ran on.
+  review: ['title', 'state', 'where', 'agent', 'chips', 'result', 'notes', 'errors', 'meta', 'detail', 'files', 'run', 'sched', 'actions'],
+};
+ORDER.done = ORDER.review;
+
 function renderCard(job) {
   const card = document.createElement('div');
+  const slots = {};
+  const put = (slot, el) => { (slots[slot] ||= []).push(el); };
   const status = liveStatus(job);
   card.className = 'job-card' + (status ? ` status-${status}` : '');
   card.dataset.jobId = job.id;
@@ -291,7 +308,34 @@ function renderCard(job) {
 
   const title = document.createElement('div');
   title.className = 'job-card-title';
-  title.textContent = job.title;
+  // The text gets its own box so the chips below can wrap as one row under
+  // it rather than trailing off the title's last word.
+  const titleText = document.createElement('span');
+  titleText.className = 'job-card-title-text';
+  titleText.textContent = job.title;
+  title.appendChild(titleText);
+  // The lower chip row: the agent·model pill, then no PR / PR runs and a
+  // permission mode, placed per column below (ORDER), smaller than the facts
+  // a glance is for. The job's type pill is on the title line instead.
+  const chips = document.createElement('div');
+  chips.className = 'job-card-chips';
+  // First and on every card: what runs it, CLI and model in one pill
+  // ("claude · opus-5-5", "codex · gpt-5.5", "claude · default" on the
+  // CLI's default model). Only the non-default CLI used to get a chip, so a Claude
+  // card showed a bare model id and a Codex card two pills. The "claude-"
+  // prefix is dropped from the label as redundant; the tooltip keeps the id.
+  const cli = job.agent === 'codex' ? 'codex' : 'claude';
+  const runsOn = document.createElement('span');
+  runsOn.className = 'job-card-runs-on';
+  // No model set reads "claude · default": a bare "claude" looked as if
+  // something were missing.
+  runsOn.textContent = `${cli} · ${job.model ? (cli === 'claude' ? job.model.replace(/^claude-/, '') : job.model) : 'default'}`;
+  runsOn.title = job.model
+    ? `Runs on ${cli === 'codex' ? 'Codex' : 'Claude Code'}, model ${job.model}`
+    : "Runs the CLI's default model";
+  chips.appendChild(runsOn);
+  // The job's type (recurring, scheduled, a schedule's run) rides inline on
+  // the title line, so the card says what kind of job it is at the very top.
   if (isScheduled(job)) {
     // A chip rather than a whole second column: a scheduled card is still an
     // ordinary card in the same queue, and splitting the board would hide it
@@ -318,13 +362,6 @@ function renderCard(job) {
     chip.title = 'Posted by its schedule';
     title.appendChild(chip);
   }
-  if (job.agent === 'codex') {
-    const chip = document.createElement('span');
-    chip.className = 'job-card-type';
-    chip.textContent = 'codex';
-    chip.title = 'Runs on Codex instead of Claude Code';
-    title.appendChild(chip);
-  }
   // A chip marks the setting that differs from its type's default: no PR on a
   // one-time card, PR runs on a schedule.
   if (isScheduled(job) && job.requiresPr === true) {
@@ -332,21 +369,14 @@ function renderCard(job) {
     chip.className = 'job-card-type';
     chip.textContent = 'PR runs';
     chip.title = 'Each run opens a pull request';
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   if (!isScheduled(job) && job.requiresPr === false) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = 'no PR';
     chip.title = 'Finishes with a summary from its agent instead of a pull request';
-    title.appendChild(chip);
-  }
-  if (job.model) {
-    const chip = document.createElement('span');
-    chip.className = 'job-card-type';
-    chip.textContent = job.model;
-    chip.title = `Runs on the ${job.model} model instead of the CLI's default`;
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
   if (job.permissionMode) {
     // Only when the card overrides the board. The mode decides how much its
@@ -361,19 +391,60 @@ function renderCard(job) {
     chip.title = job.agent === 'codex'
       ? `This job runs on Codex in ${job.permissionMode}, mapped onto Codex's sandbox and approval flags, instead of the board's setting`
       : `This job runs with --permission-mode ${job.permissionMode} instead of the board's setting`;
-    title.appendChild(chip);
+    chips.appendChild(chip);
   }
-  card.appendChild(title);
+  put('title', title);
+
+  // Status second, straight under the title: whether the agent needs you, or
+  // where the pull request is, is what a glance at a card is for. The
+  // metadata and the chrome come after.
+  const stateRow = document.createElement('div');
+  stateRow.className = 'job-card-state';
+  if (status) {
+    const badge = document.createElement('button');
+    badge.className = `job-card-status job-status-${status}`;
+    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml((STATUS_TEXT[status] || status))}`;
+    const canJump = !!liveAgentId;
+    badge.title = canJump
+      ? `Open ${job.agentName}'s terminal`
+      : 'This agent is no longer running';
+    badge.onclick = (e) => {
+      e.stopPropagation();
+      if (canJump) switchToSession(liveAgentId);
+    };
+    if (!canJump) badge.disabled = true;
+    stateRow.appendChild(badge);
+  }
+
+  // The URL comes from `gh pr list`, but it still ends up in an href, and a
+  // non-http scheme there (javascript:, data:) executes on click. Cheap guard.
+  const prHref = /^https?:\/\//i.test(String(job.prUrl || '')) ? job.prUrl : null;
+  if (prHref) {
+    const pr = document.createElement('a');
+    pr.className = 'job-card-pr';
+    pr.href = prHref;
+    pr.target = '_blank';
+    pr.rel = 'noopener noreferrer';
+    pr.textContent = job.prNumber ? `PR #${job.prNumber}` : 'View PR';
+    stateRow.appendChild(pr);
+  }
+
+  if (stateRow.childElementCount) put('state', stateRow);
 
   const meta = document.createElement('div');
   meta.className = 'job-card-meta';
   // "Who posted it" is up to three facts: the person it belongs to, the agent
   // that typed it (when one did — see the board's MCP tool), and when. Any of
-  // the first two can be absent, so filter rather than branch.
+  // the first two can be absent. Said in words ("posted by Billion"), since a
+  // bare "bill · via Billion" left the owner guessing which was the author.
+  const by = job.postedByName && job.postedByAgent
+    ? `${escapeHtml(job.postedByName)} <span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>`
+    : job.postedByAgent
+      ? `<span class="job-card-via">${escapeHtml(job.postedByAgent)}</span>`
+      : job.postedByName ? escapeHtml(job.postedByName) : null;
   const posted = [
-    job.postedByName ? escapeHtml(job.postedByName) : null,
-    job.postedByAgent ? `<span class="job-card-via">via ${escapeHtml(job.postedByAgent)}</span>` : null,
-    relativeTime(job.postedAt),
+    by ? `posted by ${by}` : null,
+    by ? relativeTime(job.postedAt) : `posted ${relativeTime(job.postedAt)}`,
     // An agent can rewrite a To do card through the board's edit_job tool, and
     // that text becomes the next agent's prompt. The card would otherwise still
     // read as the work of whoever queued it, so the rewrite says so on the card
@@ -382,56 +453,52 @@ function renderCard(job) {
       ? `<span class="job-card-via">edited by ${escapeHtml(job.editedByAgent)} ${relativeTime(job.editedAt)}</span>`
       : null,
   ].filter(Boolean).join(' · ');
-  meta.innerHTML = `<span class="job-card-repo">${escapeHtml(repoSlug(job.repoPath))}</span><span class="job-card-posted">${posted}</span>`;
-  card.appendChild(meta);
+  // Where the work happens, as one pair: the repo the card is about and, once
+  // there is one, the branch the work is on. They used to sit on separate
+  // rows (repo in the posted line, branch on the agent's) and read as two
+  // unrelated facts.
+  const where = document.createElement('div');
+  where.className = 'job-card-where';
+  const slug = escapeHtml(repoSlug(job.repoPath));
+  where.innerHTML = `<span class="job-card-repo" title="Repository: ${slug}">${slug}</span>`
+    + (job.branchName ? `<span class="job-card-branch" title="Branch: ${escapeHtml(job.branchName)}">${escapeHtml(job.branchName)}</span>` : '');
+  put('where', where);
 
-  // Sent back to To do: held a minute so it can be edited before re-dispatch.
-  if (isHeld(job)) {
-    const held = document.createElement('div');
-    held.className = 'job-card-held';
-    const tick = () => {
-      const secs = Math.ceil((Date.parse(job.holdUntil) - Date.now()) / 1000);
-      held.textContent = secs > 0 ? `held · dispatching in ${secs}s` : 'dispatching';
-      if (secs > 0) setTimeout(() => { if (held.isConnected) tick(); }, 1000);
-    };
-    tick();
-    card.appendChild(held);
+  // Which agent is doing the work, and since when, straight under the repo and
+  // branch it works in. The branch itself is on the repo line, not here: it is
+  // a fact about the job, not about the agent, and gating it on the name left
+  // a finished card showing nothing at all once the name was lost.
+  if (job.agentName || job.startedAt) {
+    const agentEl = document.createElement('div');
+    agentEl.className = 'job-card-agent';
+    const parts = [];
+    if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
+    if (job.startedAt) parts.push(`<span class="job-card-since">started ${relativeTime(job.startedAt)}</span>`);
+    agentEl.innerHTML = parts.join(' ');
+    put('agent', agentEl);
   }
 
-  if (startsLater(job)) {
-    const when = document.createElement('div');
-    when.className = 'job-card-schedule';
-    when.innerHTML = `<span class="job-card-next">${escapeHtml(dateTime(job.runAt))} · ${escapeHtml(untilTime(job.runAt))}</span>`;
-    card.appendChild(when);
-  }
+  meta.innerHTML = `<span class="job-card-posted">${posted}</span>`;
+  put('meta', meta);
+
+  const run = renderRunLine(job);
+  if (run) put('run', run);
 
   if (isScheduled(job)) {
     const sched = document.createElement('div');
     sched.className = 'job-card-schedule';
     // Its schedule in words, with the cron kept in the tooltip.
+    // When it next fires is the run line above (renderRunLine).
     const bits = [`<span class="job-card-cron" title="${escapeHtml(job.schedule || '')}">${escapeHtml(job.scheduleWords || job.schedule || '')}</span>`];
-    if (job.state === 'done') {
-      // Archived: it will not fire again, and its note below says why.
-    } else if (job.paused) {
-      // The stored nextRunAt is not shown: it is the due time the pause is
-      // holding, and resuming re-arms from that moment instead of running it.
-      bits.push('<span class="job-card-next job-card-paused">paused</span>');
-    } else if (job.nextRunAt) {
-      bits.push(`<span class="job-card-next">next ${escapeHtml(clockTime(job.nextRunAt))} · ${escapeHtml(untilTime(job.nextRunAt))}</span>`);
-    } else {
-      // nextCronIso returned nothing: a valid expression that matches no date
-      // that will ever come round, such as 30 February.
-      bits.push('<span class="job-card-next">never fires again</span>');
-    }
     // Coerced, not trusted: this lands in innerHTML, and job records come from
     // config.json, which a person can edit by hand.
     const runs = Number(job.runCount) || 0;
-    if (runs) bits.push(`<span class="job-card-runs">· ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
+    if (runs) bits.push(`<span class="job-card-runs">ran ${runs}\u00d7${job.lastRunAt ? `, last ${escapeHtml(relativeTime(job.lastRunAt))}` : ''}</span>`);
     // Where its latest run is, so the schedule points at the card to look at.
     const latest = job.lastRunJobId ? jobs.get(job.lastRunJobId) : null;
     const column = latest && (COLUMNS.find(c => c.state === latest.state)?.label || (latest.state === 'done' ? 'Finished' : null));
     sched.innerHTML = bits.join(' ');
-    card.appendChild(sched);
+    put('sched', sched);
     // The way to the card to look at: its agent when it has a live one,
     // otherwise the card itself on the board.
     if (column) {
@@ -445,7 +512,7 @@ function renderCard(job) {
         if (latest.state === 'done' && !showingFinished) { showingFinished = true; renderBoard(); }
         document.querySelector(`[data-job-id="${CSS.escape(latest.id)}"]`)?.scrollIntoView({ block: 'nearest' });
       };
-      card.appendChild(link);
+      put('sched', link);
     }
 
     const status = renderScheduleStatus(job.scheduleStatus, (id) => {
@@ -458,7 +525,7 @@ function renderCard(job) {
       expanded: openScheduleEvidence.has(job.id),
       onToggle: open => open ? openScheduleEvidence.add(job.id) : openScheduleEvidence.delete(job.id),
     });
-    if (status) card.appendChild(status);
+    if (status) put('sched', status);
 
     // A firing it held off (see scheduleHold), said out loud: a schedule that
     // quietly stops posting runs is the failure this is here to prevent.
@@ -466,7 +533,7 @@ function renderCard(job) {
       const skip = document.createElement('div');
       skip.className = 'job-card-held';
       skip.textContent = `held off ${relativeTime(job.lastSkipAt)}: ${job.lastSkipReason}`;
-      card.appendChild(skip);
+      put('sched', skip);
     }
   }
 
@@ -474,7 +541,7 @@ function renderCard(job) {
     const detail = document.createElement('div');
     detail.className = 'job-card-detail';
     detail.textContent = job.detail;
-    card.appendChild(detail);
+    put('detail', detail);
   }
 
   if (Array.isArray(job.attachments) && job.attachments.length) {
@@ -489,38 +556,7 @@ function renderCard(job) {
       link.textContent = a.name;
       files.appendChild(link);
     }
-    card.appendChild(files);
-  }
-
-  // Who worked on it, and where the work is (requirement 3). Rendered whenever
-  // EITHER is known: the branch is a fact about the job, not about the agent,
-  // and gating it on the name left a finished card showing nothing at all once
-  // the name was lost.
-  if (job.agentName || job.branchName || job.startedAt) {
-    const agentEl = document.createElement('div');
-    agentEl.className = 'job-card-agent';
-    const parts = [];
-    if (job.agentName) parts.push(`<span class="job-card-agent-name">${escapeHtml(job.agentName)}</span>`);
-    if (job.branchName) parts.push(`<span class="job-card-branch">${escapeHtml(job.branchName)}</span>`);
-    if (job.startedAt) parts.push(`<span class="job-card-since">· started ${relativeTime(job.startedAt)}</span>`);
-    agentEl.innerHTML = parts.join(' ');
-    card.appendChild(agentEl);
-  }
-
-  if (status) {
-    const badge = document.createElement('button');
-    badge.className = `job-card-status job-status-${status}`;
-    badge.innerHTML = `<span class="job-status-dot"></span>${escapeHtml((STATUS_TEXT[status] || status))}`;
-    const canJump = !!liveAgentId;
-    badge.title = canJump
-      ? `Open ${job.agentName}'s terminal`
-      : 'This agent is no longer running';
-    badge.onclick = (e) => {
-      e.stopPropagation();
-      if (canJump) switchToSession(liveAgentId);
-    };
-    if (!canJump) badge.disabled = true;
-    card.appendChild(badge);
+    put('files', files);
   }
 
   // What the agent reported through finish_job. On a card that opens no PR
@@ -534,7 +570,7 @@ function renderCard(job) {
     result.setAttribute('role', 'region');
     result.setAttribute('aria-label', 'Agent summary');
     result.title = '';   // the card's "open terminal" tooltip does not apply here
-    card.appendChild(result);
+    put('result', result);
   }
 
   // How many runs of the same schedule this one replaced in Review, and on an
@@ -546,7 +582,7 @@ function renderCard(job) {
     note.textContent = job.supersededBy
       ? 'superseded by a newer run'
       : `filed ${job.supersededRuns} earlier run${job.supersededRuns === 1 ? '' : 's'} to Finished`;
-    card.appendChild(note);
+    put('notes', note);
   }
 
   // A Review card keeps its agent until it is done, so a missing one went with
@@ -555,7 +591,7 @@ function renderCard(job) {
     const note = document.createElement('div');
     note.className = 'job-card-retired';
     note.textContent = 'agent closed';
-    card.appendChild(note);
+    put('notes', note);
   }
 
   if (job.state === 'done' && job.archivedAt) {
@@ -563,7 +599,7 @@ function renderCard(job) {
     fin.className = 'job-card-finished';
     fin.textContent = `archived ${relativeTime(job.archivedAt)}${job.archivedBy ? ` by ${job.archivedBy}` : ''}`
       + `${job.archivedReason ? `: ${job.archivedReason}` : ''}`;
-    card.appendChild(fin);
+    put('notes', fin);
   } else if (job.state === 'done') {
     const fin = document.createElement('div');
     fin.className = 'job-card-finished';
@@ -572,20 +608,7 @@ function renderCard(job) {
       : job.prClosedAt
         ? `PR closed without merging ${relativeTime(job.prClosedAt)}`
         : `finished ${relativeTime(job.doneAt)}`;
-    card.appendChild(fin);
-  }
-
-  // The URL comes from `gh pr list`, but it still ends up in an href, and a
-  // non-http scheme there (javascript:, data:) executes on click. Cheap guard.
-  const prHref = /^https?:\/\//i.test(String(job.prUrl || '')) ? job.prUrl : null;
-  if (prHref) {
-    const pr = document.createElement('a');
-    pr.className = 'job-card-pr';
-    pr.href = prHref;
-    pr.target = '_blank';
-    pr.rel = 'noopener noreferrer';
-    pr.textContent = job.prNumber ? `PR #${job.prNumber}` : 'View PR';
-    card.appendChild(pr);
+    put('notes', fin);
   }
 
   // Moot once the card has its pull request.
@@ -593,21 +616,21 @@ function renderCard(job) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = "This repo has no GitHub remote, so the job can't open a pull request; add one, or set its Pull request to Not required";
-    card.appendChild(err);
+    put('errors', err);
   }
 
   if (job.noShipSkill && !prHref) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = `${job.noShipSkill === 'codex' ? 'Codex' : 'Claude Code'} has no ship skill, so the job can't open a pull request; install gstack (github.com/garrytan/gstack) and run its setup, or set its Pull request to Not required`;
-    card.appendChild(err);
+    put('errors', err);
   }
 
   if (job.lastError) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = job.lastError;
-    card.appendChild(err);
+    put('errors', err);
   }
 
   // Shown alongside lastError, never instead of it: "the agent is gone" and
@@ -617,10 +640,12 @@ function renderCard(job) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = job.prCheckError;
-    card.appendChild(err);
+    put('errors', err);
   }
 
-  card.appendChild(renderCardActions(job));
+  if (chips.childElementCount) put('chips', chips);
+  put('actions', renderCardActions(job));
+  for (const slot of ORDER[job.state] || ORDER.todo) for (const el of slots[slot] || []) card.appendChild(el);
 
   if (liveAgentId) {
     // Pointer affordance only. The card holds buttons and a link, so giving it
@@ -641,6 +666,54 @@ function renderCard(job) {
   }
 
   return card;
+}
+
+// When a To do card goes out, in words, on every To do card: its time for a
+// scheduled or recurring one, and for an ordinary queued one where it stands
+// in its repo's queue. Mirrors selectDispatchableJobs in lib/jobs.js (oldest
+// first, per-repo cap, live agents only), which public/ cannot import.
+function renderRunLine(job) {
+  if (job.state !== 'todo') return null;
+  const line = document.createElement('div');
+  line.className = 'job-card-run';
+  const say = (text, waiting = false, title = '') => {
+    line.innerHTML = `<span class="job-card-next${waiting ? ' job-card-paused' : ''}">${escapeHtml(text)}</span>`;
+    if (title) line.title = title;
+  };
+  if (job.paused) {
+    // The stored due time is not shown: resuming re-arms from that moment
+    // instead of running it, so a countdown would be a promise not kept.
+    say('paused', true);
+  } else if (isScheduled(job)) {
+    if (job.nextRunAt) say(`runs ${clockTime(job.nextRunAt)} · ${untilTime(job.nextRunAt)}`);
+    // nextCronIso returned nothing: a valid expression that matches no date
+    // that will ever come round, such as 30 February.
+    else say('never fires again', true);
+  } else if (isHeld(job)) {
+    // Sent back to To do: held a minute so it can be edited before re-dispatch.
+    const tick = () => {
+      const secs = Math.ceil((Date.parse(job.holdUntil) - Date.now()) / 1000);
+      say(secs > 0 ? `runs in ${secs}s · held so it can be edited` : 'runs next');
+      if (secs > 0) setTimeout(() => { if (line.isConnected) tick(); }, 1000);
+    };
+    tick();
+  } else if (startsLater(job)) {
+    say(`runs ${dateTime(job.runAt)} · ${untilTime(job.runAt)}`);
+  } else if (!boardSettings.running) {
+    say('queued · board stopped', true, 'Nothing is dispatched until the board is started');
+  } else {
+    const queue = [...jobs.values()]
+      .filter(j => j.state === 'todo' && !isScheduled(j) && !j.paused && !isHeld(j) && !startsLater(j) && j.repoPath === job.repoPath)
+      .sort((a, b) => String(a.postedAt).localeCompare(String(b.postedAt)));
+    const inFlight = [...jobs.values()]
+      .filter(j => j.state === 'in-progress' && j.repoPath === job.repoPath && agents.has(j.agentSessionId)).length;
+    const free = Math.max(0, (Number(boardSettings.maxPerRepo) || 1) - inFlight);
+    const ahead = queue.indexOf(job) - free;
+    if (ahead < 0) say('runs next', false, 'Goes out on the board\'s next scan');
+    else say(`runs when a slot frees${ahead ? ` (${ahead} ahead)` : ''}`, true,
+      `This repo is at its limit of ${boardSettings.maxPerRepo} agent${boardSettings.maxPerRepo === 1 ? '' : 's'} at once`);
+  }
+  return line;
 }
 
 function isHeld(job) {

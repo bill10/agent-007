@@ -123,8 +123,9 @@ because the stock brights wash out on the cream ground.
   - 11px — explorer items (files, agents), form labels, panel labels (REPOS,
     the job columns, Finished; uppercase, letter-spacing: 2px), the job board
     toolbar's labels. 11px is the floor for labels that name a field or a
-    section; 10px stays on the branch names and diff/loading text above, 9px
-    on some badges, form hints and card metadata
+    section; 10px stays on the branch names and diff/loading text above, and
+    on job card metadata, chips and actions (11px on a phone); 9px on some
+    badges and form hints
   - 12px — terminal tabs, form inputs, repo/branch in terminal header
   - 13px — terminal header agent info
   - 14px — app title (bold, letter-spacing: 1px)
@@ -626,14 +627,50 @@ progress card saying "needs you" instead of a schedule silently losing firings.
   a text selection on the card are all excluded.
 - A card that carries its own permission mode wears it as a chip; a card left on
   the board default wears nothing, because the chip's job is to say "this one is
-  different". A Codex card wears a `codex` chip on the same reasoning, and
-  `read_job` says `runs on: codex` only for one, since Claude Code is the
-  default. `bypassPermissions` takes `--state-disconnected` instead of the
+  different". What runs the card is the exception to that rule: every card
+  opens its chips with one agent·model pill, "claude · opus-5-5" or
+  "codex · gpt-5.5" ("claude · default" / "codex · default" on the CLI's default model;
+  the redundant "claude-" prefix is dropped from the label and kept in the
+  tooltip). Chipping only the non-default CLI left a Claude card with a bare
+  model id and a Codex card with two pills. `read_job` still says
+  `runs on: codex` only for a Codex card, since Claude Code is the default. `bypassPermissions` takes `--state-disconnected` instead of the
   routine chip gold, on the card and on both selects, since it is the one mode
   with nothing reviewing the agent and it otherwise reads as just another entry
   in a list of six. The colour sits on the closed select, not on the `<option>`
   (Safari ignores option colours), so the warning survives the dropdown closing.
 - Card actions are hidden until hover/focus-within, so a full board stays scannable.
+  A touch screen (`hover: none`) has no hover, so there they always show, and
+  under 700px they are 40px tall for a thumb.
+- Order on a card depends on its column (`ORDER` in `public/modules/jobs.js`),
+  as agreed with the owner. The job's type pill (recurring, scheduled, run)
+  rides inline on the title line, so the card says what kind of job it is at
+  the very top. To do: title, repo, when it runs, who posted it
+  and when ("posted by Billion · 2h ago"), then the smaller kind chips
+  (the agent·model pill first, then no PR, then a permission mode) and any blocker
+  warning, then detail and attachments. In progress: title, status badge,
+  repo · branch, agent · started, then any error, the chips and the rest.
+  Review and Finished: title, PR pill, repo · branch, agent · started, the
+  chips (so the agent·model pill reads straight after the agent), then the
+  agent's summary on a no-PR card. The lower chip row always opens with the
+  agent·model pill; no PR (or PR runs on a schedule) and a permission mode
+  follow it. Actions are always
+  last. The repo is bold with a repo glyph and the branch beside it carries a
+  branch glyph, so the pair reads as "repo, branch" without a label.
+- Every To do card says when it runs: "runs Tue 8:00 PM · in 5h" for a
+  schedule or a one-time card with a start time, "runs in 45s · held so it
+  can be edited" after a send-back, "paused", and for an ordinary card its
+  place in its repo's queue: "runs next" while the repo has a free slot,
+  "runs when a slot frees (N ahead)" behind a full one, "queued · board
+  stopped" while the dispatcher is off. The queue is worked out on the client
+  the way `selectDispatchableJobs` orders it (oldest first, per-repo cap,
+  live agents only).
+- A long repo name or branch truncates with an ellipsis and keeps the full
+  text in its tooltip (beside a branch the repo takes at most 70%); a title never truncates. Chips keep their case, since
+  model ids and permission modes are case-sensitive identifiers.
+- Card text sits on `--text-muted`, never `--text-dim` and never under an
+  opacity: dim misses 4.5:1 on the card ground in both themes. Status and
+  error text is the state colour mixed a fifth of the way toward `--text`,
+  for the same reason; the border keeps the raw state colour.
 - Two error lines can appear, and they are independent. `lastError` carries what
   happened to the job (a dispatch failure, or "agent lost" after a restart);
   `prCheckError` carries why the board cannot check for the pull request at all.

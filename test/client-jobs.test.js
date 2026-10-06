@@ -448,7 +448,7 @@ describe('the per-job permission mode', () => {
 
   it('puts an overriding mode on the card face', () => {
     handleJobsList({ jobs: [JOB({ permissionMode: 'bypassPermissions' })], settings: { running: false, maxPerRepo: 2 } });
-    expect(cards()[0].querySelector('.job-card-title').textContent).toContain('bypassPermissions');
+    expect(cards()[0].querySelector('.job-card-chips').textContent).toContain('bypassPermissions');
   });
 
   it('shows both the scheduled chip and the permission-mode chip together', () => {
@@ -517,7 +517,7 @@ describe('job form', () => {
 
   it('shows the model on the card and keeps it on an edit that does not touch it', () => {
     handleJobsList({ jobs: [JOB({ model: 'opus' })], settings: {}, models: { claude: [], codex: [] } });
-    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toContain('opus');
+    expect(cards()[0].querySelector('.job-card-runs-on').textContent).toBe('claude · opus');
     [...cards()[0].querySelectorAll('.job-card-btn')].find(b => b.textContent === 'Edit').click();
     // No longer discovered, but still the card's: offered, selected, not re-sent.
     expect(document.getElementById('job-model').value).toBe('opus');
@@ -559,9 +559,9 @@ describe('job form', () => {
     expect(perm.querySelector('option[value="plan"]').hidden).toBe(false);
   });
 
-  it('shows a codex chip on the card and pre-fills the agent when editing', () => {
+  it('shows codex on the card and pre-fills the agent when editing', () => {
     handleJobsList({ jobs: [JOB({ agent: 'codex' })], settings: { running: false, maxPerRepo: 2 } });
-    expect(cards()[0].querySelector('.job-card-type').textContent).toBe('codex');
+    expect(cards()[0].querySelector('.job-card-runs-on').textContent).toBe('codex · default');
     cards()[0].querySelector('.job-card-actions button').click();
     expect(document.getElementById('job-agent').value).toBe('codex');
   });
@@ -615,11 +615,25 @@ describe('job form', () => {
     expect(document.getElementById('job-permission-mode-field').querySelector('option[value="plan"]').hidden).toBe(false);
   });
 
-  it('lines up the scheduled, codex and mode chips in that order, and none on a plain card', () => {
-    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', agent: 'codex', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
-    expect([...cards()[0].querySelectorAll('.job-card-type')].map(c => c.textContent)).toEqual(['recurring', 'codex', 'plan']);
+  it('puts the type on the title line, and leads the lower chips with the agent·model pill', () => {
+    handleJobsList({ jobs: [JOB({ type: 'scheduled', schedule: '@daily', agent: 'codex', model: 'gpt-5.5', permissionMode: 'plan' })], settings: { running: false, maxPerRepo: 2 } });
+    const chips = [...cards()[0].querySelector('.job-card-chips').children].map(c => c.textContent);
+    expect(chips).toEqual(['codex · gpt-5.5', 'plan']);
+    // The type is on the title line, not in the lower row.
+    expect(cards()[0].querySelector('.job-card-title .job-card-type').textContent).toBe('recurring');
     handleJobsList({ jobs: [JOB({ agent: 'claude' })], settings: { running: false, maxPerRepo: 2 } });
+    expect([...cards()[0].querySelector('.job-card-chips').children].map(c => c.textContent)).toEqual(['claude · default']);
     expect(cards()[0].querySelectorAll('.job-card-type')).toHaveLength(0);
+  });
+
+  it('shows every card its agent, dropping only the redundant "claude-" from the model', () => {
+    handleJobsList({ jobs: [JOB({ model: 'claude-opus-5-5' }), JOB({ id: 'job-2', agent: 'codex' })], settings: { running: false, maxPerRepo: 2 } });
+    const pill = document.querySelector('[data-job-id="job-1"] .job-card-runs-on');
+    expect(pill.textContent).toBe('claude · opus-5-5');
+    expect(pill.title).toContain('claude-opus-5-5');
+    const plain = document.querySelector('[data-job-id="job-2"] .job-card-runs-on');
+    expect(plain.textContent).toBe('codex · default');
+    expect(plain.title).toBe("Runs the CLI's default model");
   });
 
   // A screenshot pasted into Details becomes a named base64 attachment on the
@@ -1099,8 +1113,19 @@ describe('a finished card still shows its record', () => {
     });
     const row = document.querySelector('.job-card-agent');
     expect(row.textContent).toMatch(/Phantom/);
-    expect(row.textContent).toMatch(/bill10\/x/);
     expect(row.textContent).toMatch(/started/);
+    // The branch pairs with the repo, not with the agent.
+    expect(document.querySelector('.job-card-where').textContent).toBe('alphabill10/x');
+    expect(row.textContent).not.toMatch(/bill10\/x/);
+  });
+
+  it('pairs the repo with the branch on one line, ahead of the agent', () => {
+    handleJobsList({ jobs: [JOB({ state: 'review', agentName: 'Phantom', branchName: 'bill10/x' })], settings: {} });
+    const card = document.querySelector('.job-card');
+    const where = card.querySelector('.job-card-where');
+    expect(where.querySelector('.job-card-repo').textContent).toBe('alpha');
+    expect(where.querySelector('.job-card-branch').title).toBe('Branch: bill10/x');
+    expect(where.compareDocumentPosition(card.querySelector('.job-card-agent')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders no agent row at all when neither is known', () => {
@@ -1124,7 +1149,7 @@ describe('scheduled cards', () => {
     const card = cards()[0];
     expect(card.querySelector('.job-card-type').textContent).toBe('recurring');
     expect(card.querySelector('.job-card-cron').textContent).toBe('0 9 * * 1-5');
-    expect(card.querySelector('.job-card-next').textContent).toMatch(/next .*·.*in 2h/);
+    expect(card.querySelector('.job-card-next').textContent).toMatch(/^runs .*·.*in 2h/);
   });
 
   it('says a recurring schedule in words and keeps the cron in the tooltip', () => {
@@ -1407,5 +1432,53 @@ describe('an archived run whose PR was closed', () => {
     const text = document.querySelector('[data-job-id="r"] .job-card-finished').textContent;
     expect(text).toMatch(/PR closed without merging/);
     expect(text).not.toMatch(/^merged/);
+  });
+});
+
+describe('the run line on a To do card', () => {
+  const runText = (id) => document.querySelector(`[data-job-id="${id}"] .job-card-run`)?.textContent;
+  const at = (min) => new Date(Date.now() - min * 60_000).toISOString();
+
+  it('says the board is stopped rather than promising a run', () => {
+    handleJobsList({ jobs: [JOB()], settings: { running: false } });
+    expect(runText('job-1')).toBe('queued · board stopped');
+  });
+
+  it('says "runs next" while the repo has a free slot, and the queue behind a full one', () => {
+    agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    const busy = JOB({ id: 'busy', state: 'in-progress', agentSessionId: 's1', postedAt: at(90) });
+    const queued = [1, 2, 3].map(i => JOB({ id: `q${i}`, postedAt: at(60 - i) }));
+    handleJobsList({ jobs: [busy, ...queued], settings: { running: true, maxPerRepo: 2 } });
+    expect(runText('q1')).toBe('runs next');
+    expect(runText('q2')).toBe('runs when a slot frees');
+    expect(runText('q3')).toBe('runs when a slot frees (1 ahead)');
+    expect(runText('busy')).toBeUndefined();
+  });
+
+  it('gives a scheduled card its start time', () => {
+    handleJobsList({ jobs: [JOB({ runAt: new Date(Date.now() + 2 * 3600_000).toISOString() })], settings: { running: true } });
+    expect(runText('job-1')).toMatch(/^runs .*\d.* · in 2h$/);
+  });
+});
+
+describe('what each column says first', () => {
+  const order = (card) => [...card.children].map(el => el.className.split(' ')[0]);
+
+  it('a To do card: title, repo, when it runs, who posted it, then the chips', () => {
+    handleJobsList({ jobs: [JOB({ model: 'opus', requiresPr: false })], settings: { running: true } });
+    expect(order(cards()[0]).slice(0, 5)).toEqual(['job-card-title', 'job-card-where', 'job-card-run', 'job-card-meta', 'job-card-chips']);
+  });
+
+  it('an In progress card: title, status, repo and branch, agent', () => {
+    agents.set('s1', { name: 'Viper', state: 'WORKING', lastOutputAt: Date.now(), termEl: document.createElement('div') });
+    handleJobsList({ jobs: [JOB({ state: 'in-progress', agentSessionId: 's1', agentName: 'Viper', branchName: 'b', startedAt: new Date().toISOString() })], settings: {} });
+    expect(order(cards()[0]).slice(0, 4)).toEqual(['job-card-title', 'job-card-state', 'job-card-where', 'job-card-agent']);
+  });
+
+  it('a Review card: title, PR, repo and branch, agent, the agent·model pill, then the summary', () => {
+    handleJobsList({ jobs: [JOB({ state: 'review', prUrl: 'https://gh/o/r/pull/3', prNumber: 3, agentName: 'Echo', branchName: 'b', model: 'opus', resultSummary: 'Done.' })], settings: {} });
+    const card = cards()[0];
+    expect(order(card).slice(0, 6)).toEqual(['job-card-title', 'job-card-state', 'job-card-where', 'job-card-agent', 'job-card-chips', 'job-card-result']);
+    expect(card.querySelector('.job-card-chips').firstElementChild.textContent).toBe('claude · opus');
   });
 });
