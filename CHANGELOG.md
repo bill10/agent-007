@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.56.0.2] - 2026-10-06
+
+### Changed
+
+- **README teaser gif is cut from the shipped 38 s phone-call demo.** It opens on the "Ask for a change on a call" line, taps Talk and shows the request; the video caption and launch notes now say 38 s and no longer mention the old Veo opening shot.
+
 ## [0.56.0.1] - 2026-10-06
 
 ### Changed
