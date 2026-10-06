@@ -9,8 +9,9 @@ reach it from another machine *without* exposing it to the public internet.
 > now exists (`npm run adduser` — see the README "Multiplayer & login" section),
 > but it establishes **identity, not isolation**: every logged-in user can still
 > spawn shells on the host, and read-only sharing of others' agents is a later
-> phase (`docs/designs/multiplayer.md`). Keep the server behind Tailscale and
-> only issue tokens to people you'd give an SSH login.
+> phase (`docs/designs/multiplayer.md`). Keep the server behind Tailscale or an
+> authenticating proxy (see below) and only issue tokens to people you'd give
+> an SSH login.
 
 Three ways in, all of which leave the server on `127.0.0.1`:
 

@@ -724,8 +724,8 @@ re-queue only if still top two; 3 still queued for later briefings
 (list_round_queue to re-rank or drop).` (kept in `rounds.json` until Billion
 runs). The owner's phone gets ONE Telegram message per briefing, "Afternoon
 briefing: 5 items across 3 departments", with Billion's brief and a link to the
-app (`APP_URL`, else the first `ALLOWED_ORIGINS` entry), never one per
-question.
+app (`PUBLIC_URL`, or `APP_URL`, its older name; else the first
+`ALLOWED_ORIGINS` entry), never one per question.
 
 **Numbers and Done.** Every item in a briefing carries a short number, 1, 2,
 3…, in the order the tab shows them (*Needs you now* first, then each

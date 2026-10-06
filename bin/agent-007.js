@@ -65,7 +65,8 @@ Run it as a service (macOS and Linux):
   install --all    The service, voice and remote access, no questions;
                    --yes also accepts the default model's download
   uninstall        Stop and remove the service; ~/.agent-007 is kept
-  status           Running or not, how, pid, version, port, uptime, workers
+  status           Running or not, how, pid, version, port, uptime, workers,
+                   remote access (PUBLIC_URL, the proxy's last request)
   restart          Restart it, in a terminal or as a service. Waits for board
                    workers mid-run to finish their step unless --now
   logs             The service's log (~/.agent-007/logs/server.log); -f follows
