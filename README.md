@@ -59,7 +59,7 @@ To reach it from your phone or another machine, with [Tailscale](https://tailsca
 agent007 install --remote   # then open https://<this machine>.<tailnet>.ts.net on any device in your tailnet
 ```
 
-See [remote access](docs/REMOTE.md).
+On a VM behind Cloudflare Tunnel + Access, caddy or nginx instead: `agent007 install --public-url https://agent.example.com`. See [remote access](docs/REMOTE.md).
 
 Or run it from a clone:
 
@@ -213,6 +213,7 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `PORT` | `7007` | Listen port |
 | `HOST` | `127.0.0.1` | Bind interface. Use `0.0.0.0` only behind Tailscale/a trusted network |
 | `ALLOWED_ORIGINS` | *(none)* | Comma-separated extra origins for the cross-origin check (`localhost` is always allowed) |
+| `PUBLIC_URL` | *(none)* | The https address a reverse proxy or tunnel you run serves the app at (Cloudflare Tunnel, caddy, nginx). Allowed as an origin and used in the links the app sends. Keep `HOST` on `127.0.0.1`. See [docs/REMOTE.md](docs/REMOTE.md#cloudflare-tunnel--access) |
 | `CLAUDE_PERMISSION_MODE` | *(the CLI's own)* | Permission mode every Claude Code agent the app starts runs in (`auto`, `acceptEdits`, `bypassPermissions`, `manual`, `dontAsk`, `plan`). Flags in the command, a card's own mode or a mode picked in the board's dropdown win over it |
 | `CODEX_PERMISSION_MODE` | *(the CLI's own)* | The same for Codex agents, mapped onto Codex's sandbox and approval flags |
 | `AGENT_MESSAGING` | *(guarded)* | `open` lets any of your agents message any other. By default an agent that asks before acting cannot message one that never asks |
@@ -229,8 +230,8 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `TRUST_BOARD_WORKTREES` | *(on)* | Board-dispatched Claude Code and Codex workers skip the workspace-trust dialog, so queued jobs start unattended. That also lets the repo's own `.claude/settings.json` (or Codex project config, hooks and exec policies) apply without asking. `0` (or `false`/`off`/`no`) keeps the dialog. Hand-started agents always keep it |
 
 > **Running remotely?** The server spawns real shells, so never expose it to the
-> open internet. See [docs/REMOTE.md](docs/REMOTE.md) for the recommended
-> Tailscale setup.
+> open internet. See [docs/REMOTE.md](docs/REMOTE.md) for Tailscale, Cloudflare
+> Tunnel + Access, and WireGuard.
 
 ### Rotating Claude accounts
 

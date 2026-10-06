@@ -12,6 +12,33 @@ reach it from another machine *without* exposing it to the public internet.
 > phase (`docs/designs/multiplayer.md`). Keep the server behind Tailscale and
 > only issue tokens to people you'd give an SSH login.
 
+Three ways in, all of which leave the server on `127.0.0.1`:
+
+- **(a) [Tailscale](#recommended-tailscale)**: `agent007 install --remote`. Your
+  devices join a private network; nothing is public.
+- **(b) [Cloudflare Tunnel + Access](#cloudflare-tunnel--access)**: a real
+  `https://agent.example.com` that Cloudflare signs people into (email code or
+  Google) before any request reaches the machine. Good for a VM with a fixed
+  address, or for people you would rather not add to a tailnet.
+- **(c) [WireGuard + a local certificate](#wireguard--a-local-certificate)**:
+  your own WireGuard network, with caddy or nginx terminating https on the
+  WireGuard address.
+
+(b) and (c) put a reverse proxy in front: `agent007 install --public-url <url>`
+sets that up (see [Behind a reverse proxy](#behind-a-reverse-proxy-public_url)).
+
+### Security notes
+
+- **Never expose port 7007 directly**, to the internet or to a LAN you do not
+  trust. Keep `HOST=127.0.0.1` (or the WireGuard address) and let the proxy or
+  Tailscale be the only way in.
+- **The app assumes whatever is in front of it authenticates.** With user
+  accounts off (the default), anyone the proxy lets through gets a terminal on
+  the host. Cloudflare Access, a tailnet or a WireGuard peer list is the lock;
+  Agent 007 adds none of its own.
+- The origin check (`ALLOWED_ORIGINS`, `PUBLIC_URL`) only stops other websites
+  driving your browser; it is not access control.
+
 ## One command: `agent007 install --remote`
 
 With [Tailscale](https://tailscale.com/download) installed and logged in on the
@@ -112,12 +139,145 @@ extra port is open and traffic is encrypted end to end.
 Enable **Tailscale SSH** and reach the mini with `ssh you@mac-mini` — key-free and
 gated by tailnet ACLs. Useful for starting/restarting the server.
 
-## Alternative: Cloudflare Tunnel
+## Behind a reverse proxy (`PUBLIC_URL`)
 
-If you'd rather share a real `https://` URL without adding people to a tailnet,
-run `cloudflared` on the host (it dials out — no open ports) and gate the app with
-**Cloudflare Access** (email/SSO allowlist). Set
-`ALLOWED_ORIGINS=<your-cloudflare-hostname>`.
+Any proxy that terminates https and forwards to `http://127.0.0.1:7007` works,
+as long as it passes WebSocket upgrades (the terminals, the board and Talk all
+run over one WebSocket). Tell Agent 007 the address the browser uses:
+
+```bash
+agent007 install --public-url https://agent.example.com   # the service, with PUBLIC_URL; no Tailscale
+# or, in a terminal:  PUBLIC_URL=https://agent.example.com agent007   (or --public-url)
+```
+
+`install --public-url` writes `PUBLIC_URL` to `~/.agent-007/.env`, then installs
+and (re)starts the service bound to `127.0.0.1`. It warns if `HOST` is
+`0.0.0.0`, if the URL is not https, or if a `PUBLIC_URL` set elsewhere would
+win. With `--all` it takes the place of the Tailscale step. With `PUBLIC_URL`
+set, the server:
+
+- lets that hostname through the origin check for the API and the WebSocket,
+  as an `ALLOWED_ORIGINS` entry would, and treats that page as your own
+  browser even when the proxy sends its own `Host` header;
+- believes `X-Forwarded-Proto` and `X-Forwarded-For` from a proxy on the same
+  machine (loopback) and no one else;
+- uses it for every link it sends out (Telegram round messages; `APP_URL`,
+  its older name, still works). The page itself only uses relative URLs and
+  builds its `wss://` address from the page's own, so nothing in the browser
+  needs it.
+
+`agent007 status` says which mode the server is in and what the proxy last
+sent (`proxy headers: last forwarded request 2m ago: https from 203.0.113.9`);
+`agent007 doctor` checks `PUBLIC_URL`, `HOST` and that requests are arriving as
+https.
+
+**Voice input and Talk to Billion work behind the proxy.** The browser decides
+whether the microphone is allowed from the address it sees, so an
+`https://` page from the proxy is a secure context even though Agent 007 itself
+only sees plain http on localhost. The certificate must be one the browser
+trusts (Cloudflare's always is; a local one must be installed on each device,
+see (c)). An `http://` `PUBLIC_URL` gets no microphone.
+
+## Cloudflare Tunnel + Access
+
+`cloudflared` on the host dials out to Cloudflare, so the machine needs no open
+port, and Cloudflare Access signs people in before a request reaches it. The
+Zero Trust free plan covers up to 50 users. You need a domain on Cloudflare.
+
+1. Install `cloudflared` on the host and create the tunnel:
+
+   ```bash
+   cloudflared tunnel login
+   cloudflared tunnel create agent-007            # prints the tunnel ID
+   cloudflared tunnel route dns agent-007 agent.example.com
+   ```
+
+2. `~/.cloudflared/config.yml` (or `/etc/cloudflared/config.yml` for the system
+   service):
+
+   ```yaml
+   tunnel: agent-007
+   credentials-file: /home/you/.cloudflared/<TUNNEL-ID>.json
+   ingress:
+     - hostname: agent.example.com
+       service: http://127.0.0.1:7007
+     - service: http_status:404
+   ```
+
+   cloudflared passes WebSockets, the browser's `Host` and
+   `X-Forwarded-Proto: https` without further settings. Run it with
+   `cloudflared tunnel run agent-007`, or `sudo cloudflared service install`
+   to keep it running.
+
+3. **Set the Access policy before you open the URL.** In the Zero Trust
+   dashboard: *Access → Applications → Add an application → Self-hosted*,
+   domain `agent.example.com`. Add a policy with action **Allow** and an
+   **Include** rule of *Emails* (yours, one per person) or *Emails ending in*
+   `@yourcompany.com`. Sign-in is a one-time code by email unless you add
+   Google under *Settings → Authentication → Login methods*. Leave no
+   *Everyone* rule: that would hand a shell to anyone with an email address.
+
+4. On the host: `agent007 install --public-url https://agent.example.com`.
+
+With Access in front, every request carries `Cf-Access-Authenticated-User-Email`.
+Agent 007 logs each email the first time it sees it, `agent007 status` shows
+the last one, and the Settings panel says *Signed in through Cloudflare Access
+as …*. **That is display only: the `Cf-Access-Jwt-Assertion` token is not
+verified**, so the email is whatever the header said. Access is what keeps
+people out; Agent 007's own user accounts stay off. Because the server listens
+on `127.0.0.1`, only programs on the host itself could send a forged header.
+
+## WireGuard + a local certificate
+
+With your own WireGuard network (the host at, say, `10.8.0.1`), run a proxy on
+the WireGuard address that terminates https and forwards to the server on
+`127.0.0.1`. A plain `HOST=10.8.0.1` bind works too, but it is http, so the
+microphone is off.
+
+Give the host a name that resolves to `10.8.0.1` on your devices (a DNS record
+pointing at the private address, or each device's hosts file), e.g.
+`agent.wg.example`.
+
+**caddy** (`Caddyfile`), with its own local certificate authority:
+
+```
+https://agent.wg.example {
+	bind 10.8.0.1
+	tls internal
+	reverse_proxy 127.0.0.1:7007
+}
+```
+
+Then install caddy's root certificate
+(`~/.local/share/caddy/pki/authorities/local/root.crt`, or `caddy trust` on the
+host) on each phone and laptop, or the browser will not grant the microphone.
+`mkcert` works the same way with any proxy.
+
+**nginx** needs the WebSocket, `Host` and forwarded headers spelled out, and a
+body limit that fits a Talk recording:
+
+```nginx
+server {
+    listen 10.8.0.1:443 ssl;
+    server_name agent.wg.example;
+    ssl_certificate     /etc/nginx/agent.pem;
+    ssl_certificate_key /etc/nginx/agent-key.pem;
+    client_max_body_size 20m;
+
+    location / {
+        proxy_pass http://127.0.0.1:7007;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 1d;
+    }
+}
+```
+
+Then `agent007 install --public-url https://agent.wg.example`.
 
 ## Not recommended: router port-forwarding
 
@@ -131,8 +291,9 @@ expose the raw server.
 |-------------------|-------------|---------|
 | `PORT`            | `7007`      | Listen port |
 | `HOST`            | `127.0.0.1` | Bind interface. `0.0.0.0` = all interfaces (use only behind Tailscale/trusted network) |
+| `PUBLIC_URL`      | *(none)*    | The https address a reverse proxy or tunnel serves the app at. Allowed as an origin, used in links, and turns on the proxy checks in `status` and `doctor`. Only the origin is used (no path prefix) |
 | `ALLOWED_ORIGINS` | *(none)*    | Comma-separated extra origins allowed by the cross-origin check. Bare hostnames (`mac-mini.tailXXXX.ts.net`), `host:port` (`mac-mini:7007`), or full origins (`https://mac-mini:7007`); only the hostname is used. `*` disables the check for **any** origin — avoid it: even on the default localhost bind, `*` lets any website you visit drive this server through your browser (drive-by command execution) |
 
-Loopback origins (`localhost`, `127.0.0.1`, `[::1]`) are always allowed regardless of `ALLOWED_ORIGINS`.
+Loopback origins (`localhost`, `127.0.0.1`, `[::1]`) are always allowed regardless of `ALLOWED_ORIGINS`, and so is `PUBLIC_URL`'s hostname.
 
-The origin check only blocks cross-origin **browser** requests — it is not access control. Non-browser clients (curl, native WebSocket) send no `Origin` and always pass. When `HOST` is remote, the network boundary (Tailscale / a trusted LAN) is what actually gates who can reach the server.
+The origin check only blocks cross-origin **browser** requests — it is not access control. Non-browser clients (curl, native WebSocket) send no `Origin` and always pass. When `HOST` is remote, the network boundary (Tailscale / a trusted LAN) is what actually gates who can reach the server; behind a proxy, the proxy's sign-in does.
