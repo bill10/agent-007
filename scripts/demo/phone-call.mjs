@@ -14,7 +14,8 @@
 // dubbed over Billion's four lines where the page spoke them (another voice).
 //
 // The video starts on the request; waits where nothing happens on screen (the
-// call coming up, the worker typing on, the board's scan) are cut out of it.
+// call coming up, the dispatcher's debounce, the worker typing on, the board's
+// scan) are cut out of it.
 //
 // This script records. The video itself is a HyperFrames composition in
 // scripts/demo/launch/ (product-launch-video skill): this script leaves the two
@@ -269,12 +270,17 @@ const reply = await heard(/Got it/);
 // The wait while the server voices the reply, its text already on screen.
 drops.push([askedAt + 700, reply.at - 250]);
 await sleep(Math.max(0, reply.end + GAP - Date.now()));
-// 3. The board: the card lands and a worker picks it up.
+// 3. The board: the card lands in To do, and the dispatcher hands it to a worker.
 cut('B');
+await sleep(300);
+writeFileSync(join(home, 'demo-post-card'), '');
+await cardIn('todo');
+const todoAt = Date.now();
 await cardIn('in-progress');
-await sleep(800);
+drops.push([todoAt + 1000, Date.now() - 150]);   // the dispatcher's debounce, down to a beat
+await sleep(500);
 await tap(B, B.locator('.job-card-live').first());
-await sleep(2500);
+await sleep(1900);
 await tap(B, B.locator('.terminal-tab.board-tab:not(.waiting-tab)'), 0);
 // 4. "Tell me when it's merged": the call waits on the work and says how it goes.
 cut('A');

@@ -7,7 +7,7 @@
 // own colors: a flat ink plane, one gold accent, Barlow display, IBM Plex Mono
 // chrome, hairline borders, a karaoke caption plate. The beats: a title (1.2 s),
 // the phones (a crossfade at every cut, a small push where the phone changes),
-// the end card (3.2 s), with the disclosure line throughout.
+// the end card (3 s), with the disclosure line throughout.
 import { readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -17,7 +17,7 @@ const edit = JSON.parse(readFileSync(join(here, 'assets', 'edit.json'), 'utf8'))
 const W = 1080, H = 1920;
 const TITLE = 1.05;   // the phones come in as the title goes
 const FADE = 0.25;    // the crossfade at each cut
-const END = 3.2;
+const END = 3.0;
 const endAt = TITLE + edit.total - 0.6;   // the last moment on the call is held under the end card's way in
 const total = endAt + END;
 const NOTE = edit.dubbed
