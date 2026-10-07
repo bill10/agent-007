@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.56.2.0] - 2026-10-07
+
+### Fixed
+
+- **With `BILLION=0` the app no longer shows a Billion tab.** The desktop tab and the phone's Billion button are gone, and the page opens on the Jobs board instead of an empty chat. Anything that would have opened the chat (a badge, a remembered tab) lands on Jobs. With Billion on, nothing changes.
+
 ## [0.56.1.0] - 2026-10-06
 
 ### Changed
