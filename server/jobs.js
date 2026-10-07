@@ -327,8 +327,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
+export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -432,7 +432,16 @@ function onceFields({ schedule, once, runAt }) {
   return { schedule: '', runAt: next };
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, requiresPr, session, user }, broadcast) {
+// Who posted a card, as postedById stores it: the person's token, else the
+// agent session's, else "anonymous" — only on a board with auth off, where any
+// caller already has the owner's run of /api.
+export function posterId({ user, session, anonymous = false }) {
+  if (user) return `user:${user.id}`;
+  if (session) return `agent:${session.id}`;
+  return anonymous ? 'anonymous' : null;
+}
+
+export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, requiresPr, session, user, poster }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -486,6 +495,7 @@ export function postJobForAgent({ title, detail, repo, schedule, once, runAt, ty
     postedByName: user ? user.displayName : null,
     postedByAgent: session ? session.name : null,
     postedByBillion: !!session?.isBillion,
+    postedById: poster ?? posterId({ session }),
   }, broadcast);
   if (result.error) return { error: result.error };
 
@@ -822,28 +832,34 @@ export function notifyBillion(job) {
   return sendNotice(billion, `"${job.title}" (card ${job.id}, ${basename(job.repoPath || '')}) is in Review.`, lines);
 }
 
-// Billion's verdict on one of its own cards in Review (docs/BILLION.md, part 3).
+// Billion's verdict on one of its own cards in Review (docs/BILLION.md, part 3),
+// and the same verdict from whoever posted a card over HTTP (POST
+// /api/jobs/:id/close, `poster` being its posterId and `by` its name).
 // Accept files it as Done and retires its agent; send it back returns it to To
 // do with the reason added to its detail, so the next worker knows what to fix.
 // On one of its own To do cards it drops the card unrun: archived to Finished
 // jobs with the note as the reason, as the owner's Archive does.
 //
-// Only Billion, only its own cards, only from Review: this is the owner's
-// "Done" button handed to one agent, not to every agent on the board. A card
-// with a pull request is not accepted here — merging it is what files it as
-// Done, and a Done card whose PR never merged would claim work shipped that
-// did not.
+// Only Billion or the poster, only its own cards, only from Review: this is
+// the owner's "Done" button handed to the one caller that asked for the work,
+// not to every agent on the board. A card with a pull request is not accepted
+// here — merging it is what files it as Done, and a Done card whose PR never
+// merged would claim work shipped that did not.
+//
+// A refusal on ownership carries forbidden: true, which HTTP answers with 403.
 const SENT_BACK_CHARS = 2000;
-export async function closeJobForAgent({ session, id, accept, note }, broadcast, { killSession } = {}) {
-  if (!session?.isBillion) return { error: 'Only Billion can close cards.' };
+export async function closeJobForAgent({ session, poster, by, id, accept, note }, broadcast, { killSession } = {}) {
+  if (!session?.isBillion && !poster) return { error: 'Only Billion can close cards.', forbidden: true };
   const job = allJobs().find(j => j.id === id);
-  if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.` };
-  if (!job.postedByBillion) return { error: `"${job.title}" was not posted by you, so it is not yours to close. Ask the owner.` };
+  if (!job) return { error: `No card with id "${id}". list_jobs shows the ids.`, notFound: true };
+  const mine = (session?.isBillion && job.postedByBillion) || (poster && job.postedById === poster);
+  if (!mine) return { error: `"${job.title}" was not posted by you, so it is not yours to close. Ask the owner.`, forbidden: true };
+  const closer = session?.isBillion && job.postedByBillion ? BILLION_NAME : (by || 'its poster');
   const reason = typeof note === 'string' ? note.trim() : '';
   if (job.state === 'todo') {
     if (!accept) return { error: 'A To do card has nothing to send back; close it (accept: true) to archive it.' };
     if (!reason) return { error: 'Say why it is dropped (note): it is the reason the archive keeps.' };
-    const result = archiveJob(job.id, { reason, by: BILLION_NAME }, broadcast);
+    const result = archiveJob(job.id, { reason, by: closer }, broadcast);
     return result.error ? result : { job: jobSummary(result.job), archived: true };
   }
   if (job.state !== 'review') {
@@ -862,7 +878,7 @@ export async function closeJobForAgent({ session, id, accept, note }, broadcast,
   const oldDetail = job.detail;
   // The note always fits: it is the old detail that gives way.
   // Capped well short of the card's limit, so the task itself always survives.
-  const sentBack = `Sent back by ${BILLION_NAME}: ${reason}`.slice(0, SENT_BACK_CHARS);
+  const sentBack = `Sent back by ${closer}: ${reason}`.slice(0, SENT_BACK_CHARS);
   const room = MAX_DETAIL_LEN - sentBack.length - 2;
   job.detail = job.detail && room > 0 ? `${job.detail.slice(0, room)}\n\n${sentBack}` : sentBack;
   const result = await moveJob(job.id, 'todo', broadcast, { killSession });

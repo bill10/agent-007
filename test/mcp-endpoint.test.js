@@ -16,18 +16,20 @@ process.env.AGENT007_USERS_PATH = USERS;
 
 const { config, sessions } = await import('../server/state.js');
 const { setupRoutes } = await import('../server/http.js');
-const { allJobs, boardSettings, updateSettings } = await import('../server/jobs.js');
+const { allJobs, boardSettings, updateSettings, closeJobForAgent } = await import('../server/jobs.js');
 const { mintAgentToken, hashToken } = await import('../server/auth.js');
 const { dropMessages } = await import('../server/messages.js');
 
 const AGENT_TOKEN = mintAgentToken();
 const broadcasts = [];
+const killed = [];
 let baseUrl;
 
 const server = createServer((() => {
   const app = express();
   setupRoutes(app, mkdtempSync(join(tmpdir(), 'a007-static-')), {
     broadcast: (msg) => broadcasts.push(msg),
+    killSession: async (id) => { killed.push(id); },
   });
   return app;
 })());
@@ -736,5 +738,167 @@ describe('notify_owner through the route', () => {
     sessions.get('session-1').isBillion = true;
     await callNamed('notify_owner', { text: 'Ship it?', project: 'general', type: 'product' });
     expect(waitingItems().at(-1)).toMatchObject({ text: 'Ship it?', project: 'general', type: 'product' });
+  });
+});
+
+describe('a card\'s poster over HTTP: read, close, message', () => {
+  const OTHER_TOKEN = mintAgentToken();
+  const call = (method, path, body, token) => fetch(`${baseUrl}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const postCard = async (token = AGENT_TOKEN, fields = {}) => {
+    const res = await call('POST', '/api/jobs', { title: 'Render order 42', repo: REPO, requires_pr: false, ...fields }, token);
+    expect(res.status).toBe(201);
+    const { job } = await res.json();
+    return allJobs().find(j => j.id === job.id);
+  };
+  const worker = (fields = {}) => ({
+    id: 'w1', name: 'Viper', command: 'codex', agent: 'codex', state: 'WAITING', stateChangedAt: 0, isTUI: true,
+    lastOutputAt: 0, recentStrippedLines: [], ownerId: null, exited: false, pty: { write: vi.fn() }, ...fields,
+  });
+  const working = (job, state = 'review') => {
+    Object.assign(job, { state, agentSessionId: 'w1', agentName: 'Viper', branchName: 'board/x', resultSummary: 'done' });
+    const w = worker();
+    sessions.set('w1', w);
+    return w;
+  };
+
+  beforeEach(() => {
+    killed.length = 0;
+    dropMessages('w1');
+    sessions.set('session-2', { id: 'session-2', name: 'Mamba', repoPath: REPO, ownerId: null, exited: false, agentToken: OTHER_TOKEN });
+  });
+
+  it('records the poster on the card, from the credential that posted it', async () => {
+    const job = await postCard();
+    expect(job.postedById).toBe('agent:session-1');
+    const userToken = withUser();
+    expect((await postCard(userToken, { title: 'by a person' })).postedById).toBe('user:u1');
+    noUsers();
+    expect((await postCard(null, { title: 'anon' })).postedById).toBe('anonymous');
+    // MCP post_job stamps the same key as the HTTP door.
+    await callTool({ title: 'via mcp' });
+    expect(allJobs().find(j => j.title === 'via mcp').postedById).toBe('agent:session-1');
+  });
+
+  it('lets the poster accept a Review card: Done, worker retired', async () => {
+    const job = await postCard();
+    working(job);
+    const res = await call('POST', `/api/jobs/${job.id}/close`, { accept: true }, AGENT_TOKEN);
+    expect(res.status).toBe(200);
+    expect((await res.json()).accepted).toBe(true);
+    expect(job.state).toBe('done');
+    expect(killed).toEqual(['w1']);
+  });
+
+  it('lets the poster send a Review card back with its note', async () => {
+    const job = await postCard();
+    working(job);
+    const res = await call('POST', `/api/jobs/${job.id}/close`, { accept: false, note: 'Shorter intro.' }, AGENT_TOKEN);
+    expect(res.status).toBe(200);
+    expect(job.state).toBe('todo');
+    expect(job.detail).toContain('Sent back by Onyx: Shorter intro.');
+  });
+
+  it('archives a To do card on accept, and answers bad input with 400', async () => {
+    const job = await postCard();
+    expect((await call('POST', `/api/jobs/${job.id}/close`, {}, AGENT_TOKEN)).status).toBe(400);
+    expect((await call('POST', `/api/jobs/${job.id}/close`, { accept: true }, AGENT_TOKEN)).status).toBe(400);   // no note
+    const res = await call('POST', `/api/jobs/${job.id}/close`, { accept: true, note: 'Order cancelled.' }, AGENT_TOKEN);
+    expect(res.status).toBe(200);
+    expect((await res.json()).archived).toBe(true);
+    expect(job.state).toBe('done');
+    expect((await call('POST', '/api/jobs/nope/close', { accept: true }, AGENT_TOKEN)).status).toBe(404);
+  });
+
+  it('refuses every route to a session that did not post the card, with 403', async () => {
+    const job = await postCard();
+    const w = working(job);
+    for (const [method, path, body] of [
+      ['GET', `/api/jobs/${job.id}`],
+      ['POST', `/api/jobs/${job.id}/close`, { accept: true }],
+      ['POST', `/api/jobs/${job.id}/message`, { message: 'rm -rf' }],
+    ]) {
+      const res = await call(method, path, body, OTHER_TOKEN);
+      expect(res.status, `${method} ${path}`).toBe(403);
+    }
+    // Nor a card the UI posted, from an anonymous caller on an auth-off board.
+    job.postedById = null;
+    expect((await call('POST', `/api/jobs/${job.id}/close`, { accept: true })).status).toBe(403);
+    expect(job.state).toBe('review');
+    expect(w.pty.write).not.toHaveBeenCalled();
+  });
+
+  it('keeps the poster across a restart: the id is on the persisted card', async () => {
+    const job = await postCard(null);
+    working(job);
+    // As a restart reloads it: the stored card, a new object.
+    config.jobs = JSON.parse(JSON.stringify(config.jobs));
+    const reloaded = allJobs().find(j => j.id === job.id);
+    expect(reloaded.postedById).toBe('anonymous');
+    const res = await call('POST', `/api/jobs/${job.id}/close`, { accept: true });
+    expect(res.status).toBe(200);
+    expect(reloaded.state).toBe('done');
+  });
+
+  it('types a message into the card\'s worker, marked as from the poster', async () => {
+    const job = await postCard();
+    const w = working(job, 'in-progress');
+    const res = await call('POST', `/api/jobs/${job.id}/message`, { message: 'Make the logo bigger.' }, AGENT_TOKEN);
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.id).toMatch(/^msg-/);
+    expect(body).not.toHaveProperty('to');
+    const typed = () => w.pty.write.mock.calls.map(c => c[0]).join('');
+    expect(typed()).toContain('[Message from Onyx, who posted your card]');
+    await vi.waitFor(() => expect(typed()).toContain('> Make the logo bigger.'));
+  });
+
+  it('queues a message while the worker is busy, and caps its length', async () => {
+    const job = await postCard();
+    const w = working(job);
+    w.state = 'WORKING';
+    const res = await call('POST', `/api/jobs/${job.id}/message`, { message: 'Again, please.' }, AGENT_TOKEN);
+    expect(res.status).toBe(202);
+    expect((await res.json()).queued).toBe(1);
+    expect(w.pty.write).not.toHaveBeenCalled();
+    const long = await call('POST', `/api/jobs/${job.id}/message`, { message: 'x'.repeat(9000) }, AGENT_TOKEN);
+    expect(long.status).toBe(400);
+  });
+
+  it('answers 409 with the state when the card has no live worker', async () => {
+    const job = await postCard();
+    let res = await call('POST', `/api/jobs/${job.id}/message`, { message: 'hi' }, AGENT_TOKEN);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'no live worker', state: 'todo' });
+    working(job).exited = true;
+    res = await call('POST', `/api/jobs/${job.id}/message`, { message: 'hi' }, AGENT_TOKEN);
+    expect(res.status).toBe(409);
+    expect((await res.json()).state).toBe('review');
+  });
+
+  it('reads the card back for its poster, with whether a worker is alive', async () => {
+    const job = await postCard();
+    let body = await (await call('GET', `/api/jobs/${job.id}`, null, AGENT_TOKEN)).json();
+    expect(body.job.state).toBe('todo');
+    expect(body.workerAlive).toBe(false);
+    working(job);
+    body = await (await call('GET', `/api/jobs/${job.id}`, null, AGENT_TOKEN)).json();
+    expect(body.workerAlive).toBe(true);
+    expect(body.job.resultSummary).toBe('done');
+  });
+
+  it('leaves Billion\'s rights as they were', async () => {
+    const billion = { id: 'b1', name: 'Billion', isBillion: true };
+    const job = await postCard();
+    working(job);
+    // Not its card: refused, even though Billion may close its own.
+    expect((await closeJobForAgent({ session: billion, id: job.id, accept: true }, () => {})).forbidden).toBe(true);
+    job.postedByBillion = true;
+    expect((await closeJobForAgent({ session: billion, id: job.id, accept: true }, () => {}, { killSession: async () => {} })).accepted).toBe(true);
+    // And the MCP door still refuses any other agent outright.
+    expect((await closeJobForAgent({ session: { id: 'session-1' }, id: job.id, accept: true })).error).toMatch(/Only Billion/);
   });
 });
