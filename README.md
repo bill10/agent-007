@@ -117,7 +117,7 @@ Uncomment what you want, then restart. The ones people change:
 
 | Setting | What it does |
 |---------|--------------|
-| `BILLION=0` | Turns off Billion, the always-on agent |
+| `BILLION=0` | Turns off Billion, the always-on agent. The Billion tab and the phone's Billion button go too, and the page opens on the Jobs board |
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Billion's questions and replies reach your phone as well as the Billion tab, and you answer from either, with a tap when it is a pick ([setup](docs/BILLION.md#telegram)) |
 | `HOST=0.0.0.0` + `ALLOWED_ORIGINS=<tailnet name>` | Reach it from your phone or another machine (behind Tailscale only, see [docs/REMOTE.md](docs/REMOTE.md)) |
 | `CLAUDE_PERMISSION_MODE` | Mode Claude Code agents start in, e.g. `bypassPermissions` |

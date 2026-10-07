@@ -1,5 +1,5 @@
 // Main init + message routing
-import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, setWaitingItems, waitingActive, setChatMessages, setRoundInfo, setBillionStatus } from './modules/state.js';
+import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEnabled, billionOff, setWaitingItems, waitingActive, setChatMessages, setRoundInfo, setBillionStatus } from './modules/state.js';
 import { renderRound, renderBillionStatus, handleRoundError } from './modules/round.js';
 import { connect, send } from './modules/ws.js';
 import {
@@ -22,7 +22,7 @@ import {
 import { setupShortcuts } from './modules/shortcuts.js';
 import { setupSettings, renderTelegramSettings } from './modules/settings.js';
 import { setupVoice, stopVoice } from './modules/voice.js';
-import { setupJobBoard, handleJobsList, renderBoard, closeJobForm } from './modules/jobs.js';
+import { setupJobBoard, handleJobsList, renderBoard, closeJobForm, showJobBoard } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
 import { talkHeardAll, talkStatus } from './modules/talk.js';
 import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice, setQuestionsOpen, setTelegramState } from './modules/waiting.js';
@@ -493,6 +493,9 @@ function onMessage(msg) {
     case 'welcome':
       setSelf(msg.user ? msg.user.id : null, msg.authEnabled, msg.platform);
       setBillionEnabled(msg.billionEnabled);
+      document.body.classList.toggle('no-billion', billionOff());
+      // The page opened on the chat before this arrived; without Billion it opens on Jobs.
+      if (billionOff() && waitingActive) { showJobBoard(); updateTabs(); }
       refreshSpawnPresets();
       renderAccount();
       break;

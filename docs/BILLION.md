@@ -1207,7 +1207,7 @@ anywhere but Telegram, and there is no paid transcription.
 
 ## Order of building
 
-1. **Billion itself — built.** `server/billion.js` (on/off via `BILLION`,
+1. **Billion itself — built.** `server/billion.js` (on/off via `BILLION`; off, the web app draws no Billion tab or phone button and opens on Jobs,
    folder via `BILLION_DIR`, first-run repo from `templates/billion/`,
    command with first-run or resume prompt, projects-folder suggestion),
    started from `server.js` `startup()`; name reserved; rename refused;

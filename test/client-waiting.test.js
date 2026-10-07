@@ -324,7 +324,7 @@ describe('the text box', () => {
     setBillionNotice('b', null);
     expect(bar().hidden).toBe(true);
     agents.delete('b');
-    setBillionEnabled(false);
+    setBillionEnabled(undefined);
   });
 
   it('hides the empty thread line while a notice says Billion cannot hear', () => {
