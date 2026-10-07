@@ -306,6 +306,25 @@ distinct color and shows up in the presence indicator.
 > once auth is on anyone can still control them. Spawn agents after enabling auth
 > (or restart them) if you want them owned.
 
+### Job board HTTP API
+
+A script that cannot run an MCP client (a poller, a cron job) posts and follows
+cards over plain HTTP. Send a user token as `Authorization: Bearer <token>`, or
+nothing on a board with no users. Every route but the first answers only the
+caller that posted the card (403 for anyone else, 404 for an unknown id). With
+no users, every tokenless caller counts as the same poster.
+
+| Route | Body | Does |
+|---|---|---|
+| `POST /api/jobs` | `{title, detail, repo, agent, model, requires_pr, schedule, run_at}` | Posts a card, returns `{job, dispatcherRunning}` (201) |
+| `GET /api/jobs/:id` | | `{job, workerAlive}`: the card's state, result summary, and whether its worker terminal is still running |
+| `POST /api/jobs/:id/close` | `{accept, note}` | `accept: true` on a Review card files it as Done, retiring its worker and releasing its worktree (a card with a PR is filed by merging it). `accept: false` sends it back to To do with `note` added to its detail. On a To do card, `accept: true` with a `note` archives it |
+| `POST /api/jobs/:id/message` | `{message}` | Types `message` into the card's worker (In progress or Review), queued until it rests at its prompt. 8000 characters at most, 10 per 10 minutes. Returns `{queued, delivered, id}` (202), or 409 `{error: "no live worker", state}` so the caller can post a new card instead |
+
+The poster is recorded with the card, so it survives a restart for a user token
+or a tokenless caller. An agent session's token dies with its terminal, and so
+does its hold on the cards it posted.
+
 ## Requirements
 
 - Node.js 20.12+

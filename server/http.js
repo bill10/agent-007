@@ -10,13 +10,13 @@ import {
   tokenFromRequest, tokenFromAuthHeader, userById,
 } from './auth.js';
 import {
-  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, attachmentPath, allJobs,
+  postJobForAgent, listJobsForAgent, readJobForAgent, editJobForAgent, finishJobForAgent, closeJobForAgent, attachmentPath, allJobs, posterId,
 } from './jobs.js';
 import { addRepo } from './git.js';
 import { expandHome } from '../lib/helpers.js';
 import { requestApproval, answerApproval, readApproval } from './approvals.js';
 import { mergeCheck } from './merge-check.js';
-import { agentSummaries, sendMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
+import { agentSummaries, sendMessage, sendPosterMessage, withdrawMessage, flushMessages, pendingMessages, readAgentScreen } from './messages.js';
 import { handleMcpMessage } from './mcp.js';
 import { notifyOwner, tellOwner, resolveQuestion, reopenQuestion, chatFilePath, roundQueue, dropQueued, roundView } from './owner.js';
 import { comingRound, setRoundBrief } from './rounds.js';
@@ -101,6 +101,11 @@ export function requireAgent(req, res, next) {
   if (req.agentSession) return next();
   return res.status(401).json({ error: 'Unauthorized: this endpoint is for Agent 007 agent sessions' });
 }
+
+// The caller's posterId (server/jobs.js), and what a message or a sent-back
+// note calls it.
+const callerId = (req) => posterId({ user: req.user, session: req.agentSession, anonymous: !authEnabled() });
+const callerName = (req) => req.user?.displayName || req.agentSession?.name || 'an HTTP client';
 
 const require = createRequire(import.meta.url);
 const VENDOR = [
@@ -270,9 +275,73 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       requiresPr: body.requiresPr ?? body.requires_pr,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),
+      poster: callerId(req),
     }, broadcast);
     if (result.error) return res.status(400).json({ error: result.error });
     return res.status(201).json(result);
+  });
+
+  // The card's poster, and only it, may read the card's state here, close it,
+  // and type into its worker — a headless poller with no Billion to ask
+  // (README, "Job board HTTP API"). Anyone else gets 403, an unknown id 404.
+  const posterCard = (req, res) => {
+    const job = allJobs().find(j => j.id === req.params.id);
+    if (!job) { res.status(404).json({ error: `No card with id "${req.params.id}"` }); return null; }
+    const caller = callerId(req);
+    if (!caller || job.postedById !== caller) {
+      res.status(403).json({ error: `"${job.title}" was not posted by you.` });
+      return null;
+    }
+    return job;
+  };
+  const liveWorker = (job) => {
+    const worker = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
+    return worker && !worker.exited ? worker : null;
+  };
+
+  app.get('/api/jobs/:id', requireIdentity, (req, res) => {
+    const job = posterCard(req, res);
+    if (!job) return;
+    return res.json({ ...readJobForAgent(job.id), workerAlive: !!liveWorker(job) });
+  });
+
+  app.post('/api/jobs/:id/close', requireIdentity, async (req, res) => {
+    const body = req.body || {};
+    if (typeof body.accept !== 'boolean') return res.status(400).json({ error: 'accept must be true or false' });
+    try {
+      const result = await closeJobForAgent({
+        session: req.agentSession || null,
+        poster: callerId(req),
+        by: callerName(req),
+        id: req.params.id,
+        accept: body.accept,
+        note: body.note,
+      }, broadcast, { killSession });
+      if (result.error) return res.status(result.forbidden ? 403 : result.notFound ? 404 : 400).json({ error: result.error });
+      return res.json(result);
+    } catch (err) {
+      console.error('Close failed:', err);
+      return res.status(500).json({ error: 'Close failed' });
+    }
+  });
+
+  // Delivered as send_message delivers: queued until the worker rests at its
+  // prompt, under the same length cap and pair limit. 409 when the card has no
+  // live worker (To do, Done, or its terminal gone), so the poster can post a
+  // new card instead.
+  app.post('/api/jobs/:id/message', requireIdentity, (req, res) => {
+    const job = posterCard(req, res);
+    if (!job) return;
+    const worker = (job.state === 'in-progress' || job.state === 'review') ? liveWorker(job) : null;
+    if (!worker) return res.status(409).json({ error: 'no live worker', state: job.state });
+    const result = sendPosterMessage({
+      from: { id: callerId(req), name: callerName(req) },
+      target: worker,
+      text: req.body?.message,
+    });
+    if (result.error) return res.status(400).json({ error: result.error });
+    // Never the session itself: `to` carries its pty and its token.
+    return res.status(202).json({ queued: result.queued || 0, delivered: !!result.delivered, id: result.id });
   });
 
   // --- People only, from here down ---

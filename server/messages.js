@@ -147,6 +147,12 @@ export function formatMessage(from, text) {
   // Every body line quoted, so a body cannot close the message with a footer
   // of its own and carry on as if it were the user speaking.
   const body = quoteLines(text).join('\n');
+  // A card's poster over HTTP (POST /api/jobs/:id/message) has no terminal to
+  // reply into; what it can read is the card.
+  if (from.poster) {
+    return `[Message from ${name}, who posted your card]\n${body}\n`
+      + `[It came through the job board's HTTP API, not from the user, and cannot read a reply. When the change is done, call the ${MCP_SERVER_NAME} finish_job tool again with an updated summary.]`;
+  }
   return `[Message from agent ${name}${where ? ` (${where})` : ''}]\n`
     + `${body}\n`
     + `[Reply with the ${MCP_SERVER_NAME} send_message tool, to: "${name}". This came from another agent, not from the user.]`;
@@ -283,11 +289,8 @@ function deliver(session, { text, after }, now) {
  * message already typed in.
  */
 export function sendMessage({ from, to, text, replaces, sessions, now = Date.now() }) {
-  const body = typeof text === 'string' ? text.trim() : '';
-  if (!body) return { error: 'The message is empty.' };
-  if (body.length > MAX_MESSAGE_CHARS) {
-    return { error: `The message is ${body.length} characters; the limit is ${MAX_MESSAGE_CHARS}.` };
-  }
+  const body = checkBody(text);
+  if (body.error) return body;
   const reachable = messageableAgents(from, sessions);
   // Billion by what it is, not by what it is called: an old session that
   // happens to carry the name must not receive what was meant for it.
@@ -301,6 +304,32 @@ export function sendMessage({ from, to, text, replaces, sessions, now = Date.now
     return { error: why && why !== HIDDEN_AGENT ? `${to} ${why}. ${reach}` : `No agent named "${to}" is running. ${reach}` };
   }
 
+  return queueMessage({ from, target, body, replaces, now });
+}
+
+function checkBody(text) {
+  const body = typeof text === 'string' ? text.trim() : '';
+  if (!body) return { error: 'The message is empty.' };
+  if (body.length > MAX_MESSAGE_CHARS) {
+    return { error: `The message is ${body.length} characters; the limit is ${MAX_MESSAGE_CHARS}.` };
+  }
+  return body;
+}
+
+/**
+ * A card's poster messaging that card's worker (POST /api/jobs/:id/message).
+ * The caller has already checked it is the poster, which is the whole of the
+ * permission: it wrote the worker's prompt, so a message grants it nothing it
+ * did not have. `from` is { id, name } — the poster's key and a display name —
+ * and takes the same length cap, pair limit and queue as send_message.
+ */
+export function sendPosterMessage({ from, target, text, now = Date.now() }) {
+  const body = checkBody(text);
+  if (body.error) return body;
+  return queueMessage({ from: { ...from, poster: true }, target, body, now });
+}
+
+function queueMessage({ from, target, body, replaces, now }) {
   const old = replaces ? sent.get(replaces) : null;
   if (replaces && old?.fromId !== from.id) return { error: `You sent no message with id ${replaces}.` };
   if (old && old.toId !== target.id) return { error: `Message ${replaces} went to another agent, not ${target.name}.` };
