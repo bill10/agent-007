@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.58.0.0] - 2026-10-07
+
+### Added
+
+- **A "Check for updates" button in Settings.** It asks the npm registry right now instead of waiting out the 10-minute cache, then says "Up to date" or offers Update. A failed check says so and keeps the button.
+
 ## [0.57.0.0] - 2026-10-07
 
 ### Added
