@@ -138,6 +138,28 @@ describe('/api/browse', () => {
 
 // --- Job attachments ---
 
+describe('POST /api/jobs auto_done', () => {
+  it('takes both spellings', async () => {
+    const repoPath = mkdtempSync(join(tmpdir(), 'a007-autodone-'));
+    const savedRepos = config.repos;
+    config.repos = [...config.repos, { path: repoPath }];
+    try {
+      for (const body of [{ autoDone: true }, { auto_done: true }]) {
+        const res = await fetch(`${baseUrl}/api/jobs`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Render', repo: repoPath, requires_pr: false, ...body }),
+        });
+        expect(res.status).toBe(201);
+        const { job } = await res.json();
+        expect(allJobs().find(j => j.id === job.id).autoDone).toBe(true);
+        await deleteJob(job.id, () => {});
+      }
+    } finally {
+      config.repos = savedRepos;
+    }
+  });
+});
+
 describe('/api/jobs/:id/attachments/:name', () => {
   let job;
   beforeAll(() => {

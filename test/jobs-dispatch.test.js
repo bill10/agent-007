@@ -1751,6 +1751,28 @@ describe('finishJobForAgent', () => {
     expect(job.agentSessionId).toBe(session.id);
   });
 
+  it('files an auto_done no-PR card straight as Done, retiring its agent and worktree', async () => {
+    const { job, session } = await running({ requiresPr: false, autoDone: true });
+    const killed = [];
+    const killSession = async (id) => { killed.push(id); sessions.delete(id); };
+    const result = await finishJobForAgent({ session, summary: 'Rendered video 42.' }, noopBroadcast, { killSession });
+    expect(result.error).toBeUndefined();
+    expect(result.done).toBe(true);
+    expect(job.state).toBe('done');
+    expect(job.doneAt).toBeTruthy();
+    expect(job.resultSummary).toBe('Rendered video 42.');
+    expect(killed).toEqual([session.id]);
+    expect(job.agentSessionId).toBeNull();
+  });
+
+  it('refuses auto_done on a PR card and on a schedule', () => {
+    expect(postJobForAgent({ title: 'x', repo: REPO, autoDone: true }, noopBroadcast).error).toMatch(/requires_pr: false/);
+    expect(postJobForAgent({ title: 'x', repo: REPO, requiresPr: true, autoDone: true }, noopBroadcast).error).toMatch(/requires_pr: false/);
+    expect(postJobForAgent({ title: 'x', repo: REPO, schedule: '@daily', requiresPr: false, autoDone: true }, noopBroadcast).error).toMatch(/schedule/);
+    expect(postJobForAgent({ title: 'x', repo: REPO, requiresPr: false, autoDone: 'yes' }, noopBroadcast).error).toMatch(/auto_done must be/);
+    expect(allJobs()).toHaveLength(0);
+  });
+
   it('only lets the linked agent finish its own card', async () => {
     const { job } = await running({ requiresPr: false });
     const stranger = { id: 'session-other', name: 'Stranger' };
@@ -1767,6 +1789,7 @@ describe('the one-time prompt', () => {
     const noPr = buildJobPrompt({ title: 't', requiresPr: false });
     expect(noPr).not.toContain('ship');
     expect(noPr).toMatch(/finish_job[\s\S]*summary/);
+    expect(buildJobPrompt({ title: 't', requiresPr: false, autoDone: true })).toMatch(/files this job as Done/);
   });
 });
 

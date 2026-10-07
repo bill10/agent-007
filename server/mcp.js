@@ -123,6 +123,12 @@ export const POST_JOB_TOOL = {
           + 'research, an investigation, an ops chore — so the agent reports a '
           + 'summary instead of opening a PR.',
       },
+      auto_done: {
+        type: 'boolean',
+        description:
+          'Optional, only with requires_pr false on a one-time job: finish_job files the '
+          + 'card straight as Done instead of Review, for posters with nobody to accept it.',
+      },
     },
     required: ['title'],
     additionalProperties: false,
@@ -752,6 +758,7 @@ const CALLS = {
       agent: args.agent,
       model: args.model,
       requiresPr: args.requires_pr,
+      autoDone: args.auto_done,
       session: ctx.session || null,
     });
     if (result.error) return toolText(result.error, true);
@@ -871,7 +878,7 @@ const CALLS = {
   [FINISH_JOB_TOOL.name]: async (args, ctx) => {
     const result = await ctx.finishJob({ prUrl: args.pr_url, summary: args.summary });
     if (result.error) return toolText(result.error, true);
-    return toolText(`"${result.job.title}" is in Review. You are done — end your turn here.`);
+    return toolText(`"${result.job.title}" is in ${result.done ? 'Done' : 'Review'}. You are done — end your turn here.`);
   },
 
   [BILLION_READY_TOOL.name]: (args, ctx) => {

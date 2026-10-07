@@ -151,7 +151,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
           (jobId) => allJobs().find(job => job.id === jobId)?.title),
         sendMessage: ({ to, text, replaces }) => sendMessage({ from: req.agentSession, to, text, replaces, sessions }),
         withdrawMessage: (id) => withdrawMessage({ from: req.agentSession, id, sessions }),
-        finishJob: (fields) => finishJobForAgent({ ...fields, session: req.agentSession }, broadcast),
+        finishJob: (fields) => finishJobForAgent({ ...fields, session: req.agentSession }, broadcast, { killSession }),
         // Billion's own tools: toolsFor() lists them only for its session, and
         // each checks again here.
         addRepo: async (path) => {
@@ -268,6 +268,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       agent: body.agent,
       model: body.model,
       requiresPr: body.requiresPr ?? body.requires_pr,
+      autoDone: body.autoDone ?? body.auto_done,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),
     }, broadcast);

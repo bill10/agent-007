@@ -607,7 +607,7 @@ function renderCard(job) {
       ? `merged ${relativeTime(job.prMergedAt)}`
       : job.prClosedAt
         ? `PR closed without merging ${relativeTime(job.prClosedAt)}`
-        : `finished ${relativeTime(job.doneAt)}`;
+        : `finished ${relativeTime(job.doneAt)}${job.autoDone ? ' (auto)' : ''}`;
     put('notes', fin);
   }
 

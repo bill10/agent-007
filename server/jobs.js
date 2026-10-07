@@ -327,8 +327,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion });
+export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, requiresPr, autoDone, postedBy, postedByName, postedByAgent, postedByBillion, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, availableModels: availableModels(), requiresPr, autoDone, postedBy, postedByName, postedByAgent, postedByBillion });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -432,7 +432,7 @@ function onceFields({ schedule, once, runAt }) {
   return { schedule: '', runAt: next };
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, requiresPr, session, user }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, requiresPr, autoDone, session, user }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -479,6 +479,7 @@ export function postJobForAgent({ title, detail, repo, schedule, once, runAt, ty
     // as one token by buildJobCommand.
     model,
     requiresPr,
+    autoDone,
     // No permissionMode: an agent posting a card must not be able to pick the
     // mode the board will spawn with, which would be a way around every gate
     // its own session runs under. A card an agent files inherits the board's.
@@ -527,6 +528,7 @@ function jobSummary(job) {
     agent: jobAgent(job),
     model: job.model || null,
     requiresPr: jobRequiresPr(job),
+    autoDone: job.autoDone === true,
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
     runAt: job.runAt || null,
@@ -718,7 +720,7 @@ export function editJobForAgent({ id, title, detail, repo, schedule, once, runAt
 // card's own branch: the link lands on the card, so a made-up or unrelated URL
 // would send the reviewer to the wrong place. A card that requires none must
 // carry a summary, since that is the whole of what Review has to show.
-export async function finishJobForAgent({ session, summary, prUrl }, broadcast, { findPr = findPrForBranch } = {}) {
+export async function finishJobForAgent({ session, summary, prUrl }, broadcast, { findPr = findPrForBranch, killSession } = {}) {
   const job = session ? allJobs().find(j => j.agentSessionId === session.id) : null;
   if (!job) return { error: 'This agent is not working a job on the board, so there is nothing to finish.' };
   if (summary != null && typeof summary !== 'string') return { error: 'summary must be a string' };
@@ -793,6 +795,16 @@ export async function finishJobForAgent({ session, summary, prUrl }, broadcast, 
   clearPrCheckError(job);
   persist(broadcast);
   requestDispatch();
+  // auto_done: nobody is there to accept it, so it takes close_job's accept
+  // path straight on — Done, agent retired, worktree released. That retires
+  // this very caller, so its reply may never reach it; the card is the record.
+  if (job.autoDone && !requiresPr) {
+    if (broadcast) {
+      broadcast({ type: 'notification', level: 'info', message: `Job "${job.title}" is Done — ${session.name} finished` });
+    }
+    const result = await moveJob(job.id, 'done', broadcast, { killSession });
+    return result.error ? result : { job: jobSummary(job), done: true };
+  }
   if (broadcast) {
     broadcast({
       type: 'notification', level: 'info',
