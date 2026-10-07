@@ -11,10 +11,10 @@
 // is picked in Settings), and the box has its own
 // mic (voice.js with the CHAT_VOICE target), all in the browser and free.
 // "Talk to Billion" (talk.js) is a hands-free voice conversation over the same thread.
-import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionStatus } from './state.js';
+import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionOff, billionStatus } from './state.js';
 import { switchToSession } from './terminal.js';
 import { send } from './ws.js';
-import { hideJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
+import { hideJobBoard, showJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
 import { renderRound, renderBillionStatus, initSubTabs, subTab } from './round.js';
 import { patchChildren, rev, atBottom } from './dom-patch.js';
@@ -42,6 +42,7 @@ let attached = [];
 export const openCount = () => waitingItems.filter(item => item.status === 'open').length;
 
 export function showWaiting() {
+  if (billionOff()) return showJobBoard();
   hideJobBoard();
   const agent = activeSessionId ? agents.get(activeSessionId) : null;
   if (agent) agent.termEl.style.display = 'none';

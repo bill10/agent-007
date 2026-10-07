@@ -1,5 +1,5 @@
 // Terminal (xterm.js) lifecycle, tabs, session switching, file upload
-import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, waitingActive, jobs, billionFirst, billionTabOpen, setBillionTabOpen } from './state.js';
+import { agents, activeSessionId, setActiveSession, stateColor, canControlAgent, boardActive, waitingActive, jobs, billionFirst, billionTabOpen, setBillionTabOpen, billionOff } from './state.js';
 import { send } from './ws.js';
 import { escapeHtml, safeColor } from './auth.js';
 import { isGlobalShortcut } from './shortcuts.js';
@@ -464,7 +464,7 @@ export function updateTabs() {
   waitingTab.append(icon, document.createTextNode('Billion'));
   waitingTab.onclick = () => { showWaiting(); updateTabs(); };
   waitingTab.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); waitingTab.onclick(); } };
-  container.appendChild(waitingTab);
+  if (!billionOff()) container.appendChild(waitingTab);
   updateNavBadge(open);
   // Whether Billion is running shows in the text box.
   renderComposer();

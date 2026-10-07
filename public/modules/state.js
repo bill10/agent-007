@@ -26,7 +26,11 @@ export let serverPlatform = ''; // process.platform of the server, from the welc
 // Whether this server runs Billion (server/billion.js). The explorer keeps its
 // row pinned even while it is stopped, so there is always a way to start it.
 export let billionEnabled = false;
-export function setBillionEnabled(on) { billionEnabled = !!on; }
+export let billionKnown = false;   // the welcome message has said which
+// undefined (an older server's welcome, or a test's reset) leaves it unknown.
+export function setBillionEnabled(on) { billionEnabled = !!on; billionKnown = on !== undefined; }
+// Billion off: it has no tab, no phone button and no chat to open.
+export const billionOff = () => billionKnown && !billionEnabled;
 
 // Billion's notify_owner questions, open and answered, not dismissed
 // (server/owner.js), and the chat thread they sit in. The "Billion" tab shows
