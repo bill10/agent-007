@@ -16,25 +16,34 @@ import { VERSION } from './control.js';
 
 const BIN = fileURLToPath(new URL('../bin/agent-007.js', import.meta.url));
 const LATEST_MS = 10 * 60_000;
+const FRESH_MS = 10_000;
 
 export const updateLogPath = (env = process.env) => join(configDir(env), 'logs', 'update.log');
 
 let cached = null; // { at, latest }
+let freshAt = 0; // when a fresh=1 last asked the registry
 let run = null; // { pid, done, code } for the update this server started
 
-export function resetSelfUpdate() { cached = null; run = null; }
+export function resetSelfUpdate() { cached = null; freshAt = 0; run = null; }
 
 // The registry's latest, asked at most every 10 minutes.
-async function latest({ fetchLatest = npmLatest, now = Date.now() } = {}) {
+// fresh skips the cache, but not more than every 10 s; a failed ask (null) keeps what was cached.
+async function latest({ fetchLatest = npmLatest, now = Date.now(), fresh = false } = {}) {
+  if (fresh && now - freshAt >= FRESH_MS) {
+    freshAt = now;
+    const npm = await fetchLatest();
+    if (npm) cached = { at: now, latest: npm };
+    else return { failed: true, latest: cached?.latest ?? null };
+  }
   if (!cached || now - cached.at > LATEST_MS) cached = { at: now, latest: await fetchLatest() };
-  return cached.latest;
+  return { latest: cached.latest };
 }
 
 const tail = (file, n = 8) => {
   try { return readFileSync(file, 'utf8').trim().split('\n').slice(-n).join('\n'); } catch { return ''; }
 };
 
-export async function updateInfo({ kind = installKind(), version = VERSION, fetchLatest, env = process.env, workers = 0 } = {}) {
+export async function updateInfo({ kind = installKind(), version = VERSION, fetchLatest, env = process.env, workers = 0, fresh = false } = {}) {
   const info = { version, kind };
   if (run && !run.done) {
     // restart() logs "N workers are mid-run" while it waits for them (service.js waitForIdle).
@@ -43,7 +52,8 @@ export async function updateInfo({ kind = installKind(), version = VERSION, fetc
     info.finished = { code: run.code, log: tail(updateLogPath(env)) };
   }
   if (kind === 'npx') return info;
-  const npm = await latest({ fetchLatest });
+  const { latest: npm, failed } = await latest({ fetchLatest, fresh });
+  if (failed) info.checkFailed = true;
   if (npm && !versionAtLeast(toNpm(version), npm)) info.latest = fromNpm(npm);
   return info;
 }

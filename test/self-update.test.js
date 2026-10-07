@@ -30,6 +30,24 @@ describe('updateInfo', () => {
     expect((await updateInfo({ kind: 'npm', version: '0.53.5.0', fetchLatest: async () => null, env })).latest).toBeUndefined();
   });
 
+  it('fresh skips the cache, at most every 10 s, and keeps the cache when the registry fails', async () => {
+    let asked = 0, answer = '9.0.0';
+    const fetchLatest = async () => { asked++; return answer; };
+    await updateInfo({ kind: 'npm', version: '1.0.0.0', fetchLatest, env });
+    expect(asked).toBe(1);
+    expect((await updateInfo({ kind: 'npm', version: '1.0.0.0', fetchLatest, env, fresh: true })).latest).toBe('9.0.0.0');
+    expect(asked).toBe(2);
+    answer = '10.0.0';
+    expect((await updateInfo({ kind: 'npm', version: '1.0.0.0', fetchLatest, env, fresh: true })).latest).toBe('9.0.0.0');
+    expect(asked).toBe(2);
+    resetSelfUpdate();
+    await updateInfo({ kind: 'npm', version: '1.0.0.0', fetchLatest, env });
+    answer = null;
+    const failed = await updateInfo({ kind: 'npm', version: '1.0.0.0', fetchLatest, env, fresh: true });
+    expect(failed.checkFailed).toBe(true);
+    expect(failed.latest).toBe('10.0.0.0');
+  });
+
   it('asks the registry once per 10 minutes', async () => {
     let asked = 0;
     const fetchLatest = async () => { asked++; return '9.0.0'; };

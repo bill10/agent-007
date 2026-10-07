@@ -428,7 +428,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   // the server is the owner's call, as switching the Claude account is.
   const ownerOnly = (req, res, next) => (authEnabled() ? res.status(403).json({ error: 'Only the owner updates Agent 007, and with user accounts on nobody does.' }) : next());
   // accessEmail: who Cloudflare Access let in, for the panel to show (server/proxy.js).
-  app.get('/api/update', ownerOnly, async (req, res) => res.json({ ...await updateInfo({ workers: busyWorkers(sessions) }), accessEmail: accessEmail(req) }));
+  app.get('/api/update', ownerOnly, async (req, res) => res.json({ ...await updateInfo({ workers: busyWorkers(sessions), fresh: req.query.fresh === '1' }), accessEmail: accessEmail(req) }));
   app.post('/api/update', ownerOnly, (req, res) => {
     const result = startUpdate();
     res.status(result.error ? 409 : 202).json(result);

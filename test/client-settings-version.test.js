@@ -18,8 +18,25 @@ describe('Settings version line', () => {
     expect(text(renderVersion({ version: '1.0.0.0', kind: 'npm' })).textContent).not.toContain('Cloudflare');
   });
 
-  it('shows no button when current, or for npx', () => {
-    expect(text(renderVersion({ version: '1.0.0.0', kind: 'npm' })).querySelector('button')).toBeNull();
+  it('offers Check for updates, and says what it found', () => {
+    const cur = { version: '1.0.0.0', kind: 'npm' };
+    expect(text(renderVersion(cur)).querySelector('[data-update="check"]').textContent).toBe('Check for updates');
+    expect(text(renderVersion({ ...cur, latest: '2.0.0.0' })).querySelector('[data-update="check"]')).not.toBeNull();
+    const busy = text(renderVersion(cur, null, 'checking'));
+    expect(busy.textContent).toContain('Checking…');
+    expect(busy.querySelector('[data-update="check"]')).toBeNull();
+    expect(text(renderVersion(cur, null, 'checked')).textContent).toContain('Up to date (version 1.0.0.0)');
+    const newer = text(renderVersion({ ...cur, latest: '2.0.0.0' }, null, 'checked'));
+    expect(newer.textContent).toContain('Version 2.0.0.0 is available');
+    expect(newer.textContent).not.toContain('Up to date');
+    const failed = text(renderVersion({ ...cur, checkFailed: true }, null, 'checked'));
+    expect(failed.textContent).toContain('The check failed');
+    expect(failed.textContent).not.toContain('Up to date');
+    expect(failed.querySelector('[data-update="check"]')).not.toBeNull();
+    expect(text(renderVersion(cur, 'updating')).querySelector('button')).toBeNull();
+  });
+
+  it('shows no check button for npx', () => {
     const npx = text(renderVersion({ version: '1.0.0.0', kind: 'npx', latest: '2.0.0.0' }));
     expect(npx.textContent).toContain('npx runs the latest each start');
     expect(npx.querySelector('button')).toBeNull();
