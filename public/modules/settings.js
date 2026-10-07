@@ -97,9 +97,9 @@ export function renderVoiceSettings() {
 
 // The version line (GET /api/update, server/self-update.js) and where an
 // update started from it has got to. step: null, 'updating', 'restarting',
-// 'done' or 'failed'.
+// 'done' or 'failed'. check: null, 'checking' or 'checked' (the Check for updates button).
 const UPDATE_CMD = 'agent007 update';
-export function renderVersion(info, step = null) {
+export function renderVersion(info, step = null, check = null) {
   const lines = [`<div><span class="settings-version-name">Agent 007</span> ${escapeHtml(info.version)}</div>`];
   // Who Cloudflare Access let in (server/proxy.js): its header, not verified here.
   if (info.accessEmail) lines.push(`<div class="settings-dim">Signed in through Cloudflare Access as ${escapeHtml(info.accessEmail)}</div>`);
@@ -119,9 +119,17 @@ export function renderVersion(info, step = null) {
     lines.push(`<div>${escapeHtml(info.finished.log.split('\n').at(-1) || 'Up to date.')}</div>`);
   } else if (info.kind === 'npx') {
     lines.push('<div class="settings-dim">npx runs the latest each start.</div>');
-  } else if (info.latest) {
-    lines.push(`<div class="settings-version-new">Version ${escapeHtml(info.latest)} is available</div>`,
-      `<button type="button" class="settings-refresh" data-update="start" title="Runs ${UPDATE_CMD}: ${info.kind === 'checkout' ? 'git pull' : 'npm install -g'}, then a restart once busy workers finish">Update</button>`);
+  }
+  if (!step && info.kind !== 'npx') {
+    if (check === 'checked' && info.checkFailed) lines.push('<div class="settings-version-error">The check failed: could not reach the npm registry.</div>');
+    if (info.latest) {
+      lines.push(`<div class="settings-version-new">Version ${escapeHtml(info.latest)} is available</div>`,
+        `<button type="button" class="settings-refresh" data-update="start" title="Runs ${UPDATE_CMD}: ${info.kind === 'checkout' ? 'git pull' : 'npm install -g'}, then a restart once busy workers finish">Update</button>`);
+    } else if (check === 'checked') {
+      if (!info.checkFailed) lines.push(`<div>Up to date (version ${escapeHtml(info.version)})</div>`);
+    }
+    if (check === 'checking') lines.push('<div class="settings-dim">Checking…</div>');
+    else lines.push('<button type="button" class="settings-refresh" data-update="check">Check for updates</button>');
   }
   return lines.join('');
 }
@@ -167,9 +175,9 @@ export function setupSettings() {
   const box = document.getElementById('settings-version');
   let step = null;
   let polling = false;
-  async function loadVersion() {
+  async function loadVersion(fresh = false) {
     let resp;
-    try { resp = await fetch('/api/update', { headers: authHeaders() }); } catch { resp = null; }
+    try { resp = await fetch(fresh ? '/api/update?fresh=1' : '/api/update', { headers: authHeaders() }); } catch { resp = null; }
     if (resp?.status === 403) { box.hidden = true; return null; }
     if (!resp?.ok) return null;
     const info = await resp.json();
@@ -178,13 +186,23 @@ export function setupSettings() {
     return info;
   }
   const show = (info) => {
-    box.innerHTML = renderVersion(info, step);
+    box.innerHTML = renderVersion(info, step, check);
+    const chk = box.querySelector('[data-update="check"]');
+    if (chk) chk.onclick = checkNow;
     const start = box.querySelector('[data-update="start"]');
     if (start) start.onclick = update;
     const reload = box.querySelector('[data-update="reload"]');
     if (reload) reload.onclick = () => location.reload();
   };
   let last = null;
+  let check = null;
+  async function checkNow() {
+    check = 'checking';
+    show(last);
+    const info = await loadVersion(true);
+    check = 'checked';
+    show(last = info || { ...last, checkFailed: true });
+  }
   async function refreshVersion() {
     const info = await loadVersion();
     if (!info) return;
@@ -226,6 +244,7 @@ export function setupSettings() {
   btn.onclick = () => {
     if (panel.hidden && step !== 'updating' && step !== 'restarting') {
       if (step === 'failed') step = null;
+      check = null;
       refreshVersion();
     }
     open(panel.hidden);

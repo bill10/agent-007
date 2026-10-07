@@ -215,7 +215,7 @@ body {
 .settings-version-new { color: var(--accent); }
 .settings-version-error { color: var(--state-disconnected); white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
 .settings-version code { color: var(--text); overflow-wrap: anywhere; }
-.settings-version .settings-refresh { margin-top: 6px; }
+.settings-version .settings-refresh { margin: 6px 8px 0 0; }
 #settings-btn { position: relative; }
 #settings-btn.has-update::after {
   content: ''; position: absolute; top: -1px; right: -1px; width: 7px; height: 7px;
