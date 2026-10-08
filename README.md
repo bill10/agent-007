@@ -13,6 +13,7 @@ The operations layer for Claude Code and Codex: agents take work from a board, o
 
 - **A job board your agents work from.** Each card gets its own git worktree, a Claude Code or Codex worker and a real terminal you can type into, and ends as a pull request (or a summary, for work that isn't code).
 - **One manager agent, Billion.** Give it a goal: it posts the cards, reviews the diffs, merges the PRs, and brings you only what needs a person (money, access, security, anything irreversible) in a briefing twice a day.
+- **Agents that find the right skill.** Claude Code fits every installed skill's description into about 1% of its context window; past a hundred or so skills most show as a bare name and get missed. Agent 007 groups them into [skill families](#skill-families-every-agent-sees-a-short-index-and-a-card-picks-what-it-needs): its agents see one line per family, and each card lists in full the families its job needs.
 - **Talk to it from your phone.** Open it in your phone's browser over Tailscale (`agent007 install --remote`), tap Talk to Billion, and hear progress spoken back. One command installs it as a service; Settings has an Update button, with a What's new window listing the changes first.
 
 ### The Billion tab
@@ -154,6 +155,22 @@ branch off work in progress.
 
 The job board reuses that same machinery: a dispatched job is an ordinary agent, with a real terminal you can type into and take over at any point. Each job gets its own worktree and branch, so a job maps one-to-one onto a branch and a pull request. When the agent finishes it calls the board's `finish_job` tool (a card that requires a pull request hands over the PR it opened; one that does not hands over a summary), and the card moves to Review with the agent still running, so you can click straight into it to ask about the work. When the card reaches Done the board closes the agent and releases its worktree and local branch; the PR itself is untouched, and work that was never pushed is kept as an orphan rather than deleted. **Re-spawn** on an orphan picks that conversation back up with the CLI it ran, `codex resume <session-id>` (the newest Codex session recorded in that exact worktree) or `claude --continue`, under the permission mode its job card was dispatched with (a board agent whose card is already finished or deleted follows the board's current setting), or, for an agent you spawned by hand, under the permission flags you started it with. A board worker re-spawned after a restart is its card's worker again: it counts toward the cap, sends its approvals where the card says, is told once to carry on if its card is still In progress, and leaves like any other board worker when the card is filed. Workers on Billion's own cards still In progress come back by themselves after a restart, one every couple of seconds within the per-repo cap (`RESPAWN_BOARD_WORKERS=0` turns that off), and Billion can bring back an orphan on one of its cards with its `respawn_agent` tool. A card sent back to To do (from the board or by Billion) waits a minute before it is dispatched again, so its text can be edited first; **Dispatch now** on the card skips the wait. A Scheduled card is the same kind of card with a start time: it waits in To do showing its date and is dispatched when that time comes (**Run now** starts it early), one card from start to finish. When the PR merges the job is filed away as finished -- the record is kept, the card is not.
 
+### Skill families: every agent sees a short index, and a card picks what it needs
+
+Every Claude Code session lists every installed skill with its description, and Claude Code caps that listing at about 1% of the context window (`skillListingBudgetFraction`). With a hundred or more skills (gstack, a marketing pack, a video pack, your own) it goes over: most descriptions are cut, the agent sees bare names, and the skill that fits the job goes unused.
+
+For the Claude Code agents it starts, Agent 007 groups the installed skills into families and lists one line per family instead:
+
+- **Families are built for you.** At every spawn it reads `~/.claude/skills`: a skill installed with `npx skills` is grouped by the source recorded in `~/.agents/.skill-lock.json` (marketingskills is `marketing`, hyperframes is `hyperframes`), a gstack skill by gstack's folder, and the engineering ones (ship, review, investigate, qa, code-review, land-and-deploy, careful, guard, ...) are carved out into `engineering`. A skill that fits no family stays fully listed, and Billion gets a board notice so it can file it.
+- **One index skill per family.** `families:marketing` and the rest have a one-line description and a body that catalogs every member with a line on when to use it. Members are set to `name-only`: still invocable by name, full instructions loaded on use, just without their description in the listing.
+- **Cards name the families they need.** The card form's **Skills** field, `post_job`'s and `edit_job`'s `skills` and `POST /api/jobs`' `skills` take family names (`["hyperframes"]`); those stay fully listed for that card's worker. A card that ends in a pull request always gets `engineering`; an agent you start in a repo does too. Billion gets `marketing` plus the review skills.
+- **Nothing is locked.** Any agent can still run any skill by name.
+- **Your own sessions are untouched.** It all goes in per spawn (`--settings` with `skillOverrides`, and the family skills as a session-only `--plugin-dir`), never in `~/.claude/settings.json`, and no skill file is moved. A skill you set in your own `skillOverrides` keeps your setting.
+
+To change the grouping, write `~/.agent-007/skill-families.json` (Billion may edit it): `{"skills": {"my-skill": "data"}, "sources": {"owner/repo": "family"}, "summaries": {"data": "one line"}, "billion": ["marketing", "review"]}`. A skill or source mapped to `null` stays fully listed. Plugin skills from a marketplace are always listed in full: Claude Code applies no `skillOverrides` to them. Codex workers keep today's listing. `SKILL_FAMILIES=0` turns it all off.
+
+On the machine this was built on (189 skills, a 30,000-character budget), a no-PR worker's listing went from over budget (75,831 characters wanted, 99 descriptions shown) to 22,977 characters with nothing cut; a pull-request worker fits too.
+
 ```
 ┌─────────────┬──────────────┬────────────────────┐
 │  Explorer   │  Pixel       │  Jobs + Terminals   │
@@ -228,6 +245,7 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `TELEGRAM_VOICE` | `mirror` | Voice on Telegram: `mirror` answers in the mode of your last message, `always` speaks, `never` is text. Speaking needs macOS `say` and ffmpeg. See [Voice](docs/BILLION.md#voice) |
 | `WHISPER_MODEL` | *(none)* | Full path to a whisper.cpp ggml model (e.g. `ggml-base.en.bin`); with `whisper-cli` installed, your voice notes are transcribed locally for Billion |
 | `WHISPER_CPP_BIN` | *(on PATH)* | whisper.cpp's CLI, when `whisper-cli`/`whisper-cpp`/`main` is not on `PATH` |
+| `SKILL_FAMILIES` | *(on)* | `0` (or `false`/`off`/`no`) lists every skill in full for the Claude Code agents the app starts, as Claude Code does on its own. See [Skill families](#skill-families-every-agent-sees-a-short-index-and-a-card-picks-what-it-needs) |
 | `TRUST_BOARD_WORKTREES` | *(on)* | Board-dispatched Claude Code and Codex workers skip the workspace-trust dialog, so queued jobs start unattended. That also lets the repo's own `.claude/settings.json` (or Codex project config, hooks and exec policies) apply without asking. `0` (or `false`/`off`/`no`) keeps the dialog. Hand-started agents always keep it |
 
 > **Running remotely?** The server spawns real shells, so never expose it to the
@@ -316,7 +334,7 @@ no users, every tokenless caller counts as the same poster.
 
 | Route | Body | Does |
 |---|---|---|
-| `POST /api/jobs` | `{title, detail, repo, agent, model, requires_pr, schedule, run_at}` | Posts a card, returns `{job, dispatcherRunning}` (201) |
+| `POST /api/jobs` | `{title, detail, repo, agent, model, skills, requires_pr, schedule, run_at}` | Posts a card, returns `{job, dispatcherRunning}` (201) |
 | `GET /api/jobs/:id` | | `{job, workerAlive}`: the card's state, result summary, and whether its worker terminal is still running |
 | `POST /api/jobs/:id/close` | `{accept, note}` | `accept: true` on a Review card files it as Done, retiring its worker and releasing its worktree (a card with a PR is filed by merging it). `accept: false` sends it back to To do with `note` added to its detail. On a To do card, `accept: true` with a `note` archives it |
 | `POST /api/jobs/:id/message` | `{message}` | Types `message` into the card's worker (In progress or Review), queued until it rests at its prompt. 8000 characters at most, 10 per 10 minutes. Returns `{queued, delivered, id}` (202), or 409 `{error: "no live worker", state}` so the caller can post a new card instead |
