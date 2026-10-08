@@ -174,9 +174,10 @@ export async function handleSessionCreated(msg) {
     conflicts: [],
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,
-    // Local mirror of the server's lastOutputAt, maintained in handlePtyOutput.
-    // The job board uses it to tell "still working" from "parked at a prompt,
-    // probably waiting on a human" without any extra server traffic.
+    // Local mirror of the server's lastOutputAt, maintained in handlePtyOutput
+    // and, for a terminal not on screen, handlePtyActivity. The job board uses
+    // it to tell "still working" from "parked at a prompt, probably waiting on
+    // a human".
     lastOutputAt: Date.now(),
   });
 
@@ -211,8 +212,17 @@ export function handlePtyOutput(msg) {
   const agent = agents.get(msg.sessionId);
   if (!agent) return;
   const bytes = Uint8Array.from(atob(msg.data), c => c.charCodeAt(0));
-  agent.lastOutputAt = Date.now();
+  // A replay is the scrollback again from the top (switching to the tab), not
+  // new output: what the window held is cleared, and the agent is no busier.
+  if (msg.reset) agent.term.reset();
+  if (!msg.replay) agent.lastOutputAt = Date.now();
   agent.term.write(bytes);
+}
+
+// Output from a terminal this window is not showing, a few seconds late at most.
+export function handlePtyActivity(msg) {
+  const agent = agents.get(msg.sessionId);
+  if (agent) agent.lastOutputAt = Date.now();
 }
 
 // Tell the server how big this window could show the terminal. The pty takes

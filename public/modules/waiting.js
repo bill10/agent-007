@@ -13,7 +13,7 @@
 // "Talk to Billion" (talk.js) is a hands-free voice conversation over the same thread.
 import { agents, activeSessionId, waitingItems, chatMessages, waitingActive, setWaitingActive, setView, upsertChatMessage, billionEnabled, billionOff, billionStatus } from './state.js';
 import { switchToSession } from './terminal.js';
-import { send } from './ws.js';
+import { send, connected } from './ws.js';
 import { hideJobBoard, showJobBoard, attachmentName, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, MAX_ATTACHMENT_TOTAL_BYTES } from './jobs.js';
 import { stopVoice, toggleVoice, appendTranscript } from './voice.js';
 import { renderRound, renderBillionStatus, initSubTabs, subTab } from './round.js';
@@ -32,12 +32,50 @@ let sendError = '';
 let replyTo = null;         // the question the owner picked to answer with the box
 let undoTimer = null;
 let undoSoonest = Infinity;   // ms until the first Undo link on screen goes
-let nonces = 0;
 const SEND_TIMEOUT_MS = 20 * 1000;
+// The last message sent from the box that neither came back in the thread nor
+// was refused: { nonce, key }. Sent again unchanged, it goes with the same
+// nonce, which the server takes as the message already in (never a second).
+let unsettled = null;
 let lastShown = null;       // the newest message when the thread was last drawn
 // Files pasted, dropped or picked for the next message: { name, size, type,
 // data (base64, once read), reading, url (a thumbnail's object URL) }.
 let attached = [];
+
+// A reconnect reloads the page (ws.js). The box's text, its files and a send
+// still unsettled ride across it in sessionStorage, taken once at load.
+const DRAFT_KEY = 'agent007-chat-draft';
+const restored = (() => {
+  try {
+    const draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null');
+    sessionStorage.removeItem(DRAFT_KEY);
+    return draft && typeof draft === 'object' ? draft : null;
+  } catch { return null; }
+})();
+if (restored) {
+  unsettled = restored.unsettled || null;
+  for (const f of Array.isArray(restored.files) ? restored.files : []) {
+    if (typeof f?.name !== 'string' || typeof f.data !== 'string') continue;
+    const entry = { name: f.name, size: Number(f.size) || 0, type: String(f.type || ''), data: f.data };
+    try {
+      if (/^image\//.test(entry.type) && URL.createObjectURL) entry.url = URL.createObjectURL(new Blob([Uint8Array.from(atob(f.data), c => c.charCodeAt(0))], { type: entry.type }));
+    } catch {}
+    attached.push(entry);
+  }
+}
+globalThis.addEventListener?.('pagehide', saveDraft);
+function saveDraft() {
+  const input = document.getElementById('chat-input');
+  const text = input ? input.value : (restored?.text || '');
+  const files = attached.filter(a => a.data).map(({ name, size, type, data }) => ({ name, size, type, data }));
+  // Files can pass the storage quota; then the text goes alone.
+  for (const draft of text || files.length || unsettled ? [{ text, files, unsettled }, { text, unsettled }] : []) {
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); return; } catch {}
+  }
+  try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
+}
+const newNonce = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+const draftKey = (text) => [text, ...attached.map(a => `${a.name}:${a.size}`)].join('\0');
 
 export const openCount = () => waitingItems.filter(item => item.status === 'open').length;
 
@@ -232,38 +270,64 @@ function submit() {
     return renderComposer();
   }
   const target = answerTarget();
-  const nonce = `c${++nonces}`;
+  const key = draftKey(text);
+  const nonce = unsettled?.key === key ? unsettled.nonce : newNonce();
   const files = attached.length ? { files: attached.map(a => ({ name: a.name, type: a.type, data: a.data })) } : {};
   if (!send({ type: 'chat-send', nonce, text, ...(target ? { answers: target.id } : {}), ...files })) {
     sendError = 'Not connected to the server; try again in a moment.';
   } else {
     sending = nonce;
+    unsettled = { nonce, key };
     sendError = '';
-    // The socket dropped before the server answered: free the box, text kept.
-    setTimeout(() => {
-      if (sending !== nonce) return;
-      sending = null;
-      sendError = 'No answer from the server. Check the thread before sending again.';
-      renderComposer();
-    }, SEND_TIMEOUT_MS);
+    awaitAnswer(nonce);
   }
   renderComposer();
 }
 
+// A slow link is not a lost message: while the socket is up the box waits on,
+// for the late chat-sent or the message itself in the thread. Only a dropped
+// socket frees it, text kept; the reload after the reconnect checks the thread.
+function awaitAnswer(nonce) {
+  setTimeout(() => {
+    if (sending !== nonce) return;
+    if (connected()) return awaitAnswer(nonce);
+    sending = null;
+    sendError = 'Not sent: connection dropped.';
+    renderComposer();
+  }, SEND_TIMEOUT_MS);
+}
+
 // The server took the box's message, or said why not. The text leaves the box
-// only once it is in the thread, so a refusal never loses it.
+// only once it is in the thread, so a refusal never loses it. Late is fine.
 export function handleChatSent(msg) {
-  if (msg.nonce !== sending) return;
+  if (!unsettled || msg.nonce !== unsettled.nonce) return;
+  settle(msg.error || '');
+}
+
+function settle(error) {
   sending = null;
-  sendError = msg.error || '';
+  unsettled = null;
+  sendError = error;
   const input = document.getElementById('chat-input');
-  if (!msg.error && input) {
-    input.value = '';
-    fitInput(input);
+  if (!error) {
+    if (input) {
+      input.value = '';
+      fitInput(input);
+    }
     for (const a of attached) if (a.url) URL.revokeObjectURL(a.url);
     attached = [];
   }
   renderComposer();
+}
+
+// After a reload: was the send the connection dropped under in the thread?
+export function settleFromThread() {
+  if (!unsettled || sending) return;
+  if (chatMessages.some(m => m.utterance === `chat-${unsettled.nonce}`)) settle('');
+  else {
+    sendError = 'Not sent: connection dropped.';
+    renderComposer();
+  }
 }
 
 const sizeText = (n) => (n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
@@ -300,6 +364,7 @@ export function attachFiles(files, fallbackName) {
 // Tests only: a send left in flight and its files, gone.
 export function _resetComposer() {
   sending = null;
+  unsettled = null;
   sendError = '';
   for (const a of attached) if (a.url) URL.revokeObjectURL(a.url);
   attached = [];
@@ -578,6 +643,7 @@ onReadAloudChange(paintReadAloud);
 // when "Read new messages aloud" is on and the tab is showing.
 export function handleChatMessage(message) {
   const isNew = !chatMessages.some(m => m.id === message.id);
+  if (unsettled && message.utterance === `chat-${unsettled.nonce}`) settle('');
   upsertChatMessage(message);
   renderWaiting();
   talkHeard(message);
@@ -713,6 +779,7 @@ function shell() {
     input.rows = 1;
     input.setAttribute('aria-label', 'Message Billion');
     noAutofill(input);
+    if (restored?.text) input.value = restored.text;
     input.oninput = () => { fitInput(input); renderSlashHint(); };
     input.onkeydown = (e) => {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -771,6 +838,7 @@ function shell() {
     slash.hidden = true;
     form.append(tg, notice, target, chips, voice, talkBar(), row, slash, error);
     board.append(jump, form);
+    if (input.value) fitInput(input);
     board.addEventListener('paste', (e) => {
       const files = [...(e.clipboardData?.files || [])];
       if (!files.length) return;

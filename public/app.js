@@ -3,7 +3,7 @@ import { agents, repos, selfUserId, setSelf, shellPreset, setView, setBillionEna
 import { renderRound, renderBillionStatus, handleRoundError } from './modules/round.js';
 import { connect, send } from './modules/ws.js';
 import {
-  handleSessionCreated, handlePtyOutput, handlePtySize, handleStateChange,
+  handleSessionCreated, handlePtyOutput, handlePtyActivity, handlePtySize, handleStateChange,
   handleSpawnError, handleSessionEnded, switchToSession,
   removeSession, updateTabs, updateStatusBar, fitActiveTerminal,
   setOnSessionChanged, handleUploadComplete, setupUpload,
@@ -25,7 +25,7 @@ import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm, showJobBoard } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
 import { talkHeardAll, talkStatus } from './modules/talk.js';
-import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, showWaiting, leaveWaiting, leftChat, setBillionNotice, setQuestionsOpen, setTelegramState } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, settleFromThread, showWaiting, leaveWaiting, leftChat, setBillionNotice, setQuestionsOpen, setTelegramState } from './modules/waiting.js';
 import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
@@ -510,6 +510,7 @@ function onMessage(msg) {
       scheduleTabRestore();
       break;
     case 'pty-output': handlePtyOutput(msg); break;
+    case 'pty-activity': handlePtyActivity(msg); break;
     case 'billion-notice': setBillionNotice(msg.sessionId, msg.notice); break;
     case 'pty-size': handlePtySize(msg); break;
     case 'state-change':
@@ -559,7 +560,7 @@ function onMessage(msg) {
     case 'waiting-error': handleWaitingError(msg); handleRoundError(msg); break;
     case 'round-state': setRoundInfo(msg); renderRound(); renderBillionStatus(); break;
     case 'billion-status': setBillionStatus(msg); renderBillionStatus(); renderWaiting(); talkStatus(msg); break;
-    case 'chat-list': setChatMessages(msg.messages); renderWaiting(); talkHeardAll(msg.messages); break;
+    case 'chat-list': setChatMessages(msg.messages); renderWaiting(); talkHeardAll(msg.messages); settleFromThread(); break;
     case 'chat-message': handleChatMessage(msg.message); break;
     case 'chat-sent': handleChatSent(msg); break;
     case 'telegram-state': handleTelegramState(msg); break;
