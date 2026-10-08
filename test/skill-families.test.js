@@ -72,6 +72,34 @@ describe('grouping', () => {
     expect(s.ungrouped).toEqual([]);
   });
 
+  it("files Claude Code's bundled and claude.ai's synced skills under built-in, and reports a bundled one it does not know", () => {
+    skill(join(claudeDir, 'skills', 'synced', 'org_user', 'pdf'), 'pdf', 'Read, merge or split PDF files. And more.');
+    skill(join(claudeDir, 'skills', 'loop'), 'loop', 'My own loop skill, not the bundled one.');
+    // The newest transcript's listing: a new bundled skill, a repo's own, a plugin's, a known one.
+    const repo = join(root, 'repo');
+    skill(join(repo, '.claude', 'skills', 'repo-skill'), 'repo-skill', 'Repo only.');
+    const project = join(claudeDir, 'projects', '-repo');
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, 's.jsonl'), [
+      JSON.stringify({ type: 'user', message: 'hi' }),
+      JSON.stringify({ type: 'attachment', cwd: repo, attachment: { type: 'skill_listing',
+        content: '- new-bundled: Does a brand new thing. More.\n- dataviz: Charts.',
+        names: ['copywriting', 'new-bundled', 'repo-skill', 'ponytail:ponytail', 'dataviz', 'anthropic-skills:pdf', 'anthropic-skills:fresh'] } }),
+    ].join('\n'));
+    const s = scan();
+    const builtIn = s.families.get('built-in');
+    expect(builtIn.find(m => m.name === 'anthropic-skills:pdf').line).toBe('Read, merge or split PDF files.');
+    expect(builtIn.map(m => m.name)).toContain('dataviz');
+    expect(builtIn.map(m => m.name)).not.toContain('code-review');
+    expect(builtIn.map(m => m.name)).not.toContain('loop');
+    expect(s.ungrouped).toEqual(['anthropic-skills:fresh', 'csv-summarizer', 'loop', 'new-bundled']);
+    // Once filed, it joins with the listing's line; the source can be kept listed.
+    writeFileSync(mapFile, JSON.stringify({ skills: { 'new-bundled': 'built-in' }, sources: { 'anthropic-skills': null } }));
+    const filed = scan();
+    expect(filed.families.get('built-in').find(m => m.name === 'new-bundled').line).toBe('Does a brand new thing.');
+    expect(filed.families.get('built-in').map(m => m.name)).not.toContain('anthropic-skills:pdf');
+  });
+
   it('makes no families when no skills are installed', () => {
     expect(scanFamilies({ claudeDir: join(root, 'none'), agentsDir, map: readMap(mapFile) }).families.size).toBe(0);
   });
@@ -95,7 +123,7 @@ describe('the family skills', () => {
     writeFileSync(mapFile, JSON.stringify({ skills: { 'hyperframes-cli': null } }));
     writeFamiliesPlugin(scan(), pluginDir);
     expect(existsSync(join(pluginDir, 'skills', 'hyperframes'))).toBe(false);
-    expect(readdirSync(join(pluginDir, 'skills')).sort()).toEqual(['engineering', 'gstack', 'marketing']);
+    expect(readdirSync(join(pluginDir, 'skills')).sort()).toEqual(['built-in', 'engineering', 'gstack', 'marketing']);
   });
 });
 
