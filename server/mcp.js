@@ -46,7 +46,9 @@ export const SERVER_INFO = { name: 'agent-007-board', version: '1' };
 const SKILLS_HELP = 'Optional. Skill families the worker gets fully listed, like ["marketing"] or '
   + '["hyperframes"]: its other installed skills show by name only (each family\'s catalog '
   + 'skill lists them, and any skill still runs by name). A card that ends in a pull request '
-  + 'always gets "engineering". Pass [] on edit_job to go back to that default.';
+  + 'always gets "engineering". A plugin short name from skill-families.json\'s "plugins" '
+  + '(like "vanta") switches that plugin on for the worker; it is off for every other agent. '
+  + 'Pass [] on edit_job to go back to that default.';
 const MODEL_HELP = 'Optional. Which model the card\'s CLI runs, from the list below for its '
   + 'agent: the one most appropriate for the job; empty for the CLI\'s default. A model '
   + 'that does not belong to the card\'s agent is refused.';

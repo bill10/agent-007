@@ -24,7 +24,12 @@
 // session transcript's skill listing and reported like any unfiled skill.
 //
 // Plugin skills are left out: Claude Code applies no skillOverrides to them
-// (claude 2.1.295's skill listing returns "on" for source "plugin").
+// (claude 2.1.295's skill listing returns "on" for source "plugin"). A
+// marketplace plugin is switched instead: the map's "plugins" names some by a
+// short name, each goes off through enabledPlugins in the spawn's --settings,
+// and a card that names one in `skills` gets it on. Flag settings outrank the
+// owner's user settings both ways (README, "Skill families"). Plugins the map
+// does not name keep whatever the owner set.
 import { closeSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join, sep } from 'path';
 import { CONFIG_DIR } from './state.js';
@@ -56,6 +61,8 @@ export const DEFAULT_MAP = {
     resume: 'Job search: resumes, cover letters, applications, interviews and salary negotiation.',
     gstack: 'gstack: design and plan reviews, browser automation, office hours and the gstack tools.',
   },
+  // Marketplace plugins off for every agent unless a card names them.
+  plugins: { vanta: 'vanta-mcp-plugin@claude-plugins-official' },
   // Billion's own work is marketing, and it reviews pull requests.
   billion: ['marketing', 'review', 'code-review', 'security-review', 'cso'],
 };
@@ -128,6 +135,8 @@ export function readMap(file = FAMILIES_FILE) {
     skills: { ...DEFAULT_MAP.skills, ...own.skills },
     sources: { ...DEFAULT_MAP.sources, ...own.sources },
     summaries: { ...DEFAULT_MAP.summaries, ...own.summaries },
+    // null drops a default, so that plugin is left as the owner set it.
+    plugins: Object.fromEntries(Object.entries({ ...DEFAULT_MAP.plugins, ...own.plugins }).filter(([, id]) => typeof id === 'string' && id)),
     billion: Array.isArray(own.billion) ? own.billion : DEFAULT_MAP.billion,
   };
 }
@@ -297,33 +306,58 @@ const ownerOverrides = (claudeDir) => {
   try { return JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8')).skillOverrides || {}; } catch { return {}; }
 };
 
+// The plugin ids installed on this machine, in any scope.
+export function installedPlugins(claudeDir = skillHomes().claudeDir) {
+  try { return new Set(Object.keys(JSON.parse(readFileSync(join(claudeDir, 'plugins', 'installed_plugins.json'), 'utf8')).plugins || {})); } catch { return new Set(); }
+}
+
+// The short names in `on` that the map makes plugins but this machine lacks.
+export function missingPlugins(on = [], { map = readMap(), claudeDir = skillHomes().claudeDir, env = process.env } = {}) {
+  if (!envSwitchOn(env.SKILL_FAMILIES)) return [];
+  const asked = on.filter(name => Object.hasOwn(map.plugins, name));
+  if (!asked.length) return [];
+  const installed = installedPlugins(claudeDir);
+  return asked.filter(name => !installed.has(map.plugins[name]));
+}
+
+// The card note for those, or null.
+export const missingPluginsNote = (names) => (names.length
+  ? `${names.join(', ')} plugin${names.length === 1 ? ' is' : 's are'} not installed on this machine, so the agent started without ${names.length === 1 ? 'it' : 'them'}`
+  : null);
+
 // A Claude Code spawn's argv with the families in: the generated plugin via
 // --plugin-dir (which loads it for this session only and widens no file
-// access, unlike --add-dir) and the overrides merged into its --settings JSON.
-// A --settings given as a file path is the caller's own: no families then.
+// access, unlike --add-dir) and the overrides merged into its --settings JSON,
+// with the map's plugins switched off unless `on` names them.
+// A --settings given as a file path is the caller's own: nothing added then.
 export function withSkillFamilies(args, on = [], { homes = skillHomes(), pluginDir = FAMILIES_PLUGIN_DIR, mapFile = FAMILIES_FILE, env = process.env } = {}) {
   if (!envSwitchOn(env.SKILL_FAMILIES)) return args;
-  let scan;
+  const map = readMap(mapFile);
+  const enabledPlugins = Object.fromEntries(Object.entries(map.plugins).map(([name, id]) => [id, on.includes(name)]));
+  let scan = null;
   try {
-    scan = scanFamilies({ claudeDir: homes.claudeDir, agentsDir: homes.agentsDir, map: readMap(mapFile) });
+    scan = scanFamilies({ claudeDir: homes.claudeDir, agentsDir: homes.agentsDir, map });
     lastScan = scan;
-    if (!scan.families.size) return args;
-    writeFamiliesPlugin(scan, pluginDir);
+    if (scan.families.size) writeFamiliesPlugin(scan, pluginDir);
+    else scan = null;
   } catch (err) {
     console.error('Skill families: left out of this spawn:', err.message);
-    return args;
+    scan = null;
   }
-  const skillOverrides = familyOverrides(scan, on, ownerOverrides(homes.claudeDir));
+  if (!scan && !Object.keys(enabledPlugins).length) return args;
   const at = args.indexOf('--settings');
   let settings = {};
   if (at >= 0) {
-    // A catalog with nothing hidden would only add to the listing.
     try { settings = JSON.parse(args[at + 1]); } catch { return args; }
     if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return args;
   }
-  const merged = JSON.stringify({ ...settings, skillOverrides: { ...skillOverrides, ...settings.skillOverrides } });
-  const rest = at >= 0 ? [...args.slice(0, at), '--settings', merged, ...args.slice(at + 2)] : ['--settings', merged, ...args];
-  return ['--plugin-dir', pluginDir, ...rest];
+  // The caller's own entries win (a board worker's channel plugins stay off).
+  const merged = { ...settings, enabledPlugins: { ...enabledPlugins, ...settings.enabledPlugins } };
+  // A catalog with nothing hidden would only add to the listing.
+  if (scan) merged.skillOverrides = { ...familyOverrides(scan, on, ownerOverrides(homes.claudeDir)), ...settings.skillOverrides };
+  const json = JSON.stringify(merged);
+  const rest = at >= 0 ? [...args.slice(0, at), '--settings', json, ...args.slice(at + 2)] : ['--settings', json, ...args];
+  return scan ? ['--plugin-dir', pluginDir, ...rest] : rest;
 }
 
 // The board notice for skills no family takes, or null.
@@ -351,10 +385,11 @@ export function reportUngrouped(billion, send) {
   return true;
 }
 
-// The family names as the last spawn's scan found them, for the card form.
-// Scanned here when no spawn has yet.
-export function knownFamilies(env = process.env) {
+// The family names as the last spawn's scan found them, and the map's plugin
+// short names, for the card form. Scanned here when no spawn has yet.
+export function knownFamilies(env = process.env, mapFile = FAMILIES_FILE) {
   if (!envSwitchOn(env.SKILL_FAMILIES)) return [];
   if (!lastScan) try { lastScan = scanFamilies(); } catch { return []; }
-  return [...lastScan.families.keys()].filter(f => FAMILY_NAME.test(f)).sort();
+  const families = [...lastScan.families.keys()].filter(f => FAMILY_NAME.test(f));
+  return [...new Set([...families, ...Object.keys(readMap(mapFile).plugins)])].sort();
 }

@@ -2383,8 +2383,8 @@ select.job-mode-danger {
    and squeezes the flex:1 cron field beside it on a narrow panel. */
 #job-permission-mode-field { max-width: 200px; }
 .job-form-row > label { flex: 0 0 auto; }
-.job-form-schedule { flex: 1 1 200px; min-width: 0; }
-.job-form-skills { flex: 1 1 220px; min-width: 0; }
+.job-form-row > .job-form-schedule { flex: 1 1 200px; min-width: 0; }
+.job-form-row > .job-form-skills { flex: 1 1 220px; min-width: 0; }
 .job-form-skills input { width: 100%; box-sizing: border-box; }
 .job-form-hint {
   font-size: 9px;
