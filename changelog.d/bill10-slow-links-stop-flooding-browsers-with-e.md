@@ -1,0 +1,7 @@
+---
+bump: patch
+---
+### Fixed
+
+- **The app holds up over a slow remote link.** Over Tailscale from public Wi-Fi, a message sent to Billion sat at "Sending", then said "No answer from the server" though it had gone through, and a refresh was slow. Every terminal's output went to every browser, so a reply queued behind megabytes of other agents' spinners. Now a browser gets a terminal's output only while it shows that terminal, and gets the scrollback when it switches to one. Every other terminal sends only a small "still busy" signal every few seconds, which keeps the "quiet — may need you" badges working. The WebSocket is compressed. With four busy agents, an idle browser now receives about 750 bytes a minute instead of 1.9 MB. On a 128 kbit/s link, a chat send round-trips in about 0.13 s instead of about 47 s, and the page loads in 0.2 s instead of 15.6 s.
+- **A dead connection is noticed and a send is never lost or doubled.** The server and the page ping each other, so a socket left half-dead by a network change is dropped and the reconnect runs. A slow send keeps waiting instead of claiming failure. Only a dropped socket says "Not sent: connection dropped", and the text stays in the box. The box's text, its attachments and an unsettled send survive the reload that follows a reconnect. If the message reached the thread, the box clears. Sending the same text again is recognized as the message already sent.
