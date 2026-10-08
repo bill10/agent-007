@@ -74,6 +74,7 @@ describe('grouping', () => {
 
   it("files Claude Code's bundled and claude.ai's synced skills under built-in, and reports a bundled one it does not know", () => {
     skill(join(claudeDir, 'skills', 'synced', 'org_user', 'pdf'), 'pdf', 'Read, merge or split PDF files. And more.');
+    skill(join(claudeDir, 'skills', 'loop'), 'loop', 'My own loop skill, not the bundled one.');
     // The newest transcript's listing: a new bundled skill, a repo's own, a plugin's, a known one.
     const repo = join(root, 'repo');
     skill(join(repo, '.claude', 'skills', 'repo-skill'), 'repo-skill', 'Repo only.');
@@ -90,7 +91,8 @@ describe('grouping', () => {
     expect(builtIn.find(m => m.name === 'anthropic-skills:pdf').line).toBe('Read, merge or split PDF files.');
     expect(builtIn.map(m => m.name)).toContain('dataviz');
     expect(builtIn.map(m => m.name)).not.toContain('code-review');
-    expect(s.ungrouped).toEqual(['anthropic-skills:fresh', 'csv-summarizer', 'new-bundled']);
+    expect(builtIn.map(m => m.name)).not.toContain('loop');
+    expect(s.ungrouped).toEqual(['anthropic-skills:fresh', 'csv-summarizer', 'loop', 'new-bundled']);
     // Once filed, it joins with the listing's line; the source can be kept listed.
     writeFileSync(mapFile, JSON.stringify({ skills: { 'new-bundled': 'built-in' }, sources: { 'anthropic-skills': null } }));
     const filed = scan();

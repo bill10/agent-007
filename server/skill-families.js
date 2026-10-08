@@ -170,9 +170,10 @@ export function scanFamilies({ claudeDir = skillHomes().claudeDir, agentsDir = s
   }
   // Not on their own: with no skills installed there is nothing to shorten.
   if (found.length) {
-    for (const [name, line] of Object.entries(BUNDLED)) found.push({ name, line, source: BUNDLED_SOURCE });
-    // Built-in skills Claude Code lists that neither the table nor the disk knows.
+    // An installed skill of the same name is the one Claude Code lists.
     const known = new Set(found.map(s => s.name));
+    for (const [name, line] of Object.entries(BUNDLED)) if (!known.has(name)) { known.add(name); found.push({ name, line, source: BUNDLED_SOURCE }); }
+    // Built-in skills Claude Code lists that neither the table nor the disk knows.
     for (const { name, line } of unknownListed(claudeDir, known)) found.push({ name, line, source: null });
   }
 
