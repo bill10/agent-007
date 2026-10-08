@@ -111,6 +111,8 @@ Settings (default in brackets):
   WHISPER_CPP_BIN         whisper.cpp CLI if not on PATH [whisper-cli]
   TRUST_BOARD_WORKTREES   0 keeps Claude Code's and Codex's folder-trust
                           prompt for job board workers [on]
+  SKILL_FAMILIES          0 lists every skill in full for the Claude Code
+                          agents Agent 007 starts, no families [on]
 
 Set them in the environment, in ~/.agent-007/.env (\`agent007 init\` writes it,
 every setting explained and commented out), or in a .env in the current

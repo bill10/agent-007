@@ -18,7 +18,8 @@ import { statusPayload } from './billion-status.js';
 import { roundView, startRoundNow, markDone } from './owner.js';
 import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
-import { isValidJobAgent, sessionAgentFromCommand } from '../lib/jobs.js';
+import { isValidJobAgent, sessionAgentFromCommand, jobRequiresPr } from '../lib/jobs.js';
+import { jobSkillFamilies } from './skill-families.js';
 import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
 import {
@@ -226,6 +227,7 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
       origin: orphan.origin === 'board' ? 'board' : 'user',
       spawnedBy, jobId: card?.id || null, autoTrust,
       approvalsToBillion: card ? card.postedByBillion === true : orphan.approvalsToBillion === true,
+      skills: card ? jobSkillFamilies(card, jobRequiresPr(card)) : orphan.repoPath ? ['engineering'] : [],
       ghEnv: card ? await ghEnvForRepo(orphan.repoPath) : {},
     }, broadcast);
     if (result.error) return { error: result.error, command };
@@ -789,6 +791,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             permissionMode: msg.permissionMode,
             agent: msg.agent,
             model: msg.model,
+            skills: msg.skills,
             requiresPr: msg.requiresPr,
             postedBy: ws.user ? ws.user.id : null,
             postedByName: ws.user ? ws.user.displayName : null,
@@ -800,7 +803,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           const result = updateJob(msg.jobId, {
             title: msg.title, detail: msg.detail, repoPath: msg.repoPath,
             type: msg.jobType, schedule: msg.schedule, runAt: msg.runAt, attachments: msg.attachments,
-            permissionMode: msg.permissionMode, agent: msg.agent, model: msg.model, requiresPr: msg.requiresPr,
+            permissionMode: msg.permissionMode, agent: msg.agent, model: msg.model, skills: msg.skills, requiresPr: msg.requiresPr,
           }, broadcast);
           if (result.error) ws.send(JSON.stringify({ type: 'notification', level: 'error', message: result.error }));
           break;

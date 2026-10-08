@@ -2384,6 +2384,8 @@ select.job-mode-danger {
 #job-permission-mode-field { max-width: 200px; }
 .job-form-row > label { flex: 0 0 auto; }
 .job-form-schedule { flex: 1 1 200px; min-width: 0; }
+.job-form-skills { flex: 1 1 220px; min-width: 0; }
+.job-form-skills input { width: 100%; box-sizing: border-box; }
 .job-form-hint {
   font-size: 9px;
   color: var(--text-dim);

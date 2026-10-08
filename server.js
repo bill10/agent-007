@@ -45,7 +45,8 @@ import { migrate as migrateAccount, rollback as rollbackAccount, retire as retir
 import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation } from './server/account-rotation.js';
 import { assertClaudeProcessesManaged } from './server/claude-processes.js';
 import { withClaudeSessionsStopped } from './server/claude-rotation-sessions.js';
-import { takeMessages, restoreMessages, dropMessages, screenTail } from './server/messages.js';
+import { takeMessages, restoreMessages, dropMessages, screenTail, sendNotice } from './server/messages.js';
+import { readMap as readFamilyMap, reportUngrouped } from './server/skill-families.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand } from './lib/helpers.js';
@@ -147,6 +148,9 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
     repoSlug, cocktail, ownerId: ownerId || null,
     spawnedBy: meta.spawnedBy || 'user', jobId: meta.jobId || null,
     approvalsToBillion: !!meta.approvalsToBillion, autoTrust,
+    // The skill families switched on: a card's (server/jobs.js), or
+    // engineering for an agent someone starts in a repo.
+    skills: meta.skills || (resolvedRepoPath ? ['engineering'] : []),
     // A board worker gets its repo's GitHub account (server/jobs.js).
     ghEnv: meta.spawnedBy === 'board' ? await ghEnvForRepo(resolvedRepoPath) : {},
   }, broadcast);
@@ -289,6 +293,8 @@ async function startBillion({ handover = false, carried = null } = {}) {
   const result = createSessionFromConfig({
     sessionId: nextSessionId(), name: BILLION_NAME, color: colorCycler.next(), command,
     repoPath: null, worktreePath: null, cwd: dir, isBillion: true, ownerId: null,
+    // Marketing and the review skills by default; skill-families.json's "billion" changes it.
+    skills: readFamilyMap().billion,
   }, broadcast);
   if (result.error) return result;
   // Mail waits until Billion calls billion_ready: at the end of its
@@ -296,6 +302,7 @@ async function startBillion({ handover = false, carried = null } = {}) {
   result.session.messagesHeld = true;
   restoreMessages(result.session.id, carried);
   sessions.set(result.session.id, result.session);
+  reportUngrouped(result.session, sendNotice);
   // Why it cannot talk yet, for its chat tab. Logged out, the CLI sits at its
   // own sign-in and never calls billion_ready, so mail would wait unexplained.
   const session = result.session;

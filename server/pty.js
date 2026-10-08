@@ -16,9 +16,10 @@ import { RING_BUFFER_MAX } from './state.js';
 import { mintAgentToken, authEnabled } from './auth.js';
 import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApprovalHook, withBoardWorkerSettings, withCodexWorkerTools, CODEX_HOOK_CONFIG_ENV } from './agent-mcp.js';
 import { broadcastJobs, requestDispatch } from './jobs.js';
-import { flushMessages, dropMessages } from './messages.js';
+import { flushMessages, dropMessages, sendNotice } from './messages.js';
+import { withSkillFamilies, reportUngrouped } from './skill-families.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
-import { trustDialogKey } from './billion.js';
+import { trustDialogKey, liveBillion } from './billion.js';
 import { codexTrustArgs } from './claude-trust.js';
 import { dropApprovals } from './approvals.js';
 
@@ -221,7 +222,7 @@ function answerTrustDialog(session, data, now) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
-export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, ghEnv = {}, rotationRestart = false }, broadcast) {
+export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, ghEnv = {}, rotationRestart = false, skills = [] }, broadcast) {
   const { file, args } = parseCommand(command);
   const isClaude = sessionAgentFromCommand(command) === 'claude';
   if (isClaude && claudeSpawnBlocked && !rotationRestart) return { error: 'Claude accounts are switching; try again shortly.' };
@@ -277,7 +278,10 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // No channel plugins in a board worker (withBoardWorkerSettings). A no-op
   // when the hook's --settings, which carries the same, went in above.
   const boardWorker = spawnedBy === 'board' || origin === 'board';
-  const spawnArgs = boardWorker ? withBoardWorkerSettings(file, hookedArgs) : hookedArgs;
+  const settledArgs = boardWorker ? withBoardWorkerSettings(file, hookedArgs) : hookedArgs;
+  // Skill families (server/skill-families.js): every family's member listed by
+  // name only, apart from the ones this agent's job switches on.
+  const spawnArgs = isClaude ? withSkillFamilies(settledArgs, skills) : settledArgs;
 
   // Codex's hook finds this session's MCP config here (agent-mcp.js).
   const hookEnv = hooked && sessionAgentFromCommand(command) === 'codex' ? { [CODEX_HOOK_CONFIG_ENV]: mcpConfigPath } : {};
@@ -296,6 +300,9 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     removeMcpConfig(sessionId);   // nothing will ever read it now
     return { error: `Failed to start "${command}". Is the command installed?` };
   }
+  // Skills the scan for this spawn found in no family, told to Billion once
+  // (Billion's own spawn is told from server.js, once it is on the board).
+  if (isClaude && !isBillion) reportUngrouped(liveBillion(), sendNotice);
   // On Windows node-pty writes input through a socket on the console's input
   // pipe and listens for none of its errors. kill() closes the console under
   // any write still in flight, which then fails ("write EAGAIN" while the pipe
@@ -360,6 +367,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,       // job this session was dispatched for, if any
     isBillion: !!isBillion,     // the one agent you talk to (server/billion.js)
+    skills,                    // skill families it was started with; an account-rotation restart keeps them
     answersTrust: !!(isBillion || (autoTrust && !codexTrust)),   // see answerTrustDialog; Codex's flag leaves nothing to answer
     approvalsToBillion: hooked, // its permission dialogs go to Billion first
     ghEnv,                      // its repo's GitHub account (server/jobs.js ghEnvForRepo), kept for a rotation restart; never sent or saved
