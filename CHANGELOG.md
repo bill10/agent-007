@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.60.1.0] - 2026-10-08
+
+### Added
+
+- **Billion is told about duplicate and superseded skills.** The skill scan now spots the same skill name in more than one place (`~/.claude/skills`, `~/.agents/skills`, a board repo's `.claude/skills`, plugins), byte-identical skill folders under different names, and a skill whose description says it replaces, supersedes or deprecates another installed one. Billion gets one notice per finding per server run naming both paths and suggesting the removal; Agent 007 deletes nothing. gstack's intentional aliases are left out.
+
 ## [0.60.0.0] - 2026-10-08
 
 ### Added
