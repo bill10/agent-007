@@ -202,6 +202,11 @@ owner's on allow.
   drafts and code for a project live in its repo; this folder holds only your
   memory. A research card is a job with no pull request (`requires_pr:
   false`); its summary comes back on the card.
+- **Name the skills a card needs.** A worker lists most installed skills by
+  name only, one catalog skill per family (README, "Skill families"); give a
+  card the families its job needs in `skills` (`["hyperframes"]`, `["marketing"]`).
+  A PR card always has `engineering`. When the board says skills fit no family,
+  file them in the `skill-families.json` it names.
 - **A new repo** is created private, gets a remote and a pushed `main` before
   its first card (workers branch from the remote, and pull requests need one),
   then `add_repo` puts it on the board so you can post to it.

@@ -12,6 +12,11 @@ for (const [, key] of readFileSync(join(import.meta.dirname, '../.env.example'),
   delete process.env[key];
 }
 
+// Skill families scan the real ~/.claude/skills at every Claude spawn and
+// tell Billion about unfiled ones; test/skill-families.test.js turns them on
+// with fixture folders of its own.
+process.env.SKILL_FAMILIES = '0';
+
 // Point auth at a throwaway users path so the suite is hermetic: the file does
 // not exist, so auth starts DISABLED regardless of the dev machine's real
 // ~/.agent-007/users.json. Auth-specific tests create/remove users at this path.

@@ -272,6 +272,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
       runAt: body.runAt ?? body.run_at,
       agent: body.agent,
       model: body.model,
+      skills: body.skills,
       requiresPr: body.requiresPr ?? body.requires_pr,
       session,
       user: req.user || (session ? userById(session.ownerId) : null),

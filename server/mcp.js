@@ -42,6 +42,11 @@ export const SERVER_INFO = { name: 'agent-007-board', version: '1' };
 // what this is for.
 // The model field's description. toolsFor appends the models discovered on
 // this machine right now, since those are the only values the board accepts.
+// The skills field's description (server/skill-families.js).
+const SKILLS_HELP = 'Optional. Skill families the worker gets fully listed, like ["marketing"] or '
+  + '["hyperframes"]: its other installed skills show by name only (each family\'s catalog '
+  + 'skill lists them, and any skill still runs by name). A card that ends in a pull request '
+  + 'always gets "engineering". Pass [] on edit_job to go back to that default.';
 const MODEL_HELP = 'Optional. Which model the card\'s CLI runs, from the list below for its '
   + 'agent: the one most appropriate for the job; empty for the CLI\'s default. A model '
   + 'that does not belong to the card\'s agent is refused.';
@@ -113,6 +118,11 @@ export const POST_JOB_TOOL = {
       model: {
         type: 'string',
         description: MODEL_HELP,
+      },
+      skills: {
+        type: 'array',
+        items: { type: 'string' },
+        description: SKILLS_HELP,
       },
       requires_pr: {
         type: 'boolean',
@@ -223,6 +233,11 @@ export const EDIT_JOB_TOOL = {
       model: {
         type: 'string',
         description: `${MODEL_HELP} Switching the card's agent without naming a model clears it.`,
+      },
+      skills: {
+        type: 'array',
+        items: { type: 'string' },
+        description: SKILLS_HELP,
       },
       requires_pr: {
         type: 'boolean',
@@ -725,6 +740,7 @@ function summaryLine(job) {
   const bits = [job.repo];
   if (job.agent === 'codex') bits.push('codex');
   if (job.model) bits.push(`model ${job.model}`);
+  if (job.skills) bits.push(`skills ${job.skills.join(', ')}`);
   if (job.type === 'scheduled') {
     bits.push(`schedule ${scheduleText(job)}`);
     if (job.scheduleStatus) bits.push(job.scheduleStatus.label);
@@ -751,6 +767,7 @@ const CALLS = {
       runAt: args.run_at,
       agent: args.agent,
       model: args.model,
+      skills: args.skills,
       requiresPr: args.requires_pr,
       session: ctx.session || null,
     });
@@ -812,6 +829,7 @@ const CALLS = {
       // Only when it is not the default, the way the card's chip works.
       job.agent === 'codex' ? 'runs on: codex' : null,
       `model: ${job.model || 'CLI default'}`,
+      job.skills ? `skill families: ${job.skills.join(', ')}` : null,
       job.type === 'scheduled'
         ? `schedule: ${scheduleText(job, ' — next ')}`
           + `${job.runCount ? ` — posted ${job.runCount} run(s), last ${when(job.lastRunAt)}` : ''}`
@@ -855,6 +873,7 @@ const CALLS = {
       once: args.once,
       runAt: args.run_at,
       model: args.model,
+      skills: args.skills,
       requiresPr: args.requires_pr,
     });
     if (result.error) return toolText(result.error, true);

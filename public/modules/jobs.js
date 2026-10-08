@@ -378,6 +378,14 @@ function renderCard(job) {
     chip.title = 'Finishes with a summary from its agent instead of a pull request';
     chips.appendChild(chip);
   }
+  // Skill families the card switches on for its worker (README, "Skill families").
+  if (Array.isArray(job.skills) && job.skills.length) {
+    const chip = document.createElement('span');
+    chip.className = 'job-card-type';
+    chip.textContent = `skills: ${job.skills.join(', ')}`;
+    chip.title = 'Skill families its agent gets fully listed; its other skills show by name only';
+    chips.appendChild(chip);
+  }
   if (job.permissionMode) {
     // Only when the card overrides the board. The mode decides how much its
     // agent may do unasked, so a card carrying its own must say so on its face
@@ -1073,6 +1081,8 @@ function openForm(jobId) {
   if (modelEl) delete modelEl.dataset.filled;
   // The server looks again if its list is over 10 minutes old.
   send({ type: 'models-refresh' });
+  const skillsEl = document.getElementById('job-skills');
+  if (skillsEl) skillsEl.value = job && Array.isArray(job.skills) ? job.skills.join(', ') : '';
   prPicked = false;
   prEl.value = job ? (job.requiresPr === false || (isScheduled(job) && job.requiresPr !== true) ? 'no' : 'yes') : 'yes';
   syncAgentField();   // also marks the danger colour on the permission select
@@ -1138,7 +1148,9 @@ function saveForm() {
   // "none left".
   const attachments = pendingAttachments.map(a => ({ name: a.name, data: a.data }));
   const model = document.getElementById('job-model')?.value || '';
-  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, requiresPr, attachments, ...timing };
+  // Comma-separated family names; empty goes back to the defaults.
+  const skills = (document.getElementById('job-skills')?.value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const fields = { title, detail, repoPath, jobType, schedule, permissionMode, agent, requiresPr, skills, attachments, ...timing };
   // An edit that leaves the model alone does not send it, so a card whose
   // model discovery no longer lists can still be retitled.
   if (!editingJobId || model !== formModel) fields.model = model;
@@ -1192,6 +1204,10 @@ export function handleJobsList(msg) {
   for (const job of msg.jobs || []) jobs.set(job.id, job);
   if (msg.settings) setBoardSettings(msg.settings);
   if (msg.models) { models = msg.models; syncModelField(); }
+  if (Array.isArray(msg.skillFamilies)) {
+    const list = document.getElementById('job-skill-families');
+    if (list) list.replaceChildren(...msg.skillFamilies.map(name => Object.assign(document.createElement('option'), { value: name })));
+  }
   renderToolbar();
   renderBoard();
   if (window._onBoardVisibilityChanged) window._onBoardVisibilityChanged();

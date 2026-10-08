@@ -24,7 +24,7 @@ import {
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
   DISPATCH_INTERVAL_MS, MAX_AGENTS_PER_REPO, DEFAULT_PERMISSION_MODE,
-  MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr,
+  MAX_TITLE_LEN, MAX_DETAIL_LEN, isScheduled, jobType, resolveJobType, jobRequiresPr, resolveJobSkills,
   scheduleHold, supersededRuns, createRunJob, runsToPrune, defaultRequiresPr, isJobDue, STATE_LABELS,
   jobAgent, jobAgentFromCommand, resolveJobAgent, resumeCommand, isValidJobAgent, recordedPermissionFlags,
   BILLION_NAME, envPermissionMode, resolveJobModel, REQUEUE_HOLD_MS,
@@ -35,6 +35,7 @@ import { nextCronIso, describeCron, parseCron } from '../lib/cron.js';
 import { scheduleStatus } from '../lib/schedule-status.js';
 import { commandExists, missingCommandMessage } from './command-path.js';
 import { skillHomes, skillDir } from './skills.js';
+import { jobSkillFamilies, knownFamilies } from './skill-families.js';
 
 // --- Board settings ---
 
@@ -141,7 +142,8 @@ export function jobsPayload() {
   // really start in while no mode has been picked there.
   const envModes = { claude: envPermissionMode('claude'), codex: envPermissionMode('codex') };
   // The models each CLI's dropdown offers (server/models.js).
-  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes }, models: availableModels() };
+  // The family names the form's Skills field suggests (server/skill-families.js).
+  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes }, models: availableModels(), skillFamilies: knownFamilies() };
 }
 
 export function broadcastJobs(broadcast) {
@@ -327,8 +329,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById });
+export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, skills, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, skills, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -441,7 +443,7 @@ export function posterId({ user, session, anonymous = false }) {
   return anonymous ? 'anonymous' : null;
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, requiresPr, session, user, poster }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, skills, requiresPr, session, user, poster }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -487,6 +489,7 @@ export function postJobForAgent({ title, detail, repo, schedule, once, runAt, ty
     // Checked against the discovered list by createJob, and put on the argv
     // as one token by buildJobCommand.
     model,
+    skills,
     requiresPr,
     // No permissionMode: an agent posting a card must not be able to pick the
     // mode the board will spawn with, which would be a way around every gate
@@ -536,6 +539,7 @@ function jobSummary(job) {
     type: jobType(job),
     agent: jobAgent(job),
     model: job.model || null,
+    skills: job.skills || null,
     requiresPr: jobRequiresPr(job),
     schedule: job.schedule || null,
     nextRunAt: job.nextRunAt || null,
@@ -632,7 +636,7 @@ export function readJobForAgent(jobId) {
 // land says so out loud and leaves its name on the card, because the whole
 // hazard is an edit nobody sees. Reading stays board-wide — every browser
 // already sees every card — but writing does not.
-export function editJobForAgent({ id, title, detail, repo, schedule, once, runAt, model, requiresPr, session, user }, broadcast) {
+export function editJobForAgent({ id, title, detail, repo, schedule, once, runAt, model, skills, requiresPr, session, user }, broadcast) {
   const job = allJobs().find(j => j.id === id);
   if (!job) return { error: `No job with id "${id}" — list the board to see the ids.` };
   const gate = editableInPlace(job);
@@ -695,6 +699,11 @@ export function editJobForAgent({ id, title, detail, repo, schedule, once, runAt
     fields.model = model;
     changed.push('model');
   }
+  if (skills !== undefined) {
+    const families = resolveJobSkills(skills);
+    if (families.error) return { error: families.error };
+    if (JSON.stringify(families.skills) !== JSON.stringify(job.skills || null)) { fields.skills = families.skills; changed.push('skills'); }
+  }
   if (requiresPr !== undefined) {
     if (typeof requiresPr !== 'boolean') return { error: 'requires_pr must be true or false' };
     // Always passed on, so a type change in the same call cannot swap it for
@@ -704,7 +713,7 @@ export function editJobForAgent({ id, title, detail, repo, schedule, once, runAt
   }
 
   if (!changed.length) {
-    return { error: 'Nothing to change — pass a new title, detail, repo, schedule, run_at, model or requires_pr.' };
+    return { error: 'Nothing to change — pass a new title, detail, repo, schedule, run_at, model, skills or requires_pr.' };
   }
   const result = updateJob(job.id, fields, broadcast);
   if (result.error) return result;
@@ -946,6 +955,11 @@ export function updateJob(jobId, fields, broadcast) {
   // Type and schedule move together: "scheduled with no cron" and "one-time
   // carrying a cron" are both incoherent, so they are resolved as a pair and
   // rejected as a pair.
+  let families = null;
+  if (fields.skills !== undefined) {
+    families = resolveJobSkills(fields.skills);
+    if (families.error) return { error: families.error };
+  }
   let resolved = null;
   let changes = false;
   if (fields.type !== undefined || fields.schedule !== undefined) {
@@ -977,6 +991,7 @@ export function updateJob(jobId, fields, broadcast) {
   if (mode) job.permissionMode = mode.permissionMode;
   if (cli) job.agent = cli.agent;
   if (chosen) job.model = chosen.model;
+  if (families) job.skills = families.skills;
   const typeChanged = !!resolved && resolved.type !== jobType(job);
   if (resolved) {
     job.type = resolved.type;
@@ -1410,6 +1425,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
       spawnedBy: 'board', jobId: job.id, branchSuffixOnCollision: true,
       // Billion's cards ask Billion before they ask a person (part 4).
       approvalsToBillion: job.postedByBillion === true,
+      skills: jobSkillFamilies(job, jobRequiresPr(job)),
     });
     if (result.error) {
       // Surface the failure on the card and leave it in To do; the next tick

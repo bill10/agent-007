@@ -533,7 +533,7 @@ describe('job form', () => {
     document.getElementById('btn-job-save').click();
     expect(send).toHaveBeenCalledWith({
       type: 'job-create', title: 'New task', detail: 'Some detail', repoPath: '/repos/alpha',
-      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, attachments: [], model: '', runAt: null,
+      jobType: 'one-time', schedule: '', permissionMode: '', agent: 'claude', requiresPr: true, skills: [], attachments: [], model: '', runAt: null,
     });
   });
 
