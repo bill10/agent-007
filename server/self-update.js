@@ -24,7 +24,7 @@ let cached = null; // { at, latest }
 let freshAt = 0; // when a fresh=1 last asked the registry
 let run = null; // { pid, done, code } for the update this server started
 
-export function resetSelfUpdate() { cached = null; freshAt = 0; run = null; }
+export function resetSelfUpdate() { cached = null; freshAt = 0; run = null; notesCache = null; }
 
 // The registry's latest, asked at most every 10 minutes.
 // fresh skips the cache, but not more than every 10 s; a failed ask (null) keeps what was cached.
@@ -77,4 +77,41 @@ export function startUpdate({ kind = installKind(), spawn = nodeSpawn, env = pro
   child.on('exit', (code) => { mine.done = true; mine.code = code ?? -1; });
   child.unref();
   return { ok: true };
+}
+
+// "What's new": the CHANGELOG sections after the running version, up to the latest,
+// from GitHub at the latest's release tag. The npm package leaves CHANGELOG.md out,
+// and a checkout's own copy is the running version's, so neither has the new notes.
+export const CHANGELOG_URL = 'https://github.com/bill10/agent-007/blob/main/CHANGELOG.md';
+const rawChangelog = (v) => `https://raw.githubusercontent.com/bill10/agent-007/v${v}/CHANGELOG.md`;
+let notesCache = null; // { latest, text: Promise }; a release's CHANGELOG never changes, and windows opened together share one fetch
+
+async function fetchChangelog(v) {
+  try {
+    const res = await fetch(rawChangelog(v), { signal: AbortSignal.timeout(10_000) });
+    return res.ok ? await res.text() : null;
+  } catch { return null; }
+}
+
+// The `## [x.y.z.w]` sections newer than version and no newer than latest, newest first.
+export function changelogBetween(text, version, latest) {
+  return text.split(/^(?=## \[)/m).filter((s) => {
+    const v = s.match(/^## \[([\d.]+)\]/)?.[1];
+    return v && !versionAtLeast(version, v) && versionAtLeast(latest, v);
+  }).join('').trim();
+}
+
+export async function updateNotes({ kind = installKind(), version = VERSION, fetchLatest, fetchText = fetchChangelog } = {}) {
+  if (kind === 'npx') return { version, notes: '' };
+  const { latest: npm } = await latest({ fetchLatest });
+  const newest = npm && fromNpm(npm);
+  if (!newest || versionAtLeast(version, newest)) return { version, notes: '' };
+  if (notesCache?.latest !== newest) notesCache = { latest: newest, text: fetchText(newest) };
+  const mine = notesCache;
+  const text = await mine.text;
+  if (!text) {
+    if (notesCache === mine) notesCache = null; // a failure is asked again next time
+    return { version, latest: newest, error: 'Could not load the release notes from GitHub.', url: CHANGELOG_URL };
+  }
+  return { version, latest: newest, notes: changelogBetween(text, version, newest) };
 }

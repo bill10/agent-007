@@ -26,7 +26,7 @@ import { setNextWake } from './billion-wake.js';
 import { setBillionNotice } from './billion.js';
 import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
-import { updateInfo, startUpdate } from './self-update.js';
+import { updateInfo, startUpdate, updateNotes } from './self-update.js';
 import { busyWorkers } from './control.js';
 import { noteProxy, accessEmail } from './proxy.js';
 import { createRequire } from 'module';
@@ -429,6 +429,8 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   const ownerOnly = (req, res, next) => (authEnabled() ? res.status(403).json({ error: 'Only the owner updates Agent 007, and with user accounts on nobody does.' }) : next());
   // accessEmail: who Cloudflare Access let in, for the panel to show (server/proxy.js).
   app.get('/api/update', ownerOnly, async (req, res) => res.json({ ...await updateInfo({ workers: busyWorkers(sessions), fresh: req.query.fresh === '1' }), accessEmail: accessEmail(req) }));
+  // What's new: the CHANGELOG sections between this version and the latest.
+  app.get('/api/update/changelog', ownerOnly, async (req, res) => res.json(await updateNotes()));
   app.post('/api/update', ownerOnly, (req, res) => {
     const result = startUpdate();
     res.status(result.error ? 409 : 202).json(result);
