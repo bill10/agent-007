@@ -169,6 +169,8 @@ For the Claude Code agents it starts, Agent 007 groups the installed skills into
 
 To change the grouping, write `~/.agent-007/skill-families.json` (Billion may edit it): `{"skills": {"my-skill": "data"}, "sources": {"owner/repo": "family"}, "summaries": {"data": "one line"}, "billion": ["marketing", "review"]}`. A skill or source mapped to `null` stays fully listed. Plugin skills from a marketplace are always listed in full: Claude Code applies no `skillOverrides` to them. Codex workers keep today's listing. `SKILL_FAMILIES=0` turns it all off.
 
+Billion also gets one board notice per finding, per server run, for duplicate or superseded skills: the same name in `~/.claude/skills`, `~/.agents/skills`, a board repo's `.claude/skills` or a plugin; byte-identical folders under different names; or a skill whose description says it replaces, supersedes or deprecates another installed one. It names both paths and suggests the removal (a PR for a repo copy, the skills installer for a global one) but deletes nothing. gstack's `_gstack-command` and `connect-chrome` / `gstack-connect-chrome` aliases are left out.
+
 On the machine this was built on (189 skills, a 30,000-character budget), a no-PR worker's listing went from over budget (75,831 characters wanted, 99 descriptions shown) to 22,977 characters with nothing cut; a pull-request worker fits too.
 
 ```

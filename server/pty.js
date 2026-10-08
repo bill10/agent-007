@@ -18,6 +18,7 @@ import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApp
 import { broadcastJobs, requestDispatch } from './jobs.js';
 import { flushMessages, dropMessages, sendNotice } from './messages.js';
 import { withSkillFamilies, reportUngrouped } from './skill-families.js';
+import { reportDuplicates } from './skill-duplicates.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 import { trustDialogKey, liveBillion } from './billion.js';
 import { codexTrustArgs } from './claude-trust.js';
@@ -303,6 +304,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // Skills the scan for this spawn found in no family, told to Billion once
   // (Billion's own spawn is told from server.js, once it is on the board).
   if (isClaude && !isBillion) reportUngrouped(liveBillion(), sendNotice);
+  if (isClaude && !isBillion) reportDuplicates(liveBillion(), sendNotice);
   // On Windows node-pty writes input through a socket on the console's input
   // pipe and listens for none of its errors. kill() closes the console under
   // any write still in flight, which then fails ("write EAGAIN" while the pipe
