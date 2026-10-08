@@ -3,8 +3,9 @@ import { EventEmitter } from 'events';
 import { mkdtempSync, writeFileSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { updateInfo, startUpdate, resetSelfUpdate, updateLogPath } from '../server/self-update.js';
+import { updateInfo, startUpdate, resetSelfUpdate, updateLogPath, updateNotes, changelogBetween, CHANGELOG_URL } from '../server/self-update.js';
 import { removeTempDir } from './temp-dir.js';
+import { changelogWith } from '../scripts/release.js';
 
 // A fake spawn: records the call, hands back a child the test ends by hand.
 function fakeSpawn() {
@@ -102,5 +103,96 @@ describe('startUpdate', () => {
     const { spawn, calls } = fakeSpawn();
     expect(startUpdate({ kind: 'npx', spawn, env }).error).toMatch(/npx runs the latest/);
     expect(calls).toHaveLength(0);
+  });
+});
+
+const LOG = `# Changelog
+
+## [2.1.0.0] - 2026-10-09
+
+- unreleased
+
+## [2.0.0.0] - 2026-10-08
+
+### Added
+
+- **Two.**
+
+## [1.1.0.0] - 2026-10-07
+
+- One one.
+
+## [1.0.0.0] - 2026-10-06
+
+- One.
+`;
+
+describe('updateNotes', () => {
+  it('keeps only the sections newer than this version, up to the latest, newest first', () => {
+    const notes = changelogBetween(LOG, '1.0.0.0', '2.0.0.0');
+    expect(notes.match(/^## \[[\d.]+\]/gm)).toEqual(['## [2.0.0.0]', '## [1.1.0.0]']);
+    expect(notes).toContain('- **Two.**');
+    expect(changelogBetween(LOG, '2.0.0.0', '2.0.0.0')).toBe('');
+  });
+
+  it('reads the CHANGELOG at the latest release once, and slices it', async () => {
+    const asked = [];
+    const fetchText = async (v) => { asked.push(v); return LOG; };
+    const r = await updateNotes({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.0.0', fetchText });
+    expect(r).toMatchObject({ version: '1.0.0.0', latest: '2.0.0.0' });
+    expect(r.notes).toContain('## [1.1.0.0]');
+    expect(r.notes).not.toContain('## [1.0.0.0]');
+    expect(r.notes).not.toContain('unreleased');
+    await updateNotes({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.0.0', fetchText });
+    expect(asked).toEqual(['2.0.0.0']);
+  });
+
+  it('says so, with the GitHub link, when the fetch fails, and tries again next time', async () => {
+    let text = null;
+    const fetchText = async () => text;
+    const r = await updateNotes({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.0.0', fetchText });
+    expect(r.error).toMatch(/Could not load/);
+    expect(r.url).toBe(CHANGELOG_URL);
+    expect(r.notes).toBeUndefined();
+    text = LOG;
+    expect((await updateNotes({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.0.0', fetchText })).notes).toContain('## [2.0.0.0]');
+  });
+
+  // Value: protects=a newer release's notes after Check for updates moves the latest on; fails_when=notesCache is reused without comparing its latest (stale notes until restart); why_new=the cache test above keeps one latest throughout; seam=none
+  it('reads the CHANGELOG again once a check finds a newer latest', async () => {
+    const asked = [];
+    const fetchText = async (v) => { asked.push(v); return LOG; };
+    await updateNotes({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.0.0', fetchText });
+    await updateInfo({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.1.0', env, fresh: true });
+    const r = await updateNotes({ kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.1.0', fetchText });
+    expect(asked).toEqual(['2.0.0.0', '2.1.0.0']);
+    expect(r.notes).toContain('## [2.1.0.0]');
+  });
+
+  // Value: protects=the release script's section headings staying sliceable; fails_when=scripts/release.js changelogWith or changelogBetween's heading regex changes and they drift apart (empty What's new); why_new=other tests use a hand-written LOG, never the generator's output; seam=none
+  it('slices sections the release script writes', () => {
+    let log = '# Changelog\n';
+    for (const v of ['1.0.0.0', '1.1.0.0', '2.0.0.0']) log = changelogWith(log, v, '2026-10-08', [`### Added\n\n- In ${v}.`]);
+    const notes = changelogBetween(log, '1.0.0.0', '2.0.0.0');
+    expect(notes).toContain('- In 2.0.0.0.');
+    expect(notes).toContain('- In 1.1.0.0.');
+    expect(notes).not.toContain('- In 1.0.0.0.');
+    expect(notes.indexOf('2.0.0.0')).toBeLessThan(notes.indexOf('1.1.0.0'));
+  });
+
+  // Value: protects=windows opened together share one GitHub fetch, and npx never asks; fails_when=the in-flight promise is not cached or the npx guard goes; why_new=the other cases await one call at a time; seam=none
+  it('shares one fetch between windows opened together, and asks nothing under npx', async () => {
+    let asked = 0;
+    const fetchText = async () => { asked++; return LOG; };
+    const opts = { kind: 'npm', version: '1.0.0.0', fetchLatest: async () => '2.0.0', fetchText };
+    const [a, b] = await Promise.all([updateNotes(opts), updateNotes(opts)]);
+    expect(asked).toBe(1);
+    expect(a.notes).toBe(b.notes);
+    expect(await updateNotes({ ...opts, kind: 'npx', fetchLatest: async () => { throw new Error('not asked'); } })).toEqual({ version: '1.0.0.0', notes: '' });
+  });
+
+  it('has nothing to say when up to date', async () => {
+    const fetchText = async () => { throw new Error('not asked'); };
+    expect(await updateNotes({ kind: 'npm', version: '2.0.0.0', fetchLatest: async () => '2.0.0', fetchText })).toEqual({ version: '2.0.0.0', notes: '' });
   });
 });

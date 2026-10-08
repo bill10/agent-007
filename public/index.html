@@ -118,6 +118,17 @@
         <div class="settings-panel" id="settings-panel" role="dialog" aria-label="Settings" hidden>
           <!-- This copy's version and Update (settings.js renderVersion); the owner's pages only. -->
           <div class="settings-version" id="settings-version" hidden></div>
+          <!-- What's new (settings.js showNotes): inside the panel, so a click in it is not "outside". -->
+          <dialog class="whats-new" id="whats-new" aria-labelledby="whats-new-title">
+            <div class="whats-new-box">
+              <div class="whats-new-head"><h2 id="whats-new-title">What’s new</h2><span class="settings-dim" id="whats-new-sub"></span></div>
+              <div class="whats-new-body" id="whats-new-body" tabindex="0"></div>
+              <div class="whats-new-foot">
+                <button type="button" class="settings-refresh" data-close>Close</button>
+                <button type="button" class="settings-refresh settings-primary" data-update>Update</button>
+              </div>
+            </div>
+          </dialog>
           <div class="settings-section-head">
             <h2>Agents &amp; accounts</h2>
             <button class="settings-refresh" id="settings-refresh" type="button">Refresh</button>
