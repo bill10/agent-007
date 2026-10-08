@@ -16,9 +16,16 @@
 // owner's skill-families.json in Agent 007's data dir, which win. A skill that
 // fits no family stays fully listed, and Billion is told so it can file it.
 //
+// "built-in" holds the skills that are not in ~/.claude/skills: Claude Code's
+// bundled ones (named below, since they live in its binary) and the ones
+// synced from the owner's claude.ai account (~/.claude/skills/synced/<account>/,
+// listed as anthropic-skills:<name>). Both honour skillOverrides. A bundled
+// name Claude Code lists that the table below lacks is found in the newest
+// session transcript's skill listing and reported like any unfiled skill.
+//
 // Plugin skills are left out: Claude Code applies no skillOverrides to them
 // (claude 2.1.295's skill listing returns "on" for source "plugin").
-import { mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { closeSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs';
 import { join, sep } from 'path';
 import { CONFIG_DIR } from './state.js';
 import { skillHomes } from './skills.js';
@@ -29,6 +36,10 @@ export const FAMILIES_PLUGIN_DIR = join(CONFIG_DIR, 'skill-families-plugin');
 // The plugin the family skills come in, so they list as families:<family>.
 export const FAMILIES_PLUGIN = 'families';
 
+// The made-up sources the built-in skills are grouped by.
+const BUNDLED_SOURCE = 'claude-code';
+const SYNCED_SOURCE = 'anthropic-skills';
+
 // Purpose families that cut across sources. Engineering is what a card that
 // ends in a pull request needs, carved out of gstack and Claude Code's own.
 const ENGINEERING = ['ship', 'review', 'investigate', 'qa', 'qa-only', 'code-review', 'simplify', 'security-review',
@@ -36,7 +47,9 @@ const ENGINEERING = ['ship', 'review', 'investigate', 'qa', 'qa-only', 'code-rev
   'health', 'retro', 'document-release', 'plan-eng-review', 'test-audit', 'deslop-shared-libs'];
 export const DEFAULT_MAP = {
   skills: Object.fromEntries(ENGINEERING.map(name => [name, 'engineering'])),
+  sources: { [BUNDLED_SOURCE]: 'built-in', [SYNCED_SOURCE]: 'built-in' },
   summaries: {
+    'built-in': "Claude Code's own and claude.ai skills: charts, artifacts, settings, scheduling, Claude API, browser, Office files, PDF, research.",
     engineering: 'Engineering: ship a PR, code review, debugging, QA, security audit, deploy and safety guards.',
     marketing: 'Marketing: copy, SEO, ads, email, launch, pricing, CRO, analytics and growth.',
     hyperframes: 'HyperFrames video: make, edit, animate or render video and motion graphics from HTML.',
@@ -47,12 +60,27 @@ export const DEFAULT_MAP = {
   billion: ['marketing', 'review', 'code-review', 'security-review', 'cso'],
 };
 
-// Claude Code's own skills, which are not on disk to scan. Only the ones the
-// map files somewhere are listed, each with the line its catalog gives it.
+// Claude Code's own skills (2.1.295), which are not on disk to scan, each with
+// the line its catalog gives it. Some show only where their feature is on.
 const BUNDLED = {
   'code-review': 'Review the current diff or a PR for correctness bugs.',
   simplify: 'Review changed code for reuse and simplification, then apply the fixes.',
   'security-review': 'Security review of the pending changes on the branch.',
+  dataviz: 'Read before making any chart, graph, dashboard or data visualization.',
+  'artifact-design': 'Design guidance to load before writing any Artifact page.',
+  'artifact-diagramming': 'Diagrams in Artifacts: when one earns its place and how to draw it.',
+  'artifact-capabilities': 'Runtime capabilities an Artifact page can be granted (data, storage, files).',
+  'update-config': "Configure Claude Code's settings.json: hooks, permissions, env vars.",
+  'keybindings-help': "Customise Claude Code's keyboard shortcuts.",
+  'fewer-permission-prompts': 'Add a read-only command allowlist from past transcripts.',
+  loop: 'Run a prompt or slash command on a recurring interval.',
+  schedule: 'Create or manage scheduled cloud agents (routines).',
+  'claude-api': 'Claude API and Anthropic SDK reference: models, pricing, tools, caching.',
+  'workflow-authoring': 'Reference for writing a multi-agent Workflow script.',
+  'claude-in-chrome': 'Drive Chrome: click, fill forms, screenshots, console logs.',
+  run: "Launch and drive this project's app to see a change working.",
+  'plugin-authoring': "Make a mod or plugin for Claude Code's interface or hooks.",
+  init: 'Write a CLAUDE.md for a codebase.',
 };
 
 const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
@@ -98,7 +126,7 @@ export function readMap(file = FAMILIES_FILE) {
   try { own = JSON.parse(readFileSync(file, 'utf8')) || {}; } catch { /* none yet, or unreadable: defaults */ }
   return {
     skills: { ...DEFAULT_MAP.skills, ...own.skills },
-    sources: { ...own.sources },
+    sources: { ...DEFAULT_MAP.sources, ...own.sources },
     summaries: { ...DEFAULT_MAP.summaries, ...own.summaries },
     billion: Array.isArray(own.billion) ? own.billion : DEFAULT_MAP.billion,
   };
@@ -126,8 +154,27 @@ export function scanFamilies({ claudeDir = skillHomes().claudeDir, agentsDir = s
     const source = lock[name]?.source || lock[entry]?.source || (real.startsWith(gstackDir) ? 'gstack' : null);
     found.push({ name: name || entry, line: oneLine(description), source });
   }
+  // claude.ai's skills, one folder per account signed in here.
+  const syncedDir = join(skillsDir, 'synced');
+  let accounts = [];
+  try { accounts = readdirSync(syncedDir); } catch { /* none synced */ }
+  for (const account of accounts) {
+    let names = [];
+    try { names = readdirSync(join(syncedDir, account)); } catch { continue; }
+    for (const entry of names) {
+      const text = readable(join(syncedDir, account, entry, 'SKILL.md'));
+      if (text === null) continue;
+      const name = `${SYNCED_SOURCE}:${frontMatter(text).name || entry}`;
+      if (!found.some(s => s.name === name)) found.push({ name, line: oneLine(frontMatter(text).description), source: SYNCED_SOURCE });
+    }
+  }
   // Not on their own: with no skills installed there is nothing to shorten.
-  if (found.length) for (const [name, line] of Object.entries(BUNDLED)) if (map.skills[name]) found.push({ name, line, source: null });
+  if (found.length) {
+    for (const [name, line] of Object.entries(BUNDLED)) found.push({ name, line, source: BUNDLED_SOURCE });
+    // Built-in skills Claude Code lists that neither the table nor the disk knows.
+    const known = new Set(found.map(s => s.name));
+    for (const { name, line } of unknownListed(claudeDir, known)) found.push({ name, line, source: null });
+  }
 
   const families = new Map();
   const ungrouped = [];
@@ -141,6 +188,44 @@ export function scanFamilies({ claudeDir = skillHomes().claudeDir, agentsDir = s
   }
   for (const members of families.values()) members.sort((a, b) => a.name.localeCompare(b.name));
   return { families, ungrouped: ungrouped.sort(), summaries: map.summaries };
+}
+
+// The skill listing Claude Code recorded in the newest session transcript
+// (an attachment of type skill_listing, near the top), as [{ name, line }].
+// Kept to names no skill folder accounts for: bundled names (no plugin
+// prefix) and claude.ai ones, minus the session's project and command skills.
+const HEAD = 1 << 20;
+export function unknownListed(claudeDir, known) {
+  const projects = join(claudeDir, 'projects');
+  const byAge = (paths) => paths.map(p => { try { return [p, statSync(p).mtimeMs]; } catch { return [p, 0]; } })
+    .sort((a, b) => b[1] - a[1]).map(([p]) => p);
+  let dirs = [];
+  try { dirs = byAge(readdirSync(projects).map(d => join(projects, d))).slice(0, 5); } catch { return []; }
+  const files = byAge(dirs.flatMap(d => { try { return readdirSync(d).filter(f => f.endsWith('.jsonl')).map(f => join(d, f)); } catch { return []; } }));
+  for (const file of files.slice(0, 10)) {
+    let head = '';
+    let fd;
+    try {
+      fd = openSync(file, 'r');
+      const buf = Buffer.alloc(HEAD);
+      head = buf.toString('utf8', 0, readSync(fd, buf, 0, HEAD, 0));
+    } catch { continue; } finally { if (fd !== undefined) closeSync(fd); }
+    for (const row of head.split('\n')) {
+      if (!row.includes('"skill_listing"')) continue;
+      let entry;
+      try { entry = JSON.parse(row); } catch { continue; }
+      const listing = entry.attachment;
+      if (listing?.type !== 'skill_listing' || !Array.isArray(listing.names)) continue;
+      const lines = new Map(String(listing.content || '').split('\n').map(l => /^- ([^:\s]+(?::[^:\s]+)?): (.*)$/.exec(l)).filter(Boolean).map(m => [m[1], m[2]]));
+      const cwd = typeof entry.cwd === 'string' && entry.cwd;
+      const local = (name) => [cwd && join(cwd, '.claude', 'skills', name, 'SKILL.md'), cwd && join(cwd, '.claude', 'commands', `${name}.md`),
+        join(claudeDir, 'commands', `${name}.md`)].some(f => f && readable(f) !== null);
+      return listing.names.filter(n => typeof n === 'string' && !known.has(n) && !local(n)
+        && (!n.includes(':') || n.startsWith(`${SYNCED_SOURCE}:`)))
+        .map(name => ({ name, line: oneLine(lines.get(name)) }));
+    }
+  }
+  return [];
 }
 
 const FAMILY_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/;
