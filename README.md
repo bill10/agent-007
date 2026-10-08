@@ -13,7 +13,7 @@ The operations layer for Claude Code and Codex: agents take work from a board, o
 
 - **A job board your agents work from.** Each card gets its own git worktree, a Claude Code or Codex worker and a real terminal you can type into, and ends as a pull request (or a summary, for work that isn't code).
 - **One manager agent, Billion.** Give it a goal: it posts the cards, reviews the diffs, merges the PRs, and brings you only what needs a person (money, access, security, anything irreversible) in a briefing twice a day.
-- **Talk to it from your phone.** Open it in your phone's browser over Tailscale (`agent007 install --remote`), tap Talk to Billion, and hear progress spoken back. One command installs it as a service; Settings has an Update button.
+- **Talk to it from your phone.** Open it in your phone's browser over Tailscale (`agent007 install --remote`), tap Talk to Billion, and hear progress spoken back. One command installs it as a service; Settings has an Update button, with a What's new window listing the changes first.
 
 ### The Billion tab
 

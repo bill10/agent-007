@@ -123,8 +123,8 @@ export function renderVersion(info, step = null, check = null) {
   if (!step && info.kind !== 'npx') {
     if (check === 'checked' && info.checkFailed) lines.push('<div class="settings-version-error">The check failed: could not reach the npm registry.</div>');
     if (info.latest) {
-      lines.push(`<div class="settings-version-new">Version ${escapeHtml(info.latest)} is available</div>`,
-        `<button type="button" class="settings-refresh" data-update="start" title="Runs ${UPDATE_CMD}: ${info.kind === 'checkout' ? 'git pull' : 'npm install -g'}, then a restart once busy workers finish">Update</button>`);
+      lines.push(`<div class="settings-version-new">Version ${escapeHtml(info.latest)} is available · <button type="button" class="settings-link" data-update="notes" aria-haspopup="dialog">What’s new</button></div>`,
+        `<button type="button" class="settings-refresh settings-primary" data-update="start" title="Runs ${UPDATE_CMD}: ${info.kind === 'checkout' ? 'git pull' : 'npm install -g'}, then a restart once busy workers finish">Update</button>`);
     } else if (check === 'checked') {
       if (!info.checkFailed) lines.push(`<div>Up to date (version ${escapeHtml(info.version)})</div>`);
     }
@@ -132,6 +132,56 @@ export function renderVersion(info, step = null, check = null) {
     else lines.push('<button type="button" class="settings-refresh" data-update="check">Check for updates</button>');
   }
   return lines.join('');
+}
+
+// The CHANGELOG's markdown, as much of it as it uses: ## and ### headings,
+// lists one level deep, paragraphs, **bold**, `code` and [links](https://…).
+const inline = (t) => escapeHtml(t)
+  .replace(/`([^`]+)`/g, '<code>$1</code>')
+  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)"]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+export function renderNotes(md) {
+  const out = [];
+  let depth = 0; // open <ul>s
+  let text = null; // the open item's or paragraph's lines, inlined together so **bold** may wrap
+  let para = false;
+  const flush = () => {
+    if (text !== null) out.push(para ? `<p>${inline(text)}</p>` : inline(text));
+    text = null;
+  };
+  const closeTo = (d) => { flush(); while (depth > d) { out.push('</li></ul>'); depth--; } };
+  for (const line of md.split('\n')) {
+    const item = line.match(/^(\s*)[-*] (.*)/);
+    const head = line.match(/^(##+) (.*)/);
+    if (item) {
+      flush();
+      const d = item[1].length >= 2 ? 2 : 1;
+      if (d > depth) { out.push('<ul>'.repeat(d - depth)); depth = d; } else { closeTo(d); out.push('</li>'); }
+      out.push('<li>');
+      text = item[2];
+      para = false;
+    } else if (head) {
+      closeTo(0);
+      const tag = head[1].length === 2 ? 'h3' : 'h4';
+      // "[0.58.0.0] - 2026-10-07": the version, then its date dimmed.
+      const [, ver, date] = head[2].match(/^\[([^\]]+)\](?: - (.*))?$/) || [];
+      out.push(ver ? `<${tag}>${escapeHtml(ver)}${date ? ` <span class="settings-dim">${escapeHtml(date)}</span>` : ''}</${tag}>` : `<${tag}>${inline(head[2])}</${tag}>`);
+    } else if (line.trim()) {
+      if (text !== null) text += ` ${line.trim()}`;
+      else { text = line.trim(); para = !depth; }
+    } else closeTo(0);
+  }
+  closeTo(0);
+  return out.join('');
+}
+
+// The What's new window: GET /api/update/changelog, rendered.
+export function renderNotesBody(data) {
+  if (!data || data.error) {
+    const url = data?.url || 'https://github.com/bill10/agent-007/blob/main/CHANGELOG.md';
+    return `<p>${escapeHtml(data?.error || 'Could not load the release notes.')}</p><p><a href="${escapeHtml(url)}" target="_blank" rel="noopener">Read the CHANGELOG on GitHub</a></p>`;
+  }
+  return data.notes ? renderNotes(data.notes) : '<p>No release notes between these versions.</p>';
 }
 
 export function setupSettings() {
@@ -191,6 +241,8 @@ export function setupSettings() {
     if (chk) chk.onclick = checkNow;
     const start = box.querySelector('[data-update="start"]');
     if (start) start.onclick = update;
+    const notes = box.querySelector('[data-update="notes"]');
+    if (notes) notes.onclick = showNotes;
     const reload = box.querySelector('[data-update="reload"]');
     if (reload) reload.onclick = () => location.reload();
   };
@@ -241,6 +293,41 @@ export function setupSettings() {
   }
   refreshVersion();
 
+  // What's new: a modal <dialog>, so Esc closes it and the page behind is inert.
+  const dlg = document.getElementById('whats-new');
+  const dlgBody = document.getElementById('whats-new-body');
+  let notesSeq = 0; // a slow earlier fetch must not overwrite a newer one
+  async function showNotes() {
+    const seq = ++notesSeq;
+    const sub = document.getElementById('whats-new-sub');
+    const dlgUpdate = dlg.querySelector('[data-update]');
+    // Update only while there is one to run and none is running already.
+    const label = (d) => { sub.textContent = d?.latest ? `${d.version} → ${d.latest}` : ''; dlgUpdate.hidden = !d?.latest || Boolean(step); };
+    label(last);
+    dlgBody.innerHTML = '<p class="settings-dim">Loading…</p>';
+    dlgBody.setAttribute('aria-busy', 'true');
+    dlg.showModal();
+    let data = null;
+    try {
+      const resp = await fetch('/api/update/changelog', { headers: authHeaders() });
+      if (resp.ok) data = await resp.json();
+    } catch {}
+    if (seq !== notesSeq) return;
+    if (data) label(data); // the server's answer, in case npm moved on since the panel loaded
+    dlgBody.innerHTML = renderNotesBody(data);
+    dlgBody.removeAttribute('aria-busy');
+    dlgBody.scrollTop = 0;
+  }
+  // A click on the backdrop lands on the <dialog> itself, outside its inner box.
+  // Only a press that also started there: a text selection dragged out of the notes is not a click outside.
+  let downOnBackdrop = false;
+  dlg.addEventListener('pointerdown', (e) => { downOnBackdrop = e.target === dlg; });
+  dlg.addEventListener('click', (e) => { if (e.target === dlg && downOnBackdrop) dlg.close(); });
+  dlg.querySelector('[data-close]').onclick = () => dlg.close();
+  dlg.querySelector('[data-update]').onclick = () => { dlg.close(); update(); };
+  // Back to What's new, or to Update/Reload if a re-render took it away.
+  dlg.addEventListener('close', () => (box.querySelector('[data-update="notes"]') || box.querySelector('button') || btn).focus());
+
   btn.onclick = () => {
     if (panel.hidden && step !== 'updating' && step !== 'restarting') {
       if (step === 'failed') step = null;
@@ -250,7 +337,7 @@ export function setupSettings() {
     open(panel.hidden);
   };
   refresh.onclick = () => load('POST');
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden) { open(false); btn.focus(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !panel.hidden && !dlg.open) { open(false); btn.focus(); } });
   document.addEventListener('mousedown', (e) => { if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) open(false); });
   window.addEventListener('resize', () => { if (!panel.hidden) place(); });
 }
