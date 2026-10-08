@@ -63,7 +63,14 @@ const app = express();
 // browser's scheme and address (X-Forwarded-Proto/For); nobody else is.
 app.set('trust proxy', 'loopback');
 const server = createServer(app);
-const wss = new WebSocketServer({ server, verifyClient });
+// Compressed: terminal redraws and JSON shrink several-fold, which is what a
+// remote browser on a slow link needs. Each socket keeps a deflate context
+// (deflate about 100 KB at these window and memory sizes, inflate 32 KB);
+// messages under 1 KB go raw.
+const wss = new WebSocketServer({
+  server, verifyClient,
+  perMessageDeflate: { threshold: 1024, serverMaxWindowBits: 13, zlibDeflateOptions: { level: 6, memLevel: 7 } },
+});
 
 // --- HTTP routes ---
 // broadcast is injected for the same reason server/jobs.js takes it as an
