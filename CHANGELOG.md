@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.59.0.0] - 2026-10-08
+
+### Added
+
+- **A "What's new" link when an update is available.** Settings' "Version x is available" line now links to a window listing every CHANGELOG section between the version you run and the latest, newest first, with Update and Close. The notes come from GitHub at the latest release's tag (`GET /api/update/changelog`), since the npm package doesn't ship CHANGELOG.md; if GitHub can't be reached, the window says so and links to the CHANGELOG instead.
+
 ## [0.58.0.0] - 2026-10-07
 
 ### Added
