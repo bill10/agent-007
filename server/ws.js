@@ -41,9 +41,38 @@ export function broadcast(message) {
     if (mayAnswerOwner()) broadcastToBrowsers(message);
     return;
   }
+  // A terminal's output goes only to the windows showing it: every agent's
+  // spinner to every browser is what buried a reply on a slow link. The rest
+  // hear that it is busy, a few seconds late at most (the stalled badges).
+  if (message.type === 'pty-output') {
+    const data = JSON.stringify(message);
+    for (const ws of clients) {
+      if (ws.readyState === 1 && ws.watching?.sessionId === message.sessionId) ws.send(data);
+    }
+    if (!activityTimers.has(message.sessionId)) {
+      activityTimers.set(message.sessionId, setTimeout(() => {
+        activityTimers.delete(message.sessionId);
+        broadcast({ type: 'pty-activity', sessionId: message.sessionId });
+      }, ACTIVITY_MS));
+    }
+    return;
+  }
   const data = JSON.stringify(message);
   for (const ws of clients) {
     if (ws.readyState === 1) ws.send(data);
+  }
+}
+export const ACTIVITY_MS = 3000;
+const activityTimers = new Map();   // sessionId -> the pty-activity due for it
+
+// A window that starts showing a terminal gets its scrollback then, not at
+// connect. Every chunk of it is a `replay` (not new output, so no activity);
+// the first says `reset`, to clear what the window held, which may be stale.
+function replayTo(ws, session) {
+  const chunks = session.ringBuffer.getAll();
+  for (let i = 0; i < chunks.length; i += 100) {
+    const batch = chunks.slice(i, i + 100).join('');
+    ws.send(JSON.stringify({ type: 'pty-output', sessionId: session.id, data: Buffer.from(batch).toString('base64'), replay: true, ...(i === 0 ? { reset: true } : {}) }));
   }
 }
 
@@ -337,6 +366,7 @@ function denyControl(ws, name, ownerId) {
 }
 
 // --- Setup ---
+export const HEARTBEAT_MS = 30 * 1000;
 // Both sides normalised through URL, so a default port written one way and
 // not the other still matches. PUBLIC_URL's page counts too: a proxy may pass
 // its own Host (nginx's default) rather than the browser's.
@@ -354,7 +384,19 @@ export function broadcastToBrowsers(payload) {
   }
 }
 
-export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState }) {
+export function setupWebSocket(wss, { createSession, killSession, startBillion, switchBillion, accountAction, accountState, heartbeatMs = HEARTBEAT_MS }) {
+  // A socket left half-dead by a network change stays open on both ends until
+  // something is sent and goes unanswered: one missed pong and it is cut.
+  const heartbeat = setInterval(() => {
+    for (const ws of clients) {
+      if (ws.isAlive === false) { ws.terminate(); continue; }
+      ws.isAlive = false;
+      try { ws.ping(); } catch {}
+    }
+  }, heartbeatMs);
+  heartbeat.unref?.();
+  wss.on('close', () => clearInterval(heartbeat));
+
   wss.on('connection', (ws, req) => {
     // Auth gate (phase 1): when users are configured, require a valid token
     // (?token= on the WS URL, since browsers can't set handshake headers).
@@ -367,6 +409,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     }
     ws.user = user; // null when auth is disabled
     clients.add(ws);
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
 
     // Tell the client who it is and whether auth is on.
     // platform lets the client offer the right shell preset (bash vs PowerShell).
@@ -383,11 +427,6 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     const replay = [...sessions.values()].sort((a, b) => Number(!!b.isBillion) - Number(!!a.isBillion));
     for (const session of replay) {
       ws.send(JSON.stringify(sessionPayload(session)));
-      const chunks = session.ringBuffer.getAll();
-      for (let i = 0; i < chunks.length; i += 100) {
-        const batch = chunks.slice(i, i + 100).join('');
-        ws.send(JSON.stringify({ type: 'pty-output', sessionId: session.id, data: Buffer.from(batch).toString('base64') }));
-      }
       if (session.fileTree && session.fileTree.length > 0) {
         ws.send(JSON.stringify({
           type: 'file-tree', sessionId: session.id,
@@ -465,11 +504,18 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           const session = msg.sessionId == null ? null : sessions.get(msg.sessionId);
           const fits = Number.isInteger(msg.cols) && Number.isInteger(msg.rows)
             && msg.cols > 0 && msg.rows > 0 && msg.cols <= MAX_PTY_COLS && msg.rows <= MAX_PTY_ROWS;
-          if (msg.sessionId != null && !(session && !session.exited && fits)) break;
+          // An exited one is still watched, for its last screen, but not fitted.
+          if (msg.sessionId != null && !(session && fits)) break;
           const prev = ws.watching && sessions.get(ws.watching.sessionId);
           ws.watching = session ? { sessionId: session.id, cols: msg.cols, rows: msg.rows } : null;
           if (prev && prev !== session && !prev.exited) fitPtyToWatchers(prev);
-          if (session) fitPtyToWatchers(session);
+          if (session && prev !== session) replayTo(ws, session);
+          if (session && !session.exited) fitPtyToWatchers(session);
+          break;
+        }
+        // The page's own heartbeat (public/modules/ws.js): any answer will do.
+        case 'ping': {
+          ws.send('{"type":"pong"}');
           break;
         }
         case 'billion-start': {
@@ -547,7 +593,11 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         case 'chat-send': {
           const result = !mayAnswerOwner() ? { error: 'Only the owner talks to Billion here, and with user accounts on nobody does.' }
             : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
-            : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, files: msg.files, broadcast });
+            // The page's nonce is the message's idempotency key, as a voice
+            // turn's utterance id is: one sent again after a dropped
+            // connection is the message already in the thread, not a second.
+            : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, files: msg.files, broadcast,
+              utterance: typeof msg.nonce === 'string' && msg.nonce.length <= 64 ? `chat-${msg.nonce}` : undefined });
           ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
           break;
         }

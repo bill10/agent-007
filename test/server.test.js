@@ -5,11 +5,21 @@ import { countInFlightByRepo, selectDispatchableJobs } from '../lib/jobs.js';
 import { hashToken, WS_UNAUTHORIZED } from '../server/auth.js';
 import { addJob, deleteJob, moveJob, allJobs, updateSettings } from '../server/jobs.js';
 import { config, orphans, codenamePool } from '../server/state.js';
-import WebSocket from 'ws';
+import RawWebSocket from 'ws';
 import { tmpdir } from 'os';
 import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
+import { WebSocketServer } from 'ws';
+import { setupWebSocket, ACTIVITY_MS } from '../server/ws.js';
+
+// The server offers compression, and inflating is async: a compressed socket
+// hears the connect-time burst after its test has attached listeners, which
+// these tests were written never to see. They speak plain frames; one test
+// below checks that a browser-like client does get compression.
+class WebSocket extends RawWebSocket {
+  constructor(url, opts) { super(url, { perMessageDeflate: false, ...opts }); }
+}
 
 const PORT = 17007; // Use non-default port to avoid conflicts
 let baseUrl;
@@ -307,14 +317,18 @@ describe('PTY lifecycle', () => {
     // Collect until session-ended itself: ConPTY on a slow Windows runner can
     // take longer than any fixed wait to report echo's exit. The bound is only
     // there so a real hang fails here, inside the test's own timeout.
+    // Output goes to windows showing the terminal, so this one shows it; echo
+    // may well be done by then, which the replay on watching covers.
     const messages = [];
+    const said = () => messages.filter(m => m.type === 'pty-output').map(m => Buffer.from(m.data, 'base64').toString()).join('');
     try {
       await new Promise(resolve => {
         const timer = setTimeout(resolve, 25000);
         ws.on('message', (data) => {
           const msg = JSON.parse(data.toString());
           messages.push(msg);
-          if (msg.type === 'session-ended') { clearTimeout(timer); resolve(); }
+          if (msg.type === 'session-created') ws.send(JSON.stringify({ type: 'pty-resize', sessionId: msg.sessionId, cols: 80, rows: 24 }));
+          if (messages.some(m => m.type === 'session-ended') && said().includes('hello-agent-007')) { clearTimeout(timer); resolve(); }
         });
       });
     } finally {
@@ -516,6 +530,83 @@ describe('pty size with two windows', () => {
   }, 15000);
 });
 
+// A slow link: a window gets a terminal's output only while it shows that
+// terminal, the rest a throttled pty-activity, and its scrollback on switching.
+describe('terminal output on a slow link', () => {
+  const open = (opts) => new Promise((resolve, reject) => {
+    const ws = new WebSocket(wsUrl, opts);
+    const seen = [];
+    ws.seen = seen;
+    ws.on('message', (data) => seen.push(JSON.parse(data.toString())));
+    ws.on('open', () => resolve(ws));
+    ws.on('error', reject);
+  });
+  const text = (ws, sessionId) => ws.seen.filter(m => m.type === 'pty-output' && m.sessionId === sessionId)
+    .map(m => Buffer.from(m.data, 'base64').toString()).join('');
+
+  it('sends output only to the window showing it, activity to the rest, and the scrollback on switching', async () => {
+    const a = await open();
+    const b = await open();
+    a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
+    await vi.waitFor(() => expect(a.seen.find(m => m.type === 'session-created' && m.command === 'cat' && m.focus)).toBeTruthy());
+    const { sessionId } = a.seen.find(m => m.type === 'session-created' && m.focus);
+    a.send(JSON.stringify({ type: 'pty-resize', sessionId, cols: 80, rows: 24 }));
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: 'MARK_ONE\n' }));
+    await vi.waitFor(() => expect(text(a, sessionId)).toContain('MARK_ONE'));
+    expect(text(b, sessionId)).toBe('');
+    await vi.waitFor(() => expect(b.seen.some(m => m.type === 'pty-activity' && m.sessionId === sessionId)).toBe(true), { timeout: ACTIVITY_MS + 2000 });
+    expect(b.seen.filter(m => m.type === 'pty-activity' && m.sessionId === sessionId).length).toBe(1);   // throttled, not per chunk
+
+    // b switches to it: the scrollback, marked so its copy is cleared first.
+    b.send(JSON.stringify({ type: 'pty-resize', sessionId, cols: 80, rows: 24 }));
+    await vi.waitFor(() => expect(text(b, sessionId)).toContain('MARK_ONE'));
+    expect(b.seen.find(m => m.type === 'pty-output')).toMatchObject({ replay: true, reset: true });
+    // A resize of the same terminal is not a switch: no second replay.
+    b.send(JSON.stringify({ type: 'pty-resize', sessionId, cols: 70, rows: 24 }));
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: 'MARK_TWO\n' }));
+    await vi.waitFor(() => expect(text(b, sessionId)).toContain('MARK_TWO'));
+    expect(b.seen.filter(m => m.type === 'pty-output' && m.reset)).toHaveLength(1);
+
+    // Leaving it (job board, hidden tab) stops the stream.
+    b.send(JSON.stringify({ type: 'pty-resize', sessionId: null }));
+    await new Promise(r => setTimeout(r, 100));
+    const before = b.seen.length;
+    a.send(JSON.stringify({ type: 'pty-input', sessionId, data: 'MARK_THREE\n' }));
+    await vi.waitFor(() => expect(text(a, sessionId)).toContain('MARK_THREE'));
+    expect(b.seen.slice(before).some(m => m.type === 'pty-output')).toBe(false);
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
+  it('compresses for a client that offers it', async () => {
+    const ws = await open({ perMessageDeflate: true });
+    expect(ws.extensions).toMatch(/permessage-deflate/);
+    ws.close();
+  });
+
+  it('cuts a socket that stops answering pings, and keeps one that answers', async () => {
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise(r => wss.once('listening', r));
+    setupWebSocket(wss, { heartbeatMs: 100 });
+    const url = `ws://127.0.0.1:${wss.address().port}`;
+    const connect = () => new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      ws.on('open', () => resolve(ws));
+      ws.on('error', reject);
+    });
+    const alive = await connect();
+    const dead = await connect();
+    dead._socket.pause();   // a dead link: nothing read, so no pong goes back
+    await vi.waitFor(() => expect(wss.clients.size).toBe(1), { timeout: 3000 });
+    expect([...wss.clients][0].readyState).toBe(1);
+    expect(alive.readyState).toBe(1);
+    alive.close();
+    dead.terminate();
+    await new Promise(r => wss.close(r));
+  });
+});
+
 // --- Auth enforcement (phase 1) ---
 // Runs LAST: writes a user to the hermetic users path so the running server
 // (which started auth-disabled) picks it up live, then removes it so nothing
@@ -708,6 +799,7 @@ describe('ownership authorization', () => {
     const created = nextMatching(a, (m) => m.type === 'session-created' && /cat/.test(m.command || ''));
     a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
     const { sessionId } = await created;
+    a.send(JSON.stringify({ type: 'pty-resize', sessionId, cols: 80, rows: 24 }));   // output goes to watchers
     const b = await connect(tokenB);
 
     const marker = 'BINTRUDER_' + Math.random().toString(36).slice(2, 8);
