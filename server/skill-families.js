@@ -70,7 +70,7 @@ export const DEFAULT_MAP = {
 };
 
 const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
-const folderNames = (dir) => { try { return readdirSync(dir); } catch { return []; } };
+export const folderNames = (dir) => { try { return readdirSync(dir); } catch { return []; } };
 
 // name and description from a SKILL.md's front matter, a folded (>) or
 // literal (|) description included.
@@ -118,6 +118,9 @@ export function readMap(file = FAMILIES_FILE) {
     // null drops a default, so that plugin is left as the owner set it.
     plugins: Object.fromEntries(Object.entries({ ...DEFAULT_MAP.plugins, ...own.plugins }).filter(([, id]) => typeof id === 'string' && id)),
     billion: Array.isArray(own.billion) ? own.billion : DEFAULT_MAP.billion,
+    // The skill store's opt-outs (server/skill-store.js).
+    claudeOnly: Array.isArray(own.claudeOnly) ? own.claudeOnly : [],
+    codexOnly: Array.isArray(own.codexOnly) ? own.codexOnly : [],
   };
 }
 

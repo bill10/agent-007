@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync, spawn } from 'child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs';
+import { removeTempDir } from './temp-dir.js';
 import { createServer } from 'net';
 import { homedir, tmpdir } from 'os';
 import { join } from 'path';
@@ -72,6 +73,39 @@ describe('settings', () => {
     const keys = [...readFileSync('.env.example', 'utf8').matchAll(/^#?\s*([A-Z][A-Z0-9_]*)=/gm)].map(m => m[1]);
     expect(keys.length).toBeGreaterThan(5);
     for (const key of keys) expect(out).toContain(key);
+  });
+
+  // Value: protects=`agent007 skills sync`: a bad subcommand exits 2, --dry-run moves nothing and records nothing, a real run moves, links and records its result for Settings; fails_when=--dry-run is not passed through, the state file is not written, or a typo runs a sync; why_new=nothing ran the CLI branch; seam=none
+  it('skills sync: refuses an unknown subcommand, --dry-run changes nothing, a real run moves and records', () => {
+    const extra = { CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') };
+    // A Claude skill: a Codex one would wait while any Codex runs on this machine.
+    const skillDir = join(home, '.claude', 'skills', 'seo-audit');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: seo-audit\n---\nbody\n');
+    try {
+      expect(cli(['skills'], extra).code).toBe(2);
+      expect(cli(['skills', 'snyc'], extra).code).toBe(2);
+      expect(cli(['skills', 'sync', 'seo-audit'], extra).code).toBe(2);
+      expect(existsSync(join(home, '.agents'))).toBe(false);
+
+      const dry = cli(['skills', 'sync', '--dry-run'], extra);
+      expect(dry.code).toBe(0);
+      expect(dry.out).toMatch(/Dry run, nothing changed\. Would move 1 skill into the store/);
+      expect(existsSync(join(skillDir, 'SKILL.md'))).toBe(true);
+      expect(existsSync(join(home, '.agents'))).toBe(false);
+      expect(existsSync(join(cfg, 'skill-store.json'))).toBe(false);
+
+      const real = cli(['skills', 'sync'], extra);
+      expect(real.code).toBe(0);
+      expect(real.out).toMatch(/Moved 1 skill into the store/);
+      expect(existsSync(join(home, '.agents', 'skills', 'seo-audit', 'SKILL.md'))).toBe(true);
+      expect(lstatSync(skillDir).isSymbolicLink()).toBe(true);
+      // Recorded for Settings, without turning the automatic sync on.
+      expect(JSON.parse(readFileSync(join(cfg, 'skill-store.json'), 'utf8'))).toMatchObject({ enabled: false, last: { moved: ['seo-audit'] } });
+    } finally {
+      removeTempDir(home);
+      removeTempDir(cwd);
+    }
   });
 
   it('init writes .env.example, all commented out, and never overwrites', () => {

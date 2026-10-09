@@ -21,6 +21,7 @@ const HELP = `Usage: agent007 [--port <n>]
        agent007 adduser "Display Name"
        agent007 handover
        agent007 doctor
+       agent007 skills sync [--dry-run]
        agent007 install [--dry-run | --voice | --remote | --public-url <url> | --all [--yes]]
        agent007 uninstall | status
        agent007 restart [--now] | logs [-f] [-n <lines>] | update [--now]
@@ -37,6 +38,12 @@ Commands:
                    your repos, the port, settings, Telegram, the service) and
                    say how to fix what is missing. Changes nothing. Exits 1 on
                    a problem
+  skills sync      Move every skill folder in ~/.claude/skills and
+                   ~/.codex/skills into ~/.agents/skills and link it back
+                   for Claude Code, so both CLIs see each skill once. Old
+                   folders go to ~/.agent-007/skill-backup; two different
+                   copies of one name are left alone. --dry-run only says
+                   what it would do. Settings can run it by itself
 
 Run it as a service (macOS and Linux):
   install          Start Agent 007 at login and bring it back if it stops
@@ -176,7 +183,7 @@ if (values['public-url'] !== undefined && positionals[0] !== 'install') {
   process.env.PUBLIC_URL = values['public-url'];
   launchEnv.PUBLIC_URL = values['public-url'];
 }
-if (positionals.length && !['init', 'adduser', 'handover', 'doctor', ...SERVICE_COMMANDS].includes(positionals[0])) {
+if (positionals.length && !['init', 'adduser', 'handover', 'doctor', 'skills', ...SERVICE_COMMANDS].includes(positionals[0])) {
   console.error(`Unknown command: ${positionals[0]}\n\n${HELP}`);
   process.exit(2);
 }
@@ -230,6 +237,29 @@ if (positionals[0] === 'init') {
   // Exit once written (a pipe on macOS is asynchronous), not on its own: a
   // probe that has not timed out yet would hold the loop open.
   process.stdout.write(`${formatSummary(results, { color })}\n`, () => process.exit(failed(results) ? 1 : 0));
+} else if (positionals[0] === 'skills') {
+  if (positionals[1] !== 'sync' || positionals.length > 2) {
+    console.error(`Unknown skills command: ${positionals.slice(1).join(' ') || '(none)'}. Try: ${ownCommand('skills sync --dry-run')}`);
+    process.exit(2);
+  }
+  const { syncSkillStore, summarize, readStoreState, writeStoreState, codexBusy } = await import('../server/skill-store.js');
+  // A running Codex read its skills from ~/.codex/skills: those wait for it.
+  const codexMoves = !await codexBusy();
+  if (!codexMoves) console.log('Codex is running, so skills in ~/.codex/skills stay where they are until it stops.');
+  const result = syncSkillStore({ dryRun: Boolean(values['dry-run']), codexMoves });
+  if (result.busy) {
+    console.error('Another skill store sync is running (the server, as an agent starts). Try again in a moment.');
+    process.exit(1);
+  }
+  console.log(`${result.dryRun ? 'Dry run, nothing changed. ' : ''}${summarize(result)}`);
+  for (const [label, list] of [['Move into the store', result.moved], ['Link for Claude Code', result.linked], ['Identical copies, one kept', result.folded]]) {
+    if (list.length) console.log(`  ${label}: ${list.join(', ')}`);
+  }
+  for (const c of result.conflicts) console.log(`  Left alone, ${c.why}: ${c.paths.join(' and ')}`);
+  if (result.backup) console.log(`Backup of every folder replaced: ${result.backup}`);
+  // Shown in Settings too, as its last sync.
+  if (!result.dryRun) writeStoreState({ ...readStoreState(), last: result });
+  process.exitCode = result.errors.length ? 1 : 0;
 } else if (SERVICE_COMMANDS.includes(positionals[0])) {
   const { runCommand, defaultContext } = await import('../server/service.js');
   process.exitCode = await runCommand(positionals[0], values, defaultContext({ launchEnv, cmd: ownCommand }));

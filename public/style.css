@@ -745,6 +745,14 @@ body {
 .telegram-settings[hidden] { display: none; }
 .voice-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
 .voice-settings[hidden] { display: none; }
+.skill-store-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
+.skill-store-settings[hidden] { display: none; }
+.skill-store-body { display: flex; flex-direction: column; gap: 6px; line-height: 1.4; overflow-wrap: anywhere; }
+.skill-store-body:empty { display: none; }
+/* What it did and where the backup is: operational, not placeholder text. */
+.skill-store-settings .settings-dim { color: var(--text-muted); }
+.skill-store-actions { display: flex; gap: 8px; }
+@media (max-width: 700px) { .skill-store-settings .rotation-toggle, .skill-store-actions .settings-refresh { min-height: 44px; } }
 .settings-voice { display: flex; flex-direction: column; gap: 6px; color: var(--text-muted); }
 .settings-voice-pick {
   min-width: 0;

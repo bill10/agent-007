@@ -95,6 +95,23 @@ export function renderVoiceSettings() {
   pick.onchange = () => { setVoiceURI(pick.value); renderVoiceSettings(); };
 }
 
+// One skill store (GET /api/skill-store, server/skill-store.js): the last
+// sync, or, while it is being turned on, what turning it on would do with
+// Turn on and Cancel. Turning it on always shows that dry run first.
+export function renderSkillStore(view) {
+  if (view.error) return `<div class="account-error">${escapeHtml(view.error)}</div>`;
+  if (view.preview) {
+    return `<div><span class="settings-dim">Dry run, nothing changed yet:</span> ${escapeHtml(view.preview.summary)}</div>`
+      + '<div class="settings-dim">Every folder it replaces goes to ~/.agent-007/skill-backup first.</div>'
+      + '<div class="skill-store-actions"><button type="button" class="settings-refresh settings-primary" data-store="confirm">Turn on</button>'
+      + '<button type="button" class="settings-refresh" data-store="cancel">Cancel</button></div>';
+  }
+  if (!view.last) return view.enabled ? '<div>No sync yet.</div>' : '';
+  const when = new Date(view.last.at);
+  return `<div><span class="settings-dim">Last sync${Number.isNaN(when.getTime()) ? '' : ` ${escapeHtml(when.toLocaleString())}`}:</span> ${escapeHtml(view.summary)}</div>`
+    + (view.last.backup ? `<div class="settings-dim" title="${escapeHtml(view.last.backup)}">Backup: ${escapeHtml(tilde(view.last.backup, view.home))}</div>` : '');
+}
+
 // The version line (GET /api/update, server/self-update.js) and where an
 // update started from it has got to. step: null, 'updating', 'restarting',
 // 'done' or 'failed'. check: null, 'checking' or 'checked' (the Check for updates button).
@@ -240,10 +257,11 @@ export function setupSettings() {
     // Right edge under the gear, but never off either side of a narrow screen.
     panel.style.left = `${Math.max(8, Math.min(r.right, window.innerWidth - 8) - panel.offsetWidth)}px`;
   };
+  const loadStore = () => storeCall('/api/skill-store');
   const open = (show) => {
     panel.hidden = !show;
     btn.setAttribute('aria-expanded', String(show));
-    if (show) { renderVoiceSettings(); place(); load(); }
+    if (show) { renderVoiceSettings(); place(); load(); loadStore(); }
   };
   renderVoiceSettings();
   window.speechSynthesis?.addEventListener?.('voiceschanged', renderVoiceSettings);
@@ -360,6 +378,38 @@ export function setupSettings() {
     pollCli();
   }
   loadCli().then(u => { if (u && Object.values(u).some(x => x.updating)) pollCli(); });
+
+  // One skill store: the switch, a dry run before it goes on, the last sync.
+  const storeBox = document.getElementById('skill-store-settings');
+  const storeOn = document.getElementById('skill-store-on');
+  const storeBody = document.getElementById('skill-store-body');
+  let storeHtml = null;
+  const showStore = (view) => {
+    storeOn.checked = !!view.enabled;
+    storeOn.disabled = false;
+    // Unchanged on a reopen, so the live region does not read it out again.
+    const html = renderSkillStore(view);
+    if (html !== storeHtml) storeBody.innerHTML = storeHtml = html;
+    for (const b of storeBody.querySelectorAll('button')) b.disabled = false;
+    const confirmBtn = storeBody.querySelector('[data-store="confirm"]');
+    if (confirmBtn) { confirmBtn.onclick = async () => { await storeCall('/api/skill-store', { enabled: true }); storeOn.focus(); }; confirmBtn.focus(); }
+    const cancel = storeBody.querySelector('[data-store="cancel"]');
+    if (cancel) cancel.onclick = () => { showStore({ ...view, preview: null }); storeOn.focus(); };
+  };
+  async function storeCall(url, body) {
+    storeOn.disabled = true;
+    for (const b of storeBody.querySelectorAll('button')) b.disabled = true;
+    let resp;
+    try { resp = await fetch(url, { method: body === undefined ? 'GET' : 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); } catch { resp = null; }
+    if (resp?.status === 403) { storeBox.hidden = true; return; }
+    storeBox.hidden = false;
+    const data = await resp?.json().catch(() => null);
+    showStore(resp?.ok && data ? data : { enabled: storeOn.checked, error: data?.error || 'Could not reach the server.' });
+  }
+  storeOn.onchange = () => {
+    if (storeOn.checked) { storeOn.checked = false; storeCall('/api/skill-store/preview', {}); }
+    else storeCall('/api/skill-store', { enabled: false });
+  };
 
   // What's new: a modal <dialog>, so Esc closes it and the page behind is inert.
   const dlg = document.getElementById('whats-new');

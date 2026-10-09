@@ -144,6 +144,13 @@
             <div class="settings-section-head"><h2>Read aloud</h2></div>
             <label class="settings-voice"><span>Voice for reading messages aloud</span><select id="voice-pick" class="settings-voice-pick" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true"></select></label>
           </div>
+          <!-- One skill store (settings.js renderSkillStore); the owner's pages only. -->
+          <div class="skill-store-settings" id="skill-store-settings" hidden>
+            <div class="settings-section-head"><h2>One skill store</h2></div>
+            <p class="account-intro">Each skill kept once in ~/.agents/skills: Codex reads it there, Claude Code through a link. Checked at start and before each agent starts. Replaced folders are backed up, never deleted.</p>
+            <label class="rotation-toggle"><input type="checkbox" id="skill-store-on"><span>Keep every skill in one store</span></label>
+            <div class="skill-store-body" id="skill-store-body" aria-live="polite"></div>
+          </div>
           <!-- Claude and Codex account rotation; hidden with user accounts on. -->
           <div class="account-panel" id="account-panel" hidden>
             <div class="settings-section-head"><h2>Auto-switch accounts</h2></div>

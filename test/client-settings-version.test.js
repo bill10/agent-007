@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
-import { renderVersion, renderNotes, renderNotesBody } from '../public/modules/settings.js';
+import { renderVersion, renderNotes, renderNotesBody, renderSkillStore } from '../public/modules/settings.js';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -120,5 +120,23 @@ describe('Settings agent CLI versions', () => {
     const failed = text(renderCliVersions({ codex: { version: '0.157.0', finished: { code: 1, log: '<b>EACCES</b>' } } }));
     expect(failed.querySelector('.settings-version-error').textContent).toBe('<b>EACCES</b>');
     expect(failed.textContent).toContain('codex update');
+  });
+});
+
+describe('Settings One skill store', () => {
+  it('shows the dry run with Turn on and Cancel before it goes on', () => {
+    const d = text(renderSkillStore({ enabled: false, last: null, preview: { summary: 'Would move 3 skills into the store.' } }));
+    expect(d.textContent).toContain('Dry run, nothing changed yet: Would move 3 skills into the store.');
+    expect(d.querySelector('[data-store="confirm"]').textContent).toBe('Turn on');
+    expect(d.querySelector('[data-store="cancel"]').textContent).toBe('Cancel');
+  });
+
+  it('shows the last sync, its backup, errors as text, and nothing while off and never run', () => {
+    const d = text(renderSkillStore({ enabled: true, last: { at: '2026-10-09T12:00:00Z', backup: '/h/.agent-007/skill-backup/x' }, home: '/h', summary: '<b>Moved</b> 1 skill.' }));
+    expect(d.textContent).toContain('<b>Moved</b> 1 skill.');
+    expect(d.textContent).toContain('Backup: ~/.agent-007/skill-backup/x');
+    expect(renderSkillStore({ enabled: false, last: null })).toBe('');
+    expect(text(renderSkillStore({ enabled: true, last: null })).textContent).toBe('No sync yet.');
+    expect(text(renderSkillStore({ error: '<i>nope</i>' })).textContent).toBe('<i>nope</i>');
   });
 });
