@@ -258,13 +258,13 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 
 ### Rotating accounts
 
-Settings has one list for Claude Code and one for Codex, with the same controls.
-Open **Settings → Auto-switch accounts → Find logged-in accounts** in either.
+Settings has one list for Claude Code and Codex accounts, each row tagged with its CLI.
+Open **Settings → Auto-switch accounts → Find logged-in accounts**; it finds both CLIs' logins.
 Each Claude account must have its own Claude Code login folder (for example,
 sign in with `CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`); each
 Codex account its own Codex home with an `auth.json` (for example
 `CODEX_HOME=~/.codex-work codex login`). You can also add a
-folder under **Add an account folder manually**. **Automatic rotation turns on by default once two accounts
+folder under **Add an account folder manually**, picking Claude or Codex next to it. **Automatic rotation turns on by default once two accounts
 are added.** Arrange their order and click **Save settings** to apply changes. An explicitly saved off
 setting stays off, including after a restart or another account discovery. **Switch now** selects an account manually.
 
@@ -464,7 +464,7 @@ public/
     voice.js       Voice input (Web Speech API dictation into the terminal or the Billion tab's text box)
     auth.js        Login tokens, presence, HTML escaping
     settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Auto-switch accounts)
-    account.js     Claude and Codex account rotation settings (discovery, inclusion, order, fallback, recovery)
+    account.js     Claude and Codex account rotation settings (one list: discovery, inclusion, order, recovery)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
