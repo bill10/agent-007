@@ -187,6 +187,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
   const session = sessions.get(sessionId);
   if (!session) return;
   if (session.rotationResume) { session.accountRotating = false; session.rotationResume = false; dropMessages(sessionId); }
+  session.closing = true;   // its exit is a close, with no Restart (pty.js onExit)
   clearInterval(session.stateCheckInterval);
   clearTimeout(session.scanTimer);
   killSessionProcesses(session);

@@ -1,7 +1,21 @@
 // File explorer panel — repo sections, branch trees, inline diffs
-import { agents, repos, orphans, activeSessionId, setView, billionEnabled } from './state.js';
+import { agents, repos, orphans, activeSessionId, setView, billionEnabled, canControlAgent } from './state.js';
 import { send } from './ws.js';
-import { switchToSession } from './terminal.js';
+import { switchToSession, restartAgent, restartPending } from './terminal.js';
+
+// Restart, for an agent that is not running (terminal.js restartAgent): the
+// same button on an exited session's row and an orphan's.
+function restartButton(target, name) {
+  const id = target.sessionId || target.orphanId;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'explorer-restart-btn';
+  btn.disabled = restartPending(id);
+  btn.textContent = btn.disabled ? 'Restarting…' : 'Restart';
+  btn.title = `Restart ${name}, resuming its conversation`;
+  btn.onclick = (e) => { e.stopPropagation(); restartAgent(target); };
+  return btn;
+}
 
 let explorerVisible = true;
 let expandedBranches = new Set();  // sessionIds with expanded file trees
@@ -279,6 +293,7 @@ export function renderExplorer() {
         dot.style.background = stateColor(agent.state);
         entry.appendChild(dot);
         entry.appendChild(document.createTextNode(agent.name));
+        if (agent.restartable && canControlAgent(agent)) entry.appendChild(restartButton({ sessionId }, agent.name));
         section.appendChild(entry);
       }
     }
@@ -317,8 +332,8 @@ function renderBillionRow(content) {
     const start = document.createElement('button');
     start.className = 'explorer-icon-btn explorer-billion-start';
     start.textContent = '\u25b6';
-    start.title = 'Start Billion';
-    start.setAttribute('aria-label', 'Start Billion');
+    start.title = agent ? 'Restart Billion' : 'Start Billion';
+    start.setAttribute('aria-label', start.title);
     start.onclick = (e) => {
       e.stopPropagation();
       send({ type: 'billion-start' });
@@ -468,6 +483,7 @@ function createBranchEntry(sessionId, agent) {
     onLabel.textContent = `on ${agent.branchName}`;
     branchEl.appendChild(onLabel);
   }
+  if (agent.restartable && canControlAgent(agent)) branchEl.appendChild(restartButton({ sessionId }, agent.name));
 
   // Tree mode toggle switch (changes vs all files)
   let toggleEl = null;
@@ -573,13 +589,7 @@ function createOrphanEntry(orphanId, orphan) {
   const actions = document.createElement('div');
   actions.className = 'explorer-orphan-actions';
 
-  const respawnBtn = document.createElement('button');
-  respawnBtn.textContent = 'Re-spawn';
-  respawnBtn.onclick = (e) => {
-    e.stopPropagation();
-    send({ type: 're-adopt-orphan', orphanId });
-  };
-  actions.appendChild(respawnBtn);
+  actions.appendChild(restartButton({ orphanId }, orphan.name));
 
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'orphan-delete-btn';

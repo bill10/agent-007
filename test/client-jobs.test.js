@@ -5,7 +5,7 @@ vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 // terminal.js pulls in xterm; the board only needs switchToSession and
 // updateTabs from it, and stubbing it also proves the board does not depend on
 // the real module loading.
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 
 import { send } from '../public/modules/ws.js';
 import { switchToSession } from '../public/modules/terminal.js';

@@ -216,6 +216,7 @@ body {
 .settings-version-error { color: var(--state-disconnected); white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
 .settings-version code { color: var(--text); overflow-wrap: anywhere; }
 .settings-version .settings-refresh { margin: 6px 8px 0 0; }
+.settings-cli + .settings-cli { margin-top: 8px; }
 /* What's new: a link-looking button beside Update, and the modal it opens. */
 .settings-link {
   background: none; border: none; padding: 0; font: inherit;
@@ -889,7 +890,10 @@ body {
 .explorer-billion-start + .explorer-billion-cli { margin-left: 0; }
 /* notify_owner's questions, under Billion's row until dismissed */
 
+/* The name keeps its room (up to a long codename); the branch label gives way. */
 .explorer-branch-name {
+  flex-shrink: 0;
+  max-width: 11em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -906,6 +910,16 @@ body {
   min-width: 0;
 }
 
+/* Restart, on an exited agent's row and an orphan's */
+.explorer-restart-btn {
+  margin-left: auto; flex-shrink: 0;
+  font: inherit; font-size: 10px; padding: 1px 8px; border-radius: 3px; cursor: pointer;
+  background: transparent; color: var(--accent); border: 1px solid var(--accent);
+}
+.explorer-restart-btn:hover:not(:disabled) { background: var(--accent); color: var(--accent-contrast); }
+.explorer-restart-btn:disabled { cursor: progress; opacity: 0.7; }
+@media (hover: none) { .explorer-restart-btn { min-height: 32px; padding: 0 12px; } }
+
 /* Explorer: orphan entries */
 .explorer-orphan {
   opacity: 0.7;
@@ -918,10 +932,11 @@ body {
 }
 .explorer-orphan-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   padding: 2px 10px 4px 28px;
 }
-.explorer-orphan-actions button {
+.explorer-orphan-actions .explorer-restart-btn { margin-left: 0; padding: 2px 8px; }
+.explorer-orphan-actions .orphan-delete-btn {
   font-size: 10px;
   font-family: inherit;
   padding: 2px 8px;
@@ -931,10 +946,6 @@ body {
   background: transparent;
   color: var(--text-dim);
   transition: border-color 0.15s, color 0.15s;
-}
-.explorer-orphan-actions button:hover {
-  border-color: var(--accent);
-  color: var(--text);
 }
 .explorer-orphan-actions .orphan-delete-btn:hover {
   border-color: var(--state-disconnected);
@@ -1252,6 +1263,23 @@ body {
   padding: 4px;
 }
 .terminal-container .xterm { height: 100%; }
+/* An exited agent's terminal: what happened, and Restart. Across the bottom,
+   where its prompt was, clear of the voice button. */
+.terminal-restart {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px calc(var(--voice-fab-right) + var(--voice-fab-size) + 12px) 10px 16px;
+  background: var(--bg-dark); border-top: 1px solid var(--border);
+  color: var(--text-muted); font-size: 13px;
+}
+.terminal-restart-text { flex: 1 1 16em; }
+.terminal-restart-btn {
+  font: inherit; font-weight: 600; padding: 5px 16px; min-height: 30px; border-radius: 4px; cursor: pointer;
+  background: var(--accent); color: var(--accent-contrast); border: 1px solid var(--accent);
+}
+.terminal-restart-btn:hover:not(:disabled) { border-color: var(--text); }
+.terminal-restart-btn:disabled { cursor: progress; opacity: 0.7; }
+@media (hover: none) { .terminal-restart-btn { min-height: 44px; } }
 .terminal-empty {
   position: absolute;
   inset: 0;

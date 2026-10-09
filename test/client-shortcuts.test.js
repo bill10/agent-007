@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 vi.mock('../public/modules/explorer.js', () => ({ toggleExplorer: vi.fn() }));
 vi.mock('../public/modules/voice.js', () => ({ toggleVoice: vi.fn(), stopVoice: vi.fn() }));
 
