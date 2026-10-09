@@ -25,8 +25,9 @@ import { trustDialogKey, liveBillion } from './billion.js';
 import { codexTrustArgs } from './claude-trust.js';
 import { dropApprovals } from './approvals.js';
 
-let claudeSpawnBlocked = false;
-export function blockClaudeSpawns(on) { claudeSpawnBlocked = on; }
+// The CLI whose accounts are switching ('claude' or 'codex'), or null.
+let spawnBlocked = null;
+export function blockSpawns(on, cli = 'claude') { spawnBlocked = on ? cli : null; }
 
 // Regex constants for output filtering (shared, not recreated per event)
 
@@ -229,9 +230,11 @@ function answerTrustDialog(session, data, now) {
 export const CODEX_NO_UPDATE_ARGS = ['-c', 'check_for_update_on_startup=false'];
 export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, ghEnv = {}, rotationRestart = false, skills = [] }, broadcast) {
   const { file, args } = parseCommand(command);
-  const isClaude = sessionAgentFromCommand(command) === 'claude';
-  if (isClaude && claudeSpawnBlocked && !rotationRestart) return { error: 'Claude accounts are switching; try again shortly.' };
-  if (isClaude && (rotationState().pending || rotationState().damaged)) return { error: 'Restore the interrupted Claude login in Settings before starting Claude.' };
+  const cli = sessionAgentFromCommand(command);
+  const isClaude = cli === 'claude';
+  const cliName = cli === 'codex' ? 'Codex' : 'Claude';
+  if (cli && spawnBlocked === cli && !rotationRestart) return { error: `${cliName} accounts are switching; try again shortly.` };
+  if (cli && (rotationState(undefined, cli).pending || rotationState(undefined, cli).damaged)) return { error: `Restore the interrupted ${cliName} login in Settings before starting ${cliName}.` };
   // ownCwd: a repo-less agent that still has a folder of its own (Billion).
   const cwd = worktreePath || ownCwd || homedir();
 

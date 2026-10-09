@@ -27,7 +27,7 @@ import {
 } from './server/state.js';
 import { loadConfig, recoverCrashedSessions, saveActiveSession, removeActiveSession, syncOrphansToConfig, sessionAgent, sessionPermissionFlags, sessionOrigin } from './server/config.js';
 import { addRepo, createWorktree, removeWorktree, pruneWorktrees, discardWorktree, scanForOrphanedWorktrees, startTreeScanLoop, detectConflicts, deleteBranch } from './server/git.js';
-import { createSessionFromConfig, killSessionProcesses, blockClaudeSpawns } from './server/pty.js';
+import { createSessionFromConfig, killSessionProcesses, blockSpawns } from './server/pty.js';
 import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadcastOrphansList, verifyClient, respawnAgent, respawnBoardWorkers, mayAnswerOwner } from './server/ws.js';
 import { setupRoutes, checkOrigin } from './server/http.js';
 import { proxySeen } from './server/proxy.js';
@@ -36,7 +36,7 @@ import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, r
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
-import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand, deriveJobStatus } from './lib/jobs.js';
+import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand, deriveJobStatus, isCodexSessionId } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, saveBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
@@ -45,6 +45,7 @@ import { migrate as migrateAccount, rollback as rollbackAccount, retire as retir
 import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation } from './server/account-rotation.js';
 import { assertClaudeProcessesManaged } from './server/claude-processes.js';
 import { withClaudeSessionsStopped } from './server/claude-rotation-sessions.js';
+import { stopCodexDaemon } from './server/codex-login.js';
 import { takeMessages, restoreMessages, dropMessages, screenTail, sendNotice } from './server/messages.js';
 import { readMap as readFamilyMap, reportUngrouped } from './server/skill-families.js';
 import { reportDuplicates } from './server/skill-duplicates.js';
@@ -239,7 +240,7 @@ async function startBillion({ handover = false, carried = null } = {}) {
   const modelsIn = await modelsReady();
   for (const [id, s] of sessions) {
     if (!s.isBillion) continue;
-    if (s.rotationResume) return { error: 'Retry the paused Claude conversations in Settings before starting Billion.' };
+    if (s.rotationResume) return { error: `Retry the paused ${CLI_LABEL[s.agent] || 'Claude'} conversations in Settings before starting Billion.` };
     if (!s.exited) return { session: s, existing: true };
     sessions.delete(id);   // a stopped one's tab goes; the new one replaces it
   }
@@ -386,7 +387,10 @@ async function switchBillion(to, reason) {
 // the old account's token back first. The state goes to browsers only where
 // the owner may act (user accounts off), as the actions themselves do.
 const RECHECK_MS = 40_000;
-const accountStatePayload = () => ({ type: 'account-state', ...accountState(), rotation: { ...publicRotationState(), resumePending: [...sessions.values()].some(s => s.rotationResume) } });
+const ROTATION_CLIS = ['claude', 'codex'];
+const CLI_LABEL = { claude: 'Claude', codex: 'Codex' };
+const rotationPayload = cli => ({ ...publicRotationState(undefined, undefined, cli), resumePending: [...sessions.values()].some(s => s.rotationResume && s.agent === cli) });
+const accountStatePayload = () => ({ type: 'account-state', ...accountState(), rotation: rotationPayload('claude'), codexRotation: rotationPayload('codex') });
 const announceAccount = () => { if (mayAnswerOwner()) broadcastToBrowsers(accountStatePayload()); };
 async function tellOwnerOrShow(text, level, { show = true } = {}) {
   // In the Billion tab either way; a toast too unless it reached the phone.
@@ -403,17 +407,38 @@ async function aroundBillion(fn) {
   });
   try { return await switching; } finally { switching = null; }
 }
-// Rotation restarts every managed Claude session in its own conversation.
+// A Codex session's conversation, only while no other app Codex session
+// shares its folder: the newest recorded there since it started (so a /new in
+// the TUI counts), else the one its own `codex resume <id>` names (a rotation
+// restart, Restart, a respawned orphan): Codex writes nothing to it until a
+// turn runs.
+const codexIdFor = session => {
+  const dir = session.worktreePath || session.cwd;
+  const shared = [...sessions.values()].some(s => s !== session && s.agent === 'codex' && (!s.exited || s.rotationResume) && (s.worktreePath || s.cwd) === dir);
+  if (shared) return null;
+  const args = parseCommand(session.command || '').args, at = args.indexOf('resume');
+  return codexSessionIdFor(dir, undefined, session.createdAt || -Infinity)
+    || (at >= 0 && isCodexSessionId(args[at + 1]) ? args[at + 1] : null);
+};
+// Rotation restarts every managed session of that CLI in its own conversation.
 // Session ids and job links stay stable, including queued mail and UI tabs.
-async function aroundClaude(fn) {
+async function aroundAgent(cli, fn) {
   if (switching) return { error: BILLION_SWITCHING, busy: true };
-  blockClaudeSpawns(true);
-  switching = assertClaudeProcessesManaged([...sessions.values()]).then(() => withClaudeSessionsStopped(async () => {
-    await assertClaudeProcessesManaged([...sessions.values()]);
+  blockSpawns(true, cli);
+  const check = () => assertClaudeProcessesManaged([...sessions.values()], { agent: cli });
+  switching = check().then(() => withClaudeSessionsStopped(async () => {
+    const { daemon } = await check();
+    // Codex's background server keeps the old login in memory: stopped with
+    // every app session down, it starts again on the new one.
+    if (daemon) {
+      await stopCodexDaemon();
+      if ((await check()).daemon) throw new Error('The Codex background server did not stop. No account was switched.');
+    }
     return fn();
   }, {
+    agent: cli,
     list: () => [...sessions.values()],
-    idFor: session => session.claudeSessionId,
+    idFor: session => (cli === 'codex' ? codexIdFor(session) : session.claudeSessionId),
     stop: async session => {
       if (session.exited && session.rotationResume) return takeMessages(session.id);
       session.accountRotating = true;
@@ -422,7 +447,7 @@ async function aroundClaude(fn) {
       session.messagesHeld = true;
       try {
         await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('A Claude process did not stop; account switching was cancelled.')), 7000);
+          const timeout = setTimeout(() => reject(new Error(`A ${CLI_LABEL[cli]} process did not stop; account switching was cancelled.`)), 7000);
           session.pty.onExit(() => { clearTimeout(timeout); resolve(); });
           killSessionProcesses(session);
         });
@@ -456,22 +481,22 @@ async function aroundClaude(fn) {
   }));
   try { return await switching; }
   catch (err) { return { error: err.message, blocked: true, busy: !!err.busy }; }
-  finally { switching = null; blockClaudeSpawns(false); requestDispatch(); }
+  finally { switching = null; blockSpawns(false); requestDispatch(); }
 }
-async function rotateClaude(options = {}) {
-  const result = await rotateAccount({ ...options, around: aroundClaude });
+async function rotate(cli, options = {}) {
+  const result = await rotateAccount({ ...options, around: fn => aroundAgent(cli, fn) }, { cli });
   if (result.error === BUSY_ERROR || result.error === BILLION_SWITCHING) result.busy = true;
   announceAccount();
-  if (result.ok && !result.unchanged) await tellOwnerOrShow(`Claude account switched from ${result.oldEmail} to ${result.newEmail}. Claude conversations resumed.`, 'info');
+  if (result.ok && !result.unchanged) await tellOwnerOrShow(`${CLI_LABEL[cli]} account switched from ${result.oldEmail} to ${result.newEmail}. ${CLI_LABEL[cli]} conversations resumed.`, 'info');
   return result;
 }
-async function discoverRotationAccounts() {
+async function discoverRotationAccounts(cli) {
   const scan = await refreshAgentAccounts();
-  const folders = scan.agents.find(a => a.cli === 'claude')?.accounts.filter(a => a.loggedIn).map(a => a.folder) || [];
-  if (!folders.length) return { error: 'No logged-in Claude accounts were found.' };
+  const folders = scan.agents.find(a => a.cli === cli)?.accounts.filter(a => a.loggedIn).map(a => a.folder) || [];
+  if (!folders.length) return { error: `No logged-in ${CLI_LABEL[cli]} accounts were found.` };
   const errors = [];
   for (const folder of folders) {
-    const result = await addRotationAccount(folder);
+    const result = await addRotationAccount(folder, { cli });
     if (result.error) errors.push(result.error);
   }
   return errors.length ? { error: errors[0] } : { ok: true };
@@ -504,14 +529,16 @@ async function switchAccount(how, { fromBrowser = false } = {}) {
   }
   return result;
 }
+const cliOf = msg => (msg.cli === 'codex' ? 'codex' : 'claude');
 // Keys looked up with Object.hasOwn: a message naming a prototype key is not an action.
 const accountActions = {
-  'rotation-discover': () => discoverRotationAccounts(),
-  'rotation-add': msg => typeof msg.folder === 'string' ? addRotationAccount(msg.folder) : { error: 'Give a Claude config folder.' },
-  'rotation-configure': msg => configureRotation(msg),
-  'rotation-switch': msg => typeof msg.id === 'string' && /^[a-f0-9]{64}$/.test(msg.id) ? rotateClaude({ id: msg.id }) : { error: 'Select a saved Claude account.' },
-  'rotation-recover': () => recoverRotation(aroundClaude),
-  'rotation-resume': () => aroundClaude(async () => ({ ok: true })),
+  // msg.cli picks the registry: 'codex', else Claude's.
+  'rotation-discover': msg => discoverRotationAccounts(cliOf(msg)),
+  'rotation-add': msg => typeof msg.folder === 'string' ? addRotationAccount(msg.folder, { cli: cliOf(msg) }) : { error: cliOf(msg) === 'codex' ? 'Give a Codex home folder.' : 'Give a Claude config folder.' },
+  'rotation-configure': msg => configureRotation(msg, { cli: cliOf(msg) }),
+  'rotation-switch': msg => typeof msg.id === 'string' && /^[a-f0-9]{64}$/.test(msg.id) ? rotate(cliOf(msg), { id: msg.id }) : { error: `Select a saved ${CLI_LABEL[cliOf(msg)]} account.` },
+  'rotation-recover': msg => recoverRotation(fn => aroundAgent(cliOf(msg), fn), { cli: cliOf(msg) }),
+  'rotation-resume': msg => aroundAgent(cliOf(msg), async () => ({ ok: true })),
   setup: (msg) => setupAccount(msg.folder),
   arm: (msg) => armAccount(msg.on !== false),
   migrate: () => switchAccount('by the owner', { fromBrowser: true }),
@@ -537,28 +564,35 @@ async function accountAction(msg) {
 let wakeTimer = null;
 let accountLimitRunning = false;
 async function workerAccountLimitTick(now) {
-  if (accountLimitRunning || switching || !mayAnswerOwner() || !rotationState().enabled) return;
-  const session = [...sessions.values()].find(s => !s.exited && !s.isBillion && s.agent === 'claude'
+  if (accountLimitRunning || switching || !mayAnswerOwner()) return;
+  const clis = ROTATION_CLIS.filter(cli => rotationState(undefined, cli).enabled);
+  const session = [...sessions.values()].find(s => !s.exited && !s.isBillion && clis.includes(s.agent)
     && s.state !== 'WORKING' && now - (s.lastOutputAt || 0) >= SETTLE_MS
     && !(s.rotationRetryAt > now) && matchLimit(screenTail(s.ringBuffer.getAll().join(''), 15))?.kind === 'hard');
   if (!session) return;
   accountLimitRunning = true;
   try {
     const hit = matchLimit(screenTail(session.ringBuffer.getAll().join(''), 15));
-    const result = await rotateClaude({ limited: !session.rotationMarked, line: hit.line, allowCurrent: !!session.rotationMarked });
+    const result = await rotate(session.agent, { limited: !session.rotationMarked, line: hit.retry, allowCurrent: !!session.rotationMarked });
     if (result.busy) return;
     session.rotationMarked = true;
     if (result.exhausted || result.error) {
       session.rotationRetryAt = Number.isFinite(result.retryAt) ? result.retryAt : now + 30 * 60_000;
-      if (!session.rotationNotified) { session.rotationNotified = true; await tellOwnerOrShow(result.error || 'Claude accounts are unavailable. Workers will retry after a usage reset.', 'info'); }
+      if (!session.rotationNotified) { session.rotationNotified = true; await tellOwnerOrShow(result.error || `${CLI_LABEL[session.agent]} accounts are unavailable. Workers will retry after a usage reset.`, 'info'); }
     }
   } finally { accountLimitRunning = false; }
 }
+// An enabled account pool for limitTick, or null.
+const pool = cli => (mayAnswerOwner() && rotationState(undefined, cli).enabled ? {
+  run: (hit, { limited }) => rotate(cli, { limited, line: hit.retry ?? hit.line, allowCurrent: !limited }),
+  fallback: () => rotationState(undefined, cli).fallback,
+  prepare: () => rotate(cli, { allowCurrent: true, preferCurrent: true }),
+} : null);
 function startBillionWakes() {
   clearInterval(wakeTimer);
   wakeTimer = setInterval(() => {
     const now = Date.now();
-    workerAccountLimitTick(now).catch(() => console.error('Claude worker account rotation failed.'));
+    workerAccountLimitTick(now).catch(() => console.error('Worker account rotation failed.'));
     const session = liveBillion();
     if (!session || accountLimitRunning || switching) return;
     const busy = billionBusy(allJobs(), (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null),
@@ -569,19 +603,16 @@ function startBillionWakes() {
       switchTo: async (to, reason) => {
         const result = await switchBillion(to, reason);
         if (!result.error && !result.existing) broadcast(sessionPayload(result.session));
-        return result;
+        return result.error === BILLION_SWITCHING ? { ...result, busy: true } : result;
       },
       // Billion stalled with no one to unstick it: super urgent, so the phone too.
       notify: (text) => notifyOwner(text, { broadcast, telegram: true }),
       // No Telegram: the browser's notice instead.
       tell: (text) => tellOwnerOrShow(text, 'info'),
-      // Armed by the owner, and only while the owner may act (user accounts
-      // off): the account switch comes before any move to Codex.
-      rotation: mayAnswerOwner() && rotationState().enabled ? {
-        run: (hit, { limited }) => rotateClaude({ limited, line: hit.line, allowCurrent: !limited }),
-        fallback: () => rotationState().fallback,
-        prepare: () => rotateClaude({ allowCurrent: true, preferCurrent: true }),
-      } : null,
+      // Only while the owner may act (user accounts off): the session's own
+      // CLI moves to its next login before any move to the other CLI.
+      rotation: pool('claude'),
+      codexRotation: pool('codex'),
       migration: {
         armed: () => mayAnswerOwner() && !rotationState().accounts.length && !rotationState().damaged && accountArmed(),
         run: (hit) => switchAccount(`armed: Claude Code said "${hit.line}"`).finally(announceAccount),

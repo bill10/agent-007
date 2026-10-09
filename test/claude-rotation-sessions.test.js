@@ -73,7 +73,7 @@ describe('rotation lifecycle failures', () => {
     const run = output => (_file, _args, _options, cb) => cb(null, output);
     await expect(assertClaudeProcessesManaged([{ agent: 'claude', pty: { pid: 9 } }], {
       platform: 'win32', run: run(JSON.stringify({ ProcessId: 10, ParentProcessId: 9, Name: 'claude.exe' })),
-    })).resolves.toBeUndefined();
+    })).resolves.toEqual({ daemon: false });
     await expect(assertClaudeProcessesManaged([], {
       platform: 'win32', run: run(JSON.stringify([{ ProcessId: 10, ParentProcessId: 9, Name: 'claude.exe' }])),
     })).rejects.toThrow(/outside this app/);

@@ -191,9 +191,11 @@ export function agentFromTranscripts(worktreePath, homes) {
 // re-spawned in one worktree resumed whichever sibling's session was newest —
 // and, with that sibling still running, stalled on "This conversation is open
 // in another app". Resuming by id pins each agent to its own conversation.
-export function codexSessionIdFor(worktreePath, { codex = codexHome() } = {}) {
+// `since` (ms): only a rollout written after then, so a session that has not
+// recorded its conversation yet gets none rather than an older one.
+export function codexSessionIdFor(worktreePath, { codex = codexHome() } = {}, since = -Infinity) {
   if (!worktreePath) return null;
-  return newestCodexTranscript(pathForms(worktreePath), codex)?.id ?? null;
+  return newestCodexTranscript(pathForms(worktreePath), codex, since)?.id ?? null;
 }
 
 // The file holding the newest conversation `agent` ('claude' or 'codex') had
