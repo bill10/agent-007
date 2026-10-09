@@ -1,15 +1,15 @@
-// The Settings panel behind the gear in the terminal header. "Agents &
-// accounts" shows the server's last scan of installed agent CLIs and their
-// login folders (GET /api/agent-accounts); Refresh rescans (POST). "Telegram"
-// shows the connected chat, with Change. "Read aloud" picks the voice the
-// Billion tab reads in. On top, this copy's version and, when npm has a
-// newer one, Update.
+// The Settings panel behind the gear in the terminal header. "Accounts" is
+// the server's last scan of installed agent CLIs and their login folders (GET
+// /api/agent-accounts; Refresh rescans with POST): account.js lists the
+// logins, and below them each CLI gets one line with its version, path and
+// Update. "Telegram" shows the connected chat, with Change. "Read aloud"
+// picks the voice the Billion tab reads in. On top, this copy's version and,
+// when npm has a newer one, Update.
 
 import { authHeaders, showLogin, escapeHtml } from './auth.js';
 import { send } from './ws.js';
 import { readAloudSupported, englishVoices, pickVoice, savedVoiceURI, setVoiceURI } from './readaloud.js';
-
-const tilde = (p, home) => (home && /^[\\/]/.test(p.slice(home.length)) && p.startsWith(home) ? `~${p.slice(home.length)}` : p);
+import { setScan, homeOf, tilde } from './account.js';
 
 // The two Billion and the board run on: named even when missing, with where
 // to get them (server/command-path.js has the same hints).
@@ -18,29 +18,40 @@ const WANTED = {
   codex: 'Install Codex: npm install -g @openai/codex',
 };
 
-export function renderAgents(agents) {
-  const missing = Object.entries(WANTED).filter(([cli]) => !agents.some(a => a.cli === cli)).map(([cli, hint]) => `
-    <div class="settings-agent">
-      <div class="settings-agent-line"><span class="settings-agent-name">${cli}</span> <span class="settings-status out">not installed</span></div>
-      <div class="settings-path">${escapeHtml(hint)}, then restart Agent 007</div>
-    </div>`).join('');
-  if (!agents.length) return `<p class="settings-empty">No agent CLIs found on the PATH.</p>${missing}`;
-  // The home dir, guessed from the default folders, only to shorten paths.
-  const home = agents.flatMap(a => a.accounts).map(a => a.folder.match(/^(.*)[\\/]\.(claude|codex|gemini)$/)?.[1]).find(Boolean);
-  return agents.map(a => `
-    <div class="settings-agent">
-      <div class="settings-agent-line"><span class="settings-agent-name">${escapeHtml(a.cli)}</span>${a.version ? ` <span class="settings-dim">${escapeHtml(a.version)}</span>` : ''}</div>
-      <div class="settings-path" title="${escapeHtml(a.path)}">${escapeHtml(tilde(a.path, home))}</div>
-      ${a.accounts.map(acc => `
-        <div class="settings-account">
-          <span class="settings-folder" title="${escapeHtml(acc.folder)}">${escapeHtml(tilde(acc.folder, home))}</span>${acc.isDefault ? ' <span class="settings-tag">default</span>' : ''}
-          ${acc.email ? `<span class="settings-email">${escapeHtml(acc.email)}</span>` : ''}
-          ${acc.plan ? `<span class="settings-dim">${escapeHtml(acc.plan)}</span>` : ''}
-          ${acc.org ? `<span class="settings-dim">${escapeHtml(acc.org)}</span>` : ''}
-          ${acc.loggedIn === null ? '' : `<span class="settings-status ${acc.loggedIn ? 'in' : 'out'}">${acc.loggedIn ? 'logged in' : 'logged out'}</span>`}
-        </div>`).join('')}
-      ${!a.accounts.length && WANTED[a.cli] ? '<div class="settings-account"><span class="settings-status out">no login found</span></div>' : ''}
-    </div>`).join('') + missing;
+// One line per agent CLI: its name, version and path, and for Claude Code and
+// Codex (GET /api/cli-updates, server/cli-update.js, the owner's pages only)
+// Update when npm has a newer one, which runs the CLI's own `<cli> update`.
+// Running agents keep the old one until their next Restart, so it says so.
+const newer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+const CLI_NAMES = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini CLI' };
+const RESTART_NOTE = 'Running agents pick it up on their next Restart.';
+export function renderClis(agents, updates = {}) {
+  const home = homeOf(agents);
+  const lines = agents.map(a => {
+    const name = CLI_NAMES[a.cli] || a.cli, u = updates[a.cli] || {};
+    const bits = [`<span class="settings-version-name">${escapeHtml(name)}</span> ${escapeHtml(u.version || a.version || '(version unknown)')}`,
+      `<span class="settings-path" title="${escapeHtml(a.path)}">${escapeHtml(tilde(a.path, home))}</span>`];
+    const more = [];
+    if (u.updating) bits.push('Updating…');
+    else if (u.finished?.code === 0) more.push(`<div class="settings-version-new">Updated. ${RESTART_NOTE}</div>`);
+    else if (u.finished) {
+      more.push('<div>The update failed:</div>', `<div class="settings-version-error">${escapeHtml(u.finished.log || 'It stopped without saying why.')}</div>`,
+        `<div>Run it in a terminal instead: <code>${escapeHtml(a.cli)} update</code></div>`);
+    } else if (u.latest && u.version && newer(u.latest, u.version)) {
+      bits.push(`<button type="button" class="settings-link" data-cli-update="${escapeHtml(a.cli)}" title="Runs ${escapeHtml(a.cli)} update. ${RESTART_NOTE}" aria-label="Update ${escapeHtml(name)} to ${escapeHtml(u.latest)}">Update to ${escapeHtml(u.latest)}</button>`);
+    }
+    return `<div class="settings-cli"><div>${bits.join(' · ')}</div>${more.join('')}</div>`;
+  });
+  // The two Billion and the board run on: named even when missing, with where
+  // to get them (server/command-path.js has the same hints).
+  for (const [cli, hint] of Object.entries(WANTED)) {
+    if (!agents.some(a => a.cli === cli)) lines.push(`<div class="settings-cli"><div><span class="settings-version-name">${CLI_NAMES[cli]}</span> · <span class="settings-status out">not installed</span></div><div class="settings-path">${escapeHtml(hint)}, then restart Agent 007</div></div>`);
+  }
+  return `${agents.length ? '' : '<p class="settings-empty">No agent CLIs found on the PATH.</p>'}${lines.join('')}`;
 }
 
 // The Telegram line (server/owner.js telegramPayload): the connected chat and
@@ -201,40 +212,20 @@ export function renderNotesBody(data) {
   return data.notes ? renderNotes(data.notes) : '<p>No release notes between these versions.</p>';
 }
 
-// The agent CLIs under Agent 007's own version (GET /api/cli-updates,
-// server/cli-update.js): installed against npm's latest, and Update, which
-// runs the CLI's own `<cli> update`. Running agents keep the old one until
-// their next Restart, so the line says so.
-const newer = (a, b) => {
-  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
-  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
-  return false;
-};
-const CLI_NAMES = { claude: 'Claude Code', codex: 'Codex' };
-const RESTART_NOTE = 'Running agents pick it up on their next Restart.';
-export function renderCliVersions(updates) {
-  return Object.entries(updates).map(([cli, u]) => {
-    const name = CLI_NAMES[cli] || cli;
-    const lines = [`<div><span class="settings-version-name">${escapeHtml(name)}</span> ${escapeHtml(u.version || '(version unknown)')}</div>`];
-    if (u.updating) lines.push('<div>Updating…</div>');
-    else if (u.finished?.code === 0) lines.push(`<div class="settings-version-new">Updated. ${RESTART_NOTE}</div>`);
-    else if (u.finished) {
-      lines.push('<div>The update failed:</div>', `<div class="settings-version-error">${escapeHtml(u.finished.log || 'It stopped without saying why.')}</div>`,
-        `<div>Run it in a terminal instead: <code>${escapeHtml(cli)} update</code></div>`);
-    } else if (u.latest && u.version && newer(u.latest, u.version)) {
-      lines.push(`<div class="settings-version-new">Version ${escapeHtml(u.latest)} is available. ${RESTART_NOTE}</div>`,
-        `<button type="button" class="settings-refresh settings-primary" data-cli-update="${escapeHtml(cli)}" title="Runs ${escapeHtml(cli)} update" aria-label="Update ${escapeHtml(name)}">Update</button>`);
-    }
-    return `<div class="settings-cli">${lines.join('')}</div>`;
-  }).join('');
-}
-
 export function setupSettings() {
   const btn = document.getElementById('settings-btn');
   const panel = document.getElementById('settings-panel');
   const list = document.getElementById('settings-agents');
   const refresh = document.getElementById('settings-refresh');
 
+  // The CLI lines, from the last scan and the last update check.
+  let agents = null;
+  let updates = {};
+  const renderList = () => {
+    if (!agents) return;
+    list.innerHTML = renderClis(agents, updates);
+    for (const b of list.querySelectorAll('[data-cli-update]')) b.onclick = () => updateCli(b.dataset.cliUpdate, b);
+  };
   async function load(method = 'GET') {
     refresh.disabled = true;
     refresh.textContent = method === 'POST' ? 'Scanning…' : 'Refresh';
@@ -242,7 +233,9 @@ export function setupSettings() {
       const resp = await fetch('/api/agent-accounts', { method, headers: authHeaders() });
       if (resp.status === 401) return showLogin();
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      list.innerHTML = renderAgents((await resp.json()).agents);
+      agents = (await resp.json()).agents;
+      setScan(agents);
+      renderList();
     } catch (err) {
       list.innerHTML = `<p class="settings-empty">Could not load: ${escapeHtml(err.message)}</p>`;
     } finally {
@@ -339,18 +332,14 @@ export function setupSettings() {
   }
   refreshVersion();
 
-  // The agent CLIs' versions and their Update, polled every 2s while one runs.
-  const cliBox = document.getElementById('settings-cli-versions');
+  // The agent CLIs' Update, polled every 2s while one runs.
   let cliPolling = false;
   async function loadCli() {
     let resp;
     try { resp = await fetch('/api/cli-updates', { headers: authHeaders() }); } catch { resp = null; }
-    if (!resp?.ok) { cliBox.hidden = true; return null; }
-    const updates = await resp.json();
-    cliBox.hidden = !Object.keys(updates).length;
-    cliBox.innerHTML = renderCliVersions(updates);
-    for (const b of cliBox.querySelectorAll('[data-cli-update]')) b.onclick = () => updateCli(b.dataset.cliUpdate, b);
-    return updates;
+    updates = resp?.ok ? await resp.json() : {};
+    renderList();
+    return resp?.ok ? updates : null;
   }
   async function pollCli() {
     if (cliPolling) return;
@@ -361,7 +350,7 @@ export function setupSettings() {
       if (!updates || !Object.values(updates).some(u => u.updating)) break;
     }
     cliPolling = false;
-    await load('POST');   // rescan, so Agents & accounts shows the new version
+    await load('POST');   // rescan, so Accounts shows the new version
     loadCli();
   }
   async function updateCli(cli, b) {

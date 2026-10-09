@@ -100,30 +100,28 @@ describe('scanAgents', () => {
   });
 });
 
-describe('renderAgents (Settings panel)', () => {
-  it('escapes what it shows, marks the default and skips an unknown login state', async () => {
-    const { renderAgents } = await import('../public/modules/settings.js');
-    const html = renderAgents([{ cli: 'claude', version: '1.0', path: '/h/.local/bin/claude', accounts: [
-      { folder: '/h/.claude', isDefault: true, email: '<b>x</b>@example.com', plan: 'max', org: null, loggedIn: true },
-      { folder: '/h/.claude-2', isDefault: false, email: null, plan: null, org: null, loggedIn: null },
-    ] }]);
-    expect(html).toContain('&lt;b&gt;x&lt;/b&gt;@example.com');
-    expect(html).toContain('~/.claude</span> <span class="settings-tag">default</span>');
+describe('renderClis (Settings → Accounts, one line per CLI)', () => {
+  it('escapes what it shows and shortens paths under the home dir, for a CLI with no login too', async () => {
+    const { renderClis } = await import('../public/modules/settings.js');
+    const html = renderClis([
+      { cli: 'claude', version: '1.0', path: '/h/.local/bin/claude', accounts: [{ folder: '/h/.claude', isDefault: true, email: 'a@x', plan: null, org: null, loggedIn: true }] },
+      { cli: 'aider', version: '<b>0.86</b>', path: '/hx/bin/aider', accounts: [] },
+    ]);
+    expect(html).toContain('Claude Code</span> 1.0');
     expect(html).toContain('~/.local/bin/claude');
-    expect(renderAgents([{ cli: 'x', version: null, path: '/hx/bin/x', accounts: [{ folder: '/h/.codex', isDefault: true, email: null, plan: null, org: null, loggedIn: null }] }])).toContain('>/hx/bin/x<');
-    expect(html.match(/logged in/g)).toHaveLength(1);
-    expect(html).not.toContain('logged out');
+    expect(html).toContain('aider</span> &lt;b&gt;0.86&lt;/b&gt;');
+    expect(html).toContain('>/hx/bin/aider<');
+    expect(html).not.toContain('a@x');
   });
 
-  it('names claude and codex when missing, with where to get them, and an installed one with no login', async () => {
-    const { renderAgents } = await import('../public/modules/settings.js');
-    const none = renderAgents([]);
+  it('names claude and codex when missing, with where to get them', async () => {
+    const { renderClis } = await import('../public/modules/settings.js');
+    const none = renderClis([]);
     expect(none).toContain('No agent CLIs found on the PATH.');
-    expect(none).toMatch(/claude<\/span> <span class="settings-status out">not installed/);
+    expect(none).toMatch(/Claude Code<\/span> · <span class="settings-status out">not installed/);
     expect(none).toContain('Install Codex: npm install -g @openai/codex, then restart Agent 007');
-    const some = renderAgents([{ cli: 'claude', version: '1.0', path: '/h/bin/claude', accounts: [] }]);
-    expect(some).toContain('no login found');
-    expect(some).not.toMatch(/claude<\/span> <span class="settings-status out">not installed/);
-    expect(some).toMatch(/codex<\/span> <span class="settings-status out">not installed/);
+    const some = renderClis([{ cli: 'claude', version: '1.0', path: '/h/bin/claude', accounts: [] }]);
+    expect(some).not.toMatch(/Claude Code<\/span> · <span class="settings-status out">not installed/);
+    expect(some).toMatch(/Codex<\/span> · <span class="settings-status out">not installed/);
   });
 });
