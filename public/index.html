@@ -228,10 +228,10 @@
                   <option value="no">Not required</option>
                 </select>
               </label>
-              <label class="job-form-skills" title="Skill families this job's agent gets fully listed, comma-separated (like marketing, hyperframes). Its other skills show by name only and still run by name. Empty: engineering when a pull request is required, none otherwise. Claude Code only."><span class="job-form-label">Skills</span>
+              <label class="job-form-skills" title="Skill families this job's agent gets fully listed, comma-separated (like marketing, hyperframes), and plugins it gets switched on (like vanta). Its other skills show by name only and still run by name. Empty: engineering when a pull request is required, none otherwise. Claude Code only."><span class="job-form-label">Skills</span>
                 <input type="text" id="job-skills" list="job-skill-families" placeholder="default" spellcheck="false" autocomplete="off" maxlength="300">
                 <datalist id="job-skill-families"></datalist>
-                <span class="job-form-hint">families, comma-separated · empty: engineering when a PR is required</span>
+                <span class="job-form-hint">families or plugins, comma-separated · empty: engineering when a PR is required</span>
               </label>
               <label class="job-form-schedule" id="job-schedule-field" style="display:none"><span class="job-form-label">Schedule</span>
                 <input type="text" id="job-schedule" placeholder="0 9 * * 1-5" spellcheck="false" autocomplete="off" maxlength="120">
