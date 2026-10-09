@@ -498,7 +498,10 @@ async function enrollScanned(scan) {
     for (const { folder, loggedIn } of scan.agents.find(a => a.cli === cli)?.accounts || []) {
       if (!loggedIn) continue;
       const result = await addRotationAccount(folder, { cli });
-      if (result.error) console.error(`Accounts: ${folder} was not added to ${CLI_LABEL[cli]} switching: ${result.error}`);
+      if (!result.error) continue;
+      const message = `${folder} was not added to ${CLI_LABEL[cli]} account switching: ${result.error}`;
+      console.error(`Accounts: ${message}`);
+      if (mayAnswerOwner()) broadcastToBrowsers({ type: 'account-error', message });
     }
   }
   announceAccount();
