@@ -155,8 +155,9 @@ server/
   billion.js       Billion's folder, templates and charter refresh (docs/BILLION.md)
   account-rotation.js   Persistent account pool, cooldowns, refreshed logins and recovery (docs/FEATURES.md)
   account-migration.js  Platform credential stores, selective account writes and legacy rollback
-  claude-rotation-sessions.js  Resume exact conversations after a shared login switch
-  claude-processes.js  Detect Claude processes outside the app before a login switch
+  codex-login.js   The Codex side of rotation: capture and activate auth.json, stop Codex's background server
+  claude-rotation-sessions.js  Resume exact Claude or Codex conversations after a shared login switch
+  claude-processes.js  Detect Claude or Codex processes outside the app before a login switch
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) for workers on Billion's cards
   agent-mcp.js     Per-session MCP config for spawned Claude Code and Codex agents

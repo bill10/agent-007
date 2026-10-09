@@ -675,7 +675,9 @@ usage limit (below).
   soon, or a target CLI that is not installed or not logged in (`claude auth
   status --json`, `codex login status`), leaves Billion where it is and puts
   `Billion paused: both Claude Code and Codex are at their limits` in the
-  *Billion* tab and on Telegram, once, until a new Billion starts.
+  *Billion* tab and on Telegram, once per stall: again only after a new
+  Billion starts or it rotates to another login. With account rotation on, a
+  paused or failed handover is tried again after the same 30 minutes.
   **Claude account rotation** (`server/account-rotation.js`) comes first when
   enabled in Settings (on by default once two accounts are added; saved off
   settings stay off). Limits on Billion or managed Claude workers mark the
@@ -691,8 +693,9 @@ usage limit (below).
   **Codex account rotation** is the same for a Billion on Codex: its next
   Codex login (`~/.codex/auth.json` swapped, the background server stopped,
   `codex resume <id>`) comes before any handover, which happens only once
-  every selected Codex account is unavailable and **Fall back to Claude Code**
-  is on; a move to Codex first selects an eligible Codex login. Codex's
+  every selected Codex account is unavailable, **Fall back to Claude Code**
+  is on and `BILLION_AUTO_SWITCH` is not `0` (rotation itself runs either
+  way); a move to Codex first selects an eligible Codex login. Codex's
   `try again at …` time sets when a limited login is retried.
 
 ## Briefings

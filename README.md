@@ -306,10 +306,10 @@ or `CODEX_HOME`), atomically and 0600; `config.toml`, sessions, skills and
 history stay put. Before every switch the outgoing account's refreshed
 `auth.json` is saved back, so its refresh token stays current. At a hard limit
 on Billion or a Codex worker the app stops its Codex sessions, stops Codex's
-shared background server (`codex app-server daemon stop`, so it reloads the new
-login when the next `codex` starts it), activates the next login and resumes
-each session with `codex resume <id>`. It refuses before interrupting anything
-if a session's conversation id is unknown, two app Codex sessions share a
+shared background server (`codex app-server daemon stop`, then checks it is
+gone, so it reloads the new login when the next `codex` starts it), activates
+the next login and resumes each session with `codex resume <id>`. It refuses
+before interrupting anything if a session's conversation id is unknown, two app Codex sessions share a
 folder, or a `codex` process outside the app is running. Limited accounts
 become eligible again at the time the notice gives ("try again at Oct 25th,
 3:15 PM", read in this machine's time zone), otherwise after 30 minutes. Only
@@ -431,8 +431,9 @@ server/
   billion.js       Billion's folder (git repo, templates, charter refresh) and whether it runs
   account-rotation.js   Persistent account pool, cooldowns, refreshed logins and recovery
   account-migration.js  Platform credential stores, selective account writes and legacy rollback
-  claude-rotation-sessions.js  Resume exact conversations after a shared login switch
-  claude-processes.js  Detect Claude processes outside the app before a login switch
+  codex-login.js   The Codex side of rotation: capture and activate auth.json, stop Codex's background server
+  claude-rotation-sessions.js  Resume exact Claude or Codex conversations after a shared login switch
+  claude-processes.js  Detect Claude or Codex processes outside the app before a login switch
   talk.js          Talk to Billion: an utterance's audio transcribed (whisper.cpp) and sent once, a voice reply spoken (say), /api/talk routes
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
@@ -462,7 +463,7 @@ public/
     voice.js       Voice input (Web Speech API dictation into the terminal or the Billion tab's text box)
     auth.js        Login tokens, presence, HTML escaping
     settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Auto-switch accounts)
-    account.js     Claude account rotation settings (discovery, inclusion, order, fallback, recovery)
+    account.js     Claude and Codex account rotation settings (discovery, inclusion, order, fallback, recovery)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser
   jobs.js          Pure job-board logic (states, prompts, dispatch selection)
