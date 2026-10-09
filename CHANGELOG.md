@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.64.0.0] - 2026-10-09
+
+### Changed
+
+- **Removing a repo now asks first, then closes its agents and deletes their worktrees.** The × on a repo's header opens a dialog naming the agents that will close, and warning about any with uncommitted changes or unpushed commits ("Raven has 3 unpushed commits; they will be lost."). Cancel is the default. On confirm, every agent of the repo is closed with nothing kept, its orphans and their worktrees and local branches are deleted, and every browser clears the tabs, office figures and left panel. The repo folder on disk is never touched, nor is Billion's own folder. A card In progress in that repo goes back to To do with the note "repo removed from Agent 007". A repo that is not on the list (a hand-edited config) still shows its orphans, labelled "· not on the board".
+
 ## [0.63.2.0] - 2026-10-09
 
 ### Fixed
