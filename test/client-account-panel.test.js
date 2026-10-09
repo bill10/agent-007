@@ -130,9 +130,75 @@ describe('account rotation settings', () => {
   });
   it('offers recovery after an interrupted switch and hides when owner actions are unavailable', () => {
     show({ pending: true, accounts: [] });
-    expect(document.querySelector('[data-action="rotation-discover"]')).toBeNull();
+    expect(document.querySelector('[data-cli="claude"] [data-action="rotation-discover"]')).toBeNull();
     click('rotation-recover'); expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-recover' });
     setSelf('u1', true); renderAccount(); expect(document.getElementById('account-panel').hidden).toBe(true);
     setSelf(null, false); setBillionEnabled(false); renderAccount(); expect(document.getElementById('account-panel').hidden).toBe(true);
+  });
+  // Value: protects=an old-version switch left 'switching' still offers Restore login from previous version under Claude, sending rollback after confirm;
+  //   fails_when=the rollback button moves out of the Claude section, drops its status check, skips confirm, or sends a cli/other action;
+  //   why_new=no client test covered the legacy rollback button after it moved out of renderCli; seam=none
+  it('offers the previous-version restore under Claude for an interrupted old switch, after confirm', () => {
+    handleAccountState({ type: 'account-state', status: 'switching', rotation: { enabled: false, accounts: [] }, codexRotation: { enabled: false, accounts: [] } });
+    expect(document.querySelector('[data-cli="codex"] [data-action="rollback"]')).toBeNull();
+    const restore = document.querySelector('[data-cli="claude"] [data-action="rollback"]');
+    expect(restore.textContent).toBe('Restore login from previous version');
+    window.confirm.mockReturnValue(false); restore.click(); expect(send).not.toHaveBeenCalled();
+    window.confirm.mockReturnValue(true); restore.click();
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rollback' });
+    handleAccountState({ type: 'account-state', status: 'idle', rotation: { enabled: false, accounts: [] } });
+    expect(document.querySelector('[data-action="rollback"]')).toBeNull();
+  });
+});
+
+describe('Codex account rotation settings', () => {
+  const codex = rotation => handleAccountState({ type: 'account-state', rotation: { enabled: false, accounts: [] }, codexRotation: rotation });
+  const inCodex = sel => document.querySelector(`[data-cli="codex"] ${sel}`);
+  // Value: protects=unsaved edits in one section survive a state update caused by an action in the other section;
+  //   fails_when=handleAccountState overwrites every CLI's draft on each message;
+  //   why_new=before two sections there was one draft and one Save; seam=none
+  it('keeps unsaved Claude edits when a Codex action updates the state, and drops them once Claude saves', () => {
+    const claude = { enabled: false, fallback: true, active: 'a', accounts: [account('a', 'a@x', 'Active'), account('b', 'b@x')] };
+    const codexState = { enabled: false, accounts: [account('c', 'c@x')] };
+    handleAccountState({ type: 'account-state', rotation: claude, codexRotation: codexState });
+    document.querySelectorAll('[data-cli="claude"] [data-action="rotation-down"]')[0].click();
+    inCodex('[data-action="rotation-discover"]').click();
+    handleAccountState({ type: 'account-state', rotation: claude, codexRotation: { ...codexState, accounts: [account('c', 'c@x'), account('d', 'd@x')] } });
+    expect([...document.querySelectorAll('[data-cli="claude"] .rotation-account label span')].map(s => s.textContent)).toEqual(['b@x', 'a@x']);
+    expect(document.querySelectorAll('[data-cli="codex"] .rotation-account')).toHaveLength(2);
+    document.querySelector('[data-cli="claude"] [data-action="rotation-configure"]').click();
+    handleAccountState({ type: 'account-state', rotation: claude, codexRotation: codexState });
+    expect([...document.querySelectorAll('[data-cli="claude"] .rotation-account label span')].map(s => s.textContent)).toEqual(['a@x', 'b@x']);
+  });
+  it('names the CLI on controls repeated in both sections', () => {
+    codex({ enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] });
+    expect(inCodex('[data-action="rotation-discover"]').getAttribute('aria-label')).toBe('Find logged-in Codex accounts');
+    expect(inCodex('[data-action="rotation-configure"]').getAttribute('aria-label')).toBe('Save Codex settings');
+    expect(document.querySelector('[data-cli="claude"] [data-action="rotation-discover"]').getAttribute('aria-label')).toBe('Find logged-in Claude accounts');
+  });
+  it('lists Codex accounts in their own section after Claude, with the same controls', () => {
+    codex({ enabled: true, active: 'c', fallback: true, accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] });
+    expect([...document.querySelectorAll('.account-cli-title')].map(h => h.textContent)).toEqual(['Claude Code', 'Codex']);
+    for (const action of ['rotation-discover', 'rotation-up', 'rotation-down', 'rotation-switch', 'rotation-configure']) expect(inCodex(`[data-action="${action}"]`)).not.toBeNull();
+    expect(inCodex('#account-auto-switch-codex').checked).toBe(true);
+    expect(document.querySelector('[data-cli="codex"]').textContent).toContain('Fall back to Claude Code when Codex accounts are unavailable');
+    expect(document.querySelector('[data-cli="codex"]').textContent).toContain('other tools that read it follow the switch');
+  });
+  it('sends cli: codex on every Codex action and shows its error in the Codex section only', () => {
+    codex({ enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] });
+    inCodex('[data-action="rotation-switch"]').click();
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-switch', cli: 'codex', id: 'd' });
+    handleAccountError({ message: 'Another Codex process is running outside this app.' });
+    expect(inCodex('.account-error').textContent).toContain('Another Codex process');
+    expect(document.querySelector('[data-cli="claude"] .account-error')).toBeNull();
+    inCodex('[data-action="rotation-discover"]').click();
+    expect(send).toHaveBeenLastCalledWith({ type: 'account', action: 'rotation-discover', cli: 'codex' });
+  });
+  it('offers Restore previous login for an interrupted Codex switch while Claude stays usable', () => {
+    codex({ pending: true, accounts: [] });
+    expect(inCodex('[data-action="rotation-discover"]')).toBeNull();
+    expect(document.querySelector('[data-cli="claude"] [data-action="rotation-discover"]')).not.toBeNull();
+    inCodex('[data-action="rotation-recover"]').click();
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-recover', cli: 'codex' });
   });
 });

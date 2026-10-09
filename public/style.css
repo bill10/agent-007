@@ -2937,6 +2937,10 @@ select.job-mode-danger {
   .job-card-btn { min-height: 40px; padding: 8px 12px; font-size: 12px; }
 }
 
+.account-cli { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.account-cli:first-child { margin-top: 12px; }
+.account-cli + .account-cli { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 14px; }
+.account-cli-title { font-size: 11px; font-weight: bold; color: var(--accent); text-transform: uppercase; letter-spacing: 0.06em; margin: 0; }
 .rotation-accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0; }
 .rotation-account { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .rotation-toggle { display: flex; min-width: 0; overflow-wrap: anywhere; align-items: center; gap: 7px; margin: 8px 0; }
