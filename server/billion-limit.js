@@ -63,13 +63,14 @@ const unquoted = (re) => new RegExp(NOT_QUOTED + re.source, re.flags);
 
 // { kind: 'hard', line, retry } | { kind: 'warning', used, limit, line } | null.
 // `limit` names which one, spaces dropped: a key, not for show. `retry` is the
-// notice joined across the lines it wrapped onto, for its reset time.
+// notice joined across the lines it wrapped onto, up to a blank line, for its
+// reset time.
 export function matchLimit(text) {
   const s = String(text ?? '');
   const lineAt = (i) => s.slice(i).split('\n')[0].trim().slice(0, 160);
   for (const re of HARD) {
     const m = unquoted(re).exec(s);
-    if (m) return { kind: 'hard', line: lineAt(m.index), retry: s.slice(m.index, m.index + 400).replace(/\s+/g, ' ') };
+    if (m) return { kind: 'hard', line: lineAt(m.index), retry: s.slice(m.index, m.index + 400).split(/\n[ \t]*\n/)[0].replace(/\s+/g, ' ') };
   }
   for (const { re, used } of WARN) {
     const m = unquoted(re).exec(s);
@@ -192,10 +193,13 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
       ? `${CLI_NAMES[agent]} hit its limit too, soon after the switch to it`
       : !(await ready(to, { env })) ? `${CLI_NAMES[to]} is not installed or not logged in` : null;
     if (why) {
-      if (pool || target) session.rotationRetryAt = Math.min(session.rotationRetryAt || Infinity, now + SWITCH_GAP_MS);
+      // With a pool on, the gap is what holds the next try (pausedFor does
+      // not), and the owner hears of the pause once, not at every retry.
+      if (pool || target) session.rotationRetryAt = now + SWITCH_GAP_MS;
+      const told = watch.pausedFor === session.id;
       watch.pausedFor = session.id;
       log(`Billion: paused on ${CLI_NAMES[agent]}: ${why} ("${hit.line}")`);
-      await notify(`Billion paused: both Claude Code and Codex are at their limits. ${why}; ${CLI_NAMES[agent]} says "${hit.line}". Billion stays on ${CLI_NAMES[agent]}. Press Start or the switch button next to Billion once either has usage again.`);
+      if (!told) await notify(`Billion paused: both Claude Code and Codex are at their limits. ${why}; ${CLI_NAMES[agent]} says "${hit.line}". Billion stays on ${CLI_NAMES[agent]}. Press Start or the switch button next to Billion once either has usage again.`);
       return 'paused';
     }
     // A handover also selects an eligible login of the CLI taken over to.

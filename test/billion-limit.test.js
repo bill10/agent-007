@@ -269,6 +269,19 @@ describe('Codex account rotation before the handover to Claude Code', () => {
     expect(c.run).toHaveBeenCalledTimes(1);
     expect(s.rotationRetryAt).toBe(T0 + SWITCH_GAP_MS);
   });
+  // Value: protects=a pool exhausted with the other CLI unavailable pauses, retries after the gap, and tells the owner once;
+  //   fails_when=the pause keeps a past retry time and re-notifies (Telegram) every tick;
+  //   why_new=no case pauses on `why` with a pool on and then ticks past the gap; seam=none
+  it('pauses once when the other CLI is unavailable, then retries only after the gap without telling the owner again', async () => {
+    const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
+    const d = deps({ codexRotation: c, ready: vi.fn(async () => false) }), s = billion(CODEX_OUT, { agent: 'codex' });
+    expect(await limitTick(s, d)).toBe('paused');
+    expect(await limitTick(s, { ...d, now: T0 + 10_000 })).toBeNull();
+    expect(await limitTick(s, { ...d, now: T0 + SWITCH_GAP_MS + 1 })).toBe('paused');
+    expect(await limitTick(s, { ...d, now: T0 + SWITCH_GAP_MS + 10_001 })).toBeNull();
+    expect(s.rotationRetryAt).toBe(T0 + 2 * SWITCH_GAP_MS + 1);
+    expect(d.notify).toHaveBeenCalledTimes(1);
+  });
   it('retries next tick when the handover only met another switch in flight', async () => {
     const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
     const d = deps({ codexRotation: c, switchTo: vi.fn(async () => ({ error: 'Billion is already switching', busy: true })) }), s = billion(CODEX_OUT, { agent: 'codex' });
@@ -291,6 +304,8 @@ describe('Codex account rotation before the handover to Claude Code', () => {
     const wrapped = CODEX_OUT.replace('or try again', 'or\ntry again');
     expect(await limitTick(billion(wrapped, { agent: 'codex' }), d)).toBe('rotated');
     expect(c.run.mock.calls[0][0].retry).toContain('try again at Oct 25th, 2026 3:15 PM');
+    // Later screen text after a blank line is not part of the notice.
+    expect(matchLimit(`${CODEX_OUT}\n\nresets in 2h`).retry).not.toContain('resets in 2h');
     expect(d.switchTo).not.toHaveBeenCalled();
   });
   it('hands over to Claude Code only once every Codex login is unavailable', async () => {

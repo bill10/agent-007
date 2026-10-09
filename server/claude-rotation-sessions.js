@@ -33,7 +33,7 @@ export function resumeClaudeCommand(command, id) {
 // `codex resume --help`). A `resume` already on the command, its id, --last
 // and the old prompt are replaced; an option this does not know refuses.
 const CODEX_VALUES = new Set(['-c', '--config', '-m', '--model', '-s', '--sandbox', '-a', '--ask-for-approval', '-p', '--profile', '-C', '--cd', '--add-dir', '--enable', '--disable', '--local-provider', '--remote', '--remote-auth-token-env']);
-const CODEX_FLAGS = new Set(['--dangerously-bypass-approvals-and-sandbox', '--full-auto', '--approve-for-me', '--search', '--oss', '--no-alt-screen', '--strict-config', '--no-daemon', '--dangerously-bypass-hook-trust']);
+const CODEX_FLAGS = new Set(['--dangerously-bypass-approvals-and-sandbox', '--yolo', '--full-auto', '--approve-for-me', '--search', '--oss', '--no-alt-screen', '--strict-config', '--no-daemon', '--dangerously-bypass-hook-trust']);
 export function resumeCodexCommand(command, id) {
   if (!isCodexSessionId(id)) throw new Error('The exact Codex conversation could not be identified yet.');
   const { file, args } = parseCommand(command);
@@ -44,6 +44,7 @@ export function resumeCodexCommand(command, id) {
     if (arg === '--') break;
     if (arg === '--last') continue;
     if (arg === 'resume' && !keep.length && !prompt) { if (args[i + 1] && !args[i + 1].startsWith('-')) i++; continue; }
+    if (/^-[sacmpC]./.test(arg)) { keep.push(arg); continue; }   // a short option with its value attached: -sread-only, -a=never
     if (CODEX_VALUES.has(flag)) {
       keep.push(arg);
       if (!arg.includes('=')) { if (args[i + 1] === undefined) throw new Error(`Missing ${flag} value.`); keep.push(args[++i]); }

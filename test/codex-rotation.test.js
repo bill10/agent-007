@@ -190,6 +190,8 @@ describe('Codex sessions across a switch', () => {
     const cmd = resumeCodexCommand('codex --sandbox read-only --ask-for-approval on-request -m gpt-5.5 -c model_reasoning_effort=high "Ship card 9"', id);
     expect(parseCommand(cmd).args).toEqual(['resume', id, '--sandbox', 'read-only', '--ask-for-approval', 'on-request', '-m', 'gpt-5.5', '-c', 'model_reasoning_effort=high', expect.stringContaining('interrupted conversation')]);
     expect(cmd).not.toContain('Ship card 9');
+    // Every spelling lib/jobs.js accepts as a Codex permission flag survives.
+    expect(parseCommand(resumeCodexCommand('codex --yolo -sread-only -a=never "task"', id)).args.slice(2, 5)).toEqual(['--yolo', '-sread-only', '-a=never']);
     // Billion's own form, already resuming another id.
     const billion = resumeCodexCommand(`codex resume 019a0000-0000-7000-8000-000000000001 --dangerously-bypass-approvals-and-sandbox 'You were restarted.'`, id);
     expect(parseCommand(billion).args.slice(0, 3)).toEqual(['resume', id, '--dangerously-bypass-approvals-and-sandbox']);
