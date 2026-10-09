@@ -195,16 +195,8 @@ body {
 }
 .settings-refresh:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
 .settings-refresh:disabled { cursor: progress; opacity: 0.7; }
-.settings-agent { padding: 8px 0; border-top: 1px solid var(--border); }
-.settings-agent-name { color: var(--accent); font-weight: bold; }
 .settings-dim, .settings-path { color: var(--text-dim); }
-.settings-path, .settings-folder { overflow-wrap: anywhere; }
-.settings-account {
-  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
-  margin: 6px 0 0 10px; padding-left: 8px; border-left: 2px solid var(--border);
-}
-.settings-folder { color: var(--text-muted); }
-.settings-tag { font-size: 10px; color: var(--accent-contrast); background: var(--accent); border-radius: 3px; padding: 0 4px; }
+.settings-path { overflow-wrap: anywhere; }
 .settings-status.in { color: var(--state-waiting); }
 .settings-status.out { color: var(--state-disconnected); }
 .settings-empty { color: var(--text-dim); }
@@ -2962,7 +2954,6 @@ select.job-mode-danger {
 .account-panel .account-btn:focus-visible,
 .account-panel summary:focus-visible,
 .account-panel input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.account-discover { align-self: flex-start; color: var(--accent); }
 .account-manual summary { cursor: pointer; padding: 8px 0; }
 .account-folder-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 8px 0; }
 .account-folder-controls label { grid-column: 1 / -1; }
