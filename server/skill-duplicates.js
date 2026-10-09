@@ -83,6 +83,8 @@ export function findDuplicates(skills = collectSkills(), agentsDir = skillHomes(
   const mirrored = (a, b) => a.hash === b.hash && Object.hasOwn(locked, a.name)
     && a.kind === 'global' && b.kind === 'global' && new Set([a.where, b.where]).size === 2
     && [a, b].every(s => s.where === '~/.claude/skills' || s.where === '~/.agents/skills');
+  // A repo's .claude/skills loads only inside that repo, so two repos' skills never meet.
+  const apart = (a, b) => a.kind === 'repo' && b.kind === 'repo' && a.where !== b.where;
   const add = (key, kind, a, b, remove) => out.push({ key, kind, paths: [a.dir, b.dir], remove });
   const group = (by) => {
     const m = new Map();
@@ -94,7 +96,7 @@ export function findDuplicates(skills = collectSkills(), agentsDir = skillHomes(
   for (const g of group(s => s.name)) {
     const [a, ...rest] = g;
     for (const b of rest) {
-      if (mirrored(a, b)) continue;
+      if (mirrored(a, b) || apart(a, b)) continue;
       const same = a.hash === b.hash;
       add(`name:${a.name}:${a.dir}:${b.dir}`, same ? `the same skill name "${a.name}", and the two copies are byte-identical` : `the same skill name "${a.name}", with different contents`, a, b, removable(a, b));
     }
@@ -102,12 +104,12 @@ export function findDuplicates(skills = collectSkills(), agentsDir = skillHomes(
   for (const g of group(s => s.hash)) {
     const [a, ...rest] = g;
     for (const b of rest) {
-      if (a.name === b.name || pairIgnored(a.name, b.name)) continue;   // the first loop has it
+      if (apart(a, b) || a.name === b.name || pairIgnored(a.name, b.name)) continue;   // the first loop has it
       add(`hash:${a.dir}:${b.dir}`, `byte-identical folders under different names ("${a.name}" and "${b.name}")`, a, b, removable(a, b));
     }
   }
   const byName = new Map(skills.map(s => [s.name, s]));
-  const claimed = (s, re) => [...s.head.matchAll(re)].map(m => byName.get(m[1])).filter(o => o && o !== s && !pairIgnored(s.name, o.name));
+  const claimed = (s, re) => [...s.head.matchAll(re)].map(m => byName.get(m[1])).filter(o => o && o !== s && !apart(s, o) && !pairIgnored(s.name, o.name));
   for (const s of skills) {
     for (const old of claimed(s, SUPERSEDES)) add(`supersedes:${s.name}:${old.dir}`, `"${s.name}" says it replaces "${old.name}"`, s, old, old);
     for (const next of claimed(s, SUPERSEDED_BY)) add(`supersedes:${next.name}:${s.dir}`, `"${s.name}" says it is replaced by "${next.name}"`, next, s, s);

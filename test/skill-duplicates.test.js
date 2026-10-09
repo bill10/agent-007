@@ -38,6 +38,16 @@ describe('duplicate skills', () => {
     expect(duplicateNotice(f[1]).lines.join('\n')).toMatch(/npx skills remove xlsx/);
   });
 
+  it('does not pair skills from two different repos, but still pairs a repo with a global one', () => {
+    const other = join(root, 'other');
+    skill(join(repo, '.claude', 'skills', 'qa'), 'qa', 'one');
+    skill(join(other, '.claude', 'skills', 'qa'), 'qa', 'two');
+    const both = () => findDuplicates(collectSkills({ claudeDir, agentsDir }, [repo, other]), agentsDir);
+    expect(both()).toEqual([]);
+    skill(join(claudeDir, 'skills', 'qa'), 'qa', 'three');
+    expect(both().map(x => x.paths[1])).toEqual([join(repo, '.claude', 'skills', 'qa'), join(other, '.claude', 'skills', 'qa')]);
+  });
+
   it('skips one installer-managed skill mirrored into ~/.claude and ~/.agents, but not drift or unlocked copies', () => {
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(join(agentsDir, '.skill-lock.json'), JSON.stringify({ skills: { locked: {}, locked2: {}, locked3: {}, drifted: {} } }));
