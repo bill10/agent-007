@@ -2947,14 +2947,14 @@ select.job-mode-danger {
 .account-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .account-identity .rotation-toggle { flex: 1 1 180px; margin: 0; }
 .account-identity .settings-dim { font-size: 11px; }
-/* Which CLI an account belongs to: an outlined label after the email, quieter than Save. */
-.account-cli-tag { flex: 0 0 auto; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1; padding: 3px 5px; border-radius: 3px; color: var(--accent); border: 1px solid currentColor; }
+/* Which CLI a login belongs to: the row's first column, one width for every CLI so the list reads like a table. */
+.account-cli-tag { flex: 0 0 52px; font-weight: bold; color: var(--accent); }
 .rotation-account:not([data-cli="claude"]) .account-cli-tag { color: var(--text-muted); }
-.account-name { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-height: 24px; color: var(--text); overflow-wrap: anywhere; }
+.account-name { display: flex; align-items: center; gap: 7px; padding-left: 20px; min-height: 24px; color: var(--text); overflow-wrap: anywhere; }
 .account-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 11px; }
 .account-meta .account-state { color: var(--text); }
 .account-meta > * + *::before { content: '· '; color: var(--text-dim); }
-.rotation-account[data-index] .account-meta { padding-left: 20px; }
+.account-meta { padding-left: 79px; }
 .account-panel .rotation-toggle { margin: 0; min-height: 36px; }
 .account-panel input[type="checkbox"] { accent-color: var(--accent); }
 .account-panel .account-btn { min-height: 36px; padding: 8px 10px; }

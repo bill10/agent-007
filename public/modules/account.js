@@ -214,19 +214,18 @@ function renderLogins(body, logins, switching) {
     const tag = document.createElement('span'); tag.className = 'account-cli-tag'; tag.textContent = NAME[cli] || cli;
     const caption = document.createElement('span'); caption.textContent = name;
     if (login) caption.title = login.folder;
-    // The tag is in the checkbox's label: one email can be both a Claude and a Codex login.
+    // The CLI leads the row, inside the checkbox's label: one email can be both a Claude and a Codex login.
     if (a) {
       el.dataset.index = index;
       const wrap = document.createElement('label'), input = document.createElement('input');
       wrap.className = 'rotation-toggle'; input.type = 'checkbox'; input.checked = a.enabled;
-      wrap.append(input, caption, tag); identity.append(wrap);
+      wrap.append(input, tag, caption); identity.append(wrap);
     } else {
       const wrap = document.createElement('span'); wrap.className = 'account-name';
-      wrap.append(caption, tag); identity.append(wrap);
+      wrap.append(tag, caption); identity.append(wrap);
     }
     const meta = document.createElement('div'); meta.className = 'account-meta'; el.append(meta);
     const bit = (text, cls = 'settings-dim') => { const b = document.createElement('span'); b.className = cls; b.textContent = text; meta.append(b); };
-    if (a) bit(a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''), 'account-state');
     if (login) {
       if (login.plan) bit(login.plan);
       if (login.org) bit(login.org);
@@ -234,6 +233,7 @@ function renderLogins(body, logins, switching) {
       if (login.loggedIn !== null) bit(login.loggedIn ? 'logged in' : 'logged out', `settings-status ${login.loggedIn ? 'in' : 'out'}`);
       if (login.email && !a) bit(tilde(login.folder, home), 'settings-path');
     }
+    if (a) bit(a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''), 'account-state');
     if (!meta.children.length) meta.remove();
     if (a?.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; el.append(error); }
   };

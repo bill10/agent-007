@@ -159,7 +159,7 @@ describe('account rotation settings', () => {
 
 describe('one list of Claude and Codex accounts', () => {
   const both = (rotation, codexRotation) => handleAccountState({ type: 'account-state', rotation, codexRotation });
-  const emails = () => [...document.querySelectorAll('.rotation-account label span:first-of-type')].map(s => s.textContent);
+  const emails = () => [...document.querySelectorAll('.rotation-account label span:not(.account-cli-tag)')].map(s => s.textContent);
   const tags = () => [...document.querySelectorAll('.account-cli-tag')].map(s => s.textContent);
   const claude = { enabled: true, active: 'a', accounts: [account('a', 'a@x', 'Active'), account('b', 'b@x')] };
   const codexState = { enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] };
@@ -263,7 +263,7 @@ describe('one Accounts list: the scan\'s logins with the switch list', () => {
     { cli: 'aider', version: '1', path: '/bin/aider', accounts: [] },
   ];
   const rows = () => [...document.querySelectorAll('.rotation-account')].map(r => ({
-    cli: r.dataset.cli, name: r.querySelector('.account-identity :is(label, .account-name) > span').textContent,
+    cli: r.dataset.cli, name: r.querySelector('.account-identity :is(label, .account-name) > span:not(.account-cli-tag)').textContent,
     box: !!r.querySelector('input'), meta: r.querySelector('.account-meta')?.textContent }));
   // Value: protects=one row per login: folders of one email under one CLI merge, a folder with no email is its own row;
   //   fails_when=the key ignores the CLI or email case, or a merge loses default/plan/logged-in; why_new=the scan's folders became login rows; seam=none
@@ -279,11 +279,13 @@ describe('one Accounts list: the scan\'s logins with the switch list', () => {
     setScan(agents);
     handleAccountState({ type: 'account-state', rotation: { enabled: false, active: 'a', accounts: [account('a', 'a@x', 'Active')] } });
     expect(rows()).toEqual([
-      { cli: 'claude', name: 'a@x', box: true, meta: 'Activemaxdefaultlogged in' },
+      { cli: 'claude', name: 'a@x', box: true, meta: 'maxdefaultlogged inActive' },
       { cli: 'claude', name: '~/.claude-old', box: false, meta: 'logged out' },
       { cli: 'gemini', name: 'g@x', box: false, meta: 'defaultlogged in~/.gemini' },
     ]);
     expect([...document.querySelectorAll('.account-cli-tag')].map(t => t.textContent)).toEqual(['Claude', 'Claude', 'Gemini']);
+    // The CLI leads each row, inside the checkbox label for a switch row.
+    expect(document.querySelector('.rotation-account .rotation-toggle').textContent).toBe('Claudea@x');
     expect(document.querySelectorAll('[data-action="rotation-configure"]')).toHaveLength(1);
   });
   // Value: protects=with user accounts on the logins still show, with no switch controls at all;
