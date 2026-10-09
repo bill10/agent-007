@@ -78,9 +78,9 @@ describe('settings', () => {
   // Value: protects=`agent007 skills sync`: a bad subcommand exits 2, --dry-run moves nothing and records nothing, a real run moves, links and records its result for Settings; fails_when=--dry-run is not passed through, the state file is not written, or a typo runs a sync; why_new=nothing ran the CLI branch; seam=none
   it('skills sync: refuses an unknown subcommand, --dry-run changes nothing, a real run moves and records', () => {
     const extra = { CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') };
-    const skillDir = join(home, '.codex', 'skills', 'seo-audit');
+    // A Claude skill: a Codex one would wait while any Codex runs on this machine.
+    const skillDir = join(home, '.claude', 'skills', 'seo-audit');
     mkdirSync(skillDir, { recursive: true });
-    mkdirSync(join(home, '.claude', 'skills'), { recursive: true });
     writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: seo-audit\n---\nbody\n');
     try {
       expect(cli(['skills'], extra).code).toBe(2);
@@ -98,9 +98,8 @@ describe('settings', () => {
       const real = cli(['skills', 'sync'], extra);
       expect(real.code).toBe(0);
       expect(real.out).toMatch(/Moved 1 skill into the store/);
-      expect(existsSync(skillDir)).toBe(false);
       expect(existsSync(join(home, '.agents', 'skills', 'seo-audit', 'SKILL.md'))).toBe(true);
-      expect(lstatSync(join(home, '.claude', 'skills', 'seo-audit')).isSymbolicLink()).toBe(true);
+      expect(lstatSync(skillDir).isSymbolicLink()).toBe(true);
       // Recorded for Settings, without turning the automatic sync on.
       expect(JSON.parse(readFileSync(join(cfg, 'skill-store.json'), 'utf8'))).toMatchObject({ enabled: false, last: { moved: ['seo-audit'] } });
     } finally {

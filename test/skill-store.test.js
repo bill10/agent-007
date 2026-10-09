@@ -311,6 +311,38 @@ describe('skill store sync', () => {
     } finally { chmodSync(join(claude('z'), 'secret'), 0o600); }
   });
 
+  it('leaves a folder alone whose relative link points outside it', () => {
+    skill(join(root, 'shared'), 'shared');
+    skill(claude('foo'));
+    symlinkSync(join('..', '..', '..', 'shared'), join(claude('foo'), 'lib'), 'junction');
+    // A junction is stored absolute on Windows, where this case cannot occur.
+    if (process.platform === 'win32') return;
+    const before = tree();
+    expect(sync()).toMatchObject({ moved: [], linked: [], errors: [] });
+    expect(tree()).toEqual(before);
+  });
+
+  it('never removes a store folder it did not make: a name that differs only in Unicode form is one name', () => {
+    skill(claude('caf\u00e9'), 'cafe', 'same');
+    skill(codex('cafe\u0301'), 'cafe', 'same');
+    const r = sync();
+    // One folder on a disk that normalises names, two on one that does not: never a failed half.
+    expect(r.errors).toEqual([]);
+    expect(r.moved.length + r.conflicts.length).toBe(1);
+  });
+
+  it('a conflict resolved by editing a nested file is looked at again', () => {
+    skill(claude('n'), 'n', 'same');
+    skill(codex('n'), 'n', 'same');
+    mkdirSync(join(claude('n'), 'scripts'));
+    writeFileSync(join(claude('n'), 'scripts', 'x.py'), 'mine');
+    const settled = new Map();
+    expect(sync({ settled }).conflicts.map(c => c.name)).toEqual(['n']);
+    mkdirSync(join(codex('n'), 'scripts'));
+    writeFileSync(join(codex('n'), 'scripts', 'x.py'), 'mine');
+    expect(sync({ settled, now: new Date('2026-10-09T13:00:00Z') })).toMatchObject({ moved: ['n'], conflicts: [] });
+  });
+
   it('a second run has nothing to do', () => {
     skill(claude('a'));
     skill(codex('b'));

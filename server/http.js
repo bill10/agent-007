@@ -28,7 +28,7 @@ import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 import { cliUpdates, startCliUpdate } from './cli-update.js';
 import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
 import { updateInfo, startUpdate, updateNotes } from './self-update.js';
-import { readStoreState, writeStoreState, syncSkillStore, summarize, codexRunning } from './skill-store.js';
+import { readStoreState, writeStoreState, syncSkillStore, summarize, codexBusy } from './skill-store.js';
 import { busyWorkers } from './control.js';
 import { noteProxy, accessEmail } from './proxy.js';
 import { createRequire } from 'module';
@@ -450,15 +450,15 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   const storeView = (state, preview = null) => ({ ...state, summary: summarize(state.last), preview: preview && { ...preview, summary: summarize(preview) }, home: homedir() });
   const storeError = (res, err) => res.status(500).json({ error: `Skill store: ${err.message}` });
   app.get('/api/skill-store', ownerOnly, (req, res) => res.json(storeView(readStoreState())));
-  app.post('/api/skill-store/preview', ownerOnly, (req, res) => {
-    try { res.json(storeView(readStoreState(), syncSkillStore({ dryRun: true, codexMoves: !codexRunning() }))); } catch (err) { storeError(res, err); }
+  app.post('/api/skill-store/preview', ownerOnly, async (req, res) => {
+    try { res.json(storeView(readStoreState(), syncSkillStore({ dryRun: true, codexMoves: !await codexBusy() }))); } catch (err) { storeError(res, err); }
   });
-  app.post('/api/skill-store', ownerOnly, (req, res) => {
+  app.post('/api/skill-store', ownerOnly, async (req, res) => {
     if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'Send {"enabled": true} or false.' });
     try {
       const state = { ...readStoreState(), enabled: req.body.enabled };
       if (state.enabled) {
-        const r = syncSkillStore({ codexMoves: !codexRunning() });
+        const r = syncSkillStore({ codexMoves: !await codexBusy() });
         // Busy: on anyway, and the next agent start syncs.
         if (!r.busy) state.last = r;
       }

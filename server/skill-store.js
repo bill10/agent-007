@@ -20,11 +20,12 @@
 // ~/.codex/skills gets no link back: Codex reads ~/.agents/skills already, and
 // a second path would list the skill twice. So nothing there moves while a
 // Codex session is running, which still has the old path in its prompt.
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { randomUUID } from 'crypto';
 import { CONFIG_DIR, sessions } from './state.js';
 import { skillHomes } from './skills.js';
+import { assertClaudeProcessesManaged } from './claude-processes.js';
 import { folderHash, ALIAS, ALIAS_PAIR } from './skill-duplicates.js';
 import { readMap, frontMatter, folderNames, FAMILIES_FILE } from './skill-families.js';
 
@@ -36,6 +37,8 @@ const LEAVE = new Set(['synced', 'gstack', ALIAS, ...ALIAS_PAIR]);
 const lstat = (p) => { try { return lstatSync(p); } catch { return null; } };
 // The path as the disk spells it, so ~/.agents/Skills and ~/.agents/skills
 // are one folder on a disk that ignores case.
+// Names compared the way macOS and Windows disks compare them.
+const fold = (name) => name.normalize('NFC').toLowerCase();
 const real = (p) => { try { return realpathSync.native(p); } catch { return null; } };
 const nameIn = (dir) => { try { return frontMatter(readFileSync(join(dir, 'SKILL.md'), 'utf8')).name || null; } catch { return null; } };
 // The last real sync this server ran, for the conflict notice.
@@ -43,6 +46,13 @@ let lastResult = null;
 // Whether a Codex agent is running: it read its skills from ~/.codex/skills
 // when it started, so nothing there moves under it.
 export const codexRunning = () => [...sessions.values()].some(s => s.agent === 'codex' && !s.exited);
+// The same, counting Codex processes this app did not start (the owner's own
+// terminal) for the paths that can wait on a process list: Settings and the
+// command. Codex's background server does not count; a failed check does.
+export async function codexBusy(check = assertClaudeProcessesManaged) {
+  if (codexRunning()) return true;
+  try { await check([], { agent: 'codex' }); return false; } catch { return true; }
+}
 
 // Whether a sync may move this entry: a real skill folder whose SKILL.md is
 // not a link, with no .git or .gstack-owned (another tool updates it in place:
@@ -53,19 +63,43 @@ function movable(dir, entry) {
   if (!st || st.isSymbolicLink() || !st.isDirectory()) return false;
   const skill = lstat(join(dir, entry, 'SKILL.md'));
   if (!skill || skill.isSymbolicLink()) return false;
-  return !existsSync(join(dir, entry, '.git')) && !existsSync(join(dir, entry, '.gstack-owned'));
+  return !existsSync(join(dir, entry, '.git')) && !existsSync(join(dir, entry, '.gstack-owned')) && !linksOut(join(dir, entry));
+}
+// A relative link inside the folder that points outside it: it would point
+// somewhere else once the folder lives in the store.
+function linksOut(root, dir = root) {
+  for (const n of folderNames(dir)) {
+    const p = join(dir, n);
+    const st = lstat(p);
+    if (st?.isSymbolicLink()) {
+      let target = '';
+      try { target = readlinkSync(p); } catch { continue; }
+      if (!isAbsolute(target) && !resolve(dir, target).startsWith(root + sep)) return true;
+    } else if (st?.isDirectory() && n !== 'node_modules' && linksOut(root, p)) return true;
+  }
+  return false;
 }
 
 // When a name's copies last changed, so a conflict or a failed move is not
 // hashed or retried at every spawn until one of them changes.
-const stamp = (dirs) => dirs.map(d => { try { return `${d}:${statSync(d).mtimeMs}:${statSync(join(d, 'SKILL.md')).mtimeMs}`; } catch { return d; } }).join('|');
+const treeTime = (dir) => {
+  let t = 0;
+  for (const n of folderNames(dir)) {
+    const st = lstat(join(dir, n));
+    if (st) t = Math.max(t, st.mtimeMs, st.isDirectory() && n !== '.git' && n !== 'node_modules' ? treeTime(join(dir, n)) : 0);
+  }
+  return t;
+};
+const stamp = (dirs) => dirs.map(d => `${d}:${lstat(d)?.mtimeMs}:${treeTime(d)}`).join('|');
 
 export function readStoreState(file = STORE_FILE) {
   try { const s = JSON.parse(readFileSync(file, 'utf8')); return { enabled: s.enabled === true, last: s.last || null }; } catch { return { enabled: false, last: null }; }
 }
 export function writeStoreState(state, file = STORE_FILE) {
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(state, null, 2));
+  // Whole or not at all: a torn file would read as switched off.
+  writeFileSync(`${file}.tmp`, JSON.stringify(state, null, 2));
+  renameSync(`${file}.tmp`, file);
 }
 
 // What a sync would do: { store, claude, moves: [{ name, copies: [{ cli, dir }],
@@ -89,22 +123,22 @@ export function planSync({ homes = skillHomes(), map = readMap(FAMILIES_FILE), c
     if (isStore(dir)) continue;
     for (const entry of folderNames(dir)) {
       if (claudeOnly.has(entry) || !movable(dir, entry)) continue;
-      const key = entry.toLowerCase();
+      const key = fold(entry);
       byKey.set(key, [...(byKey.get(key) || []), { cli, name: entry, dir: join(dir, entry) }]);
     }
   }
   // Names a Claude folder already answers to, by folder or front-matter name.
-  const served = new Set(folderNames(claude).flatMap(e => [e.toLowerCase(), nameIn(join(claude, e))?.toLowerCase()]));
+  const served = new Set(folderNames(claude).flatMap(e => [fold(e), nameIn(join(claude, e)) && fold(nameIn(join(claude, e)))]));
   // Store folders whose SKILL.md answers to another name: front-matter name →
   // folder. Read once, for the two checks below.
   const storeClaims = new Map();
   for (const e of folderNames(store)) {
-    const called = nameIn(join(store, e))?.toLowerCase();
-    if (called && called !== e.toLowerCase()) storeClaims.set(called, e);
+    const called = nameIn(join(store, e));
+    if (called && fold(called) !== fold(e)) storeClaims.set(fold(called), e);
   }
   // A Codex folder waiting for its session to end still counts: a name it
   // also has is not moved now, or Codex would list it twice.
-  const waiting = codexMoves ? new Set() : new Set(folderNames(codex).map(e => e.toLowerCase()));
+  const waiting = codexMoves ? new Set() : new Set(folderNames(codex).map(fold));
   const notice = (called) => (/^[\w.:-]{1,64}$/.test(called) ? `its SKILL.md calls it "${called}", and another "${called}" is installed` : 'its SKILL.md gives it the name of another installed skill');
   const moves = [];
   const conflicts = [];
@@ -123,8 +157,8 @@ export function planSync({ homes = skillHomes(), map = readMap(FAMILIES_FILE), c
     // Both CLIs list a skill by its front-matter name, so one installed under
     // another folder name would be listed twice.
     const called = nameIn(copies[0].dir);
-    if (called && called.toLowerCase() !== name.toLowerCase()
-      && (byKey.has(called.toLowerCase()) || [store, claude, codex].some(d => lstat(join(d, called))))) {
+    if (called && fold(called) !== fold(name)
+      && (byKey.has(fold(called)) || [store, claude, codex].some(d => lstat(join(d, called))))) {
       // The name is the skill author's text: quoted only when it looks like one.
       conflict(notice(called));
       continue;
@@ -133,27 +167,27 @@ export function planSync({ homes = skillHomes(), map = readMap(FAMILIES_FILE), c
     const at = stamp(all);
     const before = settled.get(name);
     if (before?.stamp === at) { if (before.conflict) conflicts.push(before.conflict); continue; }
-    if (new Set(all.map(d => folderHash(d).digest('hex'))).size > 1) {
+    if (all.length > 1 && new Set(all.map(d => folderHash(d).digest('hex'))).size > 1) {
       conflict('copies with different contents', all);
       settled.set(name, { stamp: at, conflict: conflicts.at(-1) });
       continue;
     }
     // Linked when Claude Code would have no copy of it after the move.
-    const link = !codexOnly.has(name) && (copies.some(c => c.cli === 'claude') || (claudeLinks && !served.has(name.toLowerCase())));
+    const link = !codexOnly.has(name) && (copies.some(c => c.cli === 'claude') || (claudeLinks && !served.has(fold(name))));
     moves.push({ name, copies, inStore: !!inStore, link, stamp: at });
   }
   // Store skills Claude Code cannot see yet (installed for Codex only), unless
   // a Claude folder already answers to that name, or linking it failed and
   // nothing about it changed since.
   const links = claudeLinks
-    ? folderNames(store).filter(name => !name.startsWith('.') && !byKey.has(name.toLowerCase()) && !codexOnly.has(name)
-      && !claudeOnly.has(name) && !served.has(name.toLowerCase()) && lstat(join(store, name))?.isDirectory() && lstat(join(store, name, 'SKILL.md'))
+    ? folderNames(store).filter(name => !name.startsWith('.') && !byKey.has(fold(name)) && !codexOnly.has(name)
+      && !claudeOnly.has(name) && !served.has(fold(name)) && lstat(join(store, name))?.isDirectory() && lstat(join(store, name, 'SKILL.md'))
       && settled.get(name)?.stamp !== stamp([join(store, name)]))
     : [];
   // A store skill that answers to a name Claude Code already has stays unlinked.
   for (const name of [...links]) {
     const called = nameIn(join(store, name));
-    if (!called || called.toLowerCase() === name.toLowerCase() || !(served.has(called.toLowerCase()) || byKey.has(called.toLowerCase()))) continue;
+    if (!called || fold(called) === fold(name) || !(served.has(fold(called)) || byKey.has(fold(called)))) continue;
     links.splice(links.indexOf(name), 1);
     conflicts.push({ name, paths: [join(store, name)], why: notice(called) });
   }
@@ -174,7 +208,7 @@ function move(from, to) {
 // One sync at a time across processes (the server and `agent007 skills
 // sync`); a lock left by a crash is taken over after ten minutes. The lock
 // holds a token, so a holder only ever removes its own, and a stale one is
-// renamed away first: of two takers, only the rename's winner goes on.
+// renamed away first and checked: of two takers, only one goes on.
 export const STALE_LOCK_MS = 10 * 60_000;
 function takeLock(file) {
   mkdirSync(dirname(file), { recursive: true });
@@ -187,7 +221,14 @@ function takeLock(file) {
       if (err.code !== 'EEXIST') throw err;
       try {
         if (Date.now() - statSync(file).mtimeMs < STALE_LOCK_MS) return null;
+        const stale = readFileSync(file, 'utf8');
         renameSync(file, `${file}.${token}`);
+        // Another taker may have put a fresh lock there in between: that one
+        // goes back, and this taker gives way.
+        if (readFileSync(`${file}.${token}`, 'utf8') !== stale) {
+          if (!lstat(file)) renameSync(`${file}.${token}`, file);
+          return null;
+        }
         rmSync(`${file}.${token}`, { force: true });
       } catch { /* another taker won, or it is gone: try again */ }
     }
@@ -212,19 +253,25 @@ export function syncSkillStore({ homes = skillHomes(), map, dryRun = false, back
       if (!m.inStore) result.moved.push(m.name);
       if (m.link) result.linked.push(m.name);
       if (dryRun) continue;
-      const saved = [];
-      let created = false;
       const into = join(plan.store, m.name);
+      // Each move made, undone in reverse if a later step fails.
+      const done = [];
       try {
-        for (const c of m.copies) {
+        // The first copy is renamed straight into the store, so a process
+        // that dies part way leaves the skill there (the next sync links it),
+        // then copied into the backup; the other copies are moved there.
+        const rest = m.inStore ? m.copies : m.copies.slice(1);
+        if (!m.inStore) {
+          const first = m.copies[0];
+          if (lstat(into)) throw new Error('something else appeared in the store under that name');
+          move(first.dir, into);
+          done.push({ from: first.dir, to: into });
+          cpSync(into, join(backup, first.cli, m.name), { recursive: true, verbatimSymlinks: true });
+        }
+        for (const c of rest) {
           const to = join(backup, c.cli, m.name);
           move(c.dir, to);
-          saved.push({ ...c, to });
-        }
-        if (!m.inStore) {
-          // Before the copy: one that stops part way is this move's to drop.
-          created = true;
-          cpSync(saved[0].to, into, { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false });
+          done.push({ from: c.dir, to });
         }
         if (m.link) {
           mkdirSync(plan.claude, { recursive: true });
@@ -233,11 +280,8 @@ export function syncSkillStore({ homes = skillHomes(), map, dryRun = false, back
         settled.delete(m.name);
         result.backup = backup;
       } catch (err) {
-        // Put back what was moved, so the CLI that had it still has it, and
-        // drop the store copy this move made (the backup has one too); never
-        // one it did not make.
-        if (created) { try { rmSync(into, { recursive: true, force: true }); } catch { /* left */ } }
-        for (const s of saved) { if (!lstat(s.dir)) { try { move(s.to, s.dir); } catch { /* still in the backup */ } } }
+        // Everything moved goes back where the CLI had it; nothing is removed.
+        for (const d of done.reverse()) { if (!lstat(d.from)) { try { move(d.to, d.from); } catch { /* still where it was moved */ } } }
         for (const list of [result.moved, result.linked, result.folded]) if (list.at(-1) === m.name) list.pop();
         result.errors.push({ name: m.name, error: process.platform === 'win32' ? `${err.message} (Windows: the link is a junction; check the folder is on a local NTFS drive)` : err.message });
         // Not retried at every spawn until one of its copies changes.

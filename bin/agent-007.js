@@ -242,8 +242,11 @@ if (positionals[0] === 'init') {
     console.error(`Unknown skills command: ${positionals.slice(1).join(' ') || '(none)'}. Try: ${ownCommand('skills sync --dry-run')}`);
     process.exit(2);
   }
-  const { syncSkillStore, summarize, readStoreState, writeStoreState } = await import('../server/skill-store.js');
-  const result = syncSkillStore({ dryRun: Boolean(values['dry-run']) });
+  const { syncSkillStore, summarize, readStoreState, writeStoreState, codexBusy } = await import('../server/skill-store.js');
+  // A running Codex read its skills from ~/.codex/skills: those wait for it.
+  const codexMoves = !await codexBusy();
+  if (!codexMoves) console.log('Codex is running, so skills in ~/.codex/skills stay where they are until it stops.');
+  const result = syncSkillStore({ dryRun: Boolean(values['dry-run']), codexMoves });
   if (result.busy) {
     console.error('Another skill store sync is running (the server, as an agent starts). Try again in a moment.');
     process.exit(1);
