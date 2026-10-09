@@ -8,7 +8,7 @@ import { claudeSessionIdFor } from './agent-transcripts.js';
 import { basename } from 'path';
 import { writeSync } from 'fs';
 import { execFileSync } from 'child_process';
-import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames, ptyEnv } from '../lib/helpers.js';
+import { stripAnsiComplete, detectState, createRingBuffer, parseCommand, isRealOutput, trackSyncFrames, ptyEnv, envSwitchOn } from '../lib/helpers.js';
 // Re-exported so the handler's tests reach the parser through the module they drive.
 export { trackSyncFrames } from '../lib/helpers.js';
 import { resolveExecutable, isUsableCwd, commandExists, missingCommandMessage } from './command-path.js';
@@ -18,6 +18,7 @@ import { writeMcpConfig, removeMcpConfig, withMcpConfig, takesMcpConfig, withApp
 import { broadcastJobs, requestDispatch } from './jobs.js';
 import { flushMessages, dropMessages, sendNotice } from './messages.js';
 import { withSkillFamilies, reportUngrouped } from './skill-families.js';
+import { refreshListing } from './skill-listing.js';
 import { reportDuplicates } from './skill-duplicates.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 import { trustDialogKey, liveBillion } from './billion.js';
@@ -283,6 +284,8 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // Skill families (server/skill-families.js): every family's member listed by
   // name only, apart from the ones this agent's job switches on.
   const spawnArgs = isClaude ? withSkillFamilies(settledArgs, skills) : settledArgs;
+  // A Claude Code updated since the last probe gets probed again, for the next spawn.
+  if (isClaude && envSwitchOn(process.env.SKILL_FAMILIES)) refreshListing();
 
   // Codex's hook finds this session's MCP config here (agent-mcp.js).
   const hookEnv = hooked && sessionAgentFromCommand(command) === 'codex' ? { [CODEX_HOOK_CONFIG_ENV]: mcpConfigPath } : {};

@@ -50,7 +50,8 @@ import { readMap as readFamilyMap, reportUngrouped } from './server/skill-famili
 import { reportDuplicates } from './server/skill-duplicates.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
-import { parseCommand } from './lib/helpers.js';
+import { parseCommand, envSwitchOn } from './lib/helpers.js';
+import { refreshListing } from './server/skill-listing.js';
 import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
@@ -652,6 +653,9 @@ async function startup() {
   // archived here, each one logged, rather than left showing next year's date.
   convertOnceSchedules(broadcast);
   retireSpentSchedules(broadcast);
+  // Claude Code's own skill list for the built-in skill family, probed in the
+  // background when this version has none cached (server/skill-listing.js).
+  if (envSwitchOn(process.env.SKILL_FAMILIES)) refreshListing();
   startDispatcher(createSession, broadcast, {
     onSessionCreated: (s) => broadcast(sessionPayload(s)),
     killSession,

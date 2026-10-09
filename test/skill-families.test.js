@@ -7,6 +7,7 @@ import {
   ungroupedNotice, reportUngrouped, frontMatter, sourceFamily, oneLine, DEFAULT_MAP,
 } from '../server/skill-families.js';
 import { resolveJobSkills, createJob } from '../lib/jobs.js';
+import { parseListing } from '../server/skill-listing.js';
 import { removeTempDir } from './temp-dir.js';
 
 let root, claudeDir, agentsDir, mapFile, pluginDir;
@@ -15,7 +16,10 @@ const skill = (dir, name, description) => {
   writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\nbody\n`);
 };
 const homes = () => ({ claudeDir, agentsDir });
-const scan = () => scanFamilies({ claudeDir, agentsDir, map: readMap(mapFile) });
+// What this machine's Claude Code listed (server/skill-listing.js): a captured request.
+const VERSION = '2.1.295 (Claude Code)';
+const listing = { version: VERSION, skills: parseListing(readFileSync(join(import.meta.dirname, 'fixtures', 'skill-probe-request.json'), 'utf8')) };
+const scan = (probed = listing) => scanFamilies({ claudeDir, agentsDir, map: readMap(mapFile), listing: probed });
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'a007-families-'));
@@ -52,8 +56,8 @@ describe('grouping', () => {
     expect(names('marketing')).toEqual(['copywriting', 'seo-audit']);
     expect(names('hyperframes')).toEqual(['hyperframes-cli']);
     expect(names('gstack')).toEqual(['browse', 'gstack']);
-    // ship from gstack, plus Claude Code's bundled engineering skills.
-    expect(names('engineering')).toEqual(['code-review', 'security-review', 'ship', 'simplify']);
+    // ship from gstack, plus Claude Code's code-review.
+    expect(names('engineering')).toEqual(['code-review', 'ship']);
     expect(s.ungrouped).toEqual(['csv-summarizer']);
     expect(s.families.get('marketing')[0].line).toBe('Write marketing copy.');
     expect(s.families.get('hyperframes')[0].line).toBe('Render HyperFrames videos from the CLI.');
@@ -72,32 +76,51 @@ describe('grouping', () => {
     expect(s.ungrouped).toEqual([]);
   });
 
-  it("files Claude Code's bundled and claude.ai's synced skills under built-in, and reports a bundled one it does not know", () => {
-    skill(join(claudeDir, 'skills', 'synced', 'org_user', 'pdf'), 'pdf', 'Read, merge or split PDF files. And more.');
+  it("files what Claude Code lists and no skill folder holds under built-in, with the listing's line", () => {
     skill(join(claudeDir, 'skills', 'loop'), 'loop', 'My own loop skill, not the bundled one.');
-    // The newest transcript's listing: a new bundled skill, a repo's own, a plugin's, a known one.
+    mkdirSync(join(claudeDir, 'commands'), { recursive: true });
+    writeFileSync(join(claudeDir, 'commands', 'name-only-skill.md'), 'a command');
+    const s = scan();
+    const builtIn = s.families.get('built-in');
+    expect(builtIn.map(m => m.name)).toEqual(['anthropic-skills:pdf', 'claude-api', 'dataviz']);
+    expect(builtIn.find(m => m.name === 'claude-api').line).toBe('Reference for the Claude API / Anthropic SDK — model ids, pricing, params, streaming, tool use, MCP, agents, caching, token counting, model migration.');
+    // code-review stays in engineering; a plugin's skill, an installed one and a command are not built-in.
+    expect(s.families.get('engineering').map(m => m.name)).toContain('code-review');
+    expect(s.ungrouped).toEqual(['csv-summarizer', 'loop']);
+    // Owner settings still win: a source kept listed.
+    writeFileSync(mapFile, JSON.stringify({ sources: { 'anthropic-skills': null } }));
+    expect(scan().families.get('built-in').map(m => m.name)).not.toContain('anthropic-skills:pdf');
+  });
+
+  it('adds what a same-version transcript listed that the probe could not see, minus that repo\'s own', () => {
     const repo = join(root, 'repo');
     skill(join(repo, '.claude', 'skills', 'repo-skill'), 'repo-skill', 'Repo only.');
     const project = join(claudeDir, 'projects', '-repo');
     mkdirSync(project, { recursive: true });
-    writeFileSync(join(project, 's.jsonl'), [
+    const transcript = (version, entrypoint = 'cli') => writeFileSync(join(project, 's.jsonl'), [
       JSON.stringify({ type: 'user', message: 'hi' }),
-      JSON.stringify({ type: 'attachment', cwd: repo, attachment: { type: 'skill_listing',
-        content: '- new-bundled: Does a brand new thing. More.\n- dataviz: Charts.',
-        names: ['copywriting', 'new-bundled', 'repo-skill', 'ponytail:ponytail', 'dataviz', 'anthropic-skills:pdf', 'anthropic-skills:fresh'] } }),
+      JSON.stringify({ type: 'attachment', entrypoint, version, cwd: repo, attachment: { type: 'skill_listing',
+        content: '- artifact-design: Design guidance for any Artifact page. More.\n- dataviz: Charts.',
+        names: ['copywriting', 'artifact-design', 'repo-skill', 'ponytail:ponytail', 'dataviz'] } }),
     ].join('\n'));
-    const s = scan();
-    const builtIn = s.families.get('built-in');
-    expect(builtIn.find(m => m.name === 'anthropic-skills:pdf').line).toBe('Read, merge or split PDF files.');
-    expect(builtIn.map(m => m.name)).toContain('dataviz');
-    expect(builtIn.map(m => m.name)).not.toContain('code-review');
-    expect(builtIn.map(m => m.name)).not.toContain('loop');
-    expect(s.ungrouped).toEqual(['anthropic-skills:fresh', 'csv-summarizer', 'loop', 'new-bundled']);
-    // Once filed, it joins with the listing's line; the source can be kept listed.
-    writeFileSync(mapFile, JSON.stringify({ skills: { 'new-bundled': 'built-in' }, sources: { 'anthropic-skills': null } }));
-    const filed = scan();
-    expect(filed.families.get('built-in').find(m => m.name === 'new-bundled').line).toBe('Does a brand new thing.');
-    expect(filed.families.get('built-in').map(m => m.name)).not.toContain('anthropic-skills:pdf');
+    transcript('2.1.295');
+    const builtIn = scan().families.get('built-in');
+    expect(builtIn.map(m => m.name)).toEqual(['anthropic-skills:pdf', 'artifact-design', 'claude-api', 'dataviz', 'loop', 'name-only-skill']);
+    expect(builtIn.find(m => m.name === 'artifact-design').line).toBe('Design guidance for any Artifact page.');
+    expect(builtIn.find(m => m.name === 'dataviz').line).toMatch(/^Use this skill whenever/);
+    transcript('2.1.200');
+    expect(scan().families.get('built-in').map(m => m.name)).not.toContain('artifact-design');
+    transcript('2.1.295', 'sdk-cli');
+    expect(scan().families.get('built-in').map(m => m.name)).not.toContain('artifact-design');
+  });
+
+  it('has no built-in family when the probe failed or has not run, and hides nothing of Claude Code\'s', () => {
+    for (const probed of [{ version: VERSION, error: 'timed out' }, null]) {
+      const s = scan(probed);
+      expect(s.families.has('built-in')).toBe(false);
+      expect(s.families.get('engineering').map(m => m.name)).toEqual(['ship']);
+      expect(familyOverrides(s, [])).not.toHaveProperty('dataviz');
+    }
   });
 
   it('makes no families when no skills are installed', () => {
