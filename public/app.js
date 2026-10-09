@@ -4,7 +4,7 @@ import { renderRound, renderBillionStatus, handleRoundError } from './modules/ro
 import { connect, send } from './modules/ws.js';
 import {
   handleSessionCreated, handlePtyOutput, handlePtyActivity, handlePtySize, handleStateChange,
-  handleSpawnError, handleSessionEnded, switchToSession,
+  handleSpawnError, handleSessionEnded, handleSessionRemoved, switchToSession,
   removeSession, updateTabs, updateStatusBar, fitActiveTerminal,
   setOnSessionChanged, handleUploadComplete, setupUpload,
   updateTerminalThemes, updateTopbarAgent,
@@ -525,6 +525,10 @@ function onMessage(msg) {
       // agent is still in the map.
       noteAgentDeparture(msg.sessionId);
       handleSessionEnded(msg);
+      break;
+    case 'session-removed':
+      noteAgentDeparture(msg.sessionId);
+      handleSessionRemoved(msg);
       break;
     case 'spawn-error':
       handleSpawnError(msg);

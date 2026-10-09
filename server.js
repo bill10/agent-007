@@ -217,6 +217,8 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
     if (session.worktreePath) codenamePool.recycle(basename(session.worktreePath)); // differs after a rename
   }
   sessions.delete(sessionId);
+  // A close, unlike a crash, takes the tab with it in every browser.
+  broadcast({ type: 'session-removed', sessionId });
 }
 
 // Billion (server/billion.js): started at boot, and again only when someone
