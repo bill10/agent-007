@@ -50,7 +50,8 @@ import { readMap as readFamilyMap, reportUngrouped } from './server/skill-famili
 import { reportDuplicates } from './server/skill-duplicates.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
-import { parseCommand } from './lib/helpers.js';
+import { parseCommand, envSwitchOn } from './lib/helpers.js';
+import { refreshListing } from './server/skill-listing.js';
 import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
@@ -187,6 +188,9 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
   const session = sessions.get(sessionId);
   if (!session) return;
   if (session.rotationResume) { session.accountRotating = false; session.rotationResume = false; dropMessages(sessionId); }
+  session.closing = true;   // its exit is a close, with no Restart (pty.js onExit)
+  // Already exited, so onExit will not say so: its tabs drop their Restart.
+  if (session.exited) broadcast({ type: 'session-ended', sessionId, reason: 'Closed', spawnedBy: session.spawnedBy, jobId: session.jobId, closed: true });
   clearInterval(session.stateCheckInterval);
   clearTimeout(session.scanTimer);
   killSessionProcesses(session);
@@ -216,9 +220,11 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
     codenamePool.recycle(session.name);
     if (session.worktreePath) codenamePool.recycle(basename(session.worktreePath)); // differs after a rename
   }
-  sessions.delete(sessionId);
-  // A close, unlike a crash, takes the tab with it in every browser.
-  broadcast({ type: 'session-removed', sessionId });
+  if (sessions.get(sessionId) === session) {
+    sessions.delete(sessionId);
+    // A close, unlike a crash, takes the tab with it in every browser.
+    broadcast({ type: 'session-removed', sessionId });
+  }
 }
 
 // Billion (server/billion.js): started at boot, and again only when someone
@@ -654,6 +660,9 @@ async function startup() {
   // archived here, each one logged, rather than left showing next year's date.
   convertOnceSchedules(broadcast);
   retireSpentSchedules(broadcast);
+  // Claude Code's own skill list for the built-in skill family, probed in the
+  // background when this version has none cached (server/skill-listing.js).
+  if (envSwitchOn(process.env.SKILL_FAMILIES)) refreshListing();
   startDispatcher(createSession, broadcast, {
     onSessionCreated: (s) => broadcast(sessionPayload(s)),
     killSession,

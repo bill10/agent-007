@@ -93,6 +93,11 @@ export async function handleSessionCreated(msg) {
   if (agents.has(sessionId)) {
     const a = agents.get(sessionId);
     a.state = state || 'WORKING';
+    // A Restart comes back in place, under the same id (server/ws.js restartSession).
+    a.command = command;
+    a.restartable = a.state === 'DISCONNECTED';
+    restartsPending.delete(sessionId);
+    syncRestartBar(sessionId);
     // Keep name and ownership fresh if the session is re-emitted (reconnect/reassignment).
     a.name = name;
     a.ownerId = ownerId || null;
@@ -174,6 +179,9 @@ export async function handleSessionCreated(msg) {
     conflicts: [],
     spawnedBy: spawnedBy || 'user',
     jobId: jobId || null,
+    // Exited by itself (not closed), so Restart can bring it back. A session
+    // the server still sends as DISCONNECTED is one: a closed one is gone.
+    restartable: state === 'DISCONNECTED',
     // Local mirror of the server's lastOutputAt, maintained in handlePtyOutput
     // and, for a terminal not on screen, handlePtyActivity. The job board uses
     // it to tell "still working" from "parked at a prompt, probably waiting on
@@ -181,6 +189,7 @@ export async function handleSessionCreated(msg) {
     lastOutputAt: Date.now(),
   });
 
+  syncRestartBar(sessionId);
   requestAnimationFrame(() => fitAgent(sessionId));
   // Showing or hiding a terminal (tab switch, job board, phone views, panel
   // drags) changes its size, so this one place keeps the server told which
@@ -253,12 +262,57 @@ export function handleStateChange(msg) {
   const agent = agents.get(msg.sessionId);
   if (!agent) return;
   agent.state = msg.state;
+  if (msg.state !== 'DISCONNECTED' && agent.restartable) { agent.restartable = false; syncRestartBar(msg.sessionId); }
   updateTabs();
   updateStatusBar();
   if (onSessionChanged) onSessionChanged();
 }
 
+// --- Restart ---
+// One button for any agent that is not running: here on its exited terminal,
+// and in the left panel (explorer.js), for exited sessions and orphans alike.
+const restartsPending = new Set();   // session or orphan ids sent, not yet answered
+
+export function restartPending(id) { return restartsPending.has(id); }
+
+export function restartAgent({ sessionId, orphanId }) {
+  const id = sessionId || orphanId;
+  if (restartsPending.has(id)) return;
+  restartsPending.add(id);
+  send(sessionId ? { type: 'restart', sessionId } : { type: 'restart', orphanId });
+  if (sessionId) syncRestartBar(sessionId);
+  if (onSessionChanged) onSessionChanged();
+}
+
+// The bar across the bottom of an exited terminal: what happened, and Restart.
+function syncRestartBar(sessionId) {
+  const agent = agents.get(sessionId);
+  if (!agent) return;
+  const show = agent.restartable && canControlAgent(agent);
+  let bar = agent.termEl.querySelector('.terminal-restart');
+  if (!show) { bar?.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.className = 'terminal-restart';
+    bar.setAttribute('role', 'status');
+    bar.innerHTML = '<span class="terminal-restart-text"></span><button type="button" class="terminal-restart-btn"></button>';
+    bar.querySelector('button').onclick = () => restartAgent({ sessionId });
+    agent.termEl.appendChild(bar);
+  }
+  const kind = agent.agent || /(?:^|[\\/])(codex|claude)(?:\s|$)/.exec(agent.command || '')?.[1];
+  const cli = agent.isBillion ? 'Billion' : kind === 'codex' ? 'Codex' : kind === 'claude' ? 'Claude Code' : agent.name;
+  const resumes = agent.isBillion || cli !== agent.name;
+  bar.querySelector('.terminal-restart-text').textContent = `${cli} stopped.${resumes ? ' Restart picks the conversation up where it left off.' : ''}`;
+  const btn = bar.querySelector('button');
+  const pending = restartsPending.has(sessionId);
+  btn.disabled = pending;
+  btn.textContent = pending ? 'Restarting…' : 'Restart';
+}
+
 export function handleSpawnError(msg) {
+  // A refused Restart can be tried again.
+  restartsPending.clear();
+  for (const id of agents.keys()) syncRestartBar(id);
   const bar = document.getElementById('status-bar');
   bar.textContent = `Error: ${msg.error}`;
   bar.style.color = 'var(--state-disconnected)';
@@ -275,6 +329,9 @@ export function handleSessionEnded(msg) {
   // would transcribe speech into a dead pty forever.
   if (msg.sessionId === activeSessionId) stopVoice({ only: 'terminal', notice: 'Voice input stopped — agent ended' });
   agent.state = 'DISCONNECTED';
+  // Closed by Agent 007 (a Close, or the board retiring it): the server has
+  // dropped it, so there is nothing to restart.
+  agent.restartable = !msg.closed;
   // The server's word at exit wins: a re-spawned agent relinked to its card,
   // or one the board retired, is a board worker even if it opened as a user's.
   if ('spawnedBy' in msg) { agent.spawnedBy = msg.spawnedBy; agent.jobId = msg.jobId || null; }
@@ -284,11 +341,13 @@ export function handleSessionEnded(msg) {
   // clutter — the job card still carries the agent name, branch and PR link.
   // Agents you spawned yourself keep their tab, as before, so you can read the
   // output and close it when you're ready.
-  if (agent.spawnedBy === 'board' && agent.jobId) {
+  // One whose CLI quit by itself (an update, a crash) stays, with Restart.
+  if (agent.spawnedBy === 'board' && agent.jobId && msg.closed) {
     disposeAgent(msg.sessionId);
     return;
   }
 
+  syncRestartBar(msg.sessionId);
   updateTabs();
   updateStatusBar();
   if (onSessionChanged) onSessionChanged();
@@ -389,10 +448,10 @@ export function removeSession(sessionId) {
   // Closing the last session never reaches switchToSession, so its stopVoice
   // guard would be bypassed and the mic would stay hot over the empty state.
   if (sessionId === activeSessionId) stopVoice({ only: 'terminal', notice: 'Voice input stopped — agent closed' });
-  if (agent.state !== 'DISCONNECTED') {
-    noteAgentDeparture(sessionId); // walk out before the tile disappears
-    send({ type: 'kill', sessionId });
-  }
+  if (agent.state !== 'DISCONNECTED') noteAgentDeparture(sessionId); // walk out before the tile disappears
+  // An exited one too, or the server keeps it and it comes back on a reload.
+  // Its work is kept as an orphan, with Restart, unless there is none.
+  send({ type: 'kill', sessionId });
   agent.term.dispose();
   agent.termEl.remove();
   agents.delete(sessionId);

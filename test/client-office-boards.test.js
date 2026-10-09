@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 // The click wiring is the feature: a board click must reach showJobBoard(). The
 // rest of jobs.js stays real so COLUMNS below is still the production list.
 vi.mock('../public/modules/jobs.js', async (actual) => ({

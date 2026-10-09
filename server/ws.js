@@ -8,7 +8,7 @@ import {
   GIT_USER_TIMEOUT, isAllowedOrigin, PUBLIC_URL,
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
-import { saveActiveSession, syncOrphansToConfig, saveConfig } from './config.js';
+import { saveActiveSession, removeActiveSession, syncOrphansToConfig, saveConfig, sessionOrigin, sessionPermissionFlags } from './config.js';
 import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch, discardWorktree, inWorktreeAddTurn } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
@@ -18,7 +18,7 @@ import { statusPayload } from './billion-status.js';
 import { roundView, startRoundNow, markDone } from './owner.js';
 import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
-import { isValidJobAgent, sessionAgentFromCommand, jobRequiresPr } from '../lib/jobs.js';
+import { isValidJobAgent, sessionAgentFromCommand, jobRequiresPr, modelFromCommand } from '../lib/jobs.js';
 import { jobSkillFamilies } from './skill-families.js';
 import { refreshIfStale } from './models.js';
 import { billionRuns } from './billion.js';
@@ -165,7 +165,7 @@ export function broadcastOrphansList() {
 export async function respawnOrphan(orphanId, { recreate = false, requester = null } = {}) {
   const orphan = orphans.get(orphanId);
   if (!orphan) return { error: 'Orphan not found' };
-  if (adoptingOrphans.has(orphanId)) return { error: 'Orphan is already being re-adopted' };
+  if (adoptingOrphans.has(orphanId)) return { error: `${orphan.name} is already restarting` };
   adoptingOrphans.add(orphanId);
   try {
     if (!existsSync(join(orphan.worktreePath, '.git'))) {
@@ -257,6 +257,69 @@ export async function respawnOrphan(orphanId, { recreate = false, requester = nu
   }
 }
 
+// --- Restart ---
+
+export const RESTART_NUDGE = 'You were restarted. Continue your card where you left off.';
+const restarting = new Set();   // session ids with a Restart in flight
+
+// What Restart runs for an exited session: its own CLI resuming its own
+// conversation, through the same plan an orphan's re-spawn uses (the card's
+// permission mode and model, or the flags and model it was started with).
+// A command that is neither Claude Code nor Codex just runs again.
+export function restartPlan(session) {
+  const agent = isValidJobAgent(session.agent) ? session.agent : sessionAgentFromCommand(session.command);
+  if (!agent) return { command: session.command, mode: null, flags: sessionPermissionFlags(session) };
+  return orphanResumePlan({
+    name: session.name, repoPath: session.repoPath, branchName: session.branchName,
+    // A hand-started agent outside a repo resumes in the folder it ran in.
+    worktreePath: session.worktreePath || session.cwd,
+    jobId: session.jobId || null, origin: sessionOrigin(session), agent,
+    permissionFlags: sessionPermissionFlags(session),
+    claudeSessionId: session.claudeSessionId || null,
+    model: modelFromCommand(session.command),
+  });
+}
+
+// Restart: one button for any agent that is not running. An exited session
+// (its CLI quit: an update, a crash, a stray /exit) comes back in place — same
+// tab, session id and card — resuming its conversation; an orphan goes through
+// respawnOrphan. Billion is started by the caller (startBillion). Never for a
+// running session, and never twice at once. Returns { session } | { error }.
+export async function restartSession(sessionId, { requester = null } = {}) {
+  const old = sessions.get(sessionId);
+  // Closing (killSession is awaiting git): it is on its way out, not back.
+  if (!old || old.closing) return { error: 'Agent not found' };
+  if (!old.exited || old.accountRotating) return { error: `${old.name} is already running` };
+  if (restarting.has(sessionId)) return { error: `${old.name} is already restarting` };
+  restarting.add(sessionId);
+  try {
+    const { command, mode, flags } = restartPlan(old);
+    const autoTrust = autoTrusts({ spawnedBy: old.spawnedBy, worktreePath: old.worktreePath, command });
+    if (autoTrust && sessionAgentFromCommand(command) === 'claude') trustClaudeFolder(old.worktreePath);
+    const result = createSessionFromConfig({
+      ...old, sessionId: old.id, command, autoTrust,
+      permissionFlags: mode ? [] : flags,
+    }, broadcast);
+    if (result.error) return { error: result.error, command };
+    const session = result.session;
+    session.ringBuffer = old.ringBuffer;   // a reload still shows what came before
+    sessions.set(session.id, session);
+    if (session.worktreePath) {
+      removeActiveSession(session.worktreePath, broadcast);
+      saveActiveSession(session, broadcast);
+      startTreeScanLoop(session, broadcast);
+    }
+    const card = session.jobId ? allJobs().find(j => j.id === session.jobId) : null;
+    if (card?.state === 'in-progress' && card.agentSessionId === session.id) sendText(session, RESTART_NUDGE);
+    announceSession(session, requester);
+    broadcastJobs(broadcast);
+    console.log(`Restarted ${session.name}: ${command}`);
+    return { session };
+  } finally {
+    restarting.delete(sessionId);
+  }
+}
+
 // The card an orphan worked, when Billion posted it; null otherwise. Hand-
 // started agents and other people's cards are never Billion's to bring back:
 // the orphan must have been that card's worker (its saved card, or a board
@@ -345,8 +408,8 @@ export function verifyClient({ origin }) {
 // Two rejection shapes for non-owners, by design:
 //  - high-frequency streaming (pty-input, pty-resize): silently drop, so a
 //    read-only viewer's keystrokes don't spam a notification per character.
-//  - discrete user actions (kill, upload-file, refresh-tree, orphan
-//    re-adopt/delete): call denyControl() to surface a read-only notice.
+//  - discrete user actions (kill, upload-file, refresh-tree, restart,
+//    orphan delete): call denyControl() to surface a read-only notice.
 // Match this when wiring any new gated message.
 function owns(ws, ownerId) {
   if (!authEnabled()) return true;
@@ -723,11 +786,20 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           }
           break;
         }
-        case 're-adopt-orphan': {
-          const orphan = orphans.get(msg.orphanId);
-          if (!orphan) { ws.send(JSON.stringify({ type: 'spawn-error', error: 'Orphan not found' })); break; }
-          if (!owns(ws, orphan.ownerId)) { denyControl(ws, orphan.name, orphan.ownerId); break; }
-          const result = await respawnOrphan(msg.orphanId, { recreate: true, requester: ws });
+        case 'restart': {
+          // One Restart for an agent that is not running: an exited session
+          // ({ sessionId }) or an orphan ({ orphanId }). Same owner rule as Close.
+          const item = msg.orphanId ? orphans.get(msg.orphanId) : sessions.get(msg.sessionId);
+          if (!item) { ws.send(JSON.stringify({ type: 'spawn-error', error: 'Agent not found' })); break; }
+          if (!owns(ws, item.ownerId)) { denyControl(ws, item.name, item.ownerId); break; }
+          let result;
+          if (msg.orphanId) result = await respawnOrphan(msg.orphanId, { recreate: true, requester: ws });
+          else if (!item.isBillion) result = await restartSession(msg.sessionId, { requester: ws });
+          else if (!billionRuns()) result = { error: 'Billion is off: turned off with BILLION=0, or user accounts are enabled' };
+          else {
+            result = await startBillion();
+            if (!result.error && !result.existing) announceSession(result.session, ws);
+          }
           if (result.error) ws.send(JSON.stringify({ type: 'spawn-error', command: result.command, error: result.error }));
           break;
         }

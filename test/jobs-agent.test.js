@@ -585,7 +585,9 @@ describe('re-adopting an orphan', () => {
     expect(resumeCommand('codex', 'plan', [], apex)).toBe(`codex resume ${apex} --sandbox read-only`);
     expect(resumeCommand('codex', null, [], 'x; rm -rf /')).toBe('codex resume');
     expect(resumeCommand('codex', null, [], '--last')).toBe('codex resume');
-    expect(resumeCommand('claude', null, [], apex)).toBe('claude --continue');
+    // Claude Code by its exact conversation when one is known (a Restart), else --continue.
+    expect(resumeCommand('claude', null, [], apex)).toBe(`claude --resume ${apex}`);
+    expect(resumeCommand('claude', null, [], 'x; rm -rf /')).toBe('claude --continue');
   });
 
   it('reads a session id off session_id when a rollout has no id, and says none when it has neither', () => {

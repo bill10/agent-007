@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 
 const { entryRoute, corridorY, pointAlongPath, detectDispatches, approachX, wanderRoute, wanderSeats, chatSeats, computeDecorPlacement, computePodLayout, podRugRect, computeSpareDesks, computeConference, walkObstacles, CHAR_COL_SIT, CHAR_FRAME_W } =
   await import('../public/modules/office.js');

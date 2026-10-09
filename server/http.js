@@ -25,6 +25,7 @@ import { availableModels } from './models.js';
 import { setNextWake } from './billion-wake.js';
 import { setBillionNotice } from './billion.js';
 import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
+import { cliUpdates, startCliUpdate } from './cli-update.js';
 import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
 import { updateInfo, startUpdate, updateNotes } from './self-update.js';
 import { busyWorkers } from './control.js';
@@ -434,6 +435,12 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   app.get('/api/update/changelog', ownerOnly, async (req, res) => res.json(await updateNotes()));
   app.post('/api/update', ownerOnly, (req, res) => {
     const result = startUpdate();
+    res.status(result.error ? 409 : 202).json(result);
+  });
+  // The agent CLIs' versions and Update, next to Agent 007's (server/cli-update.js).
+  app.get('/api/cli-updates', ownerOnly, async (req, res) => res.json(await cliUpdates((await agentAccounts()).agents)));
+  app.post('/api/cli-updates/:cli', ownerOnly, async (req, res) => {
+    const result = startCliUpdate(req.params.cli, (await agentAccounts()).agents);
     res.status(result.error ? 409 : 202).json(result);
   });
 

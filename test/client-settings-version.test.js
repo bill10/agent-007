@@ -106,3 +106,19 @@ describe('What’s new', () => {
     expect(text(renderNotesBody(null)).querySelector('a')).not.toBeNull();
   });
 });
+
+describe('Settings agent CLI versions', () => {
+  it('shows each CLI\'s version, a newer one with Update, and what Restart has to do with it', async () => {
+    const { renderCliVersions } = await import('../public/modules/settings.js');
+    const d = text(renderCliVersions({ claude: { version: '2.1.295', latest: '2.1.300' }, codex: { version: '0.157.0', latest: '0.157.0' } }));
+    expect(d.textContent).toContain('Claude Code 2.1.295');
+    expect(d.textContent).toContain('Version 2.1.300 is available. Running agents pick it up on their next Restart.');
+    expect(d.textContent).toContain('Codex 0.157.0');
+    expect([...d.querySelectorAll('[data-cli-update]')].map(b => b.dataset.cliUpdate)).toEqual(['claude']);
+    expect(text(renderCliVersions({ codex: { version: '0.157.0', updating: true } })).textContent).toContain('Updating…');
+    expect(text(renderCliVersions({ codex: { version: '0.158.0', finished: { code: 0, log: '' } } })).textContent).toContain('Updated. Running agents pick it up on their next Restart.');
+    const failed = text(renderCliVersions({ codex: { version: '0.157.0', finished: { code: 1, log: '<b>EACCES</b>' } } }));
+    expect(failed.querySelector('.settings-version-error').textContent).toBe('<b>EACCES</b>');
+    expect(failed.textContent).toContain('codex update');
+  });
+});

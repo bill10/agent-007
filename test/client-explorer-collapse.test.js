@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 // terminal.js pulls in xterm; the explorer only needs switchToSession from it.
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 
 import { send } from '../public/modules/ws.js';
 import { agents, repos, orphans, setActiveSession } from '../public/modules/state.js';
@@ -195,5 +195,23 @@ describe('explorer repo section collapse/expand', () => {
 
     headerOf('No repo').click();
     expect(section('No repo').querySelectorAll('.explorer-branch')).toHaveLength(1);
+  });
+});
+
+describe('Restart in the left panel', () => {
+  it('is on an exited agent\'s row and an orphan\'s, and not on a running one', async () => {
+    const { restartAgent } = await import('../public/modules/terminal.js');
+    repos.set('/repos/restart', { slug: 'restart', exists: true });
+    agents.set('s-live', AGENT('/repos/restart', { name: 'Live', state: 'WORKING' }));
+    agents.set('s-dead', AGENT('/repos/restart', { name: 'Dead', state: 'DISCONNECTED', restartable: true }));
+    orphans.set('o1', { id: 'o1', name: 'Gone', repoPath: '/repos/restart', reason: 'server-restart' });
+    renderExplorer();
+    const buttons = [...section('restart').querySelectorAll('.explorer-restart-btn')];
+    expect(buttons.map(b => b.textContent)).toEqual(['Restart', 'Restart']);
+    expect(section('restart').textContent).not.toContain('Re-spawn');
+    buttons[0].click();
+    buttons[1].click();
+    expect(restartAgent).toHaveBeenCalledWith({ sessionId: 's-dead' });
+    expect(restartAgent).toHaveBeenCalledWith({ orphanId: 'o1' });
   });
 });
