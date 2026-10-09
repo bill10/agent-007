@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import {
   scanFamilies, readMap, familyOverrides, jobSkillFamilies, withSkillFamilies, writeFamiliesPlugin,
   ungroupedNotice, reportUngrouped, frontMatter, sourceFamily, oneLine, DEFAULT_MAP,
+  missingPlugins, missingPluginsNote, knownFamilies,
 } from '../server/skill-families.js';
 import { resolveJobSkills, createJob } from '../lib/jobs.js';
 import { parseListing } from '../server/skill-listing.js';
@@ -184,6 +185,47 @@ describe('settings per agent', () => {
     expect(withSkillFamilies(['--settings', '/my/settings.json'], [], { homes: homes(), pluginDir, mapFile, env: {} }))
       .toEqual(['--settings', '/my/settings.json']);
     expect(withSkillFamilies(['task'], [], { homes: homes(), pluginDir, mapFile, env: { SKILL_FAMILIES: 'off' } })).toEqual(['task']);
+  });
+});
+
+describe('marketplace plugins', () => {
+  const VANTA = 'vanta-mcp-plugin@claude-plugins-official';
+  const settingsOf = (args) => JSON.parse(args[args.indexOf('--settings') + 1]);
+
+  it('switches the map\'s plugins off, on for a card that names them, and leaves the rest alone', () => {
+    const plain = settingsOf(withSkillFamilies(['task'], [], { homes: homes(), pluginDir, mapFile, env: {} }));
+    expect(plain.enabledPlugins).toEqual({ [VANTA]: false });
+    const card = settingsOf(withSkillFamilies(['task'], ['vanta'], { homes: homes(), pluginDir, mapFile, env: {} }));
+    expect(card.enabledPlugins).toEqual({ [VANTA]: true });
+    // The caller's own entries (a board worker's channel plugins) win and stay.
+    const worker = settingsOf(withSkillFamilies(['--settings', JSON.stringify({ enabledPlugins: { 'telegram@claude-plugins-official': false } })], [], { homes: homes(), pluginDir, mapFile, env: {} }));
+    expect(worker.enabledPlugins).toEqual({ [VANTA]: false, 'telegram@claude-plugins-official': false });
+    // The map adds one and drops the default.
+    writeFileSync(mapFile, JSON.stringify({ plugins: { vanta: null, linear: 'linear@market' } }));
+    expect(settingsOf(withSkillFamilies(['task'], ['linear'], { homes: homes(), pluginDir, mapFile, env: {} })).enabledPlugins).toEqual({ 'linear@market': true });
+    // Two names for one plugin: either one switches it on.
+    writeFileSync(mapFile, JSON.stringify({ plugins: { vanta: VANTA, compliance: VANTA } }));
+    expect(settingsOf(withSkillFamilies(['task'], ['vanta'], { homes: homes(), pluginDir, mapFile, env: {} })).enabledPlugins).toEqual({ [VANTA]: true });
+  });
+
+  it('switches plugins even with no skills installed to group', () => {
+    const args = withSkillFamilies(['task'], [], { homes: { claudeDir: join(root, 'none'), agentsDir }, pluginDir, mapFile, env: {} });
+    expect(args).toEqual(['--settings', JSON.stringify({ enabledPlugins: { [VANTA]: false } }), 'task']);
+  });
+
+  it('names a card\'s plugins this machine lacks', () => {
+    const map = readMap(mapFile);
+    expect(missingPlugins(['vanta', 'marketing'], { map, claudeDir, env: {} })).toEqual(['vanta']);
+    expect(missingPluginsNote(['vanta'])).toMatch(/^vanta plugin is not installed on this machine/);
+    expect(missingPluginsNote([])).toBeNull();
+    mkdirSync(join(claudeDir, 'plugins'), { recursive: true });
+    writeFileSync(join(claudeDir, 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { [VANTA]: [{ scope: 'user' }] } }));
+    expect(missingPlugins(['vanta'], { map, claudeDir, env: {} })).toEqual([]);
+    expect(missingPlugins(['vanta'], { map, claudeDir: join(root, 'none'), env: { SKILL_FAMILIES: '0' } })).toEqual([]);
+  });
+
+  it('offers plugin short names in the card form', () => {
+    expect(knownFamilies({}, mapFile)).toContain('vanta');
   });
 });
 

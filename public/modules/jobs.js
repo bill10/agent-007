@@ -383,7 +383,7 @@ function renderCard(job) {
     const chip = document.createElement('span');
     chip.className = 'job-card-type';
     chip.textContent = `skills: ${job.skills.join(', ')}`;
-    chip.title = 'Skill families its agent gets fully listed; its other skills show by name only';
+    chip.title = 'Skill families its agent gets fully listed (its other skills show by name only), and plugins it gets switched on';
     chips.appendChild(chip);
   }
   if (job.permissionMode) {
@@ -631,6 +631,13 @@ function renderCard(job) {
     const err = document.createElement('div');
     err.className = 'job-card-error';
     err.textContent = `${job.noShipSkill === 'codex' ? 'Codex' : 'Claude Code'} has no ship skill, so the job can't open a pull request; install gstack (github.com/garrytan/gstack) and run its setup, or set its Pull request to Not required`;
+    put('errors', err);
+  }
+
+  if (job.pluginNote) {
+    const err = document.createElement('div');
+    err.className = 'job-card-error';
+    err.textContent = job.pluginNote;
     put('errors', err);
   }
 

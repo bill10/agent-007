@@ -35,7 +35,7 @@ import { nextCronIso, describeCron, parseCron } from '../lib/cron.js';
 import { scheduleStatus } from '../lib/schedule-status.js';
 import { commandExists, missingCommandMessage } from './command-path.js';
 import { skillHomes, skillDir } from './skills.js';
-import { jobSkillFamilies, knownFamilies } from './skill-families.js';
+import { jobSkillFamilies, knownFamilies, missingPlugins, missingPluginsNote } from './skill-families.js';
 
 // --- Board settings ---
 
@@ -617,6 +617,7 @@ export function readJobForAgent(jobId) {
       // failing to dispatch AND failing its PR check at once.
       lastError: job.lastError || null,
       prCheckError: job.prCheckError || null,
+      pluginNote: job.pluginNote || null,
       attachments: (Array.isArray(job.attachments) ? job.attachments : []).map(a => a && a.name).filter(Boolean),
     },
   };
@@ -1489,6 +1490,8 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     job.holdUntil = null;
     // Its start time has come: a card sent back to To do goes straight out.
     job.runAt = null;
+    // A plugin the card names that this machine lacks: the agent runs without it.
+    job.pluginNote = jobAgent(job) === 'claude' ? missingPluginsNote(missingPlugins(jobSkillFamilies(job, jobRequiresPr(job)))) : null;
     noteGithubRemote(job, broadcast);
 
     dispatched.push({ job, session });
