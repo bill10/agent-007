@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.0.0] - 2026-10-09
+
+### Changed
+
+- **One Accounts list in Settings.** "Agents & accounts" and "Auto-switch accounts" are now one **Accounts** section: one row per login, led by its CLI (Claude, Codex, Gemini), then its email, plan and one status (Active, Available, Limited · until …, Logged in or Logged out, plus Default for the CLI's default folder). Claude and Codex rows come first in switch order and keep their status, checkbox, Move up/down and Switch now; other CLIs' logins and logged-out folders show read-only after them. **Find logged-in accounts** is gone: every logged-in Claude and Codex login the scan finds (at start and on **Refresh**) joins the switch list on its own. **Add an account folder manually** stays for folders the scan misses. Each agent CLI's version, path and Update now sit on one compact line below the list, CLIs with no accounts included. With user accounts on, the list still shows, read-only.
+
 ## [0.68.0.0] - 2026-10-09
 
 ### Added
