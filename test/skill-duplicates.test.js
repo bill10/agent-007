@@ -40,8 +40,8 @@ describe('duplicate skills', () => {
 
   it('skips one installer-managed skill mirrored into ~/.claude and ~/.agents, but not drift or unlocked copies', () => {
     mkdirSync(agentsDir, { recursive: true });
-    writeFileSync(join(agentsDir, '.skill-lock.json'), JSON.stringify({ skills: { locked: {}, drifted: {} } }));
-    for (const n of ['locked', 'unlocked']) for (const h of [claudeDir, agentsDir]) skill(join(h, 'skills', n), n);
+    writeFileSync(join(agentsDir, '.skill-lock.json'), JSON.stringify({ skills: { locked: {}, locked2: {}, locked3: {}, drifted: {} } }));
+    for (const n of ['locked', 'locked2', 'locked3', 'unlocked']) for (const h of [claudeDir, agentsDir]) skill(join(h, 'skills', n), n);
     skill(join(claudeDir, 'skills', 'drifted'), 'drifted', 'one');
     skill(join(agentsDir, 'skills', 'drifted'), 'drifted', 'two');
     expect(find().map(x => x.kind)).toEqual([
