@@ -12,6 +12,8 @@ beforeEach(() => {
   setBillionEnabled(true); setSelf(null, false); send.mockReset(); send.mockReturnValue(true);
   window.confirm = vi.fn(() => true);
   handleAccountError({ message: null });
+  // Unsaved edits live in the module; an interrupted switch always drops them.
+  handleAccountState({ type: 'account-state', rotation: { pending: true, accounts: [] }, codexRotation: { pending: true, accounts: [] } });
 });
 describe('account rotation settings', () => {
   it('keeps the folder available to correct after an error and emphasizes recovery errors', () => {
@@ -167,8 +169,21 @@ describe('Codex account rotation settings', () => {
     expect([...document.querySelectorAll('[data-cli="claude"] .rotation-account label span')].map(s => s.textContent)).toEqual(['b@x', 'a@x']);
     expect(document.querySelectorAll('[data-cli="codex"] .rotation-account')).toHaveLength(2);
     document.querySelector('[data-cli="claude"] [data-action="rotation-configure"]').click();
+    // A refused save keeps the edits; the saved order arriving clears them.
+    handleAccountError({ message: 'Invalid rotation settings.' });
+    handleAccountState({ type: 'account-state', rotation: claude, codexRotation: codexState });
+    expect([...document.querySelectorAll('[data-cli="claude"] .rotation-account label span')].map(s => s.textContent)).toEqual(['b@x', 'a@x']);
+    const saved = { ...claude, accounts: [claude.accounts[1], claude.accounts[0]] };
+    handleAccountState({ type: 'account-state', rotation: saved, codexRotation: codexState });
     handleAccountState({ type: 'account-state', rotation: claude, codexRotation: codexState });
     expect([...document.querySelectorAll('[data-cli="claude"] .rotation-account label span')].map(s => s.textContent)).toEqual(['a@x', 'b@x']);
+  });
+  it('drops unsaved edits for an interrupted switch, so Restore previous login shows', () => {
+    const codexState = { enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] };
+    codex(codexState);
+    inCodex('[data-action="rotation-down"]').click();
+    codex({ ...codexState, pending: true });
+    expect(inCodex('[data-action="rotation-recover"]')).not.toBeNull();
   });
   it('names the CLI on controls repeated in both sections', () => {
     codex({ enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] });

@@ -36,7 +36,7 @@ import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, r
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
-import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand, deriveJobStatus } from './lib/jobs.js';
+import { withDefaultPermission, envPermissionMode, PERMISSION_MODES, ENV_PERMISSION_MODE, sessionAgentFromCommand, deriveJobStatus, isCodexSessionId } from './lib/jobs.js';
 import { BILLION_NAME, billionEnabled, billionRuns, billionDir, ensureBillionRepo, refreshCharter, suggestProjectsDir, billionCommand, noAgentCommand, changedBoardTools, saveBoardTools, charterChanges, writeAgentsMd, billionAgent, saveBillionAgent, billionAgentWarning, noAgentNotice, notLoggedInNotice, setBillionNotice, switchBillion as switchBillionSteps, liveBillion, withBillionStopped } from './server/billion.js';
 import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
@@ -407,14 +407,18 @@ async function aroundBillion(fn) {
   });
   try { return await switching; } finally { switching = null; }
 }
-// A Codex session's conversation: the one a rotation already resumed it on,
-// else the newest recorded in exactly its folder since it started, and only
-// while no other app Codex session shares that folder.
+// A Codex session's conversation, only while no other app Codex session
+// shares its folder: the newest recorded there since it started (so a /new in
+// the TUI counts), else the one its own `codex resume <id>` names (a rotation
+// restart, Restart, a respawned orphan): Codex writes nothing to it until a
+// turn runs.
 const codexIdFor = session => {
   const dir = session.worktreePath || session.cwd;
   const shared = [...sessions.values()].some(s => s !== session && s.agent === 'codex' && (!s.exited || s.rotationResume) && (s.worktreePath || s.cwd) === dir);
   if (shared) return null;
-  return (session.codexSessionId ||= codexSessionIdFor(dir, undefined, session.createdAt || -Infinity));
+  const args = parseCommand(session.command || '').args, at = args.indexOf('resume');
+  return codexSessionIdFor(dir, undefined, session.createdAt || -Infinity)
+    || (at >= 0 && isCodexSessionId(args[at + 1]) ? args[at + 1] : null);
 };
 // Rotation restarts every managed session of that CLI in its own conversation.
 // Session ids and job links stay stable, including queued mail and UI tabs.
@@ -465,7 +469,6 @@ async function aroundAgent(cli, fn) {
       if (result.error) return result;
       result.session.rotationResume = false;
       result.session.accountRotating = false;
-      result.session.codexSessionId = session.codexSessionId;
       result.session.messagesHeld = !!session.rotationMessagesHeld;
       result.session.lastWakeAt = session.lastWakeAt;
       result.session.wakeAt = session.wakeAt;
@@ -606,8 +609,8 @@ function startBillionWakes() {
       notify: (text) => notifyOwner(text, { broadcast, telegram: true }),
       // No Telegram: the browser's notice instead.
       tell: (text) => tellOwnerOrShow(text, 'info'),
-      // Armed by the owner, and only while the owner may act (user accounts
-      // off): the account switch comes before any move to Codex.
+      // Only while the owner may act (user accounts off): the session's own
+      // CLI moves to its next login before any move to the other CLI.
       rotation: pool('claude'),
       codexRotation: pool('codex'),
       migration: {

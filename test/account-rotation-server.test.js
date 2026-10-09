@@ -239,6 +239,17 @@ describe('rotation through the owner socket', () => {
       expect(output).toContain(`"resume","${id}"`);
       expect(output).not.toContain('initial task');
       expect(JSON.stringify(seen)).not.toMatch(/fake-c[ab]/);
+      // Idle after its restart, Codex has written nothing newer than this session to the rollout:
+      // its own `codex resume <id>` still names the conversation, so it can rotate again.
+      const back = enrolled.codexRotation.accounts.find(a => a.email === 'ca@example.com');
+      codexAuth.check = () => expect(resumed.exited).toBe(true);
+      const again = seen.length;
+      ws.send(JSON.stringify({ type: 'account', action: 'rotation-switch', cli: 'codex', id: back.id }));
+      await wait(() => seen.slice(again).find(m => m.type === 'account-state' && m.codexRotation?.active === back.id));
+      expect(seen.slice(again).filter(m => m.type === 'account-error')).toEqual([]);
+      const third = sessions.get(old.id);
+      await wait(() => third !== resumed && third.ringBuffer.getAll().join('').includes('fixture started'));
+      expect(third.ringBuffer.getAll().join('')).toContain(`"resume","${id}"`);
     } finally {
       codexAuth.check = null;
       if (savedHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = savedHome;
@@ -254,7 +265,6 @@ describe('rotation through the owner socket', () => {
     ws.on('message', data => seen.push(JSON.parse(data)));
     await new Promise(r => ws.once('open', r));
     const savedHome = process.env.CODEX_HOME;
-    // The previous test's Codex home still holds a rollout for this folder, so only the sharing check refuses.
     process.env.CODEX_HOME = join(root, 'codex-home');
     const first = [...sessions.values()].find(s => s.agent === 'codex' && !s.exited);
     const events = codexAuth.events.length, email = codexAuth.current.email;
@@ -263,6 +273,9 @@ describe('rotation through the owner socket', () => {
       expect(made.error).toBeUndefined();
       const twin = made.session; sessions.set(twin.id, twin);
       await wait(() => twin.ringBuffer.getAll().join('').includes('fixture started'));
+      // A conversation recorded in the folder after both started: either session would claim it, so only the sharing check refuses.
+      const rid = '019a0000-0000-7000-8000-00000000beef';
+      writeFileSync(join(root, 'codex-home', 'sessions', '2026', '10', '08', `rollout-${rid}.jsonl`), `${JSON.stringify({ type: 'session_meta', payload: { id: rid, cwd: first.cwd, source: 'cli' } })}\n`);
       const state = JSON.parse(readFileSync(join(CONFIG_DIR, 'codex-account-rotation.json'), 'utf8'));
       ws.send(JSON.stringify({ type: 'account', action: 'rotation-switch', cli: 'codex', id: state.accounts.find(a => a.id !== state.active).id }));
       const refused = await wait(() => seen.find(m => m.type === 'account-error'));
@@ -294,6 +307,7 @@ describe('rotation through the owner socket', () => {
       ws.send(JSON.stringify({ type: 'account', action: 'rotation-discover', cli: 'codex' }));
       const found = await wait(() => seen.find(m => m.type === 'account-state' && m.codexRotation?.accounts.some(a => a.folder === '/fixture-cx-in')));
       expect(found.codexRotation.accounts.map(a => a.folder)).not.toContain('/fixture-cx-out');
+      expect(found.codexRotation.accounts.map(a => a.folder)).not.toContain('/fixture-claude-in');
       expect(found.rotation.accounts).toHaveLength(claudeAccounts);
       expect(seen.filter(m => m.type === 'account-error')).toHaveLength(0);
     } finally { scan.agents = []; ws.close(); }

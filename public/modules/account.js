@@ -11,16 +11,26 @@ const CLIS = [
 const blank = () => ({ enabled: false, fallback: true, accounts: [] });
 let state = {};
 const drafts = { claude: blank(), codex: blank() };
-// A section with unsaved edits keeps them when a state update arrives for the
-// other one: each message carries both registries.
+// A section with unsaved edits keeps them when a state update arrives (each
+// message carries both registries): the edits are laid over the fresh state.
 const dirty = { claude: false, codex: false };
+const settings = r => JSON.stringify([r.enabled, r.fallback, r.accounts.map(a => [a.id, a.enabled])]);
+function merge(cli, fresh) {
+  const draft = drafts[cli], ids = a => a.map(x => x.id).sort().join();
+  // An interrupted switch, an error or a changed account list wins over unsaved edits.
+  if (!dirty[cli] || fresh.pending || fresh.damaged || fresh.error || ids(fresh.accounts) !== ids(draft.accounts)) { dirty[cli] = false; return fresh; }
+  const merged = { ...fresh, enabled: draft.enabled, fallback: draft.fallback,
+    accounts: draft.accounts.map(d => ({ ...fresh.accounts.find(a => a.id === d.id), enabled: d.enabled })) };
+  if (settings(merged) === settings(fresh)) dirty[cli] = false;   // saved
+  return merged;
+}
 const folderDrafts = { claude: '', codex: '' };
 const manualOpen = { claude: false, codex: false };
 let lastError = null;
 let lastCli = 'claude';   // the section the last action came from, where its error shows
 export function handleAccountState(msg) {
   state = msg;
-  for (const c of CLIS) if (!dirty[c.cli]) drafts[c.cli] = structuredClone(msg[c.key] || blank());
+  for (const c of CLIS) drafts[c.cli] = merge(c.cli, structuredClone(msg[c.key] || blank()));
   renderAccount();
 }
 export function handleAccountError(msg) { lastError = msg.message; renderAccount(); }
@@ -50,9 +60,10 @@ export function renderAccount() {
 }
 
 // Every control in the panel waits while an action runs: the server takes one
-// account action at a time, for either CLI. The draft is sent, so it is clean.
+// account action at a time, for either CLI. Unsaved edits stay until the
+// state shows them saved, so a refused save keeps them.
 function transmitFrom(root, cli, action, extra = {}) {
-  lastError = null; lastCli = cli; dirty[cli] = false;
+  lastError = null; lastCli = cli;
   for (const control of root.querySelectorAll('button, input')) control.disabled = true;
   if (!send({ type: 'account', action, ...(cli === 'claude' ? {} : { cli }), ...extra })) { lastError = 'Not connected. Reconnect and try again.'; renderAccount(); }
 }

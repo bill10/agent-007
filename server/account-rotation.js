@@ -135,8 +135,7 @@ function codexRetryAt(text, now) {
   if (!at || (!at[1] && !at[4])) return null;
   const today = new Date(now), month = at[1] ? MONTHS.indexOf(at[1].toLowerCase()) : today.getMonth();
   if (month < 0) return null;
-  let hour = at[4] ? Number(at[4]) % 12 + (/pm/i.test(at[6] || '') ? 12 : 0) : 0;
-  if (at[4] && !at[6]) hour = Number(at[4]);
+  const hour = !at[4] ? 0 : at[6] ? Number(at[4]) % 12 + (/pm/i.test(at[6]) ? 12 : 0) : Number(at[4]);
   const day = at[1] ? Number(at[2]) : today.getDate(), minute = at[5] ? Number(at[5]) : 0;
   let year = at[3] ? Number(at[3]) : today.getFullYear();
   let when = new Date(year, month, day, hour, minute).getTime();

@@ -212,8 +212,10 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
     const reason = `${CLI_NAMES[agent]} hit its limit`;
     const result = await switchTo(to, reason);
     if (result?.error) {
-      // Not retried every tick: the owner's switch button still works.
+      // Not retried every tick: the owner's switch button still works. With
+      // an account pool on, pausedFor alone does not hold it, so wait the gap.
       watch.pausedFor = session.id;
+      if (pool || target) session.rotationRetryAt = now + SWITCH_GAP_MS;
       log(`Billion: could not switch to ${CLI_NAMES[to]}: ${result.error}`);
       return null;
     }
