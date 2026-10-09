@@ -103,8 +103,9 @@ export function cliReady(agent, { env = process.env, platform = process.platform
   });
 }
 
-let watch = { switchAt: 0, pausedFor: null, running: false };
-export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: null, running: false, ...over }; }
+// toldFor: the session last told it is paused at both limits, until it rotates.
+let watch = { switchAt: 0, pausedFor: null, toldFor: null, running: false };
+export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: null, toldFor: null, running: false, ...over }; }
 
 /**
  * One look at Billion's screen. Returns what it did: 'warned', 'switched',
@@ -151,7 +152,7 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
     try {
       const result = await pool.run(hit, { limited: !session.rotationMarked });
       if (!result?.busy) session.rotationMarked = true;
-      if (result?.ok) return 'rotated';
+      if (result?.ok) { if (watch.toldFor === session.id) watch.toldFor = null; return 'rotated'; }
       if (result?.busy || result?.retry) return null;
       if (result?.error) {
         if (!session.rotationNotified) { session.rotationNotified = true; await notify(`${CLI_NAMES[agent]} account rotation paused: ${result.error}`); }
@@ -196,8 +197,8 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
       // With a pool on, the gap is what holds the next try (pausedFor does
       // not), and the owner hears of the pause once, not at every retry.
       if (pool || target) session.rotationRetryAt = now + SWITCH_GAP_MS;
-      const told = watch.pausedFor === session.id;
-      watch.pausedFor = session.id;
+      const told = watch.toldFor === session.id;
+      watch.pausedFor = watch.toldFor = session.id;
       log(`Billion: paused on ${CLI_NAMES[agent]}: ${why} ("${hit.line}")`);
       if (!told) await notify(`Billion paused: both Claude Code and Codex are at their limits. ${why}; ${CLI_NAMES[agent]} says "${hit.line}". Billion stays on ${CLI_NAMES[agent]}. Press Start or the switch button next to Billion once either has usage again.`);
       return 'paused';

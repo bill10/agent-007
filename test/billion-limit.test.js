@@ -281,6 +281,19 @@ describe('Codex account rotation before the handover to Claude Code', () => {
     expect(await limitTick(s, { ...d, now: T0 + SWITCH_GAP_MS + 10_001 })).toBeNull();
     expect(s.rotationRetryAt).toBe(T0 + 2 * SWITCH_GAP_MS + 1);
     expect(d.notify).toHaveBeenCalledTimes(1);
+    // A rotation in between ends that pause: running out again is told again.
+    c.run.mockResolvedValueOnce({ ok: true });
+    expect(await limitTick(s, { ...d, now: T0 + 2 * SWITCH_GAP_MS + 2 })).toBe('rotated');
+    expect(await limitTick(s, { ...d, now: T0 + 3 * SWITCH_GAP_MS })).toBe('paused');
+    expect(d.notify).toHaveBeenCalledTimes(2);
+  });
+  it('still tells the owner of a pause after a failed handover', async () => {
+    const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
+    const ready = vi.fn().mockResolvedValueOnce(true).mockResolvedValue(false);
+    const d = deps({ codexRotation: c, ready, switchTo: vi.fn(async () => ({ error: 'Billion is already switching', busy: true })) }), s = billion(CODEX_OUT, { agent: 'codex' });
+    expect(await limitTick(s, d)).toBeNull();
+    expect(await limitTick(s, { ...d, now: T0 + 10_000 })).toBe('paused');
+    expect(d.notify).toHaveBeenCalledTimes(1);
   });
   it('retries next tick when the handover only met another switch in flight', async () => {
     const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
