@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.64.1.0] - 2026-10-09
+
+### Fixed
+
+- **Skill duplicates no longer flags a skill the `skills` installer mirrored on purpose.** An identical copy in `~/.claude/skills` and `~/.agents/skills` whose name is in `~/.agents/.skill-lock.json` is one install, so it is skipped. Copies whose contents differ, and identical copies of unlocked skills, are still reported.
+
 ## [0.64.0.0] - 2026-10-09
 
 ### Changed
