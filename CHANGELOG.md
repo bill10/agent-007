@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.63.1.0] - 2026-10-09
+
+### Changed
+
+- **The built-in skill family comes from what this machine's Claude Code actually lists.** At server start, and whenever `claude --version` changes, Agent 007 runs `claude -p` once against a stand-in API on 127.0.0.1 and reads the skill listing out of the request: no fixed list of bundled skills in code, nothing sent to Anthropic, no usage spent, request headers never read or kept. The result is cached per version in `~/.agent-007/skill-listing.json`. Built-in is that listing minus installed, plugin and engineering skills, each with the listing's own one-liner. If the probe fails there is no built-in family on that machine, so nothing is hidden, and Billion gets one notice saying why.
+
 ## [0.63.0.0] - 2026-10-09
 
 ### Added
