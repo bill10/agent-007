@@ -7,11 +7,13 @@ import { addJob, deleteJob, moveJob, allJobs, updateSettings } from '../server/j
 import { config, orphans, codenamePool } from '../server/state.js';
 import RawWebSocket from 'ws';
 import { tmpdir } from 'os';
-import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync, readFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync, readFileSync, lstatSync } from 'fs';
 import { join, basename } from 'path';
 import { execFileSync } from 'child_process';
 import { WebSocketServer } from 'ws';
 import { setupWebSocket, ACTIVITY_MS } from '../server/ws.js';
+import { STORE_FILE, writeStoreState } from '../server/skill-store.js';
+import { removeTempDir } from './temp-dir.js';
 
 // The server offers compression, and inflating is async: a compressed socket
 // hears the connect-time burst after its test has attached listeners, which
@@ -629,6 +631,55 @@ describe('terminal output on a slow link', () => {
   });
 });
 
+// --- One skill store (server/skill-store.js) ---
+// Value: protects=Settings' skill-store routes (preview is a dry run, the switch validates, turning it on syncs and persists, off leaves files); fails_when=preview writes files, a non-boolean enabled is accepted, enabled:true skips the sync or the state file; why_new=test/skill-store.test.js calls the module directly and never the routes; seam=none
+// The routes act on the owner's homes, so HOME (homedir) and the CLI dirs
+// point at a temp folder for the test and are put back after it.
+describe('/api/skill-store', () => {
+  const keys = ['HOME', 'USERPROFILE', 'CLAUDE_CONFIG_DIR', 'CODEX_HOME'];
+  let home, saved;
+  beforeAll(() => {
+    saved = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+    home = mkdtempSync(join(tmpdir(), 'a007-store-home-'));
+    Object.assign(process.env, { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: join(home, '.claude'), CODEX_HOME: join(home, '.codex') });
+    mkdirSync(join(home, '.claude', 'skills', 'ads'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'skills', 'ads', 'SKILL.md'), '---\nname: ads\n---\nbody\n');
+  });
+  afterAll(() => {
+    for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    // Off again, so a later spawn in this file never syncs the real homes.
+    writeStoreState({ enabled: false, last: null });
+    removeTempDir(home);
+  });
+  const post = (path, body) => fetch(`${baseUrl}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const skillPath = () => join(home, '.claude', 'skills', 'ads');
+  const isLink = () => { try { return lstatSync(skillPath()).isSymbolicLink(); } catch { return false; } };
+
+  it('previews without changing anything, refuses a non-boolean switch, then syncs and remembers when turned on', async () => {
+    writeStoreState({ enabled: false, last: null });
+    const preview = await (await post('/api/skill-store/preview', {})).json();
+    expect(preview).toMatchObject({ enabled: false, last: null, preview: { dryRun: true, moved: ['ads'], linked: ['ads'] } });
+    expect(preview.preview.summary).toMatch(/^Would move 1 skill into the store/);
+    expect(isLink()).toBe(false);
+    expect(existsSync(join(home, '.agents', 'skills', 'ads'))).toBe(false);
+
+    const bad = await post('/api/skill-store', { enabled: 'yes' });
+    expect(bad.status).toBe(400);
+    expect(JSON.parse(readFileSync(STORE_FILE, 'utf8')).enabled).toBe(false);
+
+    const on = await (await post('/api/skill-store', { enabled: true })).json();
+    expect(on).toMatchObject({ enabled: true, last: { moved: ['ads'] }, preview: null });
+    expect(on.summary).toMatch(/^Moved 1 skill into the store/);
+    expect(isLink()).toBe(true);
+    expect(existsSync(join(home, '.agents', 'skills', 'ads', 'SKILL.md'))).toBe(true);
+    expect((await (await fetch(`${baseUrl}/api/skill-store`)).json())).toMatchObject({ enabled: true, last: { moved: ['ads'] } });
+
+    const off = await (await post('/api/skill-store', { enabled: false })).json();
+    expect(off).toMatchObject({ enabled: false, last: { moved: ['ads'] } });
+    expect(isLink()).toBe(true);
+  });
+});
+
 // --- Auth enforcement (phase 1) ---
 // Runs LAST: writes a user to the hermetic users path so the running server
 // (which started auth-disabled) picks it up live, then removes it so nothing
@@ -675,6 +726,14 @@ describe('auth enforcement (live enable)', () => {
     expect((await fetch(`${baseUrl}/api/update`, { method: 'POST', headers: auth })).status).toBe(403);
     expect((await fetch(`${baseUrl}/api/update`, { headers: auth })).status).toBe(403);
     expect((await fetch(`${baseUrl}/api/update`, { method: 'POST', headers: { ...auth, Origin: 'https://evil.example' } })).status).toBe(403);
+  });
+
+  // Value: protects=the skill store's routes stay owner-only; fails_when=ownerOnly is dropped from any of the three routes, letting a signed-in user move the owner's skill folders; why_new=only /api/update's 403 was tested; seam=none
+  it('refuses the skill store routes to a signed-in user', async () => {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    expect((await fetch(`${baseUrl}/api/skill-store`, { headers })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/skill-store`, { method: 'POST', headers, body: '{"enabled":true}' })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/skill-store/preview`, { method: 'POST', headers, body: '{}' })).status).toBe(403);
   });
 
   it('closes a WS handshake without a token (code 4401)', async () => {

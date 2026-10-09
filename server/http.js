@@ -28,6 +28,7 @@ import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 import { cliUpdates, startCliUpdate } from './cli-update.js';
 import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
 import { updateInfo, startUpdate, updateNotes } from './self-update.js';
+import { readStoreState, writeStoreState, syncSkillStore, summarize, codexRunning } from './skill-store.js';
 import { busyWorkers } from './control.js';
 import { noteProxy, accessEmail } from './proxy.js';
 import { createRequire } from 'module';
@@ -428,7 +429,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
 
   // Settings' version line and Update button (server/self-update.js). Restarting
   // the server is the owner's call, as switching the Claude account is.
-  const ownerOnly = (req, res, next) => (authEnabled() ? res.status(403).json({ error: 'Only the owner updates Agent 007, and with user accounts on nobody does.' }) : next());
+  const ownerOnly = (req, res, next) => (authEnabled() ? res.status(403).json({ error: 'Only the owner can do this, and with user accounts on nobody can.' }) : next());
   // accessEmail: who Cloudflare Access let in, for the panel to show (server/proxy.js).
   app.get('/api/update', ownerOnly, async (req, res) => res.json({ ...await updateInfo({ workers: busyWorkers(sessions), fresh: req.query.fresh === '1' }), accessEmail: accessEmail(req) }));
   // What's new: the CHANGELOG sections between this version and the latest.
@@ -442,6 +443,28 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
   app.post('/api/cli-updates/:cli', ownerOnly, async (req, res) => {
     const result = startCliUpdate(req.params.cli, (await agentAccounts()).agents);
     res.status(result.error ? 409 : 202).json(result);
+  });
+
+  // Settings' One skill store (server/skill-store.js): the switch, its last
+  // result, and a dry run to show before it is turned on. The owner's files.
+  const storeView = (state, preview = null) => ({ ...state, summary: summarize(state.last), preview: preview && { ...preview, summary: summarize(preview) }, home: homedir() });
+  const storeError = (res, err) => res.status(500).json({ error: `Skill store: ${err.message}` });
+  app.get('/api/skill-store', ownerOnly, (req, res) => res.json(storeView(readStoreState())));
+  app.post('/api/skill-store/preview', ownerOnly, (req, res) => {
+    try { res.json(storeView(readStoreState(), syncSkillStore({ dryRun: true, codexMoves: !codexRunning() }))); } catch (err) { storeError(res, err); }
+  });
+  app.post('/api/skill-store', ownerOnly, (req, res) => {
+    if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'Send {"enabled": true} or false.' });
+    try {
+      const state = { ...readStoreState(), enabled: req.body.enabled };
+      if (state.enabled) {
+        const r = syncSkillStore({ codexMoves: !codexRunning() });
+        // Busy: on anyway, and the next agent start syncs.
+        if (!r.busy) state.last = r;
+      }
+      writeStoreState(state);
+      res.json(storeView(state));
+    } catch (err) { storeError(res, err); }
   });
 
   app.get('/api/browse', (req, res) => {

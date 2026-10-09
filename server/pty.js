@@ -20,6 +20,7 @@ import { flushMessages, dropMessages, sendNotice } from './messages.js';
 import { withSkillFamilies, reportUngrouped } from './skill-families.js';
 import { refreshListing } from './skill-listing.js';
 import { reportDuplicates } from './skill-duplicates.js';
+import { autoSync, reportStoreConflicts } from './skill-store.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 import { trustDialogKey, liveBillion } from './billion.js';
 import { codexTrustArgs } from './claude-trust.js';
@@ -291,6 +292,9 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // when the hook's --settings, which carries the same, went in above.
   const boardWorker = spawnedBy === 'board' || origin === 'board';
   const settledArgs = boardWorker ? withBoardWorkerSettings(file, hookedArgs) : hookedArgs;
+  // One skill store (server/skill-store.js), when on: a skill installed since
+  // the last spawn, for either CLI, is in both before this one starts.
+  if (isClaude || isCodex) autoSync();
   // Skill families (server/skill-families.js): every family's member listed by
   // name only, apart from the ones this agent's job switches on.
   const spawnArgs = isClaude ? withSkillFamilies(settledArgs, skills) : settledArgs;
@@ -318,6 +322,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // (Billion's own spawn is told from server.js, once it is on the board).
   if (isClaude && !isBillion) reportUngrouped(liveBillion(), sendNotice);
   if (isClaude && !isBillion) reportDuplicates(liveBillion(), sendNotice);
+  if (!isBillion) reportStoreConflicts(liveBillion(), sendNotice);
   // On Windows node-pty writes input through a socket on the console's input
   // pipe and listens for none of its errors. kill() closes the console under
   // any write still in flight, which then fails ("write EAGAIN" while the pipe

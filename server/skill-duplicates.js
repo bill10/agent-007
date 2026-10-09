@@ -12,21 +12,27 @@ import { envSwitchOn } from '../lib/helpers.js';
 
 // gstack writes these on purpose (gstack-relink's _link_root_skill_alias, and
 // the connect-chrome pair), so they are never reported.
-const ALIAS = '_gstack-command';
-const ALIAS_PAIR = new Set(['connect-chrome', 'gstack-connect-chrome']);
+export const ALIAS = '_gstack-command';
+export const ALIAS_PAIR = new Set(['connect-chrome', 'gstack-connect-chrome']);
 
 const readable = (file) => { try { return readFileSync(file, 'utf8'); } catch { return null; } };
 
-// A hash of every file in a skill folder (paths and bytes, links followed).
-function folderHash(dir, hash = createHash('sha256'), rel = '') {
+// A hash of every file in a skill folder (paths and bytes, links followed;
+// a link back to a folder already hashed is not followed again).
+export function folderHash(dir, hash = createHash('sha256'), rel = '', seen = new Set()) {
   let names = [];
-  try { names = readdirSync(dir).sort(); } catch { return hash; }
+  try {
+    const real = realpathSync(dir);
+    if (seen.has(real)) return hash;
+    seen.add(real);
+    names = readdirSync(dir).sort();
+  } catch { return hash; }
   for (const n of names) {
     if (n === '.git' || n === 'node_modules') continue;
     const p = join(dir, n);
     let st;
     try { st = statSync(p); } catch { continue; }
-    if (st.isDirectory()) folderHash(p, hash, `${rel}${n}/`);
+    if (st.isDirectory()) folderHash(p, hash, `${rel}${n}/`, seen);
     else { try { hash.update(`${rel}${n}\0`).update(readFileSync(p)).update('\0'); } catch { /* unreadable */ } }
   }
   return hash;
