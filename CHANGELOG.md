@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.63.2.0] - 2026-10-09
+
+### Fixed
+
+- **Closing an agent in one browser no longer leaves a red crashed tab in the others.** The server now tells every browser when an agent is closed, so its tab and office figure go away everywhere. A real crash or exit still keeps the tab so its output stays readable.
+
 ## [0.63.1.0] - 2026-10-09
 
 ### Changed
