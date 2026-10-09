@@ -11,8 +11,8 @@ vi.mock('../server/account-migration.js', async original => {
   const actual = await original();
   return {
     ...actual,
-    captureLogin: async folder => structuredClone(folder === '/fixture-claude-in' ? { email: 'c@example.com', folder, secret: 'fake-c', fields: { oauthAccount: { accountUuid: 'c', emailAddress: 'c@example.com' } } }
-      : folder ? { email: 'b@example.com', folder, secret: 'fake-b', fields: { oauthAccount: { accountUuid: 'b', emailAddress: 'b@example.com' } } } : auth.current),
+    captureLogin: async folder => { if (folder === '/fixture-claude-fail') throw new Error('no login'); return structuredClone(folder === '/fixture-claude-in' ? { email: 'c@example.com', folder, secret: 'fake-c', fields: { oauthAccount: { accountUuid: 'c', emailAddress: 'c@example.com' } } }
+      : folder ? { email: 'b@example.com', folder, secret: 'fake-b', fields: { oauthAccount: { accountUuid: 'b', emailAddress: 'b@example.com' } } } : auth.current); },
     activateLogin: async snapshot => { await auth.activation?.(); auth.current = structuredClone(snapshot); },
   };
 });
@@ -299,7 +299,7 @@ describe('rotation through the owner socket', () => {
     ws.on('message', data => seen.push(JSON.parse(data)));
     await new Promise(r => ws.once('open', r));
     const agents = [
-      { cli: 'claude', accounts: [{ folder: '/fixture-claude-in', loggedIn: true }] },
+      { cli: 'claude', accounts: [{ folder: '/fixture-claude-in', loggedIn: true }, { folder: '/fixture-claude-fail', loggedIn: true }] },
       { cli: 'codex', accounts: [{ folder: '/fixture-cx-in', loggedIn: true }, { folder: '/fixture-cx-out', loggedIn: false }] },
       { cli: 'gemini', accounts: [{ folder: '/fixture-gemini', loggedIn: true }] },
     ];
@@ -314,7 +314,8 @@ describe('rotation through the owner socket', () => {
       expect([...found.rotation.accounts, ...found.codexRotation.accounts].map(a => a.folder)).not.toContain('/fixture-gemini');
       expect(found.rotation.accounts).toHaveLength(claudeAccounts + 1);
       expect(found.rotation.accounts.at(-1).folder).toBe('/fixture-claude-in');
-      expect(seen.filter(m => m.type === 'account-error')).toHaveLength(0);
+      // A login that cannot be read is said in Settings, not only in the server log.
+      expect(seen.filter(m => m.type === 'account-error').map(m => m.message)).toEqual([expect.stringMatching(/^\/fixture-claude-fail was not added to Claude account switching: Could not read this login/)]);
     } finally { ws.close(); }
   }, 20000);
 
