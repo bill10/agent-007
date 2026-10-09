@@ -15,6 +15,7 @@ import { join } from 'path';
 import { CONFIG_DIR } from './state.js';
 import { resolveExecutable } from './command-path.js';
 import { ptyEnv } from '../lib/helpers.js';
+import { installedPlugins } from './skill-families.js';
 
 export const LISTING_FILE = join(CONFIG_DIR, 'skill-listing.json');
 const PROBE_TIMEOUT_MS = 20_000;
@@ -51,12 +52,12 @@ export function probeListing({ file = 'claude', env = process.env, timeoutMs = P
     const cwd = mkdtempSync(join(tmpdir(), 'a007-skill-probe-'));   // no project skills in it
     let child = null;
     let timer = null;
+    let settled = false;
     const done = (err, skills) => {
-      if (!timer && !child) return;
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      timer = null;
       try { child?.kill(); } catch { /* gone */ }
-      child = null;
       server.close();
       server.closeAllConnections?.();
       // Not at once on Windows, where the just-killed child may still hold it.
@@ -83,9 +84,11 @@ export function probeListing({ file = 'claude', env = process.env, timeoutMs = P
         CLAUDE_CODE_USE_BEDROCK: '', CLAUDE_CODE_USE_VERTEX: '', CLAUDE_CODE_USE_FOUNDRY: '', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
       const childEnv = { ...ptyEnv(env), ...pinned, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' };
       for (const key of ['CLAUDE_CODE_OAUTH_TOKEN', 'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']) delete childEnv[key];
-      // No hooks or MCP servers of the owner's run, no transcript or memory folder
-      // left in ~/.claude/projects, and every description in full.
-      const settings = JSON.stringify({ env: pinned, disableAllHooks: true, autoMemoryEnabled: false, skillListingBudgetFraction: 1 });
+      // No hooks, MCP servers or plugins of the owner's (plugin skills are never
+      // built-in), no transcript or memory folder left in ~/.claude/projects,
+      // and every description in full.
+      const enabledPlugins = Object.fromEntries([...installedPlugins()].map(id => [id, false]));
+      const settings = JSON.stringify({ env: pinned, disableAllHooks: true, autoMemoryEnabled: false, enabledPlugins, skillListingBudgetFraction: 1 });
       // ponytail: a Windows .cmd shim runs through cmd.exe, which can mangle the JSON;
       // the probe then fails and that machine simply has no built-in family.
       const win = process.platform === 'win32';
