@@ -184,6 +184,34 @@ export function renderNotesBody(data) {
   return data.notes ? renderNotes(data.notes) : '<p>No release notes between these versions.</p>';
 }
 
+// The agent CLIs under Agent 007's own version (GET /api/cli-updates,
+// server/cli-update.js): installed against npm's latest, and Update, which
+// runs the CLI's own `<cli> update`. Running agents keep the old one until
+// their next Restart, so the line says so.
+const newer = (a, b) => {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+};
+const CLI_NAMES = { claude: 'Claude Code', codex: 'Codex' };
+const RESTART_NOTE = 'Running agents pick it up on their next Restart.';
+export function renderCliVersions(updates) {
+  return Object.entries(updates).map(([cli, u]) => {
+    const name = CLI_NAMES[cli] || cli;
+    const lines = [`<div><span class="settings-version-name">${escapeHtml(name)}</span> ${escapeHtml(u.version || '(version unknown)')}</div>`];
+    if (u.updating) lines.push('<div>Updating…</div>');
+    else if (u.finished?.code === 0) lines.push(`<div class="settings-version-new">Updated. ${RESTART_NOTE}</div>`);
+    else if (u.finished) {
+      lines.push('<div>The update failed:</div>', `<div class="settings-version-error">${escapeHtml(u.finished.log || 'It stopped without saying why.')}</div>`,
+        `<div>Run it in a terminal instead: <code>${escapeHtml(cli)} update</code></div>`);
+    } else if (u.latest && u.version && newer(u.latest, u.version)) {
+      lines.push(`<div class="settings-version-new">Version ${escapeHtml(u.latest)} is available. ${RESTART_NOTE}</div>`,
+        `<button type="button" class="settings-refresh settings-primary" data-cli-update="${escapeHtml(cli)}" title="Runs ${escapeHtml(cli)} update" aria-label="Update ${escapeHtml(name)}">Update</button>`);
+    }
+    return `<div class="settings-cli">${lines.join('')}</div>`;
+  }).join('');
+}
+
 export function setupSettings() {
   const btn = document.getElementById('settings-btn');
   const panel = document.getElementById('settings-panel');
@@ -292,6 +320,46 @@ export function setupSettings() {
     poll();
   }
   refreshVersion();
+
+  // The agent CLIs' versions and their Update, polled every 2s while one runs.
+  const cliBox = document.getElementById('settings-cli-versions');
+  let cliPolling = false;
+  async function loadCli() {
+    let resp;
+    try { resp = await fetch('/api/cli-updates', { headers: authHeaders() }); } catch { resp = null; }
+    if (!resp?.ok) { cliBox.hidden = true; return null; }
+    const updates = await resp.json();
+    cliBox.hidden = !Object.keys(updates).length;
+    cliBox.innerHTML = renderCliVersions(updates);
+    for (const b of cliBox.querySelectorAll('[data-cli-update]')) b.onclick = () => updateCli(b.dataset.cliUpdate, b);
+    return updates;
+  }
+  async function pollCli() {
+    if (cliPolling) return;
+    cliPolling = true;
+    for (;;) {
+      await new Promise(r => setTimeout(r, 2000));
+      const updates = await loadCli();
+      if (!updates || !Object.values(updates).some(u => u.updating)) break;
+    }
+    cliPolling = false;
+    await load('POST');   // rescan, so Agents & accounts shows the new version
+    loadCli();
+  }
+  async function updateCli(cli, b) {
+    b.disabled = true;
+    b.textContent = 'Updating…';
+    const resp = await fetch(`/api/cli-updates/${encodeURIComponent(cli)}`, { method: 'POST', headers: authHeaders() }).catch(() => null);
+    if (!resp?.ok) {
+      const err = (await resp?.json().catch(() => ({})))?.error || 'Could not start the update.';
+      b.insertAdjacentHTML('afterend', `<div class="settings-version-error">${escapeHtml(err)}</div>`);
+      b.disabled = false;
+      b.textContent = 'Update';
+      return;
+    }
+    pollCli();
+  }
+  loadCli().then(u => { if (u && Object.values(u).some(x => x.updating)) pollCli(); });
 
   // What's new: a modal <dialog>, so Esc closes it and the page behind is inert.
   const dlg = document.getElementById('whats-new');

@@ -187,6 +187,9 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
   const session = sessions.get(sessionId);
   if (!session) return;
   if (session.rotationResume) { session.accountRotating = false; session.rotationResume = false; dropMessages(sessionId); }
+  session.closing = true;   // its exit is a close, with no Restart (pty.js onExit)
+  // Already exited, so onExit will not say so: its tabs drop their Restart.
+  if (session.exited) broadcast({ type: 'session-ended', sessionId, reason: 'Closed', spawnedBy: session.spawnedBy, jobId: session.jobId, closed: true });
   clearInterval(session.stateCheckInterval);
   clearTimeout(session.scanTimer);
   killSessionProcesses(session);
@@ -216,7 +219,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
     codenamePool.recycle(session.name);
     if (session.worktreePath) codenamePool.recycle(basename(session.worktreePath)); // differs after a rename
   }
-  sessions.delete(sessionId);
+  if (sessions.get(sessionId) === session) sessions.delete(sessionId);
 }
 
 // Billion (server/billion.js): started at boot, and again only when someone

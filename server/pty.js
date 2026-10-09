@@ -85,7 +85,7 @@ function isCodexPane(text, worktreePath) {
 
 /**
  * Attach onData + onExit handlers to a PTY process.
- * Shared between createSessionFromConfig and re-adopt-orphan.
+ * Shared between createSessionFromConfig and Restart.
  */
 export function setupPtyHandlers(session, sessionId, broadcast) {
   session.pty.onData((data) => {
@@ -174,8 +174,10 @@ export function setupPtyHandlers(session, sessionId, broadcast) {
     if (session.jobId && !session.accountRotating) requestDispatch();
     // What it is as it ends, which a relink or a board retirement may have
     // changed since session-created: the client's finished-worker path reads it.
+    // `closed`: Agent 007 closed it (killSession), so there is nothing to
+    // Restart; otherwise its program exited by itself and Restart brings it back.
     if (!session.accountRotating) broadcast({ type: 'session-ended', sessionId, reason: `Process exited with code ${exitCode}`,
-      spawnedBy: session.spawnedBy, jobId: session.jobId });
+      spawnedBy: session.spawnedBy, jobId: session.jobId, closed: !!session.closing });
   });
 
   session.stateCheckInterval = setInterval(() => {
@@ -223,6 +225,7 @@ function answerTrustDialog(session, data, now) {
  * Create a session object and spawn a PTY process.
  * Used by both fresh spawn and orphan re-adopt.
  */
+export const CODEX_NO_UPDATE_ARGS = ['-c', 'check_for_update_on_startup=false'];
 export function createSessionFromConfig({ sessionId, name, color, command, repoPath, worktreePath, branchName, repoSlug, cocktail, isTUI, ownerId, spawnedBy, jobId, agent, permissionFlags, origin, cwd: ownCwd, isBillion, approvalsToBillion, autoTrust, ghEnv = {}, rotationRestart = false, skills = [] }, broadcast) {
   const { file, args } = parseCommand(command);
   const isClaude = sessionAgentFromCommand(command) === 'claude';
@@ -266,7 +269,11 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   // Billion's folder is Agent 007's own, so Codex trusts it the way a board
   // worker's worktree is trusted.
   const codexTrust = !!(autoTrust || isBillion) && sessionAgentFromCommand(command) === 'codex';
-  const ownArgs = codexTrust ? [...codexTrustArgs(cwd), ...args] : args;
+  // Codex's startup "update available" prompt runs the install and exits,
+  // leaving a dead agent. Off per spawn (never in the owner's config.toml);
+  // Settings offers the update instead (server/cli-update.js).
+  const isCodex = sessionAgentFromCommand(command) === 'codex';
+  const ownArgs = [...(isCodex ? CODEX_NO_UPDATE_ARGS : []), ...(codexTrust ? codexTrustArgs(cwd) : []), ...args];
   // A Codex worker on Billion's card gets the same board tools pre-allowed.
   // Inside withMcpConfig, whose server table override would otherwise replace them.
   const mcpArgs = withMcpConfig(file, approvalsToBillion ? withCodexWorkerTools(file, ownArgs, mcpConfigPath) : ownArgs, mcpConfigPath);

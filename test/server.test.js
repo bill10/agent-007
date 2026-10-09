@@ -7,7 +7,7 @@ import { addJob, deleteJob, moveJob, allJobs, updateSettings } from '../server/j
 import { config, orphans, codenamePool } from '../server/state.js';
 import RawWebSocket from 'ws';
 import { tmpdir } from 'os';
-import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync } from 'fs';
+import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { WebSocketServer } from 'ws';
@@ -772,6 +772,24 @@ describe('ownership authorization', () => {
     a.close(); b.close();
   }, 15000);
 
+  it('refuses Restart of an exited agent to a non-owner', async () => {
+    const a = await connect(tokenA);
+    const created = nextMatching(a, (m) => m.type === 'session-created' && m.command === 'true');
+    const ended = nextMatching(a, (m) => m.type === 'session-ended');
+    a.send(JSON.stringify({ type: 'spawn', command: 'true' }));
+    const { sessionId } = await created;
+    expect((await ended).closed).toBe(false);   // exited by itself, so Restart is offered
+
+    const b = await connect(tokenB);
+    const denied = nextMatching(b, (m) => m.type === 'notification' && /read-only/i.test(m.message || ''));
+    b.send(JSON.stringify({ type: 'restart', sessionId }));
+    expect((await denied).message).toMatch(/owned by Aowner/);
+    expect(sessions.get(sessionId).exited).toBe(true);   // not restarted
+
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    a.close(); b.close();
+  }, 15000);
+
   it('lets only the owner rename a session and broadcasts the new name', async () => {
     const a = await connect(tokenA);
     const created = nextMatching(a, (m) => m.type === 'session-created' && /sleep 7/.test(m.command || ''));
@@ -1093,7 +1111,7 @@ describe('ownership is inert when auth is disabled', () => {
       const readopted = next(w, isBack);
       other = await open();
       const theirs = next(other, isBack);
-      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
+      w.send(JSON.stringify({ type: 'restart', orphanId: orphan.id }));
       back = await readopted;
       expect(back.command).toBe('codex resume --dangerously-bypass-approvals-and-sandbox');
       // Only the window that clicked Re-spawn switches to the revived tab.
@@ -1117,6 +1135,112 @@ describe('ownership is inert when auth is disabled', () => {
       rmSync(worktreePath, { recursive: true, force: true });
       w.close();
       other?.close();
+    }
+  }, 15000);
+
+  // Restart of a session whose CLI quit by itself (Codex's update, a crash, a
+  // stray /exit): back in place under the same id and tab, resuming its own
+  // conversation with its model and permission flags, and never twice. The
+  // fake CLI logs its argv, exits on its first run and stays up after.
+  function fakeCliOnPath(cli) {
+    const bin = mkdtempSync(join(tmpdir(), 'a007-bin-'));
+    const log = join(bin, 'argv.log');
+    writeFileSync(join(bin, cli), `#!/bin/sh\necho "$@" >> "${log}"\n[ -f "${bin}/ran" ] && exec sleep 5\ntouch "${bin}/ran"\n`, { mode: 0o755 });
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${bin}:${savedPath}`;
+    return { bin, log, restore: () => { process.env.PATH = savedPath; rmSync(bin, { recursive: true, force: true }); } };
+  }
+  async function exitedSession(w, command) {
+    const created = next(w, (m) => m.type === 'session-created' && m.command === command);
+    w.send(JSON.stringify({ type: 'spawn', command }));
+    const { sessionId, name } = await created;
+    await vi.waitFor(() => expect(sessions.get(sessionId).exited).toBe(true));
+    return { sessionId, name };
+  }
+
+  it.skipIf(process.platform === 'win32')('Restart brings an exited Codex agent back in place, resuming its own session, and never twice', async () => {
+    const { bin, log, restore } = fakeCliOnPath('codex');
+    const worktreePath = fakeOrphanWorktree();
+    const codexHome = mkdtempSync(join(tmpdir(), 'a007-codex-home-'));
+    const day = join(codexHome, 'sessions', '2026', '10', '08');
+    mkdirSync(day, { recursive: true });
+    const id = '0199c0de-0000-7000-8000-00000000c0de';
+    writeFileSync(join(day, 'rollout-r.jsonl'), JSON.stringify({ type: 'session_meta', payload: { id, cwd: realpathSync.native(worktreePath), source: 'cli', thread_source: 'user' } }) + '\n');
+    const savedHome = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = codexHome;
+    const w = await open();
+    let sessionId;
+    try {
+      const command = `${join(bin, 'codex')} --model o3 --dangerously-bypass-approvals-and-sandbox`;
+      ({ sessionId } = await exitedSession(w, command));
+      Object.assign(sessions.get(sessionId), { repoPath: tmpdir(), worktreePath, branchName: 'b/restart-test' });
+
+      const back = next(w, (m) => m.type === 'session-created' && m.sessionId === sessionId);
+      const refused = next(w, (m) => m.type === 'spawn-error');
+      w.send(JSON.stringify({ type: 'restart', sessionId }));
+      w.send(JSON.stringify({ type: 'restart', sessionId }));   // a second click
+      const msg = await back;
+      expect(msg.command).toBe(`codex resume ${id} --dangerously-bypass-approvals-and-sandbox -m "o3"`);
+      expect(msg.focus).toBe(true);
+      expect((await refused).error).toMatch(/already (running|restarting)/);
+      expect(sessions.get(sessionId).exited).toBe(false);
+      // Codex's update prompt is off for every Codex Agent 007 starts.
+      await vi.waitFor(() => expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(2));
+      for (const argv of readFileSync(log, 'utf8').trim().split('\n')) expect(argv).toContain('-c check_for_update_on_startup=false');
+      expect(readFileSync(log, 'utf8').trim().split('\n')[1]).toMatch(new RegExp(`resume ${id} `));
+    } finally {
+      restore();
+      if (savedHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = savedHome;
+      config.activeSessions = config.activeSessions.filter(s => s.worktreePath !== worktreePath);
+      if (sessionId && sessions.has(sessionId)) {
+        Object.assign(sessions.get(sessionId), { repoPath: null, worktreePath: null });
+        w.send(JSON.stringify({ type: 'kill', sessionId }));
+      }
+      rmSync(worktreePath, { recursive: true, force: true });
+      rmSync(codexHome, { recursive: true, force: true });
+      w.close();
+    }
+  }, 15000);
+
+  it.skipIf(process.platform === 'win32')('Restart resumes an exited Claude Code agent by its exact conversation', async () => {
+    const { bin, log, restore } = fakeCliOnPath('claude');
+    const w = await open();
+    let sessionId;
+    try {
+      ({ sessionId } = await exitedSession(w, `${join(bin, 'claude')} --model opus`));
+      const conversation = sessions.get(sessionId).claudeSessionId;
+      expect(conversation).toMatch(/^[0-9a-f-]{36}$/);
+      const back = next(w, (m) => m.type === 'session-created' && m.sessionId === sessionId);
+      w.send(JSON.stringify({ type: 'restart', sessionId }));
+      expect((await back).command).toBe(`claude --resume ${conversation} --model "opus"`);
+      await vi.waitFor(() => expect(readFileSync(log, 'utf8')).toContain(`--resume ${conversation}`));
+      // Running now: a Restart is refused rather than starting a second one.
+      const refused = next(w, (m) => m.type === 'spawn-error');
+      w.send(JSON.stringify({ type: 'restart', sessionId }));
+      expect((await refused).error).toMatch(/already running/);
+    } finally {
+      restore();
+      if (sessionId) w.send(JSON.stringify({ type: 'kill', sessionId }));
+      w.close();
+    }
+  }, 15000);
+
+  it.skipIf(process.platform === 'win32')('Restart refuses an exited agent that is being closed, and closing one tells every window', async () => {
+    const { bin, restore } = fakeCliOnPath('claude');
+    const w = await open();
+    try {
+      const { sessionId } = await exitedSession(w, `${join(bin, 'claude')}`);
+      sessions.get(sessionId).closing = true;   // killSession is mid-way through its git work
+      const refused = next(w, (m) => m.type === 'spawn-error');
+      w.send(JSON.stringify({ type: 'restart', sessionId }));
+      expect((await refused).error).toBe('Agent not found');
+      sessions.get(sessionId).closing = false;
+      const closed = next(w, (m) => m.type === 'session-ended' && m.sessionId === sessionId && m.closed);
+      w.send(JSON.stringify({ type: 'kill', sessionId }));
+      expect(await closed).toBeTruthy();
+    } finally {
+      restore();
+      w.close();
     }
   }, 15000);
 
@@ -1155,7 +1279,7 @@ describe('ownership is inert when auth is disabled', () => {
 
       // No card yet: the transcript answers, bare, and the session keeps no note.
       let readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== sessionId);
-      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
+      w.send(JSON.stringify({ type: 'restart', orphanId: orphan.id }));
       back = await readopted;
       expect(back.command).toBe('codex resume');
       expect(sessions.get(back.sessionId).agent).toBeNull();
@@ -1170,7 +1294,7 @@ describe('ownership is inert when auth is disabled', () => {
       jobId = job.id;
       Object.assign(job, { state: 'in-progress', branchName, agentSessionId: null });
       readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== back.sessionId);
-      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: again.id }));
+      w.send(JSON.stringify({ type: 'restart', orphanId: again.id }));
       back = await readopted;
       expect(back.command).toBe('codex resume --sandbox read-only');
       expect(allJobs().find(j => j.id === jobId).agentSessionId).toBe(back.sessionId);   // relinked to its card
@@ -1219,7 +1343,7 @@ describe('ownership is inert when auth is disabled', () => {
     };
     const respawn = async (orphan, from) => {
       const readopted = next(w, (m) => m.type === 'session-created' && m.name === name && m.sessionId !== from);
-      w.send(JSON.stringify({ type: 're-adopt-orphan', orphanId: orphan.id }));
+      w.send(JSON.stringify({ type: 'restart', orphanId: orphan.id }));
       return readopted;
     };
     try {

@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 
 import { jobs, agents, repos, setActiveSession } from '../public/modules/state.js';
 import { handleJobsList, showJobBoard, setupJobBoard } from '../public/modules/jobs.js';

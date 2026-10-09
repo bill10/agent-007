@@ -4,7 +4,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 
 import { send } from '../public/modules/ws.js';
 import { switchToSession } from '../public/modules/terminal.js';

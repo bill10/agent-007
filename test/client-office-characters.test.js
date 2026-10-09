@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 
 // office.js only needs switchToSession from terminal.js, which pulls in xterm.
-vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn() }));
+vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), restartAgent: vi.fn(), restartPending: () => false }));
 
 const { charVariant, CHAR_VARIANTS } = await import('../public/modules/office.js');
 

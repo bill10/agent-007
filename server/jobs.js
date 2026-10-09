@@ -1584,12 +1584,16 @@ export function orphanResumePlan(orphan, homes) {
   const flags = recordedPermissionFlags(orphan);
   // A Codex agent is pinned to its own worktree's session by id — the one
   // the transcript probe already found, when that is how its CLI was known.
-  const sessionId = agent !== 'codex' ? null
+  // A Claude agent by its exact conversation when the record knows it (a
+  // Restart of an exited session); otherwise --continue.
+  const sessionId = agent === 'claude' ? orphan.claudeSessionId || null
+    : agent !== 'codex' ? null
     : probed ? probed.codexSessionId
     : codexSessionIdFor(orphan.worktreePath, homes);
   // The card's model, when the card is for this CLI: a worker picked for a
-  // strong model comes back on it, not the CLI's default.
-  const model = card && jobAgent(card) === agent ? card.model || null : null;
+  // strong model comes back on it, not the CLI's default. Else the model the
+  // record says it ran (a Restart reads it off the session's command).
+  const model = card && jobAgent(card) === agent ? card.model || null : orphan.model || null;
   return { agent, mode, flags, command: resumeCommand(agent, mode, flags, sessionId, model) };
 }
 
