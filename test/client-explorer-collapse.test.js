@@ -7,7 +7,7 @@ vi.mock('../public/modules/terminal.js', () => ({ switchToSession: vi.fn(), rest
 
 import { send } from '../public/modules/ws.js';
 import { agents, repos, orphans, setActiveSession } from '../public/modules/state.js';
-import { renderExplorer } from '../public/modules/explorer.js';
+import { renderExplorer, handleRepoRemovalPreview } from '../public/modules/explorer.js';
 
 // collapsedRepos is module-level state in explorer.js and survives between
 // tests (deliberately: collapse must persist across re-renders), so each test
@@ -92,13 +92,14 @@ describe('explorer repo section collapse/expand', () => {
     expect(section('delta').querySelectorAll('.explorer-branch')).toHaveLength(1);
   });
 
-  it('× button sends remove-repo without toggling the section', () => {
+  it('× button asks the server first, without toggling the section', () => {
     repos.set('/repos/epsilon', { slug: 'epsilon', exists: true });
     agents.set('s1', AGENT('/repos/epsilon'));
     renderExplorer();
 
     headerOf('epsilon').querySelector('.explorer-remove-btn').click();
-    expect(send).toHaveBeenCalledWith({ type: 'remove-repo', path: '/repos/epsilon' });
+    expect(send).toHaveBeenCalledWith({ type: 'remove-repo-check', path: '/repos/epsilon' });
+    expect(send).not.toHaveBeenCalledWith({ type: 'remove-repo', path: '/repos/epsilon' });
     expect(section('epsilon').querySelectorAll('.explorer-branch')).toHaveLength(1);
   });
 
@@ -213,5 +214,49 @@ describe('Restart in the left panel', () => {
     buttons[1].click();
     expect(restartAgent).toHaveBeenCalledWith({ sessionId: 's-dead' });
     expect(restartAgent).toHaveBeenCalledWith({ orphanId: 'o1' });
+  });
+});
+
+describe('remove-repo dialog', () => {
+  const PREVIEW = (agents) => ({ type: 'repo-removal-preview', path: '/repos/eta', slug: 'eta', agents });
+  const dialog = () => document.getElementById('remove-repo-dialog');
+  beforeEach(() => {
+    // jsdom has no <dialog> modal support.
+    HTMLDialogElement.prototype.showModal ||= function () { this.setAttribute('open', ''); };
+    HTMLDialogElement.prototype.close = function () { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); };
+  });
+
+  it('names what goes, warns about lost work, and focuses Cancel', () => {
+    handleRepoRemovalPreview(PREVIEW([
+      { name: 'Cipher', kind: 'agent', uncommitted: false, unpushed: 0 },
+      { name: 'Raven', kind: 'agent', uncommitted: false, unpushed: 3 },
+      { name: 'Ghost', kind: 'orphan', uncommitted: true, unpushed: 0 },
+    ]));
+    const text = dialog().textContent;
+    expect(text).toContain('Remove eta from Agent 007?');
+    expect(text).toContain('closes its 2 agents (Cipher, Raven)');
+    expect(text).toContain('The repo folder itself is not touched.');
+    expect(text).toContain('Raven has 3 unpushed commits; they will be lost.');
+    expect(text).toContain('Ghost has uncommitted changes; they will be lost.');
+    expect(text).not.toContain('Cipher has');
+    expect(document.activeElement.textContent).toBe('Cancel');
+  });
+
+  it('Cancel sends nothing; confirm sends remove-repo', () => {
+    handleRepoRemovalPreview(PREVIEW([]));
+    [...dialog().querySelectorAll('button')].find(b => b.textContent === 'Cancel').click();
+    expect(dialog()).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+
+    handleRepoRemovalPreview(PREVIEW([]));
+    [...dialog().querySelectorAll('button')].find(b => b.textContent === 'Remove repo').click();
+    expect(send).toHaveBeenCalledWith({ type: 'remove-repo', path: '/repos/eta' });
+  });
+
+  it('labels a repo that is not on the board, with no controls', () => {
+    orphans.set('o9', { id: 'o9', repoPath: '/repos/theta', repoSlug: 'theta', name: 'Ghost', reason: 'stale' });
+    renderExplorer();
+    expect(headerOf('theta').textContent).toContain('theta · not on the board');
+    expect(headerOf('theta').querySelector('.explorer-remove-btn')).toBeNull();
   });
 });

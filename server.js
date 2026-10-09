@@ -178,7 +178,7 @@ async function createSession(command, name, repoPath, customBranch, ownerId, met
   return { session };
 }
 
-async function killSession(sessionId, { discardChanges = false } = {}) {
+async function killSession(sessionId, { discardChanges = false, force = false } = {}) {
   // Board retirement must complete after rotation, not report a silent success
   // while the same worker is about to resume under its original session id.
   if (sessions.get(sessionId)?.accountRotating && switching) {
@@ -195,7 +195,7 @@ async function killSession(sessionId, { discardChanges = false } = {}) {
   killSessionProcesses(session);
 
   removeActiveSession(session.worktreePath, broadcast);
-  const { orphaned, reason } = await removeWorktree(session, { discardChanges });
+  const { orphaned, reason } = await removeWorktree(session, { discardChanges, force });
 
   if (orphaned) {
     const orphanId = `orphan-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;

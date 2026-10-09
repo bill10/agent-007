@@ -8,7 +8,7 @@ import { config, orphans, codenamePool } from '../server/state.js';
 import RawWebSocket from 'ws';
 import { tmpdir } from 'os';
 import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { execFileSync } from 'child_process';
 import { WebSocketServer } from 'ws';
 import { setupWebSocket, ACTIVITY_MS } from '../server/ws.js';
@@ -1471,4 +1471,101 @@ describe('delete-orphan', () => {
     expect(existsSync(worktreePath)).toBe(false);
     expect(git('-C', repo, 'worktree', 'list')).not.toContain('del-partial');
   }, 20000);
+});
+
+describe('remove-repo', () => {
+  const open = () => new Promise((res, rej) => {
+    const s = new WebSocket(wsUrl); s.on('open', () => res(s)); s.on('error', rej);
+  });
+  const next = (ws, pred, ms = 15000) => new Promise((res) => {
+    const to = setTimeout(() => { ws.off('message', h); res(null); }, ms);
+    const h = (d) => { const m = JSON.parse(d); if (pred(m)) { clearTimeout(to); ws.off('message', h); res(m); } };
+    ws.on('message', h);
+  });
+  const git = (...args) => execFileSync('git', args, { encoding: 'utf8' });
+  function makeRepo() {
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'a007-rm-repo-')));
+    git('init', '-q', repo);
+    git('-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base');
+    git('-C', repo, 'config', 'user.name', 'bill10');
+    git('-C', repo, 'config', 'user.email', 't@t');
+    return repo;
+  }
+  async function setup() {
+    const repo = makeRepo();
+    const w = await open();
+    w.send(JSON.stringify({ type: 'add-repo', path: repo }));
+    await next(w, m => m.type === 'repos-list' && m.repos.some(r => r.path === repo));
+    const spawn = async () => {
+      const created = next(w, m => m.type === 'session-created' && m.repoPath === repo);
+      w.send(JSON.stringify({ type: 'spawn', command: 'cat', repoPath: repo }));
+      return created;
+    };
+    return { repo, w, spawn };
+  }
+
+  it('previews who is lost, and cancelling changes nothing', async () => {
+    const { repo, w, spawn } = await setup();
+    const a = await spawn(), b = await spawn();
+    const wtA = sessions.get(a.sessionId).worktreePath;
+    writeFileSync(join(wtA, 'scratch.txt'), 'x');                       // uncommitted
+    const wtB = sessions.get(b.sessionId).worktreePath;
+    writeFileSync(join(wtB, 'f.txt'), 'x');
+    git('-C', wtB, 'add', '-A');
+    for (const n of [1, 2]) git('-C', wtB, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', `c${n}`);
+    try {
+      w.send(JSON.stringify({ type: 'remove-repo-check', path: repo }));
+      const preview = await next(w, m => m.type === 'repo-removal-preview');
+      expect(preview.slug).toBe(basename(repo));
+      const byName = Object.fromEntries(preview.agents.map(x => [x.name, x]));
+      expect(byName[a.name]).toMatchObject({ kind: 'agent', uncommitted: true });
+      expect(byName[b.name]).toMatchObject({ kind: 'agent', uncommitted: false, unpushed: 2 });
+      // Cancel sends nothing further: everything is still here.
+      expect(config.repos.some(r => r.path === repo)).toBe(true);
+      expect(sessions.has(a.sessionId) && sessions.has(b.sessionId)).toBe(true);
+      expect(existsSync(wtA) && existsSync(wtB)).toBe(true);
+    } finally {
+      w.send(JSON.stringify({ type: 'remove-repo', path: repo }));
+      await next(w, m => m.type === 'repos-list' && !m.repos.some(r => r.path === repo));
+      w.close();
+    }
+  }, 40000);
+
+  it('closes its agents, deletes worktrees and orphans, returns the card, and tells every client', async () => {
+    const { repo, w, spawn } = await setup();
+    const other = await open();
+    const a = await spawn(), b = await spawn();
+    const wtA = sessions.get(a.sessionId).worktreePath, brA = sessions.get(a.sessionId).branchName;
+    const wtB = sessions.get(b.sessionId).worktreePath;
+    writeFileSync(join(wtA, 'scratch.txt'), 'x');
+    git('-C', wtB, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'unpushed');
+    // An orphan of the same repo, and a card on Agent A.
+    const orphanWt = join(process.env.AGENT007_WORKTREE_DIR, 'rm-repo', 'ghost');
+    git('-C', repo, 'worktree', 'add', '-q', orphanWt, '-b', 'bill10/ghost');
+    orphans.set('orphan-rm-ghost', { id: 'orphan-rm-ghost', name: 'Ghost', repoPath: repo, worktreePath: orphanWt, branchName: 'bill10/ghost' });
+    const { job } = addJob({ title: 'rm-repo card', repoPath: repo }, () => {});
+    Object.assign(job, { state: 'in-progress', branchName: brA, worktreePath: wtA, agentSessionId: a.sessionId });
+    try {
+      const otherSees = [];
+      other.on('message', d => otherSees.push(JSON.parse(d)));
+      w.send(JSON.stringify({ type: 'remove-repo', path: repo }));
+      await next(w, m => m.type === 'repos-list' && !m.repos.some(r => r.path === repo));
+
+      expect(config.repos.some(r => r.path === repo)).toBe(false);
+      expect(sessions.has(a.sessionId) || sessions.has(b.sessionId)).toBe(false);
+      expect(orphans.has('orphan-rm-ghost')).toBe(false);
+      expect([...orphans.values()].some(o => o.repoPath === repo)).toBe(false);
+      for (const p of [wtA, wtB, orphanWt]) expect(existsSync(p)).toBe(false);
+      expect(existsSync(repo)).toBe(true);                                // the folder itself is never touched
+      expect(git('-C', repo, 'branch', '--list')).not.toMatch(/bill10\/(?!ghost)\S+|ghost/);
+      expect(job).toMatchObject({ state: 'todo', agentSessionId: null, lastError: 'repo removed from Agent 007' });
+      await new Promise(r => setTimeout(r, 300));
+      expect(otherSees.filter(m => m.type === 'session-ended' && m.closed).map(m => m.sessionId).sort())
+        .toEqual([a.sessionId, b.sessionId].sort());
+      expect(otherSees.some(m => m.type === 'repos-list' && !m.repos.some(r => r.path === repo))).toBe(true);
+    } finally {
+      await deleteJob(job.id, () => {});
+      other.close(); w.close();
+    }
+  }, 40000);
 });
