@@ -175,6 +175,38 @@ Billion also gets one board notice per finding, per server run, for duplicate or
 
 On the machine this was built on (189 skills, a 30,000-character budget), a no-PR worker's listing went from over budget (75,831 characters wanted, 99 descriptions shown) to 22,977 characters with nothing cut; a pull-request worker fits too.
 
+Families read `~/.claude/skills` and follow links, so a skill linked in from the [one skill store](#one-skill-store-every-skill-installed-once-for-both-clis) is grouped exactly like a real folder.
+
+### One skill store: every skill installed once, for both CLIs
+
+Claude Code reads `~/.claude/skills`; Codex reads `~/.codex/skills` and `~/.agents/skills`. A skill installed for one is invisible to the other, and installing it for both leaves two copies to drift apart. Turn on **Settings → One skill store** and every skill lives once, in `~/.agents/skills/<name>`: Codex reads it there, and Claude Code gets a link `~/.claude/skills/<name>` → `~/.agents/skills/<name>`.
+
+- **Off until you turn it on.** Only the owner sees the switch (it is hidden, and its routes refused, with user accounts on). Ticking **Keep every skill in one store** first shows a dry run of what it would do; **Turn on** runs it. `agent007 skills sync --dry-run` prints the same from a terminal, and `agent007 skills sync` runs it once whether the switch is on or not.
+- **It keeps itself up to date.** While on, it runs at server start and before every agent starts, so a skill installed later, for either CLI, reaches both before the next agent. Settings shows the last sync that changed something.
+- **What it does.** A real skill folder in `~/.claude/skills` or `~/.codex/skills` is moved into the store; in `~/.claude/skills` a link takes its place. `~/.codex/skills` gets no link back, because Codex already reads the store and would list the skill twice. A skill already in the store that Claude Code can't see gets its link.
+- **Never deletes.** The first copy is renamed into the store and copied to `~/.agent-007/skill-backup/<time>/<claude|codex>/<name>`; every other folder it replaces is moved there. A step that fails puts everything back. Identical copies in two or three places keep one. Left alone, with a board notice to Billion naming the paths: one name with different contents in two places, folder names that differ only in case, a name the store already holds as a link or a file, and a skill whose `SKILL.md` gives it the name of another installed skill (both CLIs would list that name twice). One sync runs at a time, the server's or the command's.
+- **Left alone:** anything already a link (gstack's skills, `npx skills` installs), a folder whose `SKILL.md` is a link (gstack's per-skill folders), `gstack` itself, its aliases (`_gstack-command`, `connect-chrome`, `gstack-connect-chrome`), any folder with a `.git` or a `.gstack-owned` marker (gstack's copies on Windows), a folder holding a relative link that points outside it (it would point elsewhere from the store), a skills folder that is already a link to `~/.agents/skills`, `~/.claude/skills/synced` (claude.ai's skills), Codex's `.system`, plugin skills and every repo's own `.claude/skills`. `~/.claude/settings.json` is never written.
+- **Running Codex sessions keep their skills.** A Codex session reads each skill from the path it started with, so nothing in `~/.codex/skills` moves while Codex is running: an agent the app started, and, for Settings and `agent007 skills sync`, any `codex` process on the machine (its background server aside). It moves at the next sync with none running.
+- **`npx skills` keeps working.** `~/.agents/.skill-lock.json` is never written. `npx skills update` rewrites the store folder and finds the Claude link already pointing at it; a copy-mode install that puts a real folder back in `~/.claude/skills` is identical, so the next sync folds it in again.
+- **Claude only or Codex only.** In `~/.agent-007/skill-families.json`, `"claudeOnly": ["name"]` leaves that skill where it is, and `"codexOnly": ["name"]` moves it into the store without a Claude link (a link that already exists is yours to remove).
+- `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed. On Windows the link is a junction, which needs no admin rights.
+
+**Repo skills** stay in their repo, versioned with it; Agent 007 never moves or edits anything in a checkout. Where each CLI looks inside a repo:
+
+- **Claude Code** reads `<repo>/.claude/skills`.
+- **Codex** (0.162) reads `.agents/skills` and `.codex/skills` in every folder from its working directory up to the repository root, not above it, and never `.claude/skills`. It follows a linked skill folder, and the project need not be trusted. Source: its app-server's `skills/list` (`codex app-server generate-ts` has the protocol), run on a stub repo with an empty `CODEX_HOME`, no login. [OpenAI's skills docs](https://learn.chatgpt.com/docs/build-skills) say the same for `.agents/skills` and do not mention `.codex/skills`, which works but is undocumented, so new skills go in `.agents/skills`.
+
+So a repo skill both CLIs can use is a real folder in `.agents/skills` with a committed relative link in `.claude/skills`:
+
+```
+<repo>/.agents/skills/qa-browser/SKILL.md                    the skill, edited here
+<repo>/.claude/skills/qa-browser -> ../../.agents/skills/qa-browser
+```
+
+To convert one, from the repo root: `git mv .claude/skills/qa-browser .agents/skills/qa-browser && ln -s ../../.agents/skills/qa-browser .claude/skills/qa-browser`, then commit both. On Windows, git checks a link out as a link only with `core.symlinks` on (Developer Mode, or an admin shell, lets it make one). Otherwise it writes a small text file holding the path, so Claude Code on that checkout finds no folder and loses the skill, while Codex still reads `.agents/skills`. Turn it on and re-check out the link: `git config core.symlinks true && git checkout -- .claude/skills`.
+
+Agent 007 tells Billion, once per skill per server run, about a skill on the board's repos that only one CLI can see (a folder in `.claude/skills` with no `.agents/skills` or `.codex/skills` counterpart, or the reverse), naming the repo, the skill and the commands above (or, for a link checked out as a file, the `core.symlinks` fix). It changes nothing; a `claudeOnly` or `codexOnly` entry in `skill-families.json` silences it. This runs whether or not the store is on.
+
 ```
 ┌─────────────┬──────────────┬────────────────────┐
 │  Explorer   │  Pixel       │  Jobs + Terminals   │

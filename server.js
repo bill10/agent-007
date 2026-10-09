@@ -49,6 +49,7 @@ import { stopCodexDaemon } from './server/codex-login.js';
 import { takeMessages, restoreMessages, dropMessages, screenTail, sendNotice } from './server/messages.js';
 import { readMap as readFamilyMap, reportUngrouped } from './server/skill-families.js';
 import { reportDuplicates } from './server/skill-duplicates.js';
+import { autoSync, reportStoreConflicts, reportRepoSkills } from './server/skill-store.js';
 import { allJobs } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand, envSwitchOn } from './lib/helpers.js';
@@ -314,6 +315,8 @@ async function startBillion({ handover = false, carried = null } = {}) {
   sessions.set(result.session.id, result.session);
   reportUngrouped(result.session, sendNotice);
   reportDuplicates(result.session, sendNotice);
+  reportStoreConflicts(result.session, sendNotice);
+  reportRepoSkills(result.session, sendNotice);
   // Why it cannot talk yet, for its chat tab. Logged out, the CLI sits at its
   // own sign-in and never calls billion_ready, so mail would wait unexplained.
   const session = result.session;
@@ -701,6 +704,8 @@ async function startup() {
   // archived here, each one logged, rather than left showing next year's date.
   convertOnceSchedules(broadcast);
   retireSpentSchedules(broadcast);
+  // One skill store, when the owner turned it on (server/skill-store.js).
+  autoSync();
   // Claude Code's own skill list for the built-in skill family, probed in the
   // background when this version has none cached (server/skill-listing.js).
   if (envSwitchOn(process.env.SKILL_FAMILIES)) refreshListing();
