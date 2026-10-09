@@ -693,8 +693,8 @@ usage limit (below).
   **Codex account rotation** is the same for a Billion on Codex: its next
   Codex login (`~/.codex/auth.json` swapped, the background server stopped,
   `codex resume <id>`) comes before any handover, which happens only once
-  every selected Codex account is unavailable, **Fall back to Claude Code**
-  is on and `BILLION_AUTO_SWITCH` is not `0` (rotation itself runs either
+  every selected Codex account is unavailable, the Settings list has a
+  selected Claude account and `BILLION_AUTO_SWITCH` is not `0` (rotation itself runs either
   way); a move to Codex first selects an eligible Codex login. Codex's
   `try again at …` time sets when a limited login is retried.
 

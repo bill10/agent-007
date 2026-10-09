@@ -7,7 +7,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, symlinkS
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { captureCodexLogin, activateCodexLogin, codexIdentity, stopCodexDaemon } from '../server/codex-login.js';
-import { addRotationAccount, configureRotation, rotateAccount, recoverRotation, publicRotationState, rotationState, retryAt, RETRY_MS } from '../server/account-rotation.js';
+import { addRotationAccount, configureRotation, rotateAccount, recoverRotation, publicRotationState, rotationState, retryAt, RETRY_MS, rotationOn } from '../server/account-rotation.js';
 import { resetInFlight } from '../server/account-migration.js';
 import { resumeCodexCommand, withClaudeSessionsStopped } from '../server/claude-rotation-sessions.js';
 import { externalClaudePids, assertClaudeProcessesManaged, isCodexDaemon } from '../server/claude-processes.js';
@@ -84,7 +84,7 @@ describe('Codex account rotation', () => {
   const addAll = async () => {
     await addRotationAccount(join(home, '.codex-b'), deps());
     await addRotationAccount(join(home, '.codex-c'), deps());
-    await configureRotation({ enabled: true, fallback: true, accounts: publicRotationState(dir, undefined, 'codex').accounts.map(a => ({ id: a.id, enabled: true })) }, deps());
+    await configureRotation({ enabled: true, accounts: publicRotationState(dir, undefined, 'codex').accounts.map(a => ({ id: a.id, enabled: true })) }, deps());
   };
   it('keeps its own registry next to Claude\'s, auto-on at two accounts, with 0600 snapshots and no secrets public', async () => {
     await addRotationAccount(join(home, '.codex-b'), deps());
@@ -153,6 +153,46 @@ describe('Codex account rotation', () => {
     expect(await recoverRotation(undefined, deps())).toMatchObject({ ok: true });
     expect(live()).toBe(auth('a'));
     expect(rotationState(dir, 'codex')).toMatchObject({ pending: null, enabled: false });
+  });
+});
+
+// Settings shows one list: one switch and one order over both registries.
+describe('one account list for Claude and Codex', () => {
+  // Claude logins are in-memory fixtures here; no real ~/.claude* is read.
+  const claudeLogin = name => ({ email: `${name}@example.com`, fields: { oauthAccount: { accountUuid: name, emailAddress: `${name}@example.com` } }, secret: `secret-${name}`, folder: `/claude-${name}` });
+  const claudeDeps = () => ({ dir, now: () => 1_000_000, capture: async folder => claudeLogin(folder === null ? 'x' : folder.slice(1)), activate: async () => {} });
+  const ids = cli => publicRotationState(dir, undefined, cli).accounts;
+  it('turns on by default at two selected accounts counted across both CLIs', async () => {
+    await addRotationAccount('/x', claudeDeps());   // one Claude login: the default x
+    expect(rotationOn(dir)).toBe(false);
+    await addRotationAccount(join(home, '.codex'), deps());   // one Codex login: a
+    expect(rotationOn(dir)).toBe(true);
+  });
+  it('saves one mixed order into both registries, ranked, and refuses a list missing either CLI', async () => {
+    await addRotationAccount('/y', claudeDeps());
+    await addRotationAccount(join(home, '.codex-b'), deps());
+    const [x, y] = ids('claude'), [a, b] = ids('codex');
+    expect(await configureRotation({ enabled: true, accounts: [x, y].map(({ id }) => ({ id, enabled: true })) }, deps())).toMatchObject({ error: 'Invalid rotation settings.' });
+    const order = [a, x, b, y].map(({ id }, i) => ({ id, enabled: i !== 3 }));
+    expect(await configureRotation({ enabled: true, accounts: order }, deps())).toEqual({ ok: true });
+    expect(ids('claude').map(r => [r.email, r.rank, r.enabled])).toEqual([['x@example.com', 1, true], ['y@example.com', 3, false]]);
+    expect(ids('codex').map(r => [r.email, r.rank])).toEqual([['a@example.com', 0], ['b@example.com', 2]]);
+    for (const cli of ['claude', 'codex']) expect(rotationState(dir, cli)).toMatchObject({ enabled: true, defaultSettings: false });
+    expect(rotationState(dir, 'codex')).not.toHaveProperty('fallback');
+    // Two selected across both CLIs are enough; one is not.
+    expect((await configureRotation({ enabled: true, accounts: order.map((o, i) => ({ ...o, enabled: i === 0 })) }, deps())).error).toMatch(/at least two/);
+  });
+  it('refuses to save while either CLI has an interrupted switch, and recovery turns switching off for both', async () => {
+    await addRotationAccount('/y', claudeDeps());
+    await addRotationAccount(join(home, '.codex-b'), deps());
+    const all = [...ids('claude'), ...ids('codex')].map(({ id }) => ({ id, enabled: true }));
+    await configureRotation({ enabled: true, accounts: all }, deps());
+    const s = rotationState(dir, 'codex');
+    writeFileSync(join(dir, 'codex-account-rotation.json'), JSON.stringify({ ...s, pending: { from: s.active, to: s.accounts[1].id } }));
+    expect((await configureRotation({ enabled: false, accounts: all }, claudeDeps())).error).toMatch(/interrupted/);
+    expect(await recoverRotation(undefined, deps())).toMatchObject({ ok: true });
+    expect(rotationOn(dir)).toBe(false);
+    expect(rotationState(dir, 'claude').enabled).toBe(false);
   });
 });
 

@@ -11,7 +11,8 @@ vi.mock('../server/account-migration.js', async original => {
   const actual = await original();
   return {
     ...actual,
-    captureLogin: async folder => structuredClone(folder ? { email: 'b@example.com', folder, secret: 'fake-b', fields: { oauthAccount: { accountUuid: 'b', emailAddress: 'b@example.com' } } } : auth.current),
+    captureLogin: async folder => structuredClone(folder === '/fixture-claude-in' ? { email: 'c@example.com', folder, secret: 'fake-c', fields: { oauthAccount: { accountUuid: 'c', emailAddress: 'c@example.com' } } }
+      : folder ? { email: 'b@example.com', folder, secret: 'fake-b', fields: { oauthAccount: { accountUuid: 'b', emailAddress: 'b@example.com' } } } : auth.current),
     activateLogin: async snapshot => { await auth.activation?.(); auth.current = structuredClone(snapshot); },
   };
 });
@@ -289,10 +290,10 @@ describe('rotation through the owner socket', () => {
     }
   }, 20000);
 
-  // Value: protects=Find logged-in accounts with cli codex enrolls the scan's logged-in Codex homes into the Codex registry only, never logged-out ones or Claude's;
-  //   fails_when=discoverRotationAccounts ignores cli, reads Claude's scan entry, or drops the loggedIn filter;
+  // Value: protects=one Find logged-in accounts enrolls the scan's logged-in Claude and Codex logins, each into its own registry, never logged-out ones;
+  //   fails_when=discoverRotationAccounts scans one CLI only, files a login under the other CLI, or drops the loggedIn filter;
   //   why_new=no test drove rotation-discover through server.js for either CLI; seam=none
-  it('discovers only logged-in Codex homes into the Codex registry', async () => {
+  it('discovers logged-in Claude and Codex logins, each into its own registry', async () => {
     const ws = new WebSocket(url, { headers: { origin: url.replace('ws:', 'http:') } }), seen = [];
     ws.on('message', data => seen.push(JSON.parse(data)));
     await new Promise(r => ws.once('open', r));
@@ -304,11 +305,12 @@ describe('rotation through the owner socket', () => {
     // Its own default login: it runs on Windows too, where the Codex switch test above is skipped.
     codexAuth.current ||= { accountId: 'cx-a', email: 'ca@example.com', folder: '/fixture-default', secret: 'fake-ca' };
     try {
-      ws.send(JSON.stringify({ type: 'account', action: 'rotation-discover', cli: 'codex' }));
+      ws.send(JSON.stringify({ type: 'account', action: 'rotation-discover' }));
       const found = await wait(() => seen.find(m => m.type === 'account-state' && m.codexRotation?.accounts.some(a => a.folder === '/fixture-cx-in')));
       expect(found.codexRotation.accounts.map(a => a.folder)).not.toContain('/fixture-cx-out');
       expect(found.codexRotation.accounts.map(a => a.folder)).not.toContain('/fixture-claude-in');
-      expect(found.rotation.accounts).toHaveLength(claudeAccounts);
+      expect(found.rotation.accounts).toHaveLength(claudeAccounts + 1);
+      expect(found.rotation.accounts.at(-1).folder).toBe('/fixture-claude-in');
       expect(seen.filter(m => m.type === 'account-error')).toHaveLength(0);
     } finally { scan.agents = []; ws.close(); }
   }, 20000);

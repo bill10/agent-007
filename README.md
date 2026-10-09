@@ -280,8 +280,8 @@ session before trying again.
 
 Limited accounts become eligible after an explicit reset time or a 30-minute
 retry delay when the notice's reset time is ambiguous. If all accounts are
-unavailable, workers wait; Billion can hand over to Codex when **Fall back to
-Codex** is enabled and `BILLION_AUTO_SWITCH` is not `0`. CLI changes use
+unavailable, workers wait; Billion can hand over to Codex when the list has a
+selected Codex account and `BILLION_AUTO_SWITCH` is not `0`. CLI changes use
 `HANDOVER.md` for recent conversation and tool activity; Billion's existing
 Git folder already holds its state and pending work. Returning from Codex
 also selects an eligible Claude account and writes a handover.
@@ -299,7 +299,8 @@ for that retry; it restarts the app's Claude sessions without changing the login
 Nothing is retired or deleted. Rotation controls require Billion enabled and app user
 accounts disabled. Details in [FEATURES.md](docs/FEATURES.md).
 
-**Codex** works the same way. A saved Codex login is a copy of that folder's
+**Codex** works the same way, in the same list: Claude and Codex accounts share
+one Settings list, tagged by CLI, whose order is the switch order. A saved Codex login is a copy of that folder's
 `auth.json`, keyed by the ChatGPT account and user in its token. Switching
 writes the saved `auth.json` over the one in your default Codex home (`~/.codex`,
 or `CODEX_HOME`), atomically and 0600; `config.toml`, sessions, skills and
@@ -313,8 +314,8 @@ before interrupting anything if a session's conversation id is unknown, two app 
 folder, or a `codex` process outside the app is running. Limited accounts
 become eligible again at the time the notice gives ("try again at Oct 25th,
 3:15 PM", read in this machine's time zone), otherwise after 30 minutes. Only
-when every Codex account is unavailable does Billion hand over to Claude Code
-(**Fall back to Claude Code**, with `BILLION_AUTO_SWITCH` on). **Anything else
+when every selected Codex account is unavailable does Billion hand over to Claude Code
+(when the list has a selected Claude account, with `BILLION_AUTO_SWITCH` on). **Anything else
 that reads `~/.codex/auth.json` follows the switch** (a tool that symlinks its
 Codex login to that file, the Codex IDE extension), just as if you had switched
 accounts yourself.
