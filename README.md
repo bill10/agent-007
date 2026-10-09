@@ -258,8 +258,8 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 
 ### Rotating accounts
 
-Settings has one list for Claude Code and Codex accounts, each row tagged with its CLI.
-Open **Settings → Auto-switch accounts → Find logged-in accounts**; it finds both CLIs' logins.
+**Settings → Accounts** is one list of every login on this machine, each row tagged with its CLI.
+Every logged-in Claude Code and Codex login the scan finds joins the switch list (at start, and on **Refresh**).
 Each Claude account must have its own Claude Code login folder (for example,
 sign in with `CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`); each
 Codex account its own Codex home with an `auth.json` (for example
@@ -293,8 +293,8 @@ Avoid using a source login folder concurrently: its copied refresh token can
 become stale. Discovery does not overwrite a maintained login with that stale
 copy. An interrupted switch offers **Restore previous login**, which leaves
 automatic rotation off until you enable it again. If a conversation fails to
-restart, fix the reported startup problem, then choose **Settings → Auto-switch
-accounts → Retry paused Claude conversations**. Queued messages are retained
+restart, fix the reported startup problem, then choose **Settings → Accounts →
+Retry paused Claude conversations**. Queued messages are retained
 for that retry; it restarts the app's Claude sessions without changing the login.
 Nothing is retired or deleted. Rotation controls require Billion enabled and app user
 accounts disabled. Details in [FEATURES.md](docs/FEATURES.md).
@@ -463,7 +463,7 @@ public/
     shortcuts.js   Keyboard shortcuts
     voice.js       Voice input (Web Speech API dictation into the terminal or the Billion tab's text box)
     auth.js        Login tokens, presence, HTML escaping
-    settings.js    The Settings panel behind the terminal header's gear (Agents & accounts, Auto-switch accounts)
+    settings.js    The Settings panel behind the terminal header's gear (Accounts: every login with its CLI, account switching, one line per agent CLI)
     account.js     Claude and Codex account rotation settings (one list: discovery, inclusion, order, recovery)
 lib/
   helpers.js       State detection (dialog patterns per CLI, the synchronized-output frames Codex paints in), git parsing, codename/cocktail pools, the file-name sanitiser

@@ -422,7 +422,7 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
     res.send(result.audio);
   });
 
-  // The Settings panel's "Agents & accounts": the last scan, or a fresh one on POST (Refresh).
+  // Settings → Accounts: the last scan, or a fresh one on POST (Refresh).
   app.get('/api/agent-accounts', async (req, res) => res.json(await agentAccounts()));
   app.post('/api/agent-accounts', async (req, res) => res.json(await refreshAgentAccounts()));
 

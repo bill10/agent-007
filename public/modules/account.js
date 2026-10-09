@@ -1,4 +1,8 @@
-// Owner-controlled Claude and Codex account rotation. No credential is sent to the UI.
+// Settings → Accounts: one list of every login on this machine, each row
+// tagged with its CLI. The rows come from the server's scan of the agent CLIs
+// (settings.js hands it over with setScan) and, for Claude and Codex, from
+// the owner's account-switching registries, whose order is the switch order.
+// Switch controls only where the owner may act. No credential reaches the UI.
 import { send } from './ws.js';
 import { authEnabled, billionEnabled } from './state.js';
 
@@ -11,7 +15,30 @@ const CLIS = [
   { cli: 'claude', key: 'rotation', name: 'Claude', example: '~/.claude-work' },
   { cli: 'codex', key: 'codexRotation', name: 'Codex', example: '~/.codex-work' },
 ];
-const NAME = { claude: 'Claude', codex: 'Codex' };
+const NAME = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini' };
+
+// The home dir, guessed from the scan's default folders, only to shorten paths.
+export const homeOf = agents => agents.flatMap(a => a.accounts).map(a => a.folder.match(/^(.*)[\\/]\.(claude|codex|gemini)$/)?.[1]).find(Boolean);
+export const tilde = (p, home) => (home && /^[\\/]/.test(p.slice(home.length)) && p.startsWith(home) ? `~${p.slice(home.length)}` : p);
+// The scan's login folders, one per login: folders logged in as the same
+// email under one CLI (a source folder and the default one it was switched
+// into) are one login. A folder with no email is a login of its own.
+export function scanLogins(agents) {
+  const out = [];
+  for (const { cli, accounts } of agents) {
+    for (const acc of accounts) {
+      const key = `${cli}:${acc.email ? acc.email.toLowerCase() : acc.folder}`;
+      const same = out.find(l => l.key === key);
+      if (!same) { out.push({ ...acc, key, cli }); continue; }
+      same.isDefault ||= acc.isDefault;
+      same.plan ||= acc.plan;
+      if (acc.loggedIn) same.loggedIn = true;
+    }
+  }
+  return out;
+}
+let scanned = null;   // the last scan's agents, null until one arrives
+export function setScan(agents) { scanned = agents; renderAccount(); }
 const blank = () => ({ enabled: false, defaultSettings: true, accounts: [] });
 let state = {};
 // Unsaved edits survive a state update: they are laid over the fresh state.
@@ -52,9 +79,10 @@ export function handleAccountError(msg) { lastError = msg.message; renderAccount
 export function renderAccount() {
   const panel = document.getElementById('account-panel');
   if (!panel) return;
-  panel.hidden = authEnabled || !billionEnabled;
   const body = panel.querySelector('.account-body');
   body.replaceChildren();
+  // The switch controls only where the owner may act (the server sends no state elsewhere).
+  if (authEnabled || !billionEnabled) return renderLogins(body, scanned ? scanLogins(scanned) : [], []);
   render(body);
   // Recover an unfinished switch made by an older app version. The migration
   // controls are replaced; its backup remains usable until recovery is done.
@@ -113,31 +141,28 @@ function render(body) {
   auto.id = 'account-auto-switch';
   const hint = text('', 'account-status'); hint.id = 'account-auto-switch-hint'; hint.setAttribute('aria-live', 'polite');
   auto.setAttribute('aria-describedby', hint.id);
-  const discover = button(body, 'Find logged-in accounts', 'rotation-discover', () => transmit(body, 'rotation-discover'), 'Find logged-in Claude and Codex accounts');
-  discover.classList.add('account-discover');
   let saveButton;
   function updateControls() {
     auto.disabled = enabledCount() < 2 && !draft.enabled;
     hint.textContent = draft.accounts.length < 2 ? (draft.defaultSettings
-      ? 'Finding two logged-in accounts enables auto-switching. You can turn it off here.'
-      : 'Find at least two logged-in accounts, then enable auto-switching.')
+      ? 'Two logged-in Claude or Codex accounts turn auto-switching on. Log in to another, then Refresh.'
+      : 'Log in to a second Claude or Codex account, then Refresh, to enable auto-switching.')
       : enabledCount() < 2 ? 'Select at least two accounts to enable automatic switching.'
       : 'Selected accounts are used top to bottom. Billion moves to the other CLI only if one of its accounts is selected. Save settings to apply changes.';
     if (saveButton) saveButton.disabled = draft.enabled && enabledCount() < 2;
   }
   updateControls();
-  const accounts = document.createElement('div'); accounts.className = 'rotation-accounts'; body.append(accounts);
-  draft.accounts.forEach((a, index) => {
-    const row = document.createElement('div'); row.className = 'rotation-account'; row.dataset.cli = a.cli; accounts.append(row);
-    const identity = document.createElement('div'); identity.className = 'account-identity'; row.append(identity);
-    // The tag is in the checkbox's label: one email can be both a Claude and a Codex login.
-    const box = checkbox(identity, a.email, a.enabled, on => { a.enabled = on; edited(); updateControls(); });
-    const tag = document.createElement('span'); tag.className = 'account-cli-tag'; tag.textContent = NAME[a.cli];
-    box.parentElement.append(tag);
-    const status = document.createElement('span'); status.className = 'settings-dim';
-    status.textContent = a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : '');
-    identity.append(status);
-    if (a.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; row.append(error); }
+  // The registries' accounts, in switch order, then the scan's other logins
+  // (Gemini and the rest, logged-out folders, a login not enrolled).
+  const logins = scanned ? scanLogins(scanned) : [];
+  const take = a => {
+    const i = logins.findIndex(l => l.cli === a.cli && l.email?.toLowerCase() === a.email?.toLowerCase());
+    return i < 0 ? null : logins.splice(i, 1)[0];
+  };
+  const accounts = renderLogins(body, logins, draft.accounts.map(a => [a, take(a)]));
+  accounts.querySelectorAll('.rotation-account[data-index]').forEach(row => {
+    const index = Number(row.dataset.index), a = draft.accounts[index];
+    const box = row.querySelector('input'); box.onchange = () => { a.enabled = box.checked; edited(); updateControls(); };
     const controls = document.createElement('div'); controls.className = 'account-actions'; row.append(controls);
     const who = `${NAME[a.cli]} account ${a.email}`;
     const up = button(controls, 'Move up', 'rotation-up', () => {
@@ -175,4 +200,49 @@ function render(body) {
     });
   }
   updateControls();
+}
+
+// The rows: `switching` is [registry account, its scan login or null] for each
+// account in switch order, each with a checkbox (wired by render) and its
+// status; `logins` are read-only rows after them.
+function renderLogins(body, logins, switching) {
+  const list = document.createElement('div'); list.className = 'rotation-accounts'; body.append(list);
+  const home = scanned ? homeOf(scanned) : null;
+  const row = (cli, login, name, a, index) => {
+    const el = document.createElement('div'); el.className = 'rotation-account'; el.dataset.cli = cli; list.append(el);
+    const identity = document.createElement('div'); identity.className = 'account-identity'; el.append(identity);
+    const tag = document.createElement('span'); tag.className = 'account-cli-tag'; tag.textContent = NAME[cli] || cli;
+    const caption = document.createElement('span'); caption.textContent = name;
+    if (login) caption.title = login.folder;
+    // The tag is in the checkbox's label: one email can be both a Claude and a Codex login.
+    if (a) {
+      el.dataset.index = index;
+      const wrap = document.createElement('label'), input = document.createElement('input');
+      wrap.className = 'rotation-toggle'; input.type = 'checkbox'; input.checked = a.enabled;
+      wrap.append(input, caption, tag); identity.append(wrap);
+    } else {
+      const wrap = document.createElement('span'); wrap.className = 'account-name';
+      wrap.append(caption, tag); identity.append(wrap);
+    }
+    const meta = document.createElement('div'); meta.className = 'account-meta'; el.append(meta);
+    const bit = (text, cls = 'settings-dim') => { const b = document.createElement('span'); b.className = cls; b.textContent = text; meta.append(b); };
+    if (a) bit(a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''), 'account-state');
+    if (login) {
+      if (login.plan) bit(login.plan);
+      if (login.org) bit(login.org);
+      if (login.isDefault) bit('default');
+      if (login.loggedIn !== null) bit(login.loggedIn ? 'logged in' : 'logged out', `settings-status ${login.loggedIn ? 'in' : 'out'}`);
+      if (login.email && !a) bit(tilde(login.folder, home), 'settings-path');
+    }
+    if (!meta.children.length) meta.remove();
+    if (a?.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; el.append(error); }
+  };
+  switching.forEach(([a, login], index) => row(a.cli, login, a.email, a, index));
+  for (const login of logins) row(login.cli, login, login.email || tilde(login.folder, home), null);
+  if (!list.children.length) {
+    const empty = document.createElement('p'); empty.className = 'settings-empty';
+    empty.textContent = scanned ? 'No logins found. Log in to Claude Code or Codex, then Refresh.' : 'Scanning…';
+    list.append(empty);
+  }
+  return list;
 }

@@ -132,12 +132,15 @@ export async function scanAgents({
 }
 
 // Scanned once at server start and on Refresh; the panel shows the last one.
+// server.js listens, to enroll the logins it finds for account switching.
 let cached = null;
 let scanning = null;
+let onScan = () => {};
+export const setOnScan = (fn) => { onScan = fn; if (cached) fn(cached); };
 
 export function refreshAgentAccounts(opts) {
   scanning ||= scanAgents(opts)
-    .then(agents => (cached = { scannedAt: Date.now(), agents }))
+    .then(agents => { cached = { scannedAt: Date.now(), agents }; onScan(cached); return cached; })
     .catch(err => { console.error(`Agent accounts: scan failed: ${err?.message ?? err}`); return cached ?? { scannedAt: Date.now(), agents: [] }; })
     .finally(() => { scanning = null; });
   return scanning;

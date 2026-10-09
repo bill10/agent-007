@@ -25,8 +25,9 @@ vi.mock('../server/codex-login.js', () => ({
   stopCodexDaemon: async () => { codexAuth.check?.(); codexAuth.events.push('daemon-stop'); },
 }));
 // The account scan is a fixture: no real ~/.codex* or ~/.claude* folder is looked at.
-const scan = vi.hoisted(() => ({ agents: [] }));
-vi.mock('../server/agent-accounts.js', async original => ({ ...(await original()), refreshAgentAccounts: async () => ({ scannedAt: Date.now(), agents: scan.agents }) }));
+// The test hands server.js's scan listener a scan of its own.
+const scan = vi.hoisted(() => ({ listener: null }));
+vi.mock('../server/agent-accounts.js', async original => ({ ...(await original()), setOnScan: fn => { scan.listener = fn; } }));
 // Codex's background server runs until a stop, and is back once a login is written.
 vi.mock('../server/claude-processes.js', () => ({ assertClaudeProcessesManaged: async (_sessions, { agent } = {}) => ({ daemon: agent === 'codex' && codexAuth.events.at(-1) !== 'daemon-stop' }) }));
 vi.mock('../server/models.js', async original => ({ ...(await original()), modelsReady: async () => true, startModelRefresh: () => {} }));
@@ -290,29 +291,31 @@ describe('rotation through the owner socket', () => {
     }
   }, 20000);
 
-  // Value: protects=one Find logged-in accounts enrolls the scan's logged-in Claude and Codex logins, each into its own registry, never logged-out ones;
-  //   fails_when=discoverRotationAccounts scans one CLI only, files a login under the other CLI, or drops the loggedIn filter;
-  //   why_new=no test drove rotation-discover through server.js for either CLI; seam=none
-  it('discovers logged-in Claude and Codex logins, each into its own registry', async () => {
+  // Value: protects=a scan enrolls its logged-in Claude and Codex logins, each into its own registry, never logged-out ones or other CLIs';
+  //   fails_when=enrollScanned covers one CLI only, files a login under the other CLI, drops the loggedIn filter, or no longer listens to scans;
+  //   why_new=Find logged-in accounts is gone: the scan itself enrolls; seam=setOnScan
+  it('enrolls the logged-in Claude and Codex logins a scan finds, each into its own registry', async () => {
     const ws = new WebSocket(url, { headers: { origin: url.replace('ws:', 'http:') } }), seen = [];
     ws.on('message', data => seen.push(JSON.parse(data)));
     await new Promise(r => ws.once('open', r));
-    scan.agents = [
+    const agents = [
       { cli: 'claude', accounts: [{ folder: '/fixture-claude-in', loggedIn: true }] },
       { cli: 'codex', accounts: [{ folder: '/fixture-cx-in', loggedIn: true }, { folder: '/fixture-cx-out', loggedIn: false }] },
+      { cli: 'gemini', accounts: [{ folder: '/fixture-gemini', loggedIn: true }] },
     ];
     const claudeAccounts = JSON.parse(readFileSync(join(CONFIG_DIR, 'account-rotation.json'), 'utf8')).accounts.length;
     // Its own default login: it runs on Windows too, where the Codex switch test above is skipped.
     codexAuth.current ||= { accountId: 'cx-a', email: 'ca@example.com', folder: '/fixture-default', secret: 'fake-ca' };
     try {
-      ws.send(JSON.stringify({ type: 'account', action: 'rotation-discover' }));
+      scan.listener({ scannedAt: Date.now(), agents });
       const found = await wait(() => seen.find(m => m.type === 'account-state' && m.codexRotation?.accounts.some(a => a.folder === '/fixture-cx-in')));
       expect(found.codexRotation.accounts.map(a => a.folder)).not.toContain('/fixture-cx-out');
       expect(found.codexRotation.accounts.map(a => a.folder)).not.toContain('/fixture-claude-in');
+      expect([...found.rotation.accounts, ...found.codexRotation.accounts].map(a => a.folder)).not.toContain('/fixture-gemini');
       expect(found.rotation.accounts).toHaveLength(claudeAccounts + 1);
       expect(found.rotation.accounts.at(-1).folder).toBe('/fixture-claude-in');
       expect(seen.filter(m => m.type === 'account-error')).toHaveLength(0);
-    } finally { scan.agents = []; ws.close(); }
+    } finally { ws.close(); }
   }, 20000);
 
 });

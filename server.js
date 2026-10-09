@@ -59,7 +59,7 @@ import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from '
 import { comingRound } from './server/rounds.js';
 import { setStatusFacts, publishStatus } from './server/billion-status.js';
 import { startModelRefresh, modelsReady, availableModels, onModelsChange } from './server/models.js';
-import { agentAccounts, refreshAgentAccounts } from './server/agent-accounts.js';
+import { agentAccounts, setOnScan } from './server/agent-accounts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -489,18 +489,21 @@ async function rotate(cli, options = {}) {
   if (result.ok && !result.unchanged) await tellOwnerOrShow(`${CLI_LABEL[cli]} account switched from ${result.oldEmail} to ${result.newEmail}. ${CLI_LABEL[cli]} conversations resumed.`, 'info');
   return result;
 }
-// Claude logins first, then Codex: a new account joins the end of the one list.
-async function discoverRotationAccounts() {
-  const scan = await refreshAgentAccounts();
-  const found = ROTATION_CLIS.flatMap(cli => (scan.agents.find(a => a.cli === cli)?.accounts.filter(a => a.loggedIn) || []).map(a => ({ cli, folder: a.folder })));
-  if (!found.length) return { error: 'No logged-in Claude or Codex accounts were found.' };
-  const errors = [];
-  for (const { cli, folder } of found) {
-    const result = await addRotationAccount(folder, { cli });
-    if (result.error) errors.push(result.error);
+// Every logged-in Claude and Codex login a scan finds joins the one Accounts
+// list, Claude first, then Codex; a new one joins the end, unselected while
+// switching is on. Only where the owner sees the list (Billion on, user accounts off).
+async function enrollScanned(scan) {
+  if (!billionRuns()) return;
+  for (const cli of ROTATION_CLIS) {
+    for (const { folder, loggedIn } of scan.agents.find(a => a.cli === cli)?.accounts || []) {
+      if (!loggedIn) continue;
+      const result = await addRotationAccount(folder, { cli });
+      if (result.error) console.error(`Accounts: ${folder} was not added to ${CLI_LABEL[cli]} switching: ${result.error}`);
+    }
   }
-  return errors.length ? { error: errors[0] } : { ok: true };
+  announceAccount();
 }
+setOnScan(scan => enrollScanned(scan).catch(err => console.error(`Accounts: enrolling scanned logins failed: ${err.message}`)));
 
 // While Billion is out of the way for a swap, nobody starts another one under it.
 const startBillionUnlessSwitching = async () => (switching ? { error: BILLION_SWITCHING } : startBillion());
@@ -532,9 +535,8 @@ async function switchAccount(how, { fromBrowser = false } = {}) {
 const cliOf = msg => (msg.cli === 'codex' ? 'codex' : 'claude');
 // Keys looked up with Object.hasOwn: a message naming a prototype key is not an action.
 const accountActions = {
-  // msg.cli picks the registry: 'codex', else Claude's. Discovery and the
-  // settings cover both.
-  'rotation-discover': () => discoverRotationAccounts(),
+  // msg.cli picks the registry: 'codex', else Claude's. The settings cover
+  // both; the scan enrolls logins (enrollScanned).
   'rotation-add': msg => typeof msg.folder === 'string' ? addRotationAccount(msg.folder, { cli: cliOf(msg) }) : { error: cliOf(msg) === 'codex' ? 'Give a Codex home folder.' : 'Give a Claude config folder.' },
   'rotation-configure': msg => configureRotation(msg),
   'rotation-switch': msg => typeof msg.id === 'string' && /^[a-f0-9]{64}$/.test(msg.id) ? rotate(cliOf(msg), { id: msg.id }) : { error: `Select a saved ${CLI_LABEL[cliOf(msg)]} account.` },

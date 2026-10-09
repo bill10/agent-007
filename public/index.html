@@ -118,8 +118,6 @@
         <div class="settings-panel" id="settings-panel" role="dialog" aria-label="Settings" hidden>
           <!-- This copy's version and Update (settings.js renderVersion); the owner's pages only. -->
           <div class="settings-version" id="settings-version" hidden></div>
-          <!-- The agent CLIs' versions and Update (settings.js renderCliVersions); the owner's pages only. -->
-          <div class="settings-version settings-cli-versions" id="settings-cli-versions" hidden></div>
           <!-- What's new (settings.js showNotes): inside the panel, so a click in it is not "outside". -->
           <dialog class="whats-new" id="whats-new" aria-labelledby="whats-new-title">
             <div class="whats-new-box">
@@ -131,11 +129,16 @@
               </div>
             </div>
           </dialog>
-          <div class="settings-section-head">
-            <h2>Agents &amp; accounts</h2>
-            <button class="settings-refresh" id="settings-refresh" type="button">Refresh</button>
+          <!-- Every login, each with its CLI (account.js); the switch controls only on the owner's pages.
+               Below it, one line per agent CLI with its version, path and Update (settings.js renderClis). -->
+          <div class="account-panel" id="account-panel">
+            <div class="settings-section-head">
+              <h2>Accounts</h2>
+              <button class="settings-refresh" id="settings-refresh" type="button">Refresh</button>
+            </div>
+            <div class="account-body"></div>
+            <div class="settings-clis" id="settings-agents"></div>
           </div>
-          <div id="settings-agents"></div>
           <!-- Telegram's chat (settings.js renderTelegramSettings); the owner's pages only. -->
           <div class="telegram-settings" id="telegram-settings" hidden></div>
           <!-- The voice Billion's messages are read aloud in (settings.js renderVoiceSettings);
@@ -143,12 +146,6 @@
           <div class="voice-settings" id="voice-settings" hidden>
             <div class="settings-section-head"><h2>Read aloud</h2></div>
             <label class="settings-voice"><span>Voice for reading messages aloud</span><select id="voice-pick" class="settings-voice-pick" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true"></select></label>
-          </div>
-          <!-- Claude and Codex account rotation; hidden with user accounts on. -->
-          <div class="account-panel" id="account-panel" hidden>
-            <div class="settings-section-head"><h2>Auto-switch accounts</h2></div>
-            <p class="account-intro">Click Find logged-in accounts to start. Your Claude and Codex accounts in one list, used in order at usage limits. Conversations, settings and plugins stay in place.</p>
-            <div class="account-body"></div>
           </div>
         </div>
         <button class="icon-btn" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">

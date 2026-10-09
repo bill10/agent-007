@@ -739,8 +739,10 @@ body {
 .explorer-content::-webkit-scrollbar-track { background: transparent; }
 .explorer-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* The owner's Claude account switch, a section of the Settings panel */
-.account-panel { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; color: var(--text-muted); }
+/* Settings → Accounts: every login, each with its CLI, then one line per CLI. */
+.account-panel { color: var(--text-muted); }
+.settings-clis { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); line-height: 1.5; overflow-wrap: anywhere; }
+.settings-clis .settings-version-error { margin: 4px 0; }
 .telegram-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
 .telegram-settings[hidden] { display: none; }
 .voice-settings { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; }
@@ -2947,7 +2949,12 @@ select.job-mode-danger {
 .account-identity .settings-dim { font-size: 11px; }
 /* Which CLI an account belongs to: an outlined label after the email, quieter than Save. */
 .account-cli-tag { flex: 0 0 auto; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1; padding: 3px 5px; border-radius: 3px; color: var(--accent); border: 1px solid currentColor; }
-.rotation-account[data-cli="codex"] .account-cli-tag { color: var(--text-muted); }
+.rotation-account:not([data-cli="claude"]) .account-cli-tag { color: var(--text-muted); }
+.account-name { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; min-height: 24px; color: var(--text); overflow-wrap: anywhere; }
+.account-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 11px; }
+.account-meta .account-state { color: var(--text); }
+.account-meta > * + *::before { content: '· '; color: var(--text-dim); }
+.rotation-account[data-index] .account-meta { padding-left: 20px; }
 .account-panel .rotation-toggle { margin: 0; min-height: 36px; }
 .account-panel input[type="checkbox"] { accent-color: var(--accent); }
 .account-panel .account-btn { min-height: 36px; padding: 8px 10px; }

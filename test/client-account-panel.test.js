@@ -3,13 +3,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 import { send } from '../public/modules/ws.js';
 import { setBillionEnabled, setSelf } from '../public/modules/state.js';
-import { handleAccountState, handleAccountError, renderAccount } from '../public/modules/account.js';
+import { handleAccountState, handleAccountError, renderAccount, setScan, scanLogins } from '../public/modules/account.js';
 const click = action => document.querySelector(`[data-action="${action}"]`).click();
 const account = (id, email, status = 'Available') => ({ id, email, enabled: true, status });
 const show = rotation => handleAccountState({ type: 'account-state', rotation });
 beforeEach(() => {
   document.body.innerHTML = '<div id="account-panel"><div class="account-body"></div></div>';
-  setBillionEnabled(true); setSelf(null, false); send.mockReset(); send.mockReturnValue(true);
+  setBillionEnabled(true); setSelf(null, false); setScan(null); send.mockReset(); send.mockReturnValue(true);
   window.confirm = vi.fn(() => true);
   handleAccountError({ message: null });
   // Unsaved edits live in the module; an interrupted switch always drops them.
@@ -31,30 +31,32 @@ describe('account rotation settings', () => {
 
   it('restores controls and reports a disconnected socket so the owner can retry', () => {
     show({ enabled: false, accounts: [] });
+    const add = () => { document.querySelector('#account-config-folder').value = '/x'; click('rotation-add'); };
     send.mockReturnValue(false);
-    click('rotation-discover');
+    add();
     expect(document.querySelector('.account-error').textContent).toContain('Not connected');
-    expect(document.querySelector('[data-action="rotation-discover"]').disabled).toBe(false);
+    expect(document.querySelector('[data-action="rotation-add"]').disabled).toBe(false);
     send.mockReturnValue(true);
-    click('rotation-discover');
+    add();
     expect(send).toHaveBeenCalledTimes(2);
-    expect(document.querySelector('[data-action="rotation-discover"]').disabled).toBe(true);
+    expect(document.querySelector('[data-action="rotation-add"]').disabled).toBe(true);
   });
 
-  it('shows the disabled auto-switch control before discovery', () => {
+  it('shows the disabled auto-switch control before two accounts are found', () => {
     show({ enabled: false, defaultSettings: true, fallback: true, accounts: [] });
-    expect(document.body.textContent).toContain('Finding two logged-in accounts enables auto-switching');
+    expect(document.body.textContent).toContain('Two logged-in Claude or Codex accounts turn auto-switching on');
     expect(document.querySelector('#account-auto-switch').disabled).toBe(true);
     expect(document.querySelector('.account-manual').open).toBe(false);
     expect(send).not.toHaveBeenCalled();
   });
-  it('directs a single-account setup to discovery rather than selecting a missing account', () => {
+  it('directs a single-account setup to logging in another rather than selecting a missing account', () => {
     show({ enabled: false, defaultSettings: false, accounts: [account('a', 'a@x')] });
     expect(document.querySelector('#account-auto-switch').disabled).toBe(true);
-    expect(document.querySelector('#account-auto-switch-hint').textContent).toContain('Find at least two');
+    expect(document.querySelector('#account-auto-switch-hint').textContent).toContain('Log in to a second Claude or Codex account, then Refresh');
   });
-  it('offers discovery and custom folders without enabling rotation', () => {
+  it('offers custom folders without enabling rotation, and no Find button', () => {
     show({ enabled: false, fallback: true, accounts: [] });
+    expect(document.querySelector('[data-action="rotation-discover"]')).toBeNull();
     expect(document.querySelector('#account-auto-switch').checked).toBe(false);
     click('rotation-add'); expect(send).not.toHaveBeenCalled();
     document.querySelector('#account-config-folder').value = ' ~/.claude-work ';
@@ -133,10 +135,11 @@ describe('account rotation settings', () => {
   });
   it('offers recovery after an interrupted switch and hides when owner actions are unavailable', () => {
     show({ pending: true, accounts: [] });
-    expect(document.querySelector('[data-action="rotation-discover"]')).toBeNull();
+    expect(document.querySelector('#account-auto-switch')).toBeNull();
     click('rotation-recover'); expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-recover' });
-    setSelf('u1', true); renderAccount(); expect(document.getElementById('account-panel').hidden).toBe(true);
-    setSelf(null, false); setBillionEnabled(false); renderAccount(); expect(document.getElementById('account-panel').hidden).toBe(true);
+    const noControls = () => document.querySelectorAll('.account-body button, .account-body input').length === 0;
+    setSelf('u1', true); renderAccount(); expect(noControls()).toBe(true);
+    setSelf(null, false); setBillionEnabled(false); renderAccount(); expect(noControls()).toBe(true);
   });
   // Value: protects=an old-version switch left 'switching' still offers Restore login from previous version, sending rollback after confirm;
   //   fails_when=the rollback button drops its status check, skips confirm, or sends a cli/other action;
@@ -167,7 +170,6 @@ describe('one list of Claude and Codex accounts', () => {
     expect(emails()).toEqual(['a@x', 'b@x', 'c@x', 'd@x']);
     expect(tags()).toEqual(['Claude', 'Claude', 'Codex', 'Codex']);
     expect(document.querySelectorAll('#account-auto-switch')).toHaveLength(1);
-    expect(document.querySelectorAll('[data-action="rotation-discover"]')).toHaveLength(1);
     expect(document.querySelectorAll('[data-action="rotation-configure"]')).toHaveLength(1);
     expect(document.body.textContent).not.toContain('Fall back');
     expect(document.body.textContent).toContain('other tools that read it follow it');
@@ -222,7 +224,7 @@ describe('one list of Claude and Codex accounts', () => {
     both(claude, codexState);
     document.querySelectorAll('[data-action="rotation-down"]')[0].click();
     both(claude, { ...codexState, pending: true });
-    expect(document.querySelector('[data-action="rotation-discover"]')).toBeNull();
+    expect(document.querySelector('#account-auto-switch')).toBeNull();
     expect(document.querySelector('.account-error').textContent).toContain('Codex account switch was interrupted');
     click('rotation-recover');
     expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-recover', cli: 'codex' });
@@ -246,5 +248,50 @@ describe('one list of Claude and Codex accounts', () => {
     input.value = '~/.codex-work'; click('rotation-add');
     expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-add', cli: 'codex', folder: '~/.codex-work' });
     kind.value = 'claude'; kind.dispatchEvent(new Event('change'));
+  });
+});
+
+describe('one Accounts list: the scan\'s logins with the switch list', () => {
+  const H = '/h';
+  const agents = [
+    { cli: 'claude', version: '1', path: '/bin/claude', accounts: [
+      { folder: `${H}/.claude`, isDefault: true, email: 'a@x', plan: 'max', org: null, loggedIn: true },
+      { folder: `${H}/.claude-a`, isDefault: false, email: 'A@x', plan: null, org: null, loggedIn: true },
+      { folder: `${H}/.claude-old`, isDefault: false, email: null, plan: null, org: null, loggedIn: false } ] },
+    { cli: 'gemini', version: '1', path: '/bin/gemini', accounts: [
+      { folder: `${H}/.gemini`, isDefault: true, email: 'g@x', plan: null, org: null, loggedIn: true } ] },
+    { cli: 'aider', version: '1', path: '/bin/aider', accounts: [] },
+  ];
+  const rows = () => [...document.querySelectorAll('.rotation-account')].map(r => ({
+    cli: r.dataset.cli, name: r.querySelector('.account-identity :is(label, .account-name) > span').textContent,
+    box: !!r.querySelector('input'), meta: r.querySelector('.account-meta')?.textContent }));
+  // Value: protects=one row per login: folders of one email under one CLI merge, a folder with no email is its own row;
+  //   fails_when=the key ignores the CLI or email case, or a merge loses default/plan/logged-in; why_new=the scan's folders became login rows; seam=none
+  it('makes one login of folders logged in as one email under one CLI', () => {
+    const logins = scanLogins(agents);
+    expect(logins.map(l => l.key)).toEqual(['claude:a@x', `claude:${H}/.claude-old`, 'gemini:g@x']);
+    expect(logins[0]).toMatchObject({ isDefault: true, plan: 'max', loggedIn: true });
+  });
+  // Value: protects=registry accounts keep their switch controls and gain the scan's plan/default, and every other login shows read-only after them;
+  //   fails_when=a scan login duplicates a registry row, Gemini gets a checkbox, or a logged-out folder disappears;
+  //   why_new=Agents & accounts and Auto-switch accounts became one list; seam=setScan
+  it('shows switch rows in order, then the other logins read-only, each tagged', () => {
+    setScan(agents);
+    handleAccountState({ type: 'account-state', rotation: { enabled: false, active: 'a', accounts: [account('a', 'a@x', 'Active')] } });
+    expect(rows()).toEqual([
+      { cli: 'claude', name: 'a@x', box: true, meta: 'Activemaxdefaultlogged in' },
+      { cli: 'claude', name: '~/.claude-old', box: false, meta: 'logged out' },
+      { cli: 'gemini', name: 'g@x', box: false, meta: 'defaultlogged in~/.gemini' },
+    ]);
+    expect([...document.querySelectorAll('.account-cli-tag')].map(t => t.textContent)).toEqual(['Claude', 'Claude', 'Gemini']);
+    expect(document.querySelectorAll('[data-action="rotation-configure"]')).toHaveLength(1);
+  });
+  // Value: protects=with user accounts on the logins still show, with no switch controls at all;
+  //   fails_when=the read-only path is hidden, or leaks a checkbox, Save or folder field; why_new=the read-only list moved here; seam=setSelf
+  it('lists every login read-only while user accounts are on', () => {
+    setSelf('u1', true);
+    setScan(agents);
+    expect(rows().map(r => [r.name, r.box])).toEqual([['a@x', false], ['~/.claude-old', false], ['g@x', false]]);
+    expect(document.querySelectorAll('.account-body button, .account-body input, .account-body select')).toHaveLength(0);
   });
 });
