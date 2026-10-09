@@ -75,8 +75,14 @@ const SUPERSEDES = /\b(?:replaces|supersedes|deprecates)\s+(?:the\s+)?(?:old\s+)
 const SUPERSEDED_BY = /\b(?:replaced by|superseded by|deprecated(?:,| in favou?r of| for)?\s+(?:use\s+)?)\s*(?:the\s+)?[`"']?\/?([a-z0-9][a-z0-9_-]*)/gi;
 
 // The findings: [{ key, kind, paths: [a, b], remove: skill, name }].
-export function findDuplicates(skills = collectSkills()) {
+export function findDuplicates(skills = collectSkills(), agentsDir = skillHomes().agentsDir) {
   const out = [];
+  // `npx skills` installs one skill into both ~/.agents/skills and ~/.claude/skills on purpose.
+  let locked = {};
+  try { locked = JSON.parse(readFileSync(join(agentsDir, '.skill-lock.json'), 'utf8')).skills || {}; } catch { /* no lock */ }
+  const mirrored = (a, b) => a.hash === b.hash && Object.hasOwn(locked, a.name)
+    && a.kind === 'global' && b.kind === 'global' && new Set([a.where, b.where]).size === 2
+    && [a, b].every(s => s.where === '~/.claude/skills' || s.where === '~/.agents/skills');
   const add = (key, kind, a, b, remove) => out.push({ key, kind, paths: [a.dir, b.dir], remove });
   const group = (by) => {
     const m = new Map();
@@ -88,6 +94,7 @@ export function findDuplicates(skills = collectSkills()) {
   for (const g of group(s => s.name)) {
     const [a, ...rest] = g;
     for (const b of rest) {
+      if (mirrored(a, b)) continue;
       const same = a.hash === b.hash;
       add(`name:${a.name}:${a.dir}:${b.dir}`, same ? `the same skill name "${a.name}", and the two copies are byte-identical` : `the same skill name "${a.name}", with different contents`, a, b, removable(a, b));
     }

@@ -10,7 +10,7 @@ const skill = (dir, name, description = 'Does a thing.', body = 'body') => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${description}\n---\n${body}\n`);
 };
-const find = () => findDuplicates(collectSkills({ claudeDir, agentsDir }, [repo]));
+const find = () => findDuplicates(collectSkills({ claudeDir, agentsDir }, [repo]), agentsDir);
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'a007-dups-'));
@@ -36,6 +36,18 @@ describe('duplicate skills', () => {
     expect(f[0].remove.dir).toBe(join(repo, '.claude', 'skills', 'pdf'));
     expect(duplicateNotice(f[0]).lines.join('\n')).toMatch(/open a PR/);
     expect(duplicateNotice(f[1]).lines.join('\n')).toMatch(/npx skills remove xlsx/);
+  });
+
+  it('skips one installer-managed skill mirrored into ~/.claude and ~/.agents, but not drift or unlocked copies', () => {
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, '.skill-lock.json'), JSON.stringify({ skills: { locked: {}, drifted: {} } }));
+    for (const n of ['locked', 'unlocked']) for (const h of [claudeDir, agentsDir]) skill(join(h, 'skills', n), n);
+    skill(join(claudeDir, 'skills', 'drifted'), 'drifted', 'one');
+    skill(join(agentsDir, 'skills', 'drifted'), 'drifted', 'two');
+    expect(find().map(x => x.kind)).toEqual([
+      'the same skill name "drifted", with different contents',
+      'the same skill name "unlocked", and the two copies are byte-identical',
+    ]);
   });
 
   it('finds byte-identical folders under different names, but not one skill linked twice', () => {
