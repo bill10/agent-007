@@ -480,6 +480,28 @@ describe('pty size with two windows', () => {
     a.close();
   }, 15000);
 
+  it('tells every browser a closed agent is gone, but not a crashed one', async () => {
+    const a = await open();
+    const b = await open();
+    const created = next(a, m => m.type === 'session-created');
+    a.send(JSON.stringify({ type: 'spawn', command: 'cat' }));
+    const { sessionId } = await created;
+
+    const removed = next(b, m => m.type === 'session-removed' && m.sessionId === sessionId);
+    a.send(JSON.stringify({ type: 'kill', sessionId }));
+    await removed;
+
+    // A real exit sends session-ended and no removal: the tab stays readable.
+    const msgs = [];
+    b.on('message', d => msgs.push(JSON.parse(d.toString())));
+    const crashed = next(b, m => m.type === 'session-ended');
+    a.send(JSON.stringify({ type: 'spawn', command: 'echo bye' }));
+    await crashed;
+    await new Promise(r => setTimeout(r, 200));
+    expect(msgs.some(m => m.type === 'session-removed')).toBe(false);
+    a.close(); b.close();
+  }, 15000);
+
   it('ignores bad sizes and lets go of a terminal a window switches away from', async () => {
     const a = await open();
     const b = await open();

@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 
 import { agents, activeSessionId, setActiveSession, setBoardActive } from '../public/modules/state.js';
-import { handleSessionCreated } from '../public/modules/terminal.js';
+import { handleSessionCreated, handleSessionEnded, handleSessionRemoved } from '../public/modules/terminal.js';
 
 // A new tab takes focus only in the window the server marked `focus` (the one
 // that spawned or re-adopted it), or in a window showing no tab at all.
@@ -46,5 +46,31 @@ describe('session-created focus', () => {
     await created('s1');
     await created('s2', { focus: true });
     expect(activeSessionId).toBe('s2');
+  });
+});
+
+describe('session-removed', () => {
+  beforeEach(() => {
+    window.Terminal = class {
+      open() {} loadAddon() {} attachCustomKeyEventHandler() {} onData() {}
+      scrollToBottom() {} focus() {} dispose() {}
+    };
+    document.body.innerHTML = '<div id="terminal-viewport"></div><div id="terminal-tabs"></div>'
+      + '<div id="status-bar"></div><div id="office-empty"></div><div id="terminal-empty"></div>'
+      + '<span id="topbar-agent-info"></span><div id="terminal-panel"></div><div id="job-board"></div>';
+    agents.clear();
+    setActiveSession(null);
+    setBoardActive(false);
+  });
+
+  it('drops the tab; a crash keeps it; removal after dispose is harmless', async () => {
+    await handleSessionCreated({ type: 'session-created', sessionId: 's1', name: 's1', state: 'IDLE' });
+    await handleSessionCreated({ type: 'session-created', sessionId: 's2', name: 's2', state: 'IDLE' });
+    handleSessionEnded({ type: 'session-ended', sessionId: 's1' });
+    expect(agents.get('s1').state).toBe('DISCONNECTED');
+    handleSessionRemoved({ type: 'session-removed', sessionId: 's2' });
+    expect(agents.has('s2')).toBe(false);
+    handleSessionRemoved({ type: 'session-removed', sessionId: 's2' });
+    expect(agents.has('s1')).toBe(true);
   });
 });

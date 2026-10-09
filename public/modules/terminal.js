@@ -353,6 +353,12 @@ export function handleSessionEnded(msg) {
   if (onSessionChanged) onSessionChanged();
 }
 
+// The server closed the agent (a close in any browser, the board retiring it).
+// The closing browser already disposed it, so a missing agent is not an error.
+export function handleSessionRemoved(msg) {
+  if (agents.has(msg.sessionId)) disposeAgent(msg.sessionId);
+}
+
 // Tear down a session's terminal locally. Unlike removeSession() this sends no
 // 'kill' — the process is already gone; this only reclaims the client's UI.
 function disposeAgent(sessionId) {
