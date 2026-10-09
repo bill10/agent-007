@@ -1491,7 +1491,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     // Its start time has come: a card sent back to To do goes straight out.
     job.runAt = null;
     // A plugin the card names that this machine lacks: the agent runs without it.
-    job.pluginNote = jobAgent(job) === 'claude' ? missingPluginsNote(missingPlugins(job.skills || [])) : null;
+    job.pluginNote = jobAgent(job) === 'claude' ? missingPluginsNote(missingPlugins(jobSkillFamilies(job, jobRequiresPr(job)))) : null;
     noteGithubRemote(job, broadcast);
 
     dispatched.push({ job, session });

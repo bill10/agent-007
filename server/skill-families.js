@@ -333,7 +333,9 @@ export const missingPluginsNote = (names) => (names.length
 export function withSkillFamilies(args, on = [], { homes = skillHomes(), pluginDir = FAMILIES_PLUGIN_DIR, mapFile = FAMILIES_FILE, env = process.env } = {}) {
   if (!envSwitchOn(env.SKILL_FAMILIES)) return args;
   const map = readMap(mapFile);
-  const enabledPlugins = Object.fromEntries(Object.entries(map.plugins).map(([name, id]) => [id, on.includes(name)]));
+  // On when any of its short names is (two names may share an id).
+  const enabledPlugins = {};
+  for (const [name, id] of Object.entries(map.plugins)) enabledPlugins[id] = enabledPlugins[id] || on.includes(name);
   let scan = null;
   try {
     scan = scanFamilies({ claudeDir: homes.claudeDir, agentsDir: homes.agentsDir, map });

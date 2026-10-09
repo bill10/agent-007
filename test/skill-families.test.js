@@ -180,6 +180,9 @@ describe('marketplace plugins', () => {
     // The map adds one and drops the default.
     writeFileSync(mapFile, JSON.stringify({ plugins: { vanta: null, linear: 'linear@market' } }));
     expect(settingsOf(withSkillFamilies(['task'], ['linear'], { homes: homes(), pluginDir, mapFile, env: {} })).enabledPlugins).toEqual({ 'linear@market': true });
+    // Two names for one plugin: either one switches it on.
+    writeFileSync(mapFile, JSON.stringify({ plugins: { vanta: VANTA, compliance: VANTA } }));
+    expect(settingsOf(withSkillFamilies(['task'], ['vanta'], { homes: homes(), pluginDir, mapFile, env: {} })).enabledPlugins).toEqual({ [VANTA]: true });
   });
 
   it('switches plugins even with no skills installed to group', () => {
