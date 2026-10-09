@@ -257,9 +257,6 @@ describe('Codex account rotation before the handover to Claude Code', () => {
   beforeEach(() => resetLimitWatch());
   const CODEX_OUT = "■ You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again at Oct 25th, 2026 3:15 PM.";
   const pool = over => ({ run: vi.fn(async () => ({ ok: true })), prepare: vi.fn(async () => ({ ok: true })), fallback: () => true, ...over });
-  // Value: protects=with both pools on, an exhausted pool with fallback still hands over, picking the other CLI's login first;
-  //   fails_when=the exhausted pool's reset wait is set before the handover and its login check returns early;
-  //   why_new=every other case enables one pool only; seam=none
   // Value: protects=a handover that fails with a pool on waits the switch gap instead of retrying every tick;
   //   fails_when=the failed switchTo leaves only pausedFor, which an enabled pool lets through;
   //   why_new=no case fails the handover itself with a pool on; seam=none
@@ -272,6 +269,15 @@ describe('Codex account rotation before the handover to Claude Code', () => {
     expect(c.run).toHaveBeenCalledTimes(1);
     expect(s.rotationRetryAt).toBe(T0 + SWITCH_GAP_MS);
   });
+  it('retries next tick when the handover only met another switch in flight', async () => {
+    const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
+    const d = deps({ codexRotation: c, switchTo: vi.fn(async () => ({ error: 'Billion is already switching', busy: true })) }), s = billion(CODEX_OUT, { agent: 'codex' });
+    expect(await limitTick(s, d)).toBeNull();
+    expect(s.rotationRetryAt).toBeUndefined();
+  });
+  // Value: protects=with both pools on, an exhausted pool with fallback still hands over, picking the other CLI's login first;
+  //   fails_when=the exhausted pool's reset wait is set before the handover and its login check returns early;
+  //   why_new=every other case enables one pool only; seam=none
   it('hands over with both pools on once its own pool is exhausted, and does not wait for that pool\'s reset', async () => {
     const order = [];
     const claude = pool({ prepare: vi.fn(async () => { order.push('claude login'); return { ok: true }; }) });

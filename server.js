@@ -603,7 +603,7 @@ function startBillionWakes() {
       switchTo: async (to, reason) => {
         const result = await switchBillion(to, reason);
         if (!result.error && !result.existing) broadcast(sessionPayload(result.session));
-        return result;
+        return result.error === BILLION_SWITCHING ? { ...result, busy: true } : result;
       },
       // Billion stalled with no one to unstick it: super urgent, so the phone too.
       notify: (text) => notifyOwner(text, { broadcast, telegram: true }),

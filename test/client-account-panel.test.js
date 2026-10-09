@@ -178,6 +178,16 @@ describe('Codex account rotation settings', () => {
     handleAccountState({ type: 'account-state', rotation: claude, codexRotation: codexState });
     expect([...document.querySelectorAll('[data-cli="claude"] .rotation-account label span')].map(s => s.textContent)).toEqual(['a@x', 'b@x']);
   });
+  it('keeps unsaved edits through a lasting registry error, and drops them when the account list changes', () => {
+    const codexState = { enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] };
+    codex(codexState);
+    inCodex('[data-action="rotation-down"]').click();
+    codex({ ...codexState, error: 'The selected login failed; the previous login was restored.' });
+    expect([...document.querySelectorAll('[data-cli="codex"] .rotation-account label span')].map(s => s.textContent)).toEqual(['d@x', 'c@x']);
+    expect(inCodex('.account-error').textContent).toContain('selected login failed');
+    codex({ ...codexState, accounts: [...codexState.accounts, account('e', 'e@x')] });
+    expect([...document.querySelectorAll('[data-cli="codex"] .rotation-account label span')].map(s => s.textContent)).toEqual(['c@x', 'd@x', 'e@x']);
+  });
   it('drops unsaved edits for an interrupted switch, so Restore previous login shows', () => {
     const codexState = { enabled: true, active: 'c', accounts: [account('c', 'c@x', 'Active'), account('d', 'd@x')] };
     codex(codexState);

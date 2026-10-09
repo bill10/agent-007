@@ -166,6 +166,8 @@ describe('Codex reset times', () => {
     expect(retryAt('or try again at 9:15 AM.', now)).toBe(at(2026, 9, 9, 9, 15));      // already past today
     expect(retryAt('tryagainat Jan 3rd, 9:00 AM', now)).toBe(at(2027, 0, 3, 9));        // spaces lost, next year
     expect(retryAt('try again in 2 days 3 hours', now)).toBe(now + (51 * 60) * 60_000);
+    expect(retryAt('try again at 16:05', now)).toBe(at(2026, 9, 8, 16, 5));                 // 24-hour clock
+    expect(retryAt('try again at Oct 25 12:30 AM', now)).toBe(at(2026, 9, 25, 0, 30));     // just after midnight
   });
   it('falls back to the 30-minute retry delay when there is no usable reset', () => {
     expect(retryAt("You've hit your usage limit.", now)).toBe(now + RETRY_MS);

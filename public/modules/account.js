@@ -17,8 +17,9 @@ const dirty = { claude: false, codex: false };
 const settings = r => JSON.stringify([r.enabled, r.fallback, r.accounts.map(a => [a.id, a.enabled])]);
 function merge(cli, fresh) {
   const draft = drafts[cli], ids = a => a.map(x => x.id).sort().join();
-  // An interrupted switch, an error or a changed account list wins over unsaved edits.
-  if (!dirty[cli] || fresh.pending || fresh.damaged || fresh.error || ids(fresh.accounts) !== ids(draft.accounts)) { dirty[cli] = false; return fresh; }
+  // An interrupted switch or a changed account list wins over unsaved edits.
+  // An error does not: it stays in the registry until the next switch.
+  if (!dirty[cli] || fresh.pending || fresh.damaged || ids(fresh.accounts) !== ids(draft.accounts)) { dirty[cli] = false; return fresh; }
   const merged = { ...fresh, enabled: draft.enabled, fallback: draft.fallback,
     accounts: draft.accounts.map(d => ({ ...fresh.accounts.find(a => a.id === d.id), enabled: d.enabled })) };
   if (settings(merged) === settings(fresh)) dirty[cli] = false;   // saved
