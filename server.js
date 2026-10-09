@@ -42,7 +42,7 @@ import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick, cliReady, matchLimit, SETTLE_MS } from './server/billion-limit.js';
 import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate, checkSwitch, recheck as recheckAccount, BUSY_ERROR } from './server/account-migration.js';
-import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation, rotationOn, selectedCount, otherCli, ROTATION_CLIS } from './server/account-rotation.js';
+import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation, selectedCount, otherCli, ROTATION_CLIS } from './server/account-rotation.js';
 import { assertClaudeProcessesManaged } from './server/claude-processes.js';
 import { withClaudeSessionsStopped } from './server/claude-rotation-sessions.js';
 import { stopCodexDaemon } from './server/codex-login.js';
@@ -564,9 +564,11 @@ async function accountAction(msg) {
 // while one of its cards is being worked, or just reached Review or finished CI.
 let wakeTimer = null;
 let accountLimitRunning = false;
+// The CLI's own saved switch (Settings saves both alike) and a selected account of it.
+const poolOn = cli => rotationState(undefined, cli).enabled && selectedCount(undefined, cli) > 0;
 async function workerAccountLimitTick(now) {
   if (accountLimitRunning || switching || !mayAnswerOwner()) return;
-  const clis = rotationOn() ? ROTATION_CLIS.filter(cli => selectedCount(undefined, cli)) : [];
+  const clis = ROTATION_CLIS.filter(poolOn);
   const session = [...sessions.values()].find(s => !s.exited && !s.isBillion && clis.includes(s.agent)
     && s.state !== 'WORKING' && now - (s.lastOutputAt || 0) >= SETTLE_MS
     && !(s.rotationRetryAt > now) && matchLimit(screenTail(s.ringBuffer.getAll().join(''), 15))?.kind === 'hard');
@@ -586,7 +588,7 @@ async function workerAccountLimitTick(now) {
 // An enabled account pool for limitTick, or null: switching on and a selected
 // account of this CLI in the list. Billion hands over to the other CLI only
 // when the list has a selected account of that one.
-const pool = cli => (mayAnswerOwner() && rotationOn() && selectedCount(undefined, cli) ? {
+const pool = cli => (mayAnswerOwner() && poolOn(cli) ? {
   run: (hit, { limited }) => rotate(cli, { limited, line: hit.retry ?? hit.line, allowCurrent: !limited }),
   fallback: () => selectedCount(undefined, otherCli(cli)) > 0,
   prepare: () => rotate(cli, { allowCurrent: true, preferCurrent: true }),

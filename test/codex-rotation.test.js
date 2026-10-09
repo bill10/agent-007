@@ -167,6 +167,8 @@ describe('one account list for Claude and Codex', () => {
     expect(rotationOn(dir)).toBe(false);
     await addRotationAccount(join(home, '.codex'), deps());   // one Codex login: a
     expect(rotationOn(dir)).toBe(true);
+    // Each CLI's pool reads its own flag, so both registries say on.
+    expect(rotationState(dir, 'claude').enabled).toBe(true);
   });
   // Value: protects=an off saved through the one list stays off when the other CLI's logins are discovered;
   //   fails_when=default-on looks only at the registry being added to; why_new=default-on now counts both CLIs; seam=none
@@ -181,6 +183,7 @@ describe('one account list for Claude and Codex', () => {
     await addRotationAccount(join(home, '.codex-b'), deps());
     const [x, y] = ids('claude'), [a, b] = ids('codex');
     expect(await configureRotation({ enabled: true, accounts: [x, y].map(({ id }) => ({ id, enabled: true })) }, deps())).toMatchObject({ error: 'Invalid rotation settings.' });
+    expect(await configureRotation({ enabled: true, accounts: [null, x, b, y] }, deps())).toMatchObject({ error: 'Invalid rotation settings.' });
     const order = [a, x, b, y].map(({ id }, i) => ({ id, enabled: i !== 3 }));
     expect(await configureRotation({ enabled: true, accounts: order }, deps())).toEqual({ ok: true });
     expect(ids('claude').map(r => [r.email, r.rank, r.enabled])).toEqual([['x@example.com', 1, true], ['y@example.com', 3, false]]);
@@ -201,6 +204,26 @@ describe('one account list for Claude and Codex', () => {
     expect(await recoverRotation(undefined, deps())).toMatchObject({ ok: true });
     expect(rotationOn(dir)).toBe(false);
     expect(rotationState(dir, 'claude').enabled).toBe(false);
+  });
+  // Value: protects=a login added while switching is on through the other CLI joins the list unselected, not silently into rotation;
+  //   fails_when=addRotationAccount defaults a new account's enabled from its own registry only (!s.enabled);
+  //   why_new=the default-on test above starts with both registries off, so it never sees the other CLI's switch; seam=none
+  it('adds new accounts unselected while switching is on through the other CLI', async () => {
+    await addRotationAccount('/y', claudeDeps());   // Claude x and y: on by default
+    expect(rotationState(dir, 'claude').enabled).toBe(true);
+    await addRotationAccount(join(home, '.codex-b'), deps());
+    expect(ids('codex').map(r => r.enabled)).toEqual([false, false]);
+  });
+  // Value: protects=recovering one CLI's interrupted switch never overwrites the other CLI's unreadable registry;
+  //   fails_when=recoverRotation saves the other registry without its damaged check, replacing the file with an empty state;
+  //   why_new=the recovery test above has a readable Claude registry; seam=none
+  it('leaves an unreadable other registry alone when recovering', async () => {
+    await addRotationAccount(join(home, '.codex-b'), deps());
+    const s = rotationState(dir, 'codex');
+    writeFileSync(join(dir, 'codex-account-rotation.json'), JSON.stringify({ ...s, pending: { from: s.active, to: s.accounts[1].id } }));
+    writeFileSync(join(dir, 'account-rotation.json'), '{not json');
+    expect(await recoverRotation(undefined, deps())).toMatchObject({ ok: true });
+    expect(readFileSync(join(dir, 'account-rotation.json'), 'utf8')).toBe('{not json');
   });
 });
 

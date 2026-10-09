@@ -227,6 +227,16 @@ describe('one list of Claude and Codex accounts', () => {
     click('rotation-recover');
     expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-recover', cli: 'codex' });
   });
+  // Value: protects=paused Codex conversations get their own Retry button that resumes Codex, not Claude;
+  //   fails_when=the resume button drops cli: codex, or shows for a CLI with nothing paused;
+  //   why_new=no client test clicked rotation-resume after the two sections became one list; seam=none
+  it('offers Retry paused conversations only for the CLI that has them, sending its cli', () => {
+    both(claude, { ...codexState, resumePending: true });
+    const resume = [...document.querySelectorAll('[data-action="rotation-resume"]')];
+    expect(resume.map(b => b.textContent)).toEqual(['Retry paused Codex conversations']);
+    resume[0].click();
+    expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-resume', cli: 'codex' });
+  });
   it('adds a folder for the CLI picked next to it', () => {
     both({ enabled: false, accounts: [] }, { enabled: false, accounts: [] });
     const kind = document.querySelector('#account-folder-cli');

@@ -42,7 +42,9 @@ export function rotationState(dir = CONFIG_DIR, cli = 'claude') {
     return { ...empty(), defaultSettings: false, ...s };
   } catch { return { ...empty(), error: `Account rotation state could not be read. Restore ${adapter(cli).file} before switching.`, damaged: true }; }
 }
-// One switch for both CLIs: on when either registry says so.
+// One switch for both CLIs, saved in both registries: on when either says so.
+// Each CLI's pool still reads its own flag, so settings saved before the one
+// list keep their per-CLI on/off until the next Save.
 export const rotationOn = (dir = CONFIG_DIR) => ROTATION_CLIS.some(cli => rotationState(dir, cli).enabled);
 export const selectedCount = (dir = CONFIG_DIR, cli = 'claude') => rotationState(dir, cli).accounts.filter(a => a.enabled).length;
 function save(s, dir, cli) {
@@ -106,7 +108,11 @@ export function addRotationAccount(folder, deps = {}) {
     s.error = null;
     // Two selected accounts across both CLIs turn the default setting on;
     // an off saved for either CLI (one switch for both) stays off.
-    if (s.defaultSettings && elsewhere.defaultSettings) s.enabled = s.accounts.filter(a => a.enabled).length + elsewhere.accounts.filter(a => a.enabled).length >= 2;
+    if (s.defaultSettings && elsewhere.defaultSettings) {
+      s.enabled = s.accounts.filter(a => a.enabled).length + elsewhere.accounts.filter(a => a.enabled).length >= 2;
+      // Each CLI's pool reads its own flag (server.js): keep the other's in step.
+      if (s.enabled && elsewhere.accounts.length && !elsewhere.damaged && !elsewhere.enabled) save({ ...elsewhere, enabled: true }, dir, otherCli(cli));
+    }
     save(s, dir, cli);
     return { ok: true };
   }, deps);
@@ -123,7 +129,7 @@ export function configureRotation(options, deps = {}) {
     const all = states.flatMap(s => s.accounts);
     if (typeof options.enabled !== 'boolean' || !Array.isArray(options.accounts)
       || options.accounts.length !== all.length || new Set(options.accounts.map(a => a?.id)).size !== all.length
-      || options.accounts.some(a => !all.some(b => b.id === a.id) || typeof a.enabled !== 'boolean')) return { error: 'Invalid rotation settings.' };
+      || options.accounts.some(a => !a || !all.some(b => b.id === a.id) || typeof a.enabled !== 'boolean')) return { error: 'Invalid rotation settings.' };
     if (options.enabled && options.accounts.filter(a => a.enabled).length < 2) return { error: 'Select at least two accounts for automatic switching.' };
     ROTATION_CLIS.forEach((cli, i) => {
       const s = states[i];
