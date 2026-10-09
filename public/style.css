@@ -2937,10 +2937,6 @@ select.job-mode-danger {
   .job-card-btn { min-height: 40px; padding: 8px 12px; font-size: 12px; }
 }
 
-.account-cli { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.account-cli:first-child { margin-top: 12px; }
-.account-cli + .account-cli { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 14px; }
-.account-cli-title { font-size: 11px; font-weight: bold; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin: 0; }
 .rotation-accounts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin: 0; }
 .rotation-account { display: grid; grid-template-columns: minmax(0, 1fr); gap: 5px; padding: 8px 0; border-bottom: 1px solid var(--border); }
 .rotation-toggle { display: flex; min-width: 0; overflow-wrap: anywhere; align-items: center; gap: 7px; margin: 8px 0; }
@@ -2949,6 +2945,9 @@ select.job-mode-danger {
 .account-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .account-identity .rotation-toggle { flex: 1 1 180px; margin: 0; }
 .account-identity .settings-dim { font-size: 11px; }
+/* Which CLI an account belongs to: an outlined label after the email, quieter than Save. */
+.account-cli-tag { flex: 0 0 auto; font-size: 10px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; line-height: 1; padding: 3px 5px; border-radius: 3px; color: var(--accent); border: 1px solid currentColor; }
+.rotation-account[data-cli="codex"] .account-cli-tag { color: var(--text-muted); }
 .account-panel .rotation-toggle { margin: 0; min-height: 36px; }
 .account-panel input[type="checkbox"] { accent-color: var(--accent); }
 .account-panel .account-btn { min-height: 36px; padding: 8px 10px; }
@@ -2958,9 +2957,10 @@ select.job-mode-danger {
 .account-panel input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .account-discover { align-self: flex-start; color: var(--accent); }
 .account-manual summary { cursor: pointer; padding: 8px 0; }
-.account-folder-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 8px 0; }
+.account-folder-controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 8px 0; }
 .account-folder-controls label { grid-column: 1 / -1; }
 .account-folder-controls input { min-width: 0; }
+@media (max-width: 480px) { .account-folder-controls { grid-template-columns: auto minmax(0, 1fr); } .account-folder-controls .account-btn { grid-column: 1 / -1; justify-self: start; } }
 .account-panel [data-action="rotation-configure"] { align-self: flex-start; color: var(--accent-contrast); background: var(--accent); border-color: var(--accent); }
 .account-panel [data-action="rotation-configure"]:hover:not(:disabled) { color: var(--accent-contrast); border-color: var(--text); }
 /* Availability and reset times are operational information, not placeholders. */

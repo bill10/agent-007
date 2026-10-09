@@ -42,7 +42,7 @@ import { writeHandover } from './server/billion-handover.js';
 import { wakeTick, billionBusy, WAKE_TICK_MS } from './server/billion-wake.js';
 import { limitTick, cliReady, matchLimit, SETTLE_MS } from './server/billion-limit.js';
 import { migrate as migrateAccount, rollback as rollbackAccount, retire as retireAccount, setup as setupAccount, setArmed as armAccount, isArmed as accountArmed, publicState as accountState, canMigrate, checkSwitch, recheck as recheckAccount, BUSY_ERROR } from './server/account-migration.js';
-import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation } from './server/account-rotation.js';
+import { publicRotationState, rotationState, addRotationAccount, configureRotation, rotateAccount, recoverRotation, selectedCount, otherCli, ROTATION_CLIS } from './server/account-rotation.js';
 import { assertClaudeProcessesManaged } from './server/claude-processes.js';
 import { withClaudeSessionsStopped } from './server/claude-rotation-sessions.js';
 import { stopCodexDaemon } from './server/codex-login.js';
@@ -387,7 +387,6 @@ async function switchBillion(to, reason) {
 // the old account's token back first. The state goes to browsers only where
 // the owner may act (user accounts off), as the actions themselves do.
 const RECHECK_MS = 40_000;
-const ROTATION_CLIS = ['claude', 'codex'];
 const CLI_LABEL = { claude: 'Claude', codex: 'Codex' };
 const rotationPayload = cli => ({ ...publicRotationState(undefined, undefined, cli), resumePending: [...sessions.values()].some(s => s.rotationResume && s.agent === cli) });
 const accountStatePayload = () => ({ type: 'account-state', ...accountState(), rotation: rotationPayload('claude'), codexRotation: rotationPayload('codex') });
@@ -490,12 +489,13 @@ async function rotate(cli, options = {}) {
   if (result.ok && !result.unchanged) await tellOwnerOrShow(`${CLI_LABEL[cli]} account switched from ${result.oldEmail} to ${result.newEmail}. ${CLI_LABEL[cli]} conversations resumed.`, 'info');
   return result;
 }
-async function discoverRotationAccounts(cli) {
+// Claude logins first, then Codex: a new account joins the end of the one list.
+async function discoverRotationAccounts() {
   const scan = await refreshAgentAccounts();
-  const folders = scan.agents.find(a => a.cli === cli)?.accounts.filter(a => a.loggedIn).map(a => a.folder) || [];
-  if (!folders.length) return { error: `No logged-in ${CLI_LABEL[cli]} accounts were found.` };
+  const found = ROTATION_CLIS.flatMap(cli => (scan.agents.find(a => a.cli === cli)?.accounts.filter(a => a.loggedIn) || []).map(a => ({ cli, folder: a.folder })));
+  if (!found.length) return { error: 'No logged-in Claude or Codex accounts were found.' };
   const errors = [];
-  for (const folder of folders) {
+  for (const { cli, folder } of found) {
     const result = await addRotationAccount(folder, { cli });
     if (result.error) errors.push(result.error);
   }
@@ -532,10 +532,11 @@ async function switchAccount(how, { fromBrowser = false } = {}) {
 const cliOf = msg => (msg.cli === 'codex' ? 'codex' : 'claude');
 // Keys looked up with Object.hasOwn: a message naming a prototype key is not an action.
 const accountActions = {
-  // msg.cli picks the registry: 'codex', else Claude's.
-  'rotation-discover': msg => discoverRotationAccounts(cliOf(msg)),
+  // msg.cli picks the registry: 'codex', else Claude's. Discovery and the
+  // settings cover both.
+  'rotation-discover': () => discoverRotationAccounts(),
   'rotation-add': msg => typeof msg.folder === 'string' ? addRotationAccount(msg.folder, { cli: cliOf(msg) }) : { error: cliOf(msg) === 'codex' ? 'Give a Codex home folder.' : 'Give a Claude config folder.' },
-  'rotation-configure': msg => configureRotation(msg, { cli: cliOf(msg) }),
+  'rotation-configure': msg => configureRotation(msg),
   'rotation-switch': msg => typeof msg.id === 'string' && /^[a-f0-9]{64}$/.test(msg.id) ? rotate(cliOf(msg), { id: msg.id }) : { error: `Select a saved ${CLI_LABEL[cliOf(msg)]} account.` },
   'rotation-recover': msg => recoverRotation(fn => aroundAgent(cliOf(msg), fn), { cli: cliOf(msg) }),
   'rotation-resume': msg => aroundAgent(cliOf(msg), async () => ({ ok: true })),
@@ -563,9 +564,11 @@ async function accountAction(msg) {
 // while one of its cards is being worked, or just reached Review or finished CI.
 let wakeTimer = null;
 let accountLimitRunning = false;
+// The CLI's own saved switch (Settings saves both alike) and a selected account of it.
+const poolOn = cli => rotationState(undefined, cli).enabled && selectedCount(undefined, cli) > 0;
 async function workerAccountLimitTick(now) {
   if (accountLimitRunning || switching || !mayAnswerOwner()) return;
-  const clis = ROTATION_CLIS.filter(cli => rotationState(undefined, cli).enabled);
+  const clis = ROTATION_CLIS.filter(poolOn);
   const session = [...sessions.values()].find(s => !s.exited && !s.isBillion && clis.includes(s.agent)
     && s.state !== 'WORKING' && now - (s.lastOutputAt || 0) >= SETTLE_MS
     && !(s.rotationRetryAt > now) && matchLimit(screenTail(s.ringBuffer.getAll().join(''), 15))?.kind === 'hard');
@@ -582,10 +585,12 @@ async function workerAccountLimitTick(now) {
     }
   } finally { accountLimitRunning = false; }
 }
-// An enabled account pool for limitTick, or null.
-const pool = cli => (mayAnswerOwner() && rotationState(undefined, cli).enabled ? {
+// An enabled account pool for limitTick, or null: switching on and a selected
+// account of this CLI in the list. Billion hands over to the other CLI only
+// when the list has a selected account of that one.
+const pool = cli => (mayAnswerOwner() && poolOn(cli) ? {
   run: (hit, { limited }) => rotate(cli, { limited, line: hit.retry ?? hit.line, allowCurrent: !limited }),
-  fallback: () => rotationState(undefined, cli).fallback,
+  fallback: () => selectedCount(undefined, otherCli(cli)) > 0,
   prepare: () => rotate(cli, { allowCurrent: true, preferCurrent: true }),
 } : null);
 function startBillionWakes() {

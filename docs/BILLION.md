@@ -685,16 +685,16 @@ usage limit (below).
   stops and resumes its Claude sessions on their exact conversation IDs,
   changing only authentication. Account order, cooldowns, active identity,
   refreshed credentials and recovery state persist across server restarts.
-  With every selected account unavailable, workers wait; Billion can fall
-  back to Codex if enabled. Without fallback it retries after the earliest
+  With every selected account unavailable, workers wait; Billion hands over
+  to Codex if the Settings list has a selected Codex account. Otherwise it retries after the earliest
   known reset or a 30-minute backoff. Returning from Codex first selects an
   eligible Claude login and then uses the normal conversation handover.
   Billion's repository and state files stay in the same place throughout.
   **Codex account rotation** is the same for a Billion on Codex: its next
   Codex login (`~/.codex/auth.json` swapped, the background server stopped,
   `codex resume <id>`) comes before any handover, which happens only once
-  every selected Codex account is unavailable, **Fall back to Claude Code**
-  is on and `BILLION_AUTO_SWITCH` is not `0` (rotation itself runs either
+  every selected Codex account is unavailable, the Settings list has a
+  selected Claude account and `BILLION_AUTO_SWITCH` is not `0` (rotation itself runs either
   way); a move to Codex first selects an eligible Codex login. Codex's
   `try again at …` time sets when a limited login is retried.
 

@@ -19,7 +19,7 @@ const add = async () => {
   await addRotationAccount('/b', deps); await addRotationAccount('/c', deps);
   await configure({ accounts: publicRotationState(dir).accounts.map(a => ({ id: a.id, enabled: true })) });
 };
-const configure = async (over = {}) => configureRotation({ enabled: true, fallback: true, accounts: publicRotationState(dir).accounts.map(({ id, enabled }) => ({ id, enabled })), ...over }, deps);
+const configure = async (over = {}) => configureRotation({ enabled: true, accounts: publicRotationState(dir).accounts.map(({ id, enabled }) => ({ id, enabled })), ...over }, deps);
 
 describe('account rotation', () => {
   it('does not enroll either account when the source login cannot be read', async () => {
@@ -91,7 +91,7 @@ describe('account rotation', () => {
     await rotateAccount({ limited: true, line: 'resets in 1h' }, deps);
     await rotateAccount({ limited: true }, deps);
     const result = await rotateAccount({ limited: true }, deps);
-    expect(result).toMatchObject({ exhausted: true, fallback: true, retryAt: now + RETRY_MS });
+    expect(result).toMatchObject({ exhausted: true, retryAt: now + RETRY_MS });
     expect(publicRotationState(dir, now).accounts[0].limitedUntil).toBe(now + 3600000);
     resetInFlight(); // a server restart does not forget account limits
     expect(await rotateAccount({}, deps)).toMatchObject({ exhausted: true });

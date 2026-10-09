@@ -1,10 +1,13 @@
 // Repeatable authentication-only rotation. The default Claude config (or
 // Codex home) remains the workspace; saved logins contain only credentials and
 // account fields. One registry per CLI, picked by deps.cli ('claude' unless
-// given): the Claude adapter is account-migration.js, the Codex one
-// codex-login.js. Both share account-logins/ (a Codex id hashes a `codex:`
-// prefix, so it never meets a Claude one) and the one account lock. Secrets never enter publicState(), notifications, or
-// command arguments.
+// given), each with its own active login: the Claude adapter is
+// account-migration.js, the Codex one codex-login.js. Settings shows one list:
+// the on/off switch is saved in both registries, and each account's place in
+// that list is its `rank` (configureRotation writes both at once). Both share
+// account-logins/ (a Codex id hashes a `codex:` prefix, so it never meets a
+// Claude one) and the one account lock. Secrets never enter publicState(),
+// notifications, or command arguments.
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -13,7 +16,9 @@ import { captureLogin, activateLogin, withAccountLock } from './account-migratio
 import { captureCodexLogin, activateCodexLogin } from './codex-login.js';
 
 export const RETRY_MS = 30 * 60_000;
-const empty = () => ({ enabled: false, defaultSettings: true, fallback: true, active: null, accounts: [], pending: null });
+const empty = () => ({ enabled: false, defaultSettings: true, active: null, accounts: [], pending: null });
+export const ROTATION_CLIS = ['claude', 'codex'];
+export const otherCli = cli => (cli === 'codex' ? 'claude' : 'codex');
 const ADAPTERS = {
   claude: { name: 'Claude', file: 'account-rotation.json', capture: captureLogin, activate: activateLogin, folder: 'an absolute Claude config folder path',
     id: s => [s.fields.oauthAccount.accountUuid || s.email, s.fields.oauthAccount.organizationUuid || ''].join(':') },
@@ -37,6 +42,11 @@ export function rotationState(dir = CONFIG_DIR, cli = 'claude') {
     return { ...empty(), defaultSettings: false, ...s };
   } catch { return { ...empty(), error: `Account rotation state could not be read. Restore ${adapter(cli).file} before switching.`, damaged: true }; }
 }
+// One switch for both CLIs, saved in both registries: on when either says so.
+// Each CLI's pool still reads its own flag, so settings saved before the one
+// list keep their per-CLI on/off until the next Save.
+export const rotationOn = (dir = CONFIG_DIR) => ROTATION_CLIS.some(cli => rotationState(dir, cli).enabled);
+export const selectedCount = (dir = CONFIG_DIR, cli = 'claude') => rotationState(dir, cli).accounts.filter(a => a.enabled).length;
 function save(s, dir, cli) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   writeJson(statePath(dir, cli), s);
@@ -55,10 +65,10 @@ function recall(id, dir) { return JSON.parse(readFileSync(snapshotPath(dir, id),
 export function publicRotationState(dir = CONFIG_DIR, now = Date.now(), cli = 'claude') {
   const s = rotationState(dir, cli);
   return {
-    enabled: s.enabled, defaultSettings: s.defaultSettings, fallback: s.fallback, active: s.active,
+    enabled: s.enabled, defaultSettings: s.defaultSettings, active: s.active,
     pending: !!s.pending, error: s.error, damaged: !!s.damaged,
-    accounts: s.accounts.map(({ id, email, folder, enabled, limitedUntil, error }) => ({
-      id, email, folder, enabled, limitedUntil, error,
+    accounts: s.accounts.map(({ id, email, folder, enabled, limitedUntil, error, rank }) => ({
+      id, email, folder, enabled, limitedUntil, error, rank,
       status: id === s.active ? 'Active' : error ? 'Needs login' : limitedUntil > now ? 'Limited' : 'Available',
     })),
   };
@@ -72,7 +82,7 @@ const keyFor = deps => s => createHash('sha256').update(adapter(deps.cli).id(s))
 export function addRotationAccount(folder, deps = {}) {
   const dir = deps.dir ?? CONFIG_DIR, { cli } = deps, key = keyFor(deps);
   return withAccountLock(async () => {
-    const s = rotationState(dir, cli);
+    const s = rotationState(dir, cli), elsewhere = rotationState(dir, otherCli(cli));
     if (blocked(s)) return { error: blocked(s) };
     if (s.accounts.length >= 32) return { error: 'At most 32 accounts can be saved.' };
     // Capture the destination first so a bad folder never changes the registry.
@@ -82,7 +92,7 @@ export function addRotationAccount(folder, deps = {}) {
     const currentId = remember(current, dir, key);
     const enroll = (snapshot, id) => {
       let account = s.accounts.find(a => a.id === id);
-      if (!account) { account = { id, email: snapshot.email, folder: snapshot.folder, enabled: !s.enabled, limitedUntil: 0 }; s.accounts.push(account); }
+      if (!account) { account = { id, email: snapshot.email, folder: snapshot.folder, enabled: !(s.enabled || elsewhere.enabled), limitedUntil: 0 }; s.accounts.push(account); }
       return account;
     };
     enroll(current, currentId);
@@ -96,23 +106,40 @@ export function addRotationAccount(folder, deps = {}) {
       Object.assign(enroll(incoming, incomingId), { error: null, limitedUntil: 0 });
     }
     s.error = null;
-    if (s.defaultSettings) s.enabled = s.accounts.filter(a => a.enabled).length >= 2;
+    // Two selected accounts across both CLIs turn the default setting on;
+    // an off saved for either CLI (one switch for both) stays off.
+    if (s.defaultSettings && elsewhere.defaultSettings) {
+      s.enabled = s.accounts.filter(a => a.enabled).length + elsewhere.accounts.filter(a => a.enabled).length >= 2;
+      // Each CLI's pool reads its own flag (server.js): keep the other's in step.
+      if (s.enabled && elsewhere.accounts.length && !elsewhere.damaged && !elsewhere.enabled) save({ ...elsewhere, enabled: true }, dir, otherCli(cli));
+    }
     save(s, dir, cli);
     return { ok: true };
   }, deps);
 }
 
+// The one Settings list: every account of both CLIs, in switch order. Each
+// registry keeps its own accounts in that order, ranked by their place in it.
 export function configureRotation(options, deps = {}) {
-  const dir = deps.dir ?? CONFIG_DIR, { cli } = deps;
+  const dir = deps.dir ?? CONFIG_DIR;
   return withAccountLock(async () => {
-    const s = rotationState(dir, cli);
-    if (blocked(s)) return { error: blocked(s) };
-    if (typeof options.enabled !== 'boolean' || typeof options.fallback !== 'boolean' || !Array.isArray(options.accounts)
-      || options.accounts.length !== s.accounts.length || new Set(options.accounts.map(a => a.id)).size !== s.accounts.length
-      || options.accounts.some(a => !s.accounts.some(b => b.id === a.id) || typeof a.enabled !== 'boolean')) return { error: 'Invalid rotation settings.' };
-    const accounts = options.accounts.map(a => ({ ...s.accounts.find(b => b.id === a.id), enabled: a.enabled }));
-    if (options.enabled && accounts.filter(a => a.enabled).length < 2) return { error: `Select at least two ${adapter(cli).name} accounts for automatic rotation.` };
-    save({ ...s, defaultSettings: false, enabled: options.enabled, fallback: options.fallback, accounts }, dir, cli);
+    const states = ROTATION_CLIS.map(cli => rotationState(dir, cli));
+    const stop = states.map(blocked).find(Boolean);
+    if (stop) return { error: stop };
+    const all = states.flatMap(s => s.accounts);
+    if (typeof options.enabled !== 'boolean' || !Array.isArray(options.accounts)
+      || options.accounts.length !== all.length || new Set(options.accounts.map(a => a?.id)).size !== all.length
+      || options.accounts.some(a => !a || !all.some(b => b.id === a.id) || typeof a.enabled !== 'boolean')) return { error: 'Invalid rotation settings.' };
+    if (options.enabled && options.accounts.filter(a => a.enabled).length < 2) return { error: 'Select at least two accounts for automatic switching.' };
+    ROTATION_CLIS.forEach((cli, i) => {
+      const s = states[i];
+      const accounts = options.accounts.flatMap((a, rank) => {
+        const saved = s.accounts.find(b => b.id === a.id);
+        return saved ? [{ ...saved, enabled: a.enabled, rank }] : [];
+      });
+      // fallback: the per-CLI switch the one list replaced.
+      save({ ...s, defaultSettings: false, enabled: options.enabled, fallback: undefined, accounts }, dir, cli);
+    });
     return { ok: true };
   }, deps);
 }
@@ -182,7 +209,7 @@ export function rotateAccount({ limited = false, line = '', id = null, allowCurr
     }
     let next = id ? s.accounts.find(a => a.id === id && a.id !== s.active) : nextRotationAccount(s, now);
     if (!next && allowCurrent && !limited) next = s.accounts.find(a => a.id === s.active && a.enabled && !a.error && !(a.limitedUntil > now));
-    if (!next) return { exhausted: true, retryAt: Math.min(...s.accounts.filter(a => a.enabled && a.limitedUntil > now).map(a => a.limitedUntil)), fallback: s.fallback };
+    if (!next) return { exhausted: true, retryAt: Math.min(...s.accounts.filter(a => a.enabled && a.limitedUntil > now).map(a => a.limitedUntil)) };
     return around(async () => {
       let current, target;
       try {
@@ -221,6 +248,9 @@ export function recoverRotation(around = fn => fn(), deps = {}) {
       catch { return { error: 'Could not restore the previous login. The recovery record has been kept.' }; }
       s.active = s.pending.from; s.pending = null; s.enabled = false; s.defaultSettings = false; s.error = null;
       save(s, dir, cli);
+      // The switch is one for both CLIs: recovery turns it off for the other too.
+      const o = rotationState(dir, otherCli(cli));
+      if (!o.damaged) save({ ...o, enabled: false, defaultSettings: false }, dir, otherCli(cli));
       return { ok: true };
     });
   }, deps);
