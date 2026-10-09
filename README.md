@@ -209,7 +209,7 @@ Any terminal agent runs in its web terminals. The job board and Billion work wit
 No. Each step of the list above works on its own: stop at web terminals, or at the job board, and post the cards yourself.
 
 ### What happens when I hit a usage limit?
-Cards on that model wait for the reset unless you enable Claude account rotation. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex, or rotate through selected Claude accounts first (see [Rotating Claude accounts](#rotating-claude-accounts)).
+Cards on that model wait for the reset unless you enable account rotation for that CLI. Billion itself warns as it nears its limit and can hand over between Claude Code and Codex, or rotate through selected Claude or Codex accounts first (see [Rotating accounts](#rotating-accounts)).
 
 ## Configuration
 
@@ -243,7 +243,7 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `BILLION` | *(on)* | `0` (or `false`/`off`/`no`) turns Billion off. It is also off whenever user accounts exist, since it would belong to everyone |
 | `BILLION_DIR` | `~/.agent-007/billion` | Billion's own folder and git repo. Point it at a new or empty folder |
 | `BILLION_AGENT` | `claude` | The CLI Billion runs on: `claude` (Claude Code) or `codex`. The button next to Billion's name switches it, writing `HANDOVER.md` for the new CLI; that choice is saved in `~/.agent-007/billion-agent.json` and wins until you change `BILLION_AGENT`, which then wins again. See [docs/BILLION.md](docs/BILLION.md#claude-code-or-codex) |
-| `BILLION_AUTO_SWITCH` | *(on)* | `0` keeps Billion on its CLI at a usage limit. On, a hard limit on Billion's screen switches it to the other CLI (never back on a timer), a warning past 75% tells it to update `STATE.md` first, and if both are spent you are told. See [docs/BILLION.md](docs/BILLION.md#claude-code-or-codex) |
+| `BILLION_AUTO_SWITCH` | *(on)* | `0` keeps Billion on its CLI at a usage limit. On, a hard limit on Billion's screen switches it to the other CLI (never back on a timer), a warning past 75% tells it to update `STATE.md` first, and if both are spent you are told. With [account rotation](#rotating-accounts) on for that CLI, Billion first moves to its next Claude or Codex login and switches CLI only once every one is unavailable; rotation works with this set to `0` too. See [docs/BILLION.md](docs/BILLION.md#claude-code-or-codex) |
 | `TELEGRAM_BOT_TOKEN` | *(off)* | A Telegram bot's token. Billion's blocking `notify_owner` questions (or ones it marks `telegram`) are sent through it, and replies come back into Billion's terminal. See [docs/BILLION.md](docs/BILLION.md#telegram) |
 | `TELEGRAM_CHAT_ID` | *(none)* | Your chat with the bot. The only chat whose messages reach Billion. Usually left unset: message the bot and press *Use this chat* in the Billion tab instead; when set, it wins over that |
 | `TELEGRAM_VOICE` | `mirror` | Voice on Telegram: `mirror` answers in the mode of your last message, `always` speaks, `never` is text. Speaking needs macOS `say` and ffmpeg. See [Voice](docs/BILLION.md#voice) |
@@ -256,11 +256,14 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 > open internet. See [docs/REMOTE.md](docs/REMOTE.md) for Tailscale, Cloudflare
 > Tunnel + Access, and WireGuard.
 
-### Rotating Claude accounts
+### Rotating accounts
 
-Open **Settings → Auto-switch accounts → Find logged-in accounts**. Each account
-must have its own Claude Code login folder (for example, sign in with
-`CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`). You can also add a
+Settings has one list for Claude Code and one for Codex, with the same controls.
+Open **Settings → Auto-switch accounts → Find logged-in accounts** in either.
+Each Claude account must have its own Claude Code login folder (for example,
+sign in with `CLAUDE_CONFIG_DIR=~/.claude-work claude`, then `/login`); each
+Codex account its own Codex home with an `auth.json` (for example
+`CODEX_HOME=~/.codex-work codex login`). You can also add a
 folder under **Add an account folder manually**. **Automatic rotation turns on by default once two accounts
 are added.** Arrange their order and click **Save settings** to apply changes. An explicitly saved off
 setting stays off, including after a restart or another account discovery. **Switch now** selects an account manually.
@@ -295,6 +298,26 @@ accounts → Retry paused Claude conversations**. Queued messages are retained
 for that retry; it restarts the app's Claude sessions without changing the login.
 Nothing is retired or deleted. Rotation controls require Billion enabled and app user
 accounts disabled. Details in [FEATURES.md](docs/FEATURES.md).
+
+**Codex** works the same way. A saved Codex login is a copy of that folder's
+`auth.json`, keyed by the ChatGPT account and user in its token. Switching
+writes the saved `auth.json` over the one in your default Codex home (`~/.codex`,
+or `CODEX_HOME`), atomically and 0600; `config.toml`, sessions, skills and
+history stay put. Before every switch the outgoing account's refreshed
+`auth.json` is saved back, so its refresh token stays current. At a hard limit
+on Billion or a Codex worker the app stops its Codex sessions, stops Codex's
+shared background server (`codex app-server daemon stop`, so it reloads the new
+login when the next `codex` starts it), activates the next login and resumes
+each session with `codex resume <id>`. It refuses before interrupting anything
+if a session's conversation id is unknown, two app Codex sessions share a
+folder, or a `codex` process outside the app is running. Limited accounts
+become eligible again at the time the notice gives ("try again at Oct 25th,
+3:15 PM", read in this machine's time zone), otherwise after 30 minutes. Only
+when every Codex account is unavailable does Billion hand over to Claude Code
+(**Fall back to Claude Code**, with `BILLION_AUTO_SWITCH` on). **Anything else
+that reads `~/.codex/auth.json` follows the switch** (a tool that symlinks its
+Codex login to that file, the Codex IDE extension), just as if you had switched
+accounts yourself.
 
 ### Multiplayer & login
 

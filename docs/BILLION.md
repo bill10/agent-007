@@ -688,6 +688,12 @@ usage limit (below).
   known reset or a 30-minute backoff. Returning from Codex first selects an
   eligible Claude login and then uses the normal conversation handover.
   Billion's repository and state files stay in the same place throughout.
+  **Codex account rotation** is the same for a Billion on Codex: its next
+  Codex login (`~/.codex/auth.json` swapped, the background server stopped,
+  `codex resume <id>`) comes before any handover, which happens only once
+  every selected Codex account is unavailable and **Fall back to Claude Code**
+  is on; a move to Codex first selects an eligible Codex login. Codex's
+  `try again at …` time sets when a limited login is retried.
 
 ## Briefings
 
