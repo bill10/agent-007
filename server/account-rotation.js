@@ -104,8 +104,9 @@ export function addRotationAccount(folder, deps = {}) {
       Object.assign(enroll(incoming, incomingId), { error: null, limitedUntil: 0 });
     }
     s.error = null;
-    // Two selected accounts across both CLIs turn the default setting on.
-    if (s.defaultSettings) s.enabled = s.accounts.filter(a => a.enabled).length + elsewhere.accounts.filter(a => a.enabled).length >= 2;
+    // Two selected accounts across both CLIs turn the default setting on;
+    // an off saved for either CLI (one switch for both) stays off.
+    if (s.defaultSettings && elsewhere.defaultSettings) s.enabled = s.accounts.filter(a => a.enabled).length + elsewhere.accounts.filter(a => a.enabled).length >= 2;
     save(s, dir, cli);
     return { ok: true };
   }, deps);

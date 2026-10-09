@@ -168,6 +168,14 @@ describe('one account list for Claude and Codex', () => {
     await addRotationAccount(join(home, '.codex'), deps());   // one Codex login: a
     expect(rotationOn(dir)).toBe(true);
   });
+  // Value: protects=an off saved through the one list stays off when the other CLI's logins are discovered;
+  //   fails_when=default-on looks only at the registry being added to; why_new=default-on now counts both CLIs; seam=none
+  it('keeps a saved off when the other CLI\'s logins are found later', async () => {
+    await addRotationAccount('/y', claudeDeps());
+    await configureRotation({ enabled: false, accounts: ids('claude').map(({ id }) => ({ id, enabled: true })) }, claudeDeps());
+    await addRotationAccount(join(home, '.codex-b'), deps());
+    expect(rotationOn(dir)).toBe(false);
+  });
   it('saves one mixed order into both registries, ranked, and refuses a list missing either CLI', async () => {
     await addRotationAccount('/y', claudeDeps());
     await addRotationAccount(join(home, '.codex-b'), deps());
