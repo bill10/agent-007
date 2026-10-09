@@ -191,6 +191,22 @@ Claude Code reads `~/.claude/skills`; Codex reads `~/.codex/skills` and `~/.agen
 - **Claude only or Codex only.** In `~/.agent-007/skill-families.json`, `"claudeOnly": ["name"]` leaves that skill where it is, and `"codexOnly": ["name"]` moves it into the store without a Claude link (a link that already exists is yours to remove).
 - `CLAUDE_CONFIG_DIR` and `CODEX_HOME` are followed. On Windows the link is a junction, which needs no admin rights.
 
+**Repo skills** stay in their repo, versioned with it; Agent 007 never moves or edits anything in a checkout. Where each CLI looks inside a repo:
+
+- **Claude Code** reads `<repo>/.claude/skills`.
+- **Codex** (0.162) reads `.agents/skills` and `.codex/skills` in every folder from its working directory up to the repository root, not above it, and never `.claude/skills`. It follows a linked skill folder, and the project need not be trusted. Source: its app-server's `skills/list` (`codex app-server generate-ts` has the protocol), run on a stub repo with an empty `CODEX_HOME`, no login. [OpenAI's skills docs](https://learn.chatgpt.com/docs/build-skills) say the same for `.agents/skills` and do not mention `.codex/skills`, which works but is undocumented, so new skills go in `.agents/skills`.
+
+So a repo skill both CLIs can use is a real folder in `.agents/skills` with a committed relative link in `.claude/skills`:
+
+```
+<repo>/.agents/skills/qa-browser/SKILL.md                    the skill, edited here
+<repo>/.claude/skills/qa-browser -> ../../.agents/skills/qa-browser
+```
+
+To convert one, from the repo root: `git mv .claude/skills/qa-browser .agents/skills/qa-browser && ln -s ../../.agents/skills/qa-browser .claude/skills/qa-browser`, then commit both. On Windows, git checks a link out as a link only with `core.symlinks` on (Developer Mode, or an admin shell, lets it make one). Otherwise it writes a small text file holding the path, so Claude Code on that checkout finds no folder and loses the skill, while Codex still reads `.agents/skills`. Turn it on and re-check out the link: `git config core.symlinks true && git checkout -- .claude/skills`.
+
+Agent 007 tells Billion, once per skill per server run, about a skill on the board's repos that only one CLI can see (a folder in `.claude/skills` with no `.agents/skills` or `.codex/skills` counterpart, or the reverse), naming the repo, the skill and the commands above (or, for a link checked out as a file, the `core.symlinks` fix). It changes nothing; a `claudeOnly` or `codexOnly` entry in `skill-families.json` silences it. This runs whether or not the store is on.
+
 ```
 ┌─────────────┬──────────────┬────────────────────┐
 │  Explorer   │  Pixel       │  Jobs + Terminals   │

@@ -20,7 +20,7 @@ import { flushMessages, dropMessages, sendNotice } from './messages.js';
 import { withSkillFamilies, reportUngrouped } from './skill-families.js';
 import { refreshListing } from './skill-listing.js';
 import { reportDuplicates } from './skill-duplicates.js';
-import { autoSync, reportStoreConflicts } from './skill-store.js';
+import { autoSync, reportStoreConflicts, reportRepoSkills } from './skill-store.js';
 import { sessionAgentFromCommand, permissionFlagsFromCommand } from '../lib/jobs.js';
 import { trustDialogKey, liveBillion } from './billion.js';
 import { codexTrustArgs } from './claude-trust.js';
@@ -323,6 +323,7 @@ export function createSessionFromConfig({ sessionId, name, color, command, repoP
   if (isClaude && !isBillion) reportUngrouped(liveBillion(), sendNotice);
   if (isClaude && !isBillion) reportDuplicates(liveBillion(), sendNotice);
   if (!isBillion) reportStoreConflicts(liveBillion(), sendNotice);
+  if (!isBillion) reportRepoSkills(liveBillion(), sendNotice);
   // On Windows node-pty writes input through a socket on the console's input
   // pipe and listens for none of its errors. kill() closes the console under
   // any write still in flight, which then fails ("write EAGAIN" while the pipe

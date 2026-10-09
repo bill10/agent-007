@@ -23,7 +23,7 @@
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'path';
 import { randomUUID } from 'crypto';
-import { CONFIG_DIR, sessions } from './state.js';
+import { CONFIG_DIR, sessions, config } from './state.js';
 import { skillHomes } from './skills.js';
 import { assertClaudeProcessesManaged } from './claude-processes.js';
 import { folderHash, ALIAS, ALIAS_PAIR } from './skill-duplicates.js';
@@ -357,3 +357,52 @@ export function reportStoreConflicts(billion, send) {
   return sent;
 }
 export const forgetStoreConflicts = () => { reported.clear(); settled.clear(); lastResult = null; };
+
+// Repo skills (README, "One skill store"): they stay in their repo, and Agent
+// 007 never writes there. Claude Code reads <repo>/.claude/skills; Codex reads
+// <repo>/.agents/skills and <repo>/.codex/skills (from its cwd up to the repo
+// root) and never .claude/skills. A skill only one of them can see is told to
+// Billion with the fix: [{ repo, name, cli, dir, fix }].
+export function findOneCliRepoSkills(repos = (config.repos || []).map(r => r?.path), map = readMap(FAMILIES_FILE)) {
+  const skip = new Set([...map.claudeOnly, ...map.codexOnly]);
+  const out = [];
+  for (const repo of repos.filter(p => typeof p === 'string')) {
+    const names = (sub) => folderNames(join(repo, sub)).filter(n => existsSync(join(repo, sub, n, 'SKILL.md')) && !skip.has(n));
+    const claude = names('.claude/skills');
+    const claudeKeys = new Set(claude.map(fold));
+    const codex = new Map();   // .agents/skills wins a name both folders hold
+    for (const sub of ['.codex/skills', '.agents/skills']) for (const n of names(sub)) codex.set(fold(n), { name: n, sub });
+    for (const name of claude) {
+      if (codex.has(fold(name))) continue;
+      out.push({ repo, name, cli: 'Claude Code', dir: join(repo, '.claude/skills', name),
+        fix: `git mv .claude/skills/${name} .agents/skills/${name} && ln -s ../../.agents/skills/${name} .claude/skills/${name}, then commit both` });
+    }
+    for (const [key, { name, sub }] of codex) {
+      if (claudeKeys.has(key)) continue;
+      // A committed link that git checked out as a text file (Windows without core.symlinks).
+      const flat = lstat(join(repo, '.claude/skills', name))?.isFile();
+      out.push({ repo, name, cli: 'Codex', dir: join(repo, sub, name),
+        fix: flat ? `the link .claude/skills/${name} is checked out as a file: git config core.symlinks true && git checkout -- .claude/skills (Windows needs Developer Mode)`
+          : `ln -s ../../${sub}/${name} .claude/skills/${name}, then commit the link` });
+    }
+  }
+  return out;
+}
+
+// Once per finding per server run, like a store conflict.
+const reportedRepo = new Set();
+export function reportRepoSkills(billion, send, repos) {
+  if (!billion) return 0;
+  let sent = 0;
+  for (const f of findOneCliRepoSkills(repos)) {
+    if (reportedRepo.has(f.dir)) continue;
+    if (!send(billion, `Repo skill "${f.name}" in ${f.repo} is visible to ${f.cli} only.`, [
+      `Path: ${f.dir}`,
+      `Both CLIs see a skill kept in .agents/skills (Codex reads it) with a committed relative link in .claude/skills (Claude Code reads that). Fix, from the repo root, in a PR to that repo: ${f.fix}. Agent 007 changes nothing in a repo.`,
+    ])) break;
+    reportedRepo.add(f.dir);
+    sent++;
+  }
+  return sent;
+}
+export const forgetRepoSkills = () => reportedRepo.clear();

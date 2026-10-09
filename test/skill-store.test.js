@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, readdirSync, lstatSync, existsSync, realpathSync, utimesSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { planSync, syncSkillStore, summarize, autoSync, readStoreState, writeStoreState, reportStoreConflicts, forgetStoreConflicts } from '../server/skill-store.js';
+import { planSync, syncSkillStore, summarize, autoSync, readStoreState, writeStoreState, reportStoreConflicts, forgetStoreConflicts, findOneCliRepoSkills, reportRepoSkills, forgetRepoSkills } from '../server/skill-store.js';
 import { scanFamilies, readMap } from '../server/skill-families.js';
 import { removeTempDir } from './temp-dir.js';
 
@@ -34,6 +34,7 @@ beforeEach(() => {
   mkdirSync(join(homes.codexDir, 'skills'), { recursive: true });
   mkdirSync(join(root, '.agent-007'));
   forgetStoreConflicts();
+  forgetRepoSkills();
 });
 afterEach(() => removeTempDir(root));
 
@@ -388,5 +389,54 @@ describe('the server side', () => {
     skill(claude('xlsx'), 'xlsx', 'one');
     skill(codex('xlsx'), 'xlsx', 'two');
     for (let i = 0; i < 2; i++) expect(autoSync({ file: stateFile, homes, map: map(), backupRoot }).conflicts.map(c => c.name)).toEqual(['xlsx']);
+  });
+});
+
+describe('repo skills one CLI cannot see', () => {
+  const repoSkills = (repos) => findOneCliRepoSkills(repos, map());
+  it('names a Claude-only folder and a Codex-only one, and passes the shared layout', () => {
+    const repo = join(root, 'repo');
+    skill(join(repo, '.claude', 'skills', 'qa-browser'));
+    skill(join(repo, '.agents', 'skills', 'news-digest'));
+    skill(join(repo, '.codex', 'skills', 'old-codex'));
+    skill(join(repo, '.agents', 'skills', 'shared'));
+    symlinkSync('../../.agents/skills/shared', join(repo, '.claude', 'skills', 'shared'));
+    mkdirSync(join(repo, '.claude', 'skills', 'not-a-skill'));
+    const found = repoSkills([repo, join(root, 'missing'), null]);
+    expect(found.map(f => [f.cli, f.name, f.dir])).toEqual([
+      ['Claude Code', 'qa-browser', join(repo, '.claude', 'skills', 'qa-browser')],
+      ['Codex', 'old-codex', join(repo, '.codex', 'skills', 'old-codex')],
+      ['Codex', 'news-digest', join(repo, '.agents', 'skills', 'news-digest')],
+    ]);
+    expect(found[0].fix).toContain('git mv .claude/skills/qa-browser .agents/skills/qa-browser && ln -s ../../.agents/skills/qa-browser .claude/skills/qa-browser');
+    expect(found[1].fix).toContain('ln -s ../../.codex/skills/old-codex .claude/skills/old-codex');
+  });
+
+  it('points a link checked out as a file at core.symlinks', () => {
+    const repo = join(root, 'repo');
+    skill(join(repo, '.agents', 'skills', 'qa-email'));
+    mkdirSync(join(repo, '.claude', 'skills'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'skills', 'qa-email'), '../../.agents/skills/qa-email');
+    expect(repoSkills([repo])[0].fix).toContain('git config core.symlinks true');
+  });
+
+  it('skips claudeOnly and codexOnly names', () => {
+    const repo = join(root, 'repo');
+    skill(join(repo, '.claude', 'skills', 'mine'));
+    writeFileSync(mapFile, JSON.stringify({ claudeOnly: ['mine'] }));
+    expect(repoSkills([repo])).toEqual([]);
+  });
+
+  it('tells Billion once per finding per run and changes nothing', () => {
+    const repo = join(root, 'repo');
+    skill(join(repo, '.claude', 'skills', 'teaser-video'));
+    const before = tree();
+    const sent = [];
+    const send = (b, headline, lines) => sent.push([headline, ...lines]);
+    expect(reportRepoSkills({ id: 'b' }, send, [repo])).toBe(1);
+    expect(reportRepoSkills({ id: 'b' }, send, [repo])).toBe(0);
+    expect(reportRepoSkills(null, send, [repo])).toBe(0);
+    expect(sent[0][0]).toBe(`Repo skill "teaser-video" in ${repo} is visible to Claude Code only.`);
+    expect(tree()).toEqual(before);
   });
 });
