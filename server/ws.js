@@ -9,7 +9,7 @@ import {
 } from './state.js';
 import { authEnabled, resolveToken, tokenFromRequest, publicUser, userById, loadUsers, WS_UNAUTHORIZED } from './auth.js';
 import { saveActiveSession, removeActiveSession, syncOrphansToConfig, saveConfig, sessionOrigin, sessionPermissionFlags } from './config.js';
-import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch, discardWorktree, inWorktreeAddTurn } from './git.js';
+import { addRepo, removeRepo, scanFileTree, startTreeScanLoop, getDiff, broadcastReposList, gitExec, deleteBranch, discardWorktree, inWorktreeAddTurn, worktreeRisk } from './git.js';
 import { createSessionFromConfig } from './pty.js';
 import { isTyping, sendText } from './messages.js';
 import { redactEmails } from './account-migration.js';
@@ -21,11 +21,11 @@ import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand, jobRequiresPr, modelFromCommand } from '../lib/jobs.js';
 import { jobSkillFamilies } from './skill-families.js';
 import { refreshIfStale } from './models.js';
-import { billionRuns } from './billion.js';
+import { billionRuns, billionDir } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused, releaseJobHold, archiveJob,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
-  orphanResumePlan, findJobForBranch, repoAtCap, boardSettings, ghEnvForRepo,
+  orphanResumePlan, findJobForBranch, returnJobsOfRemovedRepo, repoAtCap, boardSettings, ghEnvForRepo,
 } from './jobs.js';
 
 export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Continue your card where you left off.';
@@ -148,6 +148,62 @@ function fitPtyToWatchers(session) {
   }
   session.lastResizeAt = Date.now();
   broadcast({ type: 'pty-size', sessionId: session.id, cols, rows });
+}
+
+// Delete an orphan's worktree and branch and forget it. False when the
+// worktree could not be removed (the orphan stays).
+async function deleteOrphan(orphan) {
+  if (!await discardWorktree(orphan.repoPath, orphan.worktreePath)) return false;
+  await deleteBranch(orphan.repoPath, orphan.branchName);
+  codenamePool.recycle(orphan.name);
+  if (orphan.worktreePath) codenamePool.recycle(basename(orphan.worktreePath)); // differs after a rename
+  orphans.delete(orphan.id);
+  syncOrphansToConfig(broadcast);
+  broadcastOrphansList();
+  return true;
+}
+
+// What removing a repo takes with it: its live sessions and orphans, and (with
+// `risk`) which of them hold work that is nowhere else, read by the same
+// checks removeWorktree uses to decide an orphan. Billion's own folder is never
+// removable.
+async function repoRemovalPlan(repoPath, { risk = true } = {}) {
+  if (typeof repoPath !== 'string' || !config.repos.some(r => r.path === repoPath)) return { error: 'That repo is not on the board' };
+  if (repoPath === billionDir()) return { error: "Billion's own folder can't be removed" };
+  const live = [...sessions.values()].filter(x => x.repoPath === repoPath && !x.isBillion);
+  const kept = [...orphans.values()].filter(o => o.repoPath === repoPath);
+  const items = [];
+  if (risk) {
+    for (const [kind, list] of [['agent', live], ['orphan', kept]]) {
+      for (const x of list) {
+        const r = x.worktreePath && existsSync(x.worktreePath) ? await worktreeRisk(x) : { uncommitted: false, unpushed: 0 };
+        items.push({ name: x.name, kind, uncommitted: r.uncommitted, unpushed: r.unpushed });
+      }
+    }
+  }
+  return { sessions: live, orphans: kept, items };
+}
+
+// Closes every agent of the repo with nothing kept, deletes its orphans, and
+// only then takes the repo off the list. The repo's own folder is never touched.
+const removingRepos = new Set();
+async function removeRepoWithAgents(repoPath, plan, killSession) {
+  if (removingRepos.has(repoPath)) return;
+  removingRepos.add(repoPath);
+  try {
+    for (const s of plan.sessions) {
+      try { await killSession(s.id, { discardChanges: true, force: true }); } catch (err) {
+        console.error(`remove-repo: closing ${s.name} failed:`, err.message);
+      }
+    }
+    await returnJobsOfRemovedRepo(repoPath, broadcast, { killSession });
+    // A close that could not finish leaves an orphan: swept with the rest.
+    for (const o of [...orphans.values()].filter(o => o.repoPath === repoPath)) await deleteOrphan(o);
+    try { await gitExec(['-C', repoPath, 'worktree', 'prune']); } catch {}
+    removeRepo(repoPath, broadcast);
+  } finally {
+    removingRepos.delete(repoPath);
+  }
 }
 
 export function broadcastOrphansList() {
@@ -708,8 +764,21 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           if (result.error) ws.send(JSON.stringify({ type: 'repo-error', error: result.error }));
           break;
         }
+        case 'remove-repo-check': {
+          const plan = await repoRemovalPlan(msg.path);
+          const denied = plan.error ? null : [...plan.sessions, ...plan.orphans].find(x => !owns(ws, x.ownerId));
+          if (denied) { denyControl(ws, denied.name, denied.ownerId); break; }
+          ws.send(JSON.stringify(plan.error
+            ? { type: 'notification', level: 'error', message: plan.error }
+            : { type: 'repo-removal-preview', path: msg.path, slug: basename(msg.path), agents: plan.items }));
+          break;
+        }
         case 'remove-repo': {
-          removeRepo(msg.path, broadcast);
+          const plan = await repoRemovalPlan(msg.path, { risk: false });
+          if (plan.error) { ws.send(JSON.stringify({ type: 'notification', level: 'error', message: plan.error })); break; }
+          const denied = [...plan.sessions, ...plan.orphans].find(x => !owns(ws, x.ownerId));
+          if (denied) { denyControl(ws, denied.name, denied.ownerId); break; }
+          await removeRepoWithAgents(msg.path, plan, killSession);
           break;
         }
         case 'rename-session': {
@@ -807,17 +876,10 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           const orphan = orphans.get(msg.orphanId);
           if (!orphan) break;
           if (!owns(ws, orphan.ownerId)) { denyControl(ws, orphan.name, orphan.ownerId); break; }
-          const worktreeRemoved = await discardWorktree(orphan.repoPath, orphan.worktreePath);
-          if (!worktreeRemoved) {
+          if (!await deleteOrphan(orphan)) {
             broadcast({ type: 'notification', level: 'error', message: `Failed to delete orphan ${orphan.name} — worktree removal failed` });
             break;
           }
-          await deleteBranch(orphan.repoPath, orphan.branchName);
-          codenamePool.recycle(orphan.name);
-          if (orphan.worktreePath) codenamePool.recycle(basename(orphan.worktreePath)); // differs after a rename
-          orphans.delete(msg.orphanId);
-          syncOrphansToConfig(broadcast);
-          broadcastOrphansList();
           broadcast({ type: 'notification', level: 'info', message: `Deleted orphan ${orphan.name} — worktree and branch removed` });
           break;
         }

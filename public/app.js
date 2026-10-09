@@ -18,6 +18,7 @@ import {
   handleConflictsUpdate, handleFileDiff, handleOrphansList,
   renderExplorer, closeDiffViewer,
   handleRepoError as explorerHandleRepoError,
+  handleRepoRemovalPreview,
 } from './modules/explorer.js';
 import { setupShortcuts } from './modules/shortcuts.js';
 import { setupSettings, renderTelegramSettings } from './modules/settings.js';
@@ -535,6 +536,7 @@ function onMessage(msg) {
       if (window._onSpawnErrorInForm) window._onSpawnErrorInForm(msg.error);
       break;
     case 'repos-list': handleReposList(msg); break;
+    case 'repo-removal-preview': handleRepoRemovalPreview(msg); break;
     case 'file-tree': handleFileTree(msg); break;
     case 'branch-changed': {
       const agent = agents.get(msg.sessionId);

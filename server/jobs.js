@@ -1302,6 +1302,23 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   return { job };
 }
 
+// A repo taken off the list: its In progress cards go back to To do, where they
+// wait (availableRepos skips an unlisted repo) with a note saying why, rather
+// than into the archive, which cannot be undone. The caller has already closed
+// the workers, so this only unlinks them. Scheduled cards are left alone.
+export async function returnJobsOfRemovedRepo(repoPath, broadcast, { killSession } = {}) {
+  const moved = [];
+  for (const job of allJobs().filter(j => j.repoPath === repoPath && j.state === 'in-progress' && !isScheduled(j))) {
+    const { error } = await moveJob(job.id, 'todo', broadcast, { killSession, discardChanges: true });
+    if (error) continue;
+    job.lastError = 'repo removed from Agent 007';
+    job.lastErrorAt = new Date().toISOString();
+    moved.push(job);
+  }
+  if (moved.length) { persist(broadcast); }
+  return moved;
+}
+
 // A restart kills every agent, and a kept agent's worktree comes back as an
 // orphan record rather than a session. A card that reaches Done (or goes back
 // to To do) before anyone re-adopts it has no agent to retire, so the worktree

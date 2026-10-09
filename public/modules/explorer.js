@@ -90,6 +90,80 @@ export function handleReposList(msg) {
   }
 }
 
+const joinNames = names => names.length < 3 ? names.join(' and ') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// The server's repo-removal-preview: what leaving the list takes with it. Our
+// own dialog rather than confirm(), so the work that would be lost can be
+// listed one agent to a line. Cancel holds focus; Esc and the backdrop cancel.
+export function handleRepoRemovalPreview(msg) {
+  document.getElementById('remove-repo-dialog')?.remove();
+  const live = msg.agents.filter(a => a.kind === 'agent');
+  const lost = msg.agents.filter(a => a.uncommitted || a.unpushed);
+
+  const dlg = document.createElement('dialog');
+  dlg.id = 'remove-repo-dialog';
+  dlg.className = 'confirm-dialog';
+  dlg.setAttribute('aria-labelledby', 'remove-repo-title');
+  const box = document.createElement('div');
+  box.className = 'confirm-box';
+
+  const title = document.createElement('h2');
+  title.id = 'remove-repo-title';
+  title.textContent = `Remove ${msg.slug} from Agent 007?`;
+  box.appendChild(title);
+
+  const body = document.createElement('div');
+  body.className = 'confirm-body';
+  const what = document.createElement('p');
+  const closes = live.length ? `This closes its ${plural(live.length, 'agent')} (${live.map(a => a.name).join(', ')}) and deletes their worktrees and branches. ` : '';
+  const orphanNames = msg.agents.filter(a => a.kind === 'orphan').map(a => a.name);
+  const sweeps = orphanNames.length ? `${live.length ? 'It also deletes' : 'This deletes'} ${plural(orphanNames.length, 'orphaned worktree')} (${joinNames(orphanNames)}). ` : '';
+  what.textContent = `${closes}${sweeps}The repo folder itself is not touched.`;
+  body.appendChild(what);
+
+  if (lost.length) {
+    const warn = document.createElement('ul');
+    warn.className = 'confirm-warn';
+    for (const a of lost) {
+      const bits = [];
+      if (a.uncommitted) bits.push('uncommitted changes');
+      if (a.unpushed > 0) bits.push(plural(a.unpushed, 'unpushed commit'));
+      else if (a.unpushed < 0) bits.push('commits that may not be pushed');
+      const li = document.createElement('li');
+      li.textContent = `${a.name} has ${bits.join(' and ')}; ${bits.length === 1 && a.unpushed === 1 ? 'it' : 'they'} will be lost.`;
+      warn.appendChild(li);
+    }
+    body.appendChild(warn);
+  }
+  box.appendChild(body);
+
+  const foot = document.createElement('div');
+  foot.className = 'confirm-foot';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'confirm-btn';
+  cancel.textContent = 'Cancel';
+  cancel.onclick = () => dlg.close();
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.className = 'confirm-btn confirm-danger';
+  ok.textContent = 'Remove repo';
+  ok.onclick = () => {
+    dlg.close();
+    send({ type: 'remove-repo', path: msg.path });
+  };
+  foot.append(cancel, ok);
+  box.appendChild(foot);
+  dlg.appendChild(box);
+
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+  document.body.appendChild(dlg);
+  dlg.showModal();
+  cancel.focus();
+}
+
 export function handleRepoError(msg) {
   const bar = document.getElementById('status-bar');
   if (bar) {
@@ -221,7 +295,7 @@ export function renderExplorer() {
       e.stopPropagation();
       collapsedRepos.delete(repoPath);
       saveCollapsedRepos();
-      send({ type: 'remove-repo', path: repoPath });
+      send({ type: 'remove-repo-check', path: repoPath });
     };
     headerActions.appendChild(removeBtn);
 
@@ -262,7 +336,7 @@ export function renderExplorer() {
     if (repos.has(repoPath)) continue; // Already rendered above
     const section = document.createElement('div');
     section.className = 'explorer-repo';
-    const { header, isCollapsed } = makeRepoHeader(repoPath, orphanList[0].orphan.repoSlug || repoPath.split('/').pop());
+    const { header, isCollapsed } = makeRepoHeader(repoPath, `${orphanList[0].orphan.repoSlug || repoPath.split('/').pop()} · not on the board`);
     if (isCollapsed) header.appendChild(makeCollapsedBadge([], orphanList.length));
     section.appendChild(header);
     if (!isCollapsed) {

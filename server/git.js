@@ -360,57 +360,72 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
   return { error: `Could not find a free branch name after ${tries} attempts` };
 }
 
+// Work in a worktree that exists nowhere else: `uncommitted` (anything in
+// `status --porcelain`, or a status git could not read) and `unpushed` (commits
+// the remote does not have: a count, or -1 when there is no base branch or log
+// to count against). removeWorktree orphans on either; the remove-repo dialog
+// warns on either, so both read it from here.
+export async function worktreeRisk(session) {
+  let uncommitted = false;
+  try {
+    const status = await gitExec(['-C', session.worktreePath, 'status', '--porcelain']);
+    uncommitted = !!status.trim();
+  } catch { uncommitted = true; }
+  // Fully pushed to its upstream? Then nothing is at risk locally — the
+  // commits are on the remote. This is exactly the state right after
+  // `gh pr create`, so a finished job's worktree and local branch can be
+  // removed even though the branch is not merged into the base branch. The
+  // pull request is unaffected: it references the remote branch, not this
+  // worktree. Without this check the base-branch test below calls every
+  // PR-ready branch "unpushed" and orphans it, which would leave one stale
+  // worktree per completed job.
+  let fullyPushed = false;
+  try {
+    const local = (await gitExec(['-C', session.worktreePath, 'rev-parse', 'HEAD'])).trim();
+    const upstream = (await gitExec(['-C', session.worktreePath, 'rev-parse', '@{u}'])).trim();
+    fullyPushed = !!local && local === upstream;
+  } catch {}
+  // No upstream git can resolve locally (a branch pushed to a raw URL,
+  // `git push -u https://…`, records the URL as branch.<name>.remote and
+  // creates no remote-tracking ref), or one that is stale: a push from
+  // inside the worktree after a rebase or a force-with-lease can leave the
+  // shared repo's refs/remotes/origin/<branch> on an old SHA. Ask the
+  // remote itself; anything short of a matching SHA stays not-pushed.
+  if (!fullyPushed) fullyPushed = await matchesRemote(session);
+  let unpushed = 0;
+  if (!fullyPushed) {
+    const baseBranch = await resolveBaseBranch(session.repoPath);
+    // No base branch to compare against means no way to know whether the
+    // branch holds commits nobody else has. Keep it: `branch -D` below is
+    // the one step here that can destroy work.
+    if (!baseBranch) unpushed = -1;
+    else {
+      try {
+        const log = await gitExec(['-C', session.repoPath, 'log', `${baseBranch}..${session.branchName}`, '--oneline']);
+        unpushed = log.trim() ? log.trim().split('\n').length : 0;
+      } catch { unpushed = -1; }
+    }
+  }
+  return { uncommitted, unpushed };
+}
+
 // discardChanges: uncommitted and untracked files are not worth keeping, for
 // a caller that knows the tree is scratch. Commits the remote does not have
 // are still protected; only the status check is skipped.
-export async function removeWorktree(session, { discardChanges = false } = {}) {
+// force: the owner was told the lot will be lost (removing a repo), so nothing
+// is kept: no status check, no unpushed check, a broken worktree deleted too.
+export async function removeWorktree(session, { discardChanges = false, force = false } = {}) {
   if (!session.worktreePath || !session.repoPath) return { orphaned: false };
   if (!existsSync(join(session.worktreePath, '.git'))) {
-    return existsSync(session.worktreePath) ? { orphaned: true, reason: 'broken-worktree' } : { orphaned: false };
+    if (!existsSync(session.worktreePath)) return { orphaned: false };
+    if (!force) return { orphaned: true, reason: 'broken-worktree' };
   }
   try {
     let reason = null;
-    if (!discardChanges) {
-      try {
-        const status = await gitExec(['-C', session.worktreePath, 'status', '--porcelain']);
-        if (status.trim()) reason = 'uncommitted';
-      } catch { reason = 'uncommitted'; }
-    }
-    // Fully pushed to its upstream? Then nothing is at risk locally — the
-    // commits are on the remote. This is exactly the state right after
-    // `gh pr create`, so a finished job's worktree and local branch can be
-    // removed even though the branch is not merged into the base branch. The
-    // pull request is unaffected: it references the remote branch, not this
-    // worktree. Without this check the base-branch test below calls every
-    // PR-ready branch "unpushed" and orphans it, which would leave one stale
-    // worktree per completed job.
-    let fullyPushed = false;
-    if (!reason) {
-      try {
-        const local = (await gitExec(['-C', session.worktreePath, 'rev-parse', 'HEAD'])).trim();
-        const upstream = (await gitExec(['-C', session.worktreePath, 'rev-parse', '@{u}'])).trim();
-        fullyPushed = !!local && local === upstream;
-      } catch {}
-      // No upstream git can resolve locally (a branch pushed to a raw URL,
-      // `git push -u https://…`, records the URL as branch.<name>.remote and
-      // creates no remote-tracking ref), or one that is stale: a push from
-      // inside the worktree after a rebase or a force-with-lease can leave the
-      // shared repo's refs/remotes/origin/<branch> on an old SHA. Ask the
-      // remote itself; anything short of a matching SHA stays not-pushed.
-      if (!fullyPushed) fullyPushed = await matchesRemote(session);
-    }
-    if (!reason && !fullyPushed) {
-      const baseBranch = await resolveBaseBranch(session.repoPath);
-      // No base branch to compare against means no way to know whether the
-      // branch holds commits nobody else has. Keep it: `branch -D` below is
-      // the one step here that can destroy work.
-      if (!baseBranch) reason = 'unpushed';
-      else {
-        try {
-          const log = await gitExec(['-C', session.repoPath, 'log', `${baseBranch}..${session.branchName}`, '--oneline']);
-          if (log.trim()) reason = 'unpushed';
-        } catch { reason = 'unpushed'; }
-      }
+    if (!force) {
+      const risk = await worktreeRisk(session);
+      if (risk.uncommitted && !discardChanges) reason = 'uncommitted';
+      else if (risk.unpushed) reason = 'unpushed';
     }
     if (reason) return { orphaned: true, reason };
     if (!await discardWorktree(session.repoPath, session.worktreePath)) return { orphaned: true, reason: 'cleanup-failed' };
