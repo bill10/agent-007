@@ -226,14 +226,15 @@ function renderLogins(body, logins, switching) {
     }
     const meta = document.createElement('div'); meta.className = 'account-meta'; el.append(meta);
     const bit = (text, cls = 'settings-dim') => { const b = document.createElement('span'); b.className = cls; b.textContent = text; meta.append(b); };
-    if (login) {
-      if (login.plan) bit(login.plan);
-      if (login.org) bit(login.org);
-      if (login.isDefault) bit('default');
-      if (login.loggedIn !== null) bit(login.loggedIn ? 'logged in' : 'logged out', `settings-status ${login.loggedIn ? 'in' : 'out'}`);
-      if (login.email && !a) bit(tilde(login.folder, home), 'settings-path');
-    }
-    if (a) bit(a.status + (a.limitedUntil > Date.now() ? ` · retry ${new Date(a.limitedUntil).toLocaleString()}` : ''), 'account-state');
+    // One status: a switch row's (Active, Available, Limited · until …), else
+    // the login's; Logged out wins either way. Default marks the CLI's
+    // default folder when that login is not already the Active one.
+    const out = login?.loggedIn === false || (a && a.status === 'Needs login');
+    if (login?.plan) bit(login.plan);
+    if (out) bit('Logged out', 'settings-status out');
+    else if (a) bit(a.status === 'Limited' && a.limitedUntil > Date.now() ? `Limited · until ${new Date(a.limitedUntil).toLocaleString()}` : a.status, 'account-state');
+    else if (login?.loggedIn) bit('Logged in', 'settings-status in');
+    if (login?.isDefault && a?.status !== 'Active') bit('Default');
     if (!meta.children.length) meta.remove();
     if (a?.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; el.append(error); }
   };

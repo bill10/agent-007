@@ -279,11 +279,15 @@ describe('one Accounts list: the scan\'s logins with the switch list', () => {
     setScan(agents);
     handleAccountState({ type: 'account-state', rotation: { enabled: false, active: 'a', accounts: [account('a', 'a@x', 'Active')] } });
     expect(rows()).toEqual([
-      { cli: 'claude', name: 'a@x', box: true, meta: 'maxdefaultlogged inActive' },
-      { cli: 'claude', name: '~/.claude-old', box: false, meta: 'logged out' },
-      { cli: 'gemini', name: 'g@x', box: false, meta: 'defaultlogged in~/.gemini' },
+      { cli: 'claude', name: 'a@x', box: true, meta: 'maxActive' },
+      { cli: 'claude', name: '~/.claude-old', box: false, meta: 'Logged out' },
+      { cli: 'gemini', name: 'g@x', box: false, meta: 'Logged inDefault' },
     ]);
     expect([...document.querySelectorAll('.account-cli-tag')].map(t => t.textContent)).toEqual(['Claude', 'Claude', 'Gemini']);
+    // One status: Logged out wins over the switch status, and Default shows unless that login is Active.
+    handleAccountState({ type: 'account-state', rotation: { enabled: false, active: 'b', accounts: [{ ...account('a', 'a@x', 'Needs login'), error: 'Sign in again' }, account('b', 'b@x', 'Active')] } });
+    expect(rows()[0].meta).toBe('maxLogged outDefault');
+    handleAccountState({ type: 'account-state', rotation: { enabled: false, active: 'a', accounts: [account('a', 'a@x', 'Active')] } });
     // The CLI leads each row, inside the checkbox label for a switch row.
     expect(document.querySelector('.rotation-account .rotation-toggle').textContent).toBe('Claudea@x');
     expect(document.querySelectorAll('[data-action="rotation-configure"]')).toHaveLength(1);
