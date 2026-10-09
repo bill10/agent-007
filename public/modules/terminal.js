@@ -299,7 +299,8 @@ function syncRestartBar(sessionId) {
     bar.querySelector('button').onclick = () => restartAgent({ sessionId });
     agent.termEl.appendChild(bar);
   }
-  const cli = agent.isBillion ? 'Billion' : /^codex\b/.test(agent.command || '') ? 'Codex' : /^claude\b/.test(agent.command || '') ? 'Claude Code' : agent.name;
+  const kind = agent.agent || /(?:^|[\\/])(codex|claude)(?:\s|$)/.exec(agent.command || '')?.[1];
+  const cli = agent.isBillion ? 'Billion' : kind === 'codex' ? 'Codex' : kind === 'claude' ? 'Claude Code' : agent.name;
   const resumes = agent.isBillion || cli !== agent.name;
   bar.querySelector('.terminal-restart-text').textContent = `${cli} stopped.${resumes ? ' Restart picks the conversation up where it left off.' : ''}`;
   const btn = bar.querySelector('button');

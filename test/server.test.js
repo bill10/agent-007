@@ -1225,6 +1225,25 @@ describe('ownership is inert when auth is disabled', () => {
     }
   }, 15000);
 
+  it.skipIf(process.platform === 'win32')('Restart refuses an exited agent that is being closed, and closing one tells every window', async () => {
+    const { bin, restore } = fakeCliOnPath('claude');
+    const w = await open();
+    try {
+      const { sessionId } = await exitedSession(w, `${join(bin, 'claude')}`);
+      sessions.get(sessionId).closing = true;   // killSession is mid-way through its git work
+      const refused = next(w, (m) => m.type === 'spawn-error');
+      w.send(JSON.stringify({ type: 'restart', sessionId }));
+      expect((await refused).error).toBe('Agent not found');
+      sessions.get(sessionId).closing = false;
+      const closed = next(w, (m) => m.type === 'session-ended' && m.sessionId === sessionId && m.closed);
+      w.send(JSON.stringify({ type: 'kill', sessionId }));
+      expect(await closed).toBeTruthy();
+    } finally {
+      restore();
+      w.close();
+    }
+  }, 15000);
+
   // An orphan with no note (a record written before the CLI was noted, or a
   // worktree discovered on disk) resumes by whatever its job card or the
   // transcripts say — but that answer is a guess, and the new session must

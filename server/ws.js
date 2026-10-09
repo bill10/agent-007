@@ -287,7 +287,8 @@ export function restartPlan(session) {
 // running session, and never twice at once. Returns { session } | { error }.
 export async function restartSession(sessionId, { requester = null } = {}) {
   const old = sessions.get(sessionId);
-  if (!old) return { error: 'Agent not found' };
+  // Closing (killSession is awaiting git): it is on its way out, not back.
+  if (!old || old.closing) return { error: 'Agent not found' };
   if (!old.exited || old.accountRotating) return { error: `${old.name} is already running` };
   if (restarting.has(sessionId)) return { error: `${old.name} is already restarting` };
   restarting.add(sessionId);
