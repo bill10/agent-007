@@ -57,7 +57,9 @@ export function probeListing({ file = 'claude', env = process.env, timeoutMs = P
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try { child?.kill(); } catch { /* gone */ }
+      // Through cmd.exe on Windows: the whole tree, or claude outlives its shell.
+      if (child?.pid && process.platform === 'win32') execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => {});
+      else try { child?.kill(); } catch { /* gone */ }
       server.close();
       server.closeAllConnections?.();
       // Not at once on Windows, where the just-killed child may still hold it.
