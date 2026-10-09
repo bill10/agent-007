@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.64.2.0] - 2026-10-09
+
+### Fixed
+
+- **Skill duplicates no longer compare one repo's skills against another's.** A repo's `.claude/skills` only loads inside that repo, so two repos each having their own `qa-browser` is not a duplicate. Repo vs global, repo vs plugin and two copies in one repo are still reported.
+
 ## [0.64.1.0] - 2026-10-09
 
 ### Fixed
