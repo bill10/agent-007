@@ -11,9 +11,10 @@
 // the other CLI is missing or logged out, both are spent: Billion stays where
 // it is and the owner is told, once, until a new Billion starts.
 //
-// An enabled account pool runs before the CLI fallback: Claude conversations
-// resume on the next eligible login without a handover. Exhausted pools wait
-// until reset/backoff, or let Billion hand over to Codex. The migration adapter
+// An enabled account pool runs before the CLI fallback: Claude or Codex
+// conversations resume on the next eligible login of the same CLI without a
+// handover. Exhausted pools wait until reset/backoff, or let Billion hand over
+// to the other CLI, picking an eligible login of that one first. The migration adapter
 // remains only for an older installation that has not configured rotation.
 
 import { execFile } from 'child_process';
@@ -60,14 +61,15 @@ const WARN = [
 const NOT_QUOTED = String.raw`(?<![\w,:;\-*>][ \t]+|["'“‘\`][ \t]*)`;
 const unquoted = (re) => new RegExp(NOT_QUOTED + re.source, re.flags);
 
-// { kind: 'hard', line } | { kind: 'warning', used, limit, line } | null.
-// `limit` names which one, spaces dropped: a key, not for show.
+// { kind: 'hard', line, retry } | { kind: 'warning', used, limit, line } | null.
+// `limit` names which one, spaces dropped: a key, not for show. `retry` is the
+// notice joined across the lines it wrapped onto, for its reset time.
 export function matchLimit(text) {
   const s = String(text ?? '');
   const lineAt = (i) => s.slice(i).split('\n')[0].trim().slice(0, 160);
   for (const re of HARD) {
     const m = unquoted(re).exec(s);
-    if (m) return { kind: 'hard', line: lineAt(m.index) };
+    if (m) return { kind: 'hard', line: lineAt(m.index), retry: s.slice(m.index, m.index + 400).replace(/\s+/g, ' ') };
   }
   for (const { re, used } of WARN) {
     const m = unquoted(re).exec(s);
@@ -110,14 +112,20 @@ export function resetLimitWatch(over = {}) { watch = { switchAt: 0, pausedFor: n
  * item, pushed to Telegram too), tell(text) (Telegram only), ready(agent) (cliReady),
  * and migration { armed(), run(hit) }: the owner's armed Claude account
  * switch, which needs no BILLION_AUTO_SWITCH and applies to a Claude Billion.
+ * rotation and codexRotation { run, fallback, prepare } are the enabled
+ * Claude and Codex account pools, or null.
  */
-export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log, migration = null, rotation = null } = {}) {
+export async function limitTick(session, { now = Date.now(), env = process.env, send = sendText, ready = cliReady, switchTo, notify, tell, log = console.log, migration = null, rotation = null, codexRotation = null } = {}) {
   if (!session?.isBillion || session.exited || watch.running) return null;
   const agent = session.agent;
   const armed = agent === 'claude' && !!migration?.armed?.();
-  if (!autoSwitchOn(env) && !armed && !(rotation && agent === 'claude')) return null;
+  const pool = { claude: rotation, codex: codexRotation }[agent] || null;
+  if (!autoSwitchOn(env) && !armed && !pool) return null;
   const to = { claude: 'codex', codex: 'claude' }[agent];
   if (!to) return null;
+  // The pool of the CLI a handover goes to: it picks a login first, and a
+  // pause waiting on it is retried at its reset rather than held for good.
+  const target = { claude: rotation, codex: codexRotation }[to] || null;
   const hit = matchLimit(screenTail(session.ringBuffer?.getAll().join('') || '', TAIL_LINES));
   if (!hit) return null;
 
@@ -132,33 +140,35 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
     return 'warned';
   }
 
-  if (rotation && session.rotationRetryAt > now) return null;
+  if ((rotation || codexRotation) && session.rotationRetryAt > now) return null;
   // Rotation cooldown is per login, not the CLI-switch gap. An exhausted
   // pool is checked again when its earliest known reset/backoff expires.
-  if (rotation && agent === 'claude') {
+  if (pool) {
     if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
     if (session.rotationRetryAt > now) return null;
     watch.running = true;
     try {
-      const result = await rotation.run(hit, { limited: !session.rotationMarked });
+      const result = await pool.run(hit, { limited: !session.rotationMarked });
       if (!result?.busy) session.rotationMarked = true;
       if (result?.ok) return 'rotated';
       if (result?.busy || result?.retry) return null;
       if (result?.error) {
-        if (!session.rotationNotified) { session.rotationNotified = true; await notify(`Claude account rotation paused: ${result.error}`); }
+        if (!session.rotationNotified) { session.rotationNotified = true; await notify(`${CLI_NAMES[agent]} account rotation paused: ${result.error}`); }
         session.rotationRetryAt = now + 30 * 60_000;
         return 'paused';
       }
       if (result?.exhausted) {
-        session.rotationRetryAt = Number.isFinite(result.retryAt) ? result.retryAt : now + 30 * 60_000;
-        if (!rotation.fallback() || !autoSwitchOn(env)) {
-          if (!session.rotationNotified) { session.rotationNotified = true; await notify('Claude accounts are unavailable. Waiting for a usage reset before retrying.'); }
+        // Only a pause waits for this pool's reset: a fallback goes on to the
+        // handover now, whose own login check must not see this pool's wait.
+        if (!pool.fallback() || !autoSwitchOn(env)) {
+          session.rotationRetryAt = Number.isFinite(result.retryAt) ? result.retryAt : now + 30 * 60_000;
+          if (!session.rotationNotified) { session.rotationNotified = true; await notify(`${CLI_NAMES[agent]} accounts are unavailable. Waiting for a usage reset before retrying.`); }
           return 'paused';
         }
       }
     } finally { watch.running = false; }
   }
-  if (watch.pausedFor === session.id && !rotation) return null;
+  if (watch.pausedFor === session.id && !pool && !target) return null;
   if (session.state === 'WORKING' || now - (session.lastOutputAt || 0) < SETTLE_MS) return null;
   if (armed && !rotation) {
     // Once: run() disarms on any failure of its own (server/account-migration.js);
@@ -182,20 +192,20 @@ export async function limitTick(session, { now = Date.now(), env = process.env, 
       ? `${CLI_NAMES[agent]} hit its limit too, soon after the switch to it`
       : !(await ready(to, { env })) ? `${CLI_NAMES[to]} is not installed or not logged in` : null;
     if (why) {
-      if (rotation) session.rotationRetryAt = Math.min(session.rotationRetryAt || Infinity, now + SWITCH_GAP_MS);
+      if (pool || target) session.rotationRetryAt = Math.min(session.rotationRetryAt || Infinity, now + SWITCH_GAP_MS);
       watch.pausedFor = session.id;
       log(`Billion: paused on ${CLI_NAMES[agent]}: ${why} ("${hit.line}")`);
       await notify(`Billion paused: both Claude Code and Codex are at their limits. ${why}; ${CLI_NAMES[agent]} says "${hit.line}". Billion stays on ${CLI_NAMES[agent]}. Press Start or the switch button next to Billion once either has usage again.`);
       return 'paused';
     }
-    // Codex -> Claude also selects an eligible Claude login before handing
-    // the conversation over. Exhausted logins are never retried every tick.
-    if (rotation && to === 'claude') {
+    // A handover also selects an eligible login of the CLI taken over to.
+    // Exhausted logins are never retried every tick.
+    if (target) {
       if (session.rotationRetryAt > now) return null;
-      const result = await rotation.prepare();
+      const result = await target.prepare();
       if (!result?.ok) {
         session.rotationRetryAt = Number.isFinite(result?.retryAt) ? result.retryAt : now + 30 * 60_000;
-        if (!session.rotationNotified) { session.rotationNotified = true; await notify('Codex and the selected Claude accounts are unavailable. Waiting before retrying.'); }
+        if (!session.rotationNotified) { session.rotationNotified = true; await notify(`${CLI_NAMES[agent]} and the selected ${CLI_NAMES[to]} accounts are unavailable. Waiting before retrying.`); }
         return 'paused';
       }
     }

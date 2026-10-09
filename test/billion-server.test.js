@@ -194,7 +194,7 @@ describe('the Claude account switch over the socket', () => {
       });
       expect((await waitFor(seen, m => m.type === 'welcome')).authEnabled).toBe(true);
       const got = await refusal(ws, seen, { action: 'setup', folder: '/tmp/never-read' });
-      expect(got.message).toMatch(/Only the owner switches the Claude account, and with user accounts on nobody does/);
+      expect(got.message).toMatch(/Only the owner switches accounts, and with user accounts on nobody does/);
       ws.close();
     } finally {
       rmSync(usersPath, { force: true });

@@ -677,12 +677,12 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
           let result;
           try {
             result = !accountAction ? { error: 'Not available.' }
-              : !mayAnswerOwner() ? { error: 'Only the owner switches the Claude account, and with user accounts on nobody does.' }
-              : !ws.fromBrowser ? { error: 'The Claude account is switched from the browser only.' }
+              : !mayAnswerOwner() ? { error: 'Only the owner switches accounts, and with user accounts on nobody does.' }
+              : !ws.fromBrowser ? { error: 'Accounts are switched from the browser only.' }
               : await accountAction(msg);
           } catch (err) {
-            console.error('Claude account action failed:', redactEmails(err.message));
-            result = { error: `Claude account action failed: ${err.message}` };
+            console.error('Account action failed:', redactEmails(err.message));
+            result = { error: `Account action failed: ${err.message}` };
           }
           if (result?.error) ws.send(JSON.stringify({ type: 'account-error', message: result.error }));
           if (accountState && mayAnswerOwner() && ws.fromBrowser) ws.send(JSON.stringify(accountState()));

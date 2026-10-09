@@ -252,3 +252,63 @@ describe('persistent account rotation before CLI fallback', () => {
     expect(d.notify).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Codex account rotation before the handover to Claude Code', () => {
+  beforeEach(() => resetLimitWatch());
+  const CODEX_OUT = "■ You've hit your usage limit. Upgrade to Plus to continue using Codex (https://chatgpt.com/explore/plus), or try again at Oct 25th, 2026 3:15 PM.";
+  const pool = over => ({ run: vi.fn(async () => ({ ok: true })), prepare: vi.fn(async () => ({ ok: true })), fallback: () => true, ...over });
+  // Value: protects=with both pools on, an exhausted pool with fallback still hands over, picking the other CLI's login first;
+  //   fails_when=the exhausted pool's reset wait is set before the handover and its login check returns early;
+  //   why_new=every other case enables one pool only; seam=none
+  it('hands over with both pools on once its own pool is exhausted, and does not wait for that pool\'s reset', async () => {
+    const order = [];
+    const claude = pool({ prepare: vi.fn(async () => { order.push('claude login'); return { ok: true }; }) });
+    const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 3 * 86_400_000 })) });
+    const d = deps({ rotation: claude, codexRotation: c, switchTo: vi.fn(async () => { order.push('handover'); return { session: {} }; }) });
+    expect(await limitTick(billion(CODEX_OUT, { agent: 'codex' }), d)).toBe('switched');
+    expect(order).toEqual(['claude login', 'handover']);
+  });
+  it('rotates Codex logins with CLI auto-switch off, and passes the wrapped notice for its reset time', async () => {
+    const c = pool(), d = deps({ codexRotation: c, env: { BILLION_AUTO_SWITCH: '0' } });
+    const wrapped = CODEX_OUT.replace('or try again', 'or\ntry again');
+    expect(await limitTick(billion(wrapped, { agent: 'codex' }), d)).toBe('rotated');
+    expect(c.run.mock.calls[0][0].retry).toContain('try again at Oct 25th, 2026 3:15 PM');
+    expect(d.switchTo).not.toHaveBeenCalled();
+  });
+  it('hands over to Claude Code only once every Codex login is unavailable', async () => {
+    const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })) });
+    const d = deps({ codexRotation: c });
+    expect(await limitTick(billion(CODEX_OUT, { agent: 'codex' }), d)).toBe('switched');
+    expect(d.switchTo).toHaveBeenCalledWith('claude', expect.any(String));
+  });
+  it('waits for a Codex reset with fallback off, telling the owner once', async () => {
+    const c = pool({ run: vi.fn(async () => ({ exhausted: true, retryAt: T0 + 60_000 })), fallback: () => false });
+    const d = deps({ codexRotation: c }), s = billion(CODEX_OUT, { agent: 'codex' });
+    expect(await limitTick(s, d)).toBe('paused');
+    expect(await limitTick(s, { ...d, now: T0 + 1000 })).toBeNull();
+    expect(d.notify).toHaveBeenCalledWith(expect.stringContaining('Codex accounts are unavailable'));
+    expect(d.switchTo).not.toHaveBeenCalled();
+  });
+  it('picks an eligible Codex login before a Claude-to-Codex handover', async () => {
+    const order = [], c = pool({ prepare: vi.fn(async () => { order.push('codex login'); return { ok: true }; }) });
+    const d = deps({ codexRotation: c, switchTo: vi.fn(async () => { order.push('handover'); return { session: {} }; }) });
+    expect(await limitTick(billion(CLAUDE_OUT), d)).toBe('switched');
+    expect(order).toEqual(['codex login', 'handover']);
+  });
+});
+
+describe('a Codex Billion paused with only the Claude pool enabled', () => {
+  beforeEach(() => resetLimitWatch());
+  // Value: protects=a Codex Billion paused at both limits retries the handover to Claude once the switch gap passes, while only the Claude account pool is on;
+  //   fails_when=the pause/retry guards key on the Codex pool alone, so the Claude pool no longer re-arms the paused handover;
+  //   why_new=existing Codex-side tests cover the prepare-failure path only, not the paused-by-switch-gap path; seam=none
+  it('hands over to Claude after the switch gap instead of staying paused', async () => {
+    const r = { run: vi.fn(), prepare: vi.fn(async () => ({ ok: true })), fallback: () => true };
+    const d = deps({ rotation: r }), s = billion("You've hit your usage limit", { agent: 'codex' });
+    resetLimitWatch({ switchAt: T0 - 100 });
+    expect(await limitTick(s, d)).toBe('paused');
+    expect(await limitTick(s, { ...d, now: T0 + SWITCH_GAP_MS + 1 })).toBe('switched');
+    expect(d.switchTo).toHaveBeenCalledWith('claude', expect.any(String));
+    expect(r.run).not.toHaveBeenCalled();
+  });
+});
