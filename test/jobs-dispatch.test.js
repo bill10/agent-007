@@ -1633,10 +1633,10 @@ describe('moving to done when the agent is already gone', () => {
   it('drops the dead link rather than leaving a stale id on the card', async () => {
     // A stale id is how a finished card outlived a restart and then resolved to
     // an unrelated agent in the next process generation.
-    addJob({ title: 'agent already exited', repoPath: REPO }, noopBroadcast);
+    addJob({ title: 'agent already gone', repoPath: REPO }, noopBroadcast);
     await dispatchOnce(fakeCreateSession([]), noopBroadcast);
     const job = allJobs()[0];
-    sessions.get(job.agentSessionId).exited = true;
+    sessions.delete(job.agentSessionId);
 
     const killed = [];
     await moveJob(job.id, 'done', noopBroadcast, {
@@ -1644,6 +1644,23 @@ describe('moving to done when the agent is already gone', () => {
     });
     expect(killed).toEqual([]);              // nothing to kill
     expect(job.agentSessionId).toBeNull();   // but the link still goes
+  });
+
+  it('closes an agent whose CLI exited, so its tab and saved session do not outlive the card', async () => {
+    // Only unlinked, it stayed in activeSessions, and the next restart made it
+    // an orphan of a finished card (test/worker-lifecycle.test.js).
+    addJob({ title: 'agent already exited', repoPath: REPO }, noopBroadcast);
+    await dispatchOnce(fakeCreateSession([]), noopBroadcast);
+    const job = allJobs()[0];
+    const sid = job.agentSessionId;
+    sessions.get(sid).exited = true;
+
+    const killed = [];
+    await moveJob(job.id, 'done', noopBroadcast, {
+      killSession: async (id) => { killed.push(id); sessions.delete(id); },
+    });
+    expect(killed).toEqual([sid]);
+    expect(job.agentSessionId).toBeNull();
   });
 });
 

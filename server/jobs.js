@@ -1278,9 +1278,15 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
   if (state === 'todo' || fromState === 'in-progress') requestDispatch();
   if (retiringSessionId && killSession) {
     const session = sessions.get(retiringSessionId);
-    if (session && !session.exited) {
+    // An exited one too: its CLI quit (a crash, an update, /exit) but its tab,
+    // worktree and saved session are all still there, and a restart would
+    // bring it back as an orphan of a card that has moved on.
+    if (session) {
       try {
-        await killSession(retiringSessionId, { discardChanges });
+        logWorkerClosed(session, job);
+        // An exited worker never throws its files away: a CLI that died
+        // mid-run may hold work its summary does not.
+        await killSession(retiringSessionId, { discardChanges: discardChanges && !session.exited });
         // Only after it succeeded: a failed kill leaves the agent running, and
         // the card must keep pointing at it rather than become unreachable.
         if (job.agentSessionId === retiringSessionId) {
@@ -1291,7 +1297,7 @@ export async function moveJob(jobId, state, broadcast, { killSession, findPr = f
         console.error(`Failed to close agent for job "${job.title}":`, err.message);
       }
     } else if (job.agentSessionId === retiringSessionId) {
-      // Nothing to kill — the session already went. Drop the link anyway, or
+      // Nothing to close — the session already went. Drop the link anyway, or
       // the card keeps a dead id, which is how a stale link outlived a restart
       // and resolved to an unrelated agent in the next process generation.
       job.agentSessionId = null;
@@ -1990,6 +1996,19 @@ export async function findPrCi(repoPath, branchName, prNumber, {
     { listAccounts, tokenFor, label: 'gh pr view' });
 }
 
+// Whether a card's worker can be closed without cutting someone off: exited,
+// or idle at its prompt. One paused by an account switch has exited only for
+// the switch and is about to resume mid-turn, so it is not quiet.
+function quietWorker(session) {
+  if (session.accountRotating || session.rotationResume) return false;
+  return session.exited || session.state === 'WAITING';
+}
+
+// The board closing a card's worker, by name in server.log.
+function logWorkerClosed(session, job) {
+  console.log(`${session.name}: closed, its card "${job.title}" moved to ${STATE_LABELS[job.state] || job.state}${session.exited ? ' (its CLI had already exited)' : ''}`);
+}
+
 // Close the agent that delivered a job, resolving it by branch when the stored
 // link is gone. killSession -> removeWorktree deletes the worktree and the local
 // branch (fully pushed by then); the PR is untouched. The card keeps the whole
@@ -2004,9 +2023,10 @@ export async function findPrCi(repoPath, branchName, prNumber, {
 // keep the agent — Review is finished work with its agent still on hand — and
 // manual moves retire it in moveJob, by the linked session.
 //
-// Returns whether it actually closed something. A failure is logged and
-// swallowed: the work has shipped either way, so a cleanup that did not work
-// must not strand the card.
+// Returns whether it actually closed something; with nothing to close it still
+// drops the card's link to a session that is gone, for the caller to persist.
+// A failure is logged and swallowed: the work has shipped either way, so a
+// cleanup that did not work must not strand the card.
 // byBranch: false restricts it to the linked session. A Review card's agent is
 // always linked (a re-adopt relinks it), so an unlinked session on that branch
 // is one someone opened by hand, and a merge is no reason to close it.
@@ -2020,13 +2040,22 @@ async function retireAgentForJob(job, askedBranch, askedSessionId, killSession, 
     && candidate.branchName === askedBranch
     && candidate.repoPath === job.repoPath,
   );
-  if (!session || session.exited) return false;
+  // Nothing to close: a filed card keeps no link to a session that is gone,
+  // or the link outlives it and resolves to whatever reuses the id.
+  if (!session) {
+    if (askedSessionId && job.agentSessionId === askedSessionId) job.agentSessionId = null;
+    return false;
+  }
+  // A linked worker whose CLI already exited is closed too (killSession copes):
+  // left alone, its tab and saved session outlive the card, and the next
+  // restart turns it into an orphan nothing ever retires.
   try {
     if (!job.agentName) job.agentName = session.name;
     // The board retired it, so it leaves as a board worker does: session-ended
     // carries these, and the client closes the tab and walks it out on them.
     session.spawnedBy = 'board';
     session.jobId = job.id;
+    logWorkerClosed(session, job);
     await killSession(session.id);
     job.agentSessionId = null;   // only after the kill actually succeeded
     return true;
@@ -2235,7 +2264,7 @@ export async function checkMergedPullRequests(broadcast, { killSession, findMerg
         // Someone may be talking to its agent about the rework; wait until it
         // is quiet, as superseding does.
         const live = job.agentSessionId ? sessions.get(job.agentSessionId) : null;
-        if (live && !live.exited && live.state !== 'WAITING') continue;
+        if (live && !quietWorker(live)) continue;
         job.state = 'done';
         job.prClosedAt = new Date().toISOString();
         job.doneAt = job.prClosedAt;
@@ -2467,7 +2496,7 @@ export async function supersedeRuns(broadcast, { killSession } = {}) {
     // An agent working a follow-up or asking something is someone's live
     // conversation; it is superseded on a later scan, once it is quiet.
     const session = old.agentSessionId ? sessions.get(old.agentSessionId) : null;
-    if (session && !session.exited && session.state !== 'WAITING') continue;
+    if (session && !quietWorker(session)) continue;
     // Its result is the summary it reported, so what it left in the worktree is
     // scratch; an hourly schedule would otherwise orphan a worktree a run.
     const result = await moveJob(old.id, 'done', broadcast, { killSession, discardChanges: true });

@@ -200,6 +200,17 @@ describe('superseding no-PR runs', () => {
     expect(first.state).toBe('done');
   });
 
+  it('leaves a run whose agent is paused for an account switch, though it reads as exited', async () => {
+    // A worker the switch stopped mid-turn resumes in a moment; closing it
+    // then would cut off its follow-up (and once only unlinked it, cardless).
+    const { runs: [first] } = await twoFinishedRuns();
+    Object.assign(sessions.get(first.agentSessionId), { state: 'WORKING', exited: true, accountRotating: true });
+    const killed = [];
+    await supersedeRuns(noopBroadcast, { killSession: fakeKillSession(killed) });
+    expect(first.state).toBe('review');
+    expect(killed).toEqual([]);
+  });
+
   it('keeps the run that reached Review last, even if it was posted first', async () => {
     const { runs: [first, second] } = await twoFinishedRuns();
     first.reviewAt = new Date(Date.now() + 60_000).toISOString();   // sent back and returned
