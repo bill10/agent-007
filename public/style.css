@@ -2948,19 +2948,21 @@ select.job-mode-danger {
 .rotation-account .account-error { grid-column: 1 / -1; }
 .account-actions [data-action="rotation-up"], .account-actions [data-action="rotation-down"] { min-width: 36px; padding: 8px 0; text-align: center; font-size: 14px; }
 .account-actions [data-action="rotation-switch"] { white-space: nowrap; padding: 8px; font-size: 12px; }
+.sw-short { display: none; }
+@media (max-width: 700px) { .sw-full { display: none; } .sw-short { display: inline; font-size: 14px; } .account-actions [data-action="rotation-switch"] { min-width: 40px; padding: 8px 0; } }
 .account-email { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-name { min-width: 0; }
 .account-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
 .account-identity .rotation-toggle { flex: 1 1 180px; margin: 0; }
 .account-identity .settings-dim { font-size: 11px; }
 /* Which CLI a login belongs to: the row's first column, one width for every CLI so the list reads like a table. */
-.account-cli-tag { flex: 0 0 52px; font-weight: bold; color: var(--accent); }
+.account-cli-tag { flex: 0 0 66px; white-space: nowrap; font-weight: bold; color: var(--accent); }
 .rotation-account:not([data-cli="claude"]) .account-cli-tag { color: var(--text-muted); }
 .account-name { display: flex; align-items: center; gap: 7px; padding-left: 20px; min-height: 24px; color: var(--text); overflow-wrap: anywhere; }
 .account-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; font-size: 11px; }
 .account-meta .account-state { color: var(--text); }
 .account-meta > * + *::before { content: '· '; color: var(--text-dim); }
-.account-meta { padding-left: 79px; }
+.account-meta { padding-left: 93px; }
 .account-panel .rotation-toggle { margin: 0; min-height: 36px; }
 .account-panel input[type="checkbox"] { accent-color: var(--accent); }
 .account-panel .account-btn { min-height: 36px; padding: 8px 10px; }

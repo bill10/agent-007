@@ -174,6 +174,8 @@ function render(body) {
     if (a.id !== draft.active[a.cli]) button(controls, 'Switch now', 'rotation-switch', () => {
       if (confirm(`Switch ${NAME[a.cli]} to ${a.email}? The app's ${NAME[a.cli]} sessions will restart in their existing conversations.`)) transmit(body, 'rotation-switch', { ...cliField(a.cli), id: a.id });
     }, `Switch ${NAME[a.cli]} to ${a.email} now`);
+    const sw = controls.querySelector('[data-action="rotation-switch"]');
+    if (sw) { sw.title = 'Switch now'; sw.innerHTML = '<span class="sw-full">Switch now</span><span class="sw-short" aria-hidden="true">⇄</span>'; }
   });
   const manual = document.createElement('details'); manual.className = 'account-manual'; manual.open = manualOpen;
   manual.ontoggle = () => { manualOpen = manual.open; };
