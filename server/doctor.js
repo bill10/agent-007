@@ -149,7 +149,7 @@ function readBoard(p) {
     // explorer: the repos added in the Explorer; the rest only cards name.
     const explorer = new Set((Array.isArray(c.repos) ? c.repos : []).map(r => r?.path).filter(isPath));
     const repos = [...new Set([...explorer, ...jobs.map(j => j.repoPath).filter(isPath)])];
-    const orphans = (Array.isArray(c.orphans) ? c.orphans : []).filter(o => o && isPath(o.worktreePath) && isPath(o.repoPath));
+    const orphans = (Array.isArray(c.orphans) ? c.orphans : []).filter(o => o && isPath(o.worktreePath) && isPath(o.repoPath) && isPath(o.branchName));
     return { repos, jobs, explorer, orphans };
   } catch (err) {
     // Only where it broke: V8's message quotes the file's text, which may be anything.
@@ -285,7 +285,7 @@ export async function checkRepos(p, board, origin, account = accountOf(p, new Ma
 }
 
 // Orphaned worktrees kept for nothing: clean, and every commit's content
-// already on origin/<base> (squash-merged, rebased, or none at all). Older
+// already on the base branch (squash-merged, rebased, or none at all). Older
 // builds kept one per finished card as "unpushed". Report only: the Explorer's
 // delete button removes one, and a restart releases an "unpushed" one whose
 // card is finished. An orphan an open card may still re-adopt is left out. Local
@@ -304,11 +304,11 @@ export async function checkOrphans(p, board) {
     } catch { return null; }
     const base = await p.baseBranch(o.repoPath).catch(() => null);
     const ahead = await Promise.resolve().then(() => p.commitsNotInBase(o)).catch(() => -1);
-    return base && ahead === 0 ? { o, why: `its work is already on origin/${base}` } : null;
+    return base && ahead === 0 ? { o, why: `its work is already on ${base}` } : null;
   }))).filter(Boolean);
   const kept = orphans.length - stale.length;
   const lines = stale.map(({ o, why }) => fail(
-    `orphan ${o.name || o.branchName} (${tilde(o.worktreePath)}) is kept as "${o.reason || 'orphaned'}", but ${why}`,
+    `orphan ${o.name || path.basename(o.worktreePath)} (${tilde(o.worktreePath)}) is kept as "${o.reason || 'orphaned'}", but ${why}`,
     o.reason === 'unpushed'
       ? 'Delete it in the Explorer (the orphan\'s delete button), or restart Agent 007, which releases it'
       : 'Delete it in the Explorer (the orphan\'s delete button)',

@@ -627,7 +627,7 @@ describe('doctor stale orphans', () => {
     const lines = await checkOrphans(machine(), board({ orphans: [orphan('Spectre')] }));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ status: 'fail', text: expect.stringContaining('Spectre') });
-    expect(lines[0].text).toContain('already on origin/main');
+    expect(lines[0].text).toContain('already on main');
     expect(lines[0].fix).toMatch(/Explorer.*restart Agent 007/);
     // Only an "unpushed" orphan is released by a restart.
     const [restart] = await checkOrphans(machine(), board({ orphans: [orphan('Ember', { reason: 'server-restart' })] }));
@@ -646,6 +646,28 @@ describe('doctor stale orphans', () => {
     const [line] = await checkOrphans(machine({ gone: ['Dagger'] }), board({ orphans: [orphan('Dagger')] }));
     expect(line).toMatchObject({ status: 'fail', text: expect.stringContaining('its folder is gone') });
     expect(await checkOrphans(machine(), board({ orphans: [] }))).toEqual([{ status: 'ok', text: 'no orphaned worktrees' }]);
+  });
+
+  it('keeps an orphan whose status, base branch or count git cannot read', async () => {
+    const orphans = [orphan('Shade'), orphan('Wisp'), orphan('Moth')];
+    const p = {
+      ...machine(),
+      git: async (a) => { if (a[1].endsWith('/Shade')) throw new Error('not a git repository'); return ''; },
+      baseBranch: async (repo) => { throw new Error('no base'); },
+      commitsNotInBase: (o) => { if (o.name === 'Moth') throw new Error('sync throw'); return 0; },
+    };
+    expect(await checkOrphans(p, board({ orphans }))).toEqual([{ status: 'ok', text: expect.stringMatching(/^3 orphaned worktrees kept/) }]);
+    const one = await checkOrphans({ ...machine(), baseBranch: async () => null }, board({ orphans: [orphan('Wisp')] }));
+    expect(one).toEqual([{ status: 'ok', text: expect.stringMatching(/^1 orphaned worktree kept:/) }]);
+  });
+
+  it('skips malformed orphan entries in config.json', async () => {
+    const orphans = [null, { name: 'NoPath', repoPath: '/r/app' }, { name: 'NoRepo', worktreePath: '/home/x' }, orphan('Kite')];
+    const files = { [CONFIG]: JSON.stringify({ repos: [{ path: '/r/app' }], jobs: [], orphans }) };
+    const results = await runDoctor({ probes: { ...machine(), files, readFile: (p) => files[p], exists: () => true } });
+    const stale = results.find(r => r.title === 'Stale orphans');
+    expect(stale.lines).toHaveLength(1);
+    expect(stale.lines[0].text).toContain('Kite');
   });
 
   it('reads the orphans from config.json for a full run', async () => {
