@@ -7,7 +7,7 @@ import { tmpdir } from 'os';
 import { telegramGetMe } from '../server/owner.js';
 import {
   portState, runDoctor, failed, formatReport, formatStartup, formatSection, formatSummary, useColor, SECTIONS, versionAtLeast,
-  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, checkRemote, toNpm, fromNpm,
+  insideDir, checkNode, checkClis, checkGh, checkRepos, checkPort, checkSettings, checkVersion, checkTelegram, checkWhisper, checkPlugins, checkSkills, checkService, checkRemote, checkOrphans, toNpm, fromNpm,
 } from '../server/doctor.js';
 import { plist } from '../server/service.js';
 
@@ -611,5 +611,78 @@ describe('doctor report layout', () => {
     expect(formatSummary(r('fail', 'na'))).toBe('1 problem, 1 note');
     expect(formatSummary(r('fail', 'fail'))).toBe('2 problems, 0 notes');
     expect(formatReport(r('fail')).split('\n').at(-1)).toBe('1 problem, 0 notes');
+  });
+});
+
+describe('doctor stale orphans', () => {
+  const orphan = (name, over = {}) => ({ name, reason: 'unpushed', repoPath: '/r/app', branchName: `bill/${name}`, worktreePath: `/home/.agent-007/worktrees/app-1/${name}`, ...over });
+  // dirty: worktree paths with uncommitted files; ahead: commitsNotInBase per name.
+  const machine = ({ dirty = [], ahead = {}, gone = [] } = {}) => probes({
+    // checkOrphans joins paths, which on Windows turns / into a backslash.
+    exists: (p) => { const at = p.replace(/\\/g, '/'); return !gone.some(n => at.endsWith(`/${n}`)) && (at.startsWith('/r/') || at.startsWith('/home/')); },
+    git: async (a) => (a.includes('status') ? (dirty.some(n => a[1].endsWith(`/${n}`)) ? ' M file\n' : '') : ''),
+    commitsNotInBase: async (o) => ahead[o.name] ?? 0,
+  });
+
+  it('lists a clean orphan whose work is on origin/main, with how to remove it', async () => {
+    const lines = await checkOrphans(machine(), board({ orphans: [orphan('Spectre')] }));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ status: 'fail', text: expect.stringContaining('Spectre') });
+    expect(lines[0].text).toContain('already on main');
+    expect(lines[0].fix).toMatch(/Explorer.*restart Agent 007/);
+    // Only an "unpushed" orphan is released by a restart.
+    const [restart] = await checkOrphans(machine(), board({ orphans: [orphan('Ember', { reason: 'server-restart' })] }));
+    expect(restart.fix).not.toMatch(/restart/);
+  });
+
+  it('keeps dirty orphans, real work, undecidable ones and those an open card may re-adopt', async () => {
+    const orphans = [orphan('Ghost'), orphan('Viper'), orphan('Onyx'), orphan('Cobra'), orphan('Raven')];
+    const jobs = [{ state: 'review', repoPath: '/r/app', branchName: 'bill/Cobra' }];
+    const lines = await checkOrphans(machine({ dirty: ['Ghost'], ahead: { Viper: 2, Onyx: -1 } }), board({ orphans, jobs }));
+    expect(lines.filter(l => l.status === 'fail').map(l => l.text)).toEqual([expect.stringContaining('Raven')]);
+    expect(lines.at(-1)).toMatchObject({ status: 'ok', text: expect.stringMatching(/^4 orphaned worktrees kept/) });
+  });
+
+  it('lists an orphan whose folder is gone, and says so when there are none', async () => {
+    const [line] = await checkOrphans(machine({ gone: ['Dagger'] }), board({ orphans: [orphan('Dagger')] }));
+    expect(line).toMatchObject({ status: 'fail', text: expect.stringContaining('its folder is gone') });
+    expect(await checkOrphans(machine(), board({ orphans: [] }))).toEqual([{ status: 'ok', text: 'no orphaned worktrees' }]);
+  });
+
+  it('keeps an orphan whose status, base branch or count git cannot read', async () => {
+    const orphans = [orphan('Shade'), orphan('Wisp'), orphan('Moth')];
+    const p = {
+      ...machine(),
+      git: async (a) => { if (a[1].endsWith('/Shade')) throw new Error('not a git repository'); return ''; },
+      baseBranch: async (repo) => { throw new Error('no base'); },
+      commitsNotInBase: (o) => { if (o.name === 'Moth') throw new Error('sync throw'); return 0; },
+    };
+    expect(await checkOrphans(p, board({ orphans }))).toEqual([{ status: 'ok', text: expect.stringMatching(/^3 orphaned worktrees kept/) }]);
+    const one = await checkOrphans({ ...machine(), baseBranch: async () => null }, board({ orphans: [orphan('Wisp')] }));
+    expect(one).toEqual([{ status: 'ok', text: expect.stringMatching(/^1 orphaned worktree kept:/) }]);
+  });
+
+  it('skips malformed orphan entries in config.json', async () => {
+    const orphans = [null, { name: 'NoPath', repoPath: '/r/app' }, { name: 'NoRepo', worktreePath: '/home/x' }, orphan('Kite')];
+    const files = { [CONFIG]: JSON.stringify({ repos: [{ path: '/r/app' }], jobs: [], orphans }) };
+    const results = await runDoctor({ probes: { ...machine(), files, readFile: (p) => files[p], exists: () => true } });
+    const stale = results.find(r => r.title === 'Stale orphans');
+    expect(stale.lines).toHaveLength(1);
+    expect(stale.lines[0].text).toContain('Kite');
+  });
+
+  it('leaves out a folder that is no longer a worktree', async () => {
+    // status there would answer for whatever repo holds the folder.
+    const p = { ...machine(), exists: (path) => !path.endsWith(join('Husk', '.git')) };
+    const lines = await checkOrphans(p, board({ orphans: [orphan('Husk', { reason: 'broken-worktree' })] }));
+    expect(lines).toEqual([expect.objectContaining({ status: 'ok', text: expect.stringMatching(/^1 orphaned worktree kept/) })]);
+  });
+
+  it('reads the orphans from config.json for a full run', async () => {
+    const files = { [CONFIG]: JSON.stringify({ repos: [{ path: '/r/app' }], jobs: [], orphans: [orphan('Falcon')] }) };
+    const results = await runDoctor({ probes: { ...machine(), files, readFile: (p) => files[p], exists: () => true } });
+    const stale = results.find(r => r.title === 'Stale orphans');
+    expect(stale.section).toBe('Repos');
+    expect(stale.lines[0].text).toContain('Falcon');
   });
 });

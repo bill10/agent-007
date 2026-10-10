@@ -1350,10 +1350,13 @@ async function releaseOrphanedWorktree({ branchName, repoPath, worktreePath }, b
 }
 
 // An "unpushed" orphan left by an older build (or a stale remote-tracking ref)
-// may be fully on the remote by now. Re-check each one at startup through the
-// same release path, so removeWorktree's rules decide: dirty stays, and only
-// an exact SHA match on the remote counts as pushed. A card still in progress
-// or in Review may want its agent re-adopted, so its orphan is left alone.
+// may be fully on the remote by now, or squash-merged into the base branch
+// with its remote branch deleted. Re-check each one at startup through the
+// same release path, so removeWorktree's rules decide: dirty stays, and a
+// commit counts as safe only on the remote branch at the same SHA or with its
+// content in origin/<base>. Idempotent: a kept one is simply kept again. A
+// card still in progress or in Review may want its agent re-adopted, so its
+// orphan is left alone.
 export async function releasePushedOrphans(broadcast) {
   let released = 0;
   for (const entry of [...orphans.values()]) {

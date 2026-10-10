@@ -32,7 +32,7 @@ export function gitExec(args, opts = {}) {
   // hanging, so it is set for every git call.
   const env = { ...process.env, ...opts.env, LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0' };
   return new Promise((resolve, reject) => {
-    execFileCb('git', args, { timeout, maxBuffer: 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
+    execFileCb('git', args, { timeout, maxBuffer: opts.maxBuffer || 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;
         reject(err);
@@ -362,9 +362,9 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
 
 // Work in a worktree that exists nowhere else: `uncommitted` (anything in
 // `status --porcelain`, or a status git could not read) and `unpushed` (commits
-// the remote does not have: a count, or -1 when there is no base branch or log
-// to count against). removeWorktree orphans on either; the remove-repo dialog
-// warns on either, so both read it from here.
+// whose content is in neither the remote branch nor the base branch: a count,
+// or -1 when git cannot decide). removeWorktree orphans on either; the
+// remove-repo dialog warns on either, so both read it from here.
 export async function worktreeRisk(session) {
   let uncommitted = false;
   try {
@@ -392,21 +392,119 @@ export async function worktreeRisk(session) {
   // shared repo's refs/remotes/origin/<branch> on an old SHA. Ask the
   // remote itself; anything short of a matching SHA stays not-pushed.
   if (!fullyPushed) fullyPushed = await matchesRemote(session);
-  let unpushed = 0;
-  if (!fullyPushed) {
-    const baseBranch = await resolveBaseBranch(session.repoPath);
-    // No base branch to compare against means no way to know whether the
-    // branch holds commits nobody else has. Keep it: `branch -D` below is
-    // the one step here that can destroy work.
-    if (!baseBranch) unpushed = -1;
-    else {
-      try {
-        const log = await gitExec(['-C', session.repoPath, 'log', `${baseBranch}..${session.branchName}`, '--oneline']);
-        unpushed = log.trim() ? log.trim().split('\n').length : 0;
-      } catch { unpushed = -1; }
-    }
-  }
+  // Not on the remote branch (deleted after its PR merged, or never pushed):
+  // then it is safe only when the base branch already has its content.
+  const unpushed = fullyPushed ? 0 : await commitsNotInBase(session);
   return { uncommitted, unpushed };
+}
+
+// How many of the branch's commits are not on the base branch: 0 when none
+// are, or when every file the branch changed has held exactly the branch's
+// version on the base branch since the fork; -1 when git cannot say. Measured
+// against `origin/<base>`, not the local base branch: agents branch from
+// origin, so a local main that has fallen behind counted every commit main
+// gained since as the branch's own, and a run that produced nothing came out
+// "unpushed".
+// The file test is what a squash or rebase merge leaves: the branch's commits
+// never reach main as they are, but its files do, byte for byte. Blob ids,
+// never patch-ids (which ignore whitespace, so two different edits can match)
+// and never a trial merge (which runs the repo's own merge drivers).
+// fetch: refresh origin/<base> before the file test, so a PR merged a moment
+// ago is seen and a cached ref the remote has since moved off cannot clear a
+// branch; a failed fetch keeps it. Off for the doctor, which never talks to
+// the network.
+export async function commitsNotInBase({ repoPath, branchName, worktreePath }, { fetch = true } = {}) {
+  if (!branchName || branchName.startsWith('-')) return -1;
+  // No base branch to compare against means no way to know whether the
+  // branch holds commits nobody else has. Keep it: `branch -D` in
+  // removeWorktree is the one step that can destroy work.
+  const base = await resolveBaseBranch(repoPath);
+  if (!base || base.startsWith('-')) return -1;
+  const sha = async (ref) => {
+    try { return (await gitExec(['-C', repoPath, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim() || null; } catch { return null; }
+  };
+  const remoteBase = `refs/remotes/origin/${base}`;
+  const baseRef = await sha(remoteBase) ? remoteBase : `refs/heads/${base}`;
+  const branchRef = `refs/heads/${branchName}`;
+  const tip = await sha(branchRef);
+  if (!await sha(baseRef) || !tip) return -1;
+  // The worktree's HEAD is what removal throws away. An agent that detached
+  // it and committed there has commits the branch does not reach.
+  if (worktreePath) {
+    try {
+      if ((await gitExec(['-C', worktreePath, 'rev-parse', 'HEAD'])).trim() !== tip) return -1;
+    } catch { return -1; }
+  }
+  const ahead = async () => {
+    try {
+      const n = parseInt((await gitExec(['-C', repoPath, 'rev-list', '--count', `${baseRef}..${branchRef}`])).trim(), 10);
+      return Number.isFinite(n) ? n : -1;
+    } catch { return -1; }
+  };
+  // 0: every commit is on the base as it is (merged, or none made).
+  let n = await ahead();
+  if (n <= 0) return n;
+  if (fetch && baseRef === remoteBase) {
+    if (!await fetchBase(repoPath, base)) return n;
+    n = await ahead();
+    if (n <= 0) return n;
+  }
+  return await filesLanded(repoPath, baseRef, branchRef) ? 0 : n;
+}
+
+// One fetch of origin/<base> per repo at a time, shared by every caller in
+// that window: the startup pass checks many orphans of one repo in a row.
+const baseFetches = new Map();
+const BASE_FETCH_REUSE_MS = 30_000;
+function fetchBase(repoPath, base) {
+  const key = `${repoPath}\0${base}`;
+  const cached = baseFetches.get(key);
+  if (cached && Date.now() - cached.at < BASE_FETCH_REUSE_MS) return cached.done;
+  const done = gitExec(['-C', repoPath, 'fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { timeout: FETCH_TIMEOUT })
+    .then(() => true, () => false);
+  // A failure is reused too: offline, every worktree of the repo would
+  // otherwise wait out its own timeout in a row.
+  baseFetches.set(key, { at: Date.now(), done });
+  return done;
+}
+
+// Every path the branch changed since the fork (added, modified or deleted)
+// has, in some commit on the base since then, exactly the branch's mode and
+// blob, or none for a deletion. Only a definite yes returns true.
+const MAX_LANDED_PATHS = 1000;
+async function filesLanded(repoPath, baseRef, branchRef) {
+  try {
+    const mergeBase = (await gitExec(['-C', repoPath, 'merge-base', baseRef, branchRef])).trim();
+    if (!mergeBase) return false;
+    const wanted = parseRaw(await gitExec(['-C', repoPath, 'diff', '--raw', '--no-renames', '--no-abbrev', '-z', mergeBase, branchRef]));
+    // Commits but no net change: nothing to match, so keep. Net is the test:
+    // a file the branch added and deleted again is not looked for, as a
+    // squash merge would not carry it either.
+    if (!wanted.size) return false;
+    if (wanted.size > MAX_LANDED_PATHS) return false;
+    // -m: a merge commit on the base counts by what it brought in, too.
+    const seen = new Set();
+    const log = await gitExec(['-C', repoPath, 'log', '-m', '--raw', '--no-renames', '--no-abbrev', '-z', '--format=', `${mergeBase}..${baseRef}`, '--', ...[...wanted.keys()].map(p => `:(literal)${p}`)], { maxBuffer: 16 * 1024 * 1024, timeout: 15_000 });
+    for (const [path, mb] of parseRaw(log, true)) for (const v of mb) seen.add(`${path}\0${v}`);
+    return [...wanted].every(([path, [v]]) => seen.has(`${path}\0${v}`));
+  } catch { return false; }
+}
+
+// `--raw -z` output to path -> ["<new mode> <new blob>", ...]. A deletion is
+// "000000 000…0". all: keep every entry per path (a log), else the one diff.
+function parseRaw(out, all = false) {
+  const map = new Map();
+  const parts = out.split('\0');
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const meta = parts[i].replace(/^\n+/, '');
+    if (!meta.startsWith(':')) { i--; continue; }
+    const [, newMode, , newBlob] = meta.slice(1).split(' ');
+    const path = parts[i + 1];
+    const value = `${newMode} ${newBlob}`;
+    if (!map.has(path)) map.set(path, []);
+    if (all || !map.get(path).length) map.get(path).push(value);
+  }
+  return map;
 }
 
 // discardChanges: uncommitted and untracked files are not worth keeping, for

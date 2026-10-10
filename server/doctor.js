@@ -22,7 +22,7 @@ import { commandPath, INSTALL_HINTS } from './command-path.js';
 import { billionAgent, billionRuns } from './billion.js';
 import { ghAccounts, ghAccountFor, ghAgentEnv, parseGithubRemote } from './jobs.js';
 import { telegramGetMe } from './owner.js';
-import { gitExec, resolveBaseBranch } from './git.js';
+import { gitExec, resolveBaseBranch, commitsNotInBase } from './git.js';
 import { configDir, tilde } from './settings.js';
 import { jobAgent, jobRequiresPr, JOB_AGENTS } from '../lib/jobs.js';
 import { installedService, parseServiceFile, remoteLines } from './service.js';
@@ -107,6 +107,8 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     // What a board worker on a repo pushes with, for the account found for it.
     repoEnv: (account) => ghAgentEnv(account?.token),
     baseBranch: resolveBaseBranch,
+    // From local refs only: the doctor never fetches.
+    commitsNotInBase: (orphan) => commitsNotInBase(orphan, { fetch: false }),
     exists: existsSync,
     readFile: (p) => readFileSync(p, 'utf8'),
     port: PORT,
@@ -139,7 +141,7 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
 // which rewrites in-progress jobs as a restart would) ---
 
 function readBoard(p) {
-  if (!p.exists(p.configPath)) return { missing: true, repos: [], jobs: [] };
+  if (!p.exists(p.configPath)) return { missing: true, repos: [], jobs: [], orphans: [] };
   try {
     const c = JSON.parse(p.readFile(p.configPath));
     const jobs = (Array.isArray(c.jobs) ? c.jobs : []).filter(j => j && j.state !== 'done');
@@ -147,7 +149,8 @@ function readBoard(p) {
     // explorer: the repos added in the Explorer; the rest only cards name.
     const explorer = new Set((Array.isArray(c.repos) ? c.repos : []).map(r => r?.path).filter(isPath));
     const repos = [...new Set([...explorer, ...jobs.map(j => j.repoPath).filter(isPath)])];
-    return { repos, jobs, explorer };
+    const orphans = (Array.isArray(c.orphans) ? c.orphans : []).filter(o => o && isPath(o.worktreePath) && isPath(o.repoPath) && isPath(o.branchName));
+    return { repos, jobs, explorer, orphans };
   } catch (err) {
     // Only where it broke: V8's message quotes the file's text, which may be anything.
     const at = /position (\d+)/.exec(err.message);
@@ -279,6 +282,40 @@ export async function checkRepos(p, board, origin, account = accountOf(p, new Ma
       return fail(`${name}: could not reach origin (${redact(firstLine(err.stderr || err.message))})`, `git -C ${sh} ls-remote origin`);
     }
   }))];
+}
+
+// Orphaned worktrees kept for nothing: clean, and every commit's content
+// already on the base branch (squash-merged, rebased, or none at all). Older
+// builds kept one per finished card as "unpushed". Report only: the Explorer's
+// delete button removes one, and a restart releases an "unpushed" one whose
+// card is finished. An orphan an open card may still re-adopt is left out. Local
+// refs only, so a PR merged since the last fetch reads as kept.
+export async function checkOrphans(p, board) {
+  const orphans = board.orphans || [];
+  if (!orphans.length) return [ok('no orphaned worktrees')];
+  const open = (o) => board.jobs.some(j => j.repoPath === o.repoPath && j.branchName === o.branchName
+    && (j.state === 'in-progress' || j.state === 'review'));
+  const stale = (await Promise.all(orphans.map(async (o) => {
+    if (open(o)) return null;
+    if (!p.exists(o.worktreePath)) return { o, why: 'its folder is gone' };
+    // No .git: status would walk up into whatever repo holds the folder.
+    if (!p.exists(join(o.worktreePath, '.git'))) return null;
+    try {
+      if ((await p.git(['-C', o.worktreePath, 'status', '--porcelain'], LOCAL_GIT_MS)).trim()) return null;
+    } catch { return null; }
+    const base = await p.baseBranch(o.repoPath).catch(() => null);
+    const ahead = await Promise.resolve().then(() => p.commitsNotInBase(o)).catch(() => -1);
+    return base && ahead === 0 ? { o, why: `its work is already on ${base}` } : null;
+  }))).filter(Boolean);
+  const kept = orphans.length - stale.length;
+  const lines = stale.map(({ o, why }) => fail(
+    `orphan ${o.name || path.basename(o.worktreePath)} (${tilde(o.worktreePath)}) is kept as "${o.reason || 'orphaned'}", but ${why}`,
+    o.reason === 'unpushed'
+      ? 'Delete it in the Explorer (the orphan\'s delete button), or restart Agent 007, which releases it'
+      : 'Delete it in the Explorer (the orphan\'s delete button)',
+  ));
+  if (kept) lines.push(ok(`${kept} orphaned worktree${kept === 1 ? '' : 's'} kept: uncommitted files, work not on the base branch, or a card that may re-adopt it`));
+  return lines;
 }
 
 // starting: another Agent 007 on the port is a problem, since this one cannot listen.
@@ -506,6 +543,7 @@ function checks(fast) {
     { title: 'Agent CLIs', section: 'Agents', run: (c) => checkClis(c.p, c.board) },
     { title: 'GitHub', section: 'GitHub', run: (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account }) },
     { title: 'Repos', section: 'Repos', slow: true, run: async (c) => (await checkRepos(c.p, c.board, c.origin, c.account)).slice(1) },
+    { title: 'Stale orphans', section: 'Repos', slow: true, run: (c) => checkOrphans(c.p, c.board) },
     { title: 'Skills', section: 'Skills', run: (c) => checkSkills(c.p, c.board).filter(l => !l.recommended) },
     { title: 'Plugins', section: 'Skills', slow: true, run: (c) => checkPlugins(c.p) },
     { title: 'Settings', section: 'Settings & service', run: (c) => checkSettings(c.p, c.board) },

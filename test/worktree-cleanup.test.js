@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, existsSync, writeFileSync, rmSync, readdirSync 
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { removeWorktree, createWorktree, discardWorktree, pruneWorktrees, scanForOrphanedWorktrees } from '../server/git.js';
+import { removeWorktree, createWorktree, discardWorktree, pruneWorktrees, scanForOrphanedWorktrees, commitsNotInBase } from '../server/git.js';
 import { orphans } from '../server/state.js';
 
 // Real git against a real bare remote: this logic is entirely about what git
@@ -27,12 +27,15 @@ function repoWithRemote() {
   // version, unlike `init -b`.
   execFileSync('git', ['-C', repo, 'branch', '-M', 'main']);
   execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
+  // The bare remote's HEAD still names init.defaultBranch (`master` on CI),
+  // so a second clone would check out nothing. Point it at main.
+  execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
   return { root, repo };
 }
 
-function worktreeOn(repo, root, branch, { commit, push, dirty } = {}) {
+function worktreeOn(repo, root, branch, { commit, push, dirty, from } = {}) {
   const wt = join(root, `wt-${branch.replace(/\//g, '-')}`);
-  execFileSync('git', ['-C', repo, 'worktree', 'add', wt, '-b', branch], { stdio: 'ignore' });
+  execFileSync('git', ['-C', repo, 'worktree', 'add', wt, '-b', branch, ...(from ? [from] : [])], { stdio: 'ignore' });
   if (commit) {
     writeFileSync(join(wt, 'work.txt'), 'the job output');
     execFileSync('git', ['-C', wt, 'add', '-A']);
@@ -136,6 +139,245 @@ describe('removeWorktree after a job opens its PR', () => {
     const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/no-op' });
     expect(result.orphaned).toBe(false);
     expect(existsSync(wt)).toBe(false);
+  });
+});
+
+// A second clone of the same remote: the person (or GitHub's merge button)
+// moving main on while this machine's checkout sits still.
+function elsewhere(root) {
+  const other = join(root, `other-${readdirSync(root).length}`);
+  execFileSync('git', ['clone', '-q', '-b', 'main', join(root, 'remote.git'), other], { stdio: 'ignore' });
+  execFileSync('git', ['-C', other, 'config', 'user.name', 'someone']);
+  execFileSync('git', ['-C', other, 'config', 'user.email', 's@s']);
+  return other;
+}
+function commitFile(dir, file, text, message) {
+  writeFileSync(join(dir, file), text);
+  execFileSync('git', ['-C', dir, 'add', '-A']);
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', message]);
+}
+// What a squash-merged PR leaves: the branch's change as one new commit on
+// main, and the remote branch deleted (its tracking ref gone with it).
+function squashMerge(repo, root, branch) {
+  const other = elsewhere(root);
+  execFileSync('git', ['-C', other, 'merge', '-q', '--squash', `origin/${branch}`], { stdio: 'ignore' });
+  execFileSync('git', ['-C', other, 'commit', '-q', '-m', `squash of ${branch} (#1)`]);
+  execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+  execFileSync('git', ['-C', repo, 'push', '-q', 'origin', '--delete', branch]);
+  return other;
+}
+
+describe('removeWorktree once the work is on main', () => {
+  it('releases a squash-merged branch whose remote branch was deleted', async () => {
+    // Every finished card ended here: the PR squash-merged, so none of the
+    // branch's own commits is on main, and with the remote branch gone nothing
+    // matched upstream either. Its content is on main all the same.
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/squashed', { push: true });
+    commitFile(wt, 'a.txt', 'one', 'first');
+    commitFile(wt, 'b.txt', 'two', 'second');
+    execFileSync('git', ['-C', wt, 'push', '-q']);
+    squashMerge(repo, root, 'bill10/squashed');
+
+    // This machine has not fetched since: the check fetches origin/main itself.
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/squashed' });
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+    expect(execFileSync('git', ['-C', repo, 'branch', '--list'], { encoding: 'utf8' })).not.toContain('bill10/squashed');
+  });
+
+  it('releases a squash-merged branch after main has built on the same file', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/built-on', { push: true });
+    commitFile(wt, 'notes.txt', 'line 1\n', 'first');
+    commitFile(wt, 'notes.txt', 'line 1\nline 2\n', 'second');
+    execFileSync('git', ['-C', wt, 'push', '-q']);
+    const other = squashMerge(repo, root, 'bill10/built-on');
+    commitFile(other, 'notes.txt', 'line 0\nline 1\nline 2\n', 'later on main');
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/built-on' });
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it('releases a branch whose commits reached main rebased', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/rebased', { commit: true });
+    const other = elsewhere(root);
+    commitFile(other, 'unrelated.txt', 'x', 'someone else first');
+    const sha = execFileSync('git', ['-C', wt, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    execFileSync('git', ['-C', other, 'fetch', '-q', repo, 'bill10/rebased']);
+    execFileSync('git', ['-C', other, 'cherry-pick', sha], { stdio: 'ignore' });
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+    execFileSync('git', ['-C', repo, 'fetch', '-q', 'origin']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/rebased' });
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it('releases a run with no upstream and nothing beyond origin/main, though local main is behind', async () => {
+    // The hourly runs: branched from origin/main, no commits, no PR. Counted
+    // against the stale local main, origin's newer commits read as the run's.
+    const { root, repo } = repoWithRemote();
+    const other = elsewhere(root);
+    commitFile(other, 'newer.txt', 'x', 'main moves on');
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+    execFileSync('git', ['-C', repo, 'fetch', '-q', 'origin']);
+    const wt = worktreeOn(repo, root, 'bill10/hourly', { from: 'origin/main' });
+    execFileSync('git', ['-C', repo, 'branch', '--unset-upstream', 'bill10/hourly'], { stdio: 'ignore' });
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/hourly' });
+    expect(result).toEqual({ orphaned: false });
+    expect(existsSync(wt)).toBe(false);
+  });
+
+  it('keeps a commit main does not have, even when local main is behind', async () => {
+    const { root, repo } = repoWithRemote();
+    const other = elsewhere(root);
+    commitFile(other, 'newer.txt', 'x', 'main moves on');
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+    execFileSync('git', ['-C', repo, 'fetch', '-q', 'origin']);
+    const wt = worktreeOn(repo, root, 'bill10/real-work', { from: 'origin/main', commit: true });
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/real-work' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps a squash-merged branch with uncommitted files', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/merged-dirty', { commit: true, push: true });
+    squashMerge(repo, root, 'bill10/merged-dirty');
+    writeFileSync(join(wt, 'scratch.txt'), 'not committed');
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/merged-dirty' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'uncommitted' });
+    expect(existsSync(wt)).toBe(true);
+  });
+});
+
+describe('removeWorktree never mistakes different work for merged work', () => {
+  it('keeps a branch whose edit differs from main\'s only in whitespace', async () => {
+    // A patch-id ignores whitespace, so "hello world" and "helloworld" made
+    // from the same line match by patch-id. The files are not the same.
+    const { root, repo } = repoWithRemote();
+    commitFile(repo, 'msg.txt', 'message = "old"\n', 'msg');
+    execFileSync('git', ['-C', repo, 'push', '-q', 'origin', 'main']);
+    const wt = worktreeOn(repo, root, 'bill10/spaced', {});
+    commitFile(wt, 'msg.txt', 'message = "hello world"\n', 'branch edit');
+    const other = elsewhere(root);
+    commitFile(other, 'msg.txt', 'message = "helloworld"\n', 'main edit');
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/spaced' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps a branch even when a repo merge driver would drop its change', async () => {
+    // A trial merge runs the repo's merge drivers; `merge=ours` keeps main's
+    // side and would make the merge look like main. No merge is tried.
+    const { root, repo } = repoWithRemote();
+    commitFile(repo, '.gitattributes', 'config.json merge=ours\n', 'attrs');
+    commitFile(repo, 'config.json', '{"a":1}\n', 'config');
+    execFileSync('git', ['-C', repo, 'push', '-q', 'origin', 'main']);
+    execFileSync('git', ['-C', repo, 'config', 'merge.ours.driver', 'true']);
+    const wt = worktreeOn(repo, root, 'bill10/driver', {});
+    commitFile(wt, 'config.json', '{"a":2}\n', 'branch edit');
+    const other = elsewhere(root);
+    commitFile(other, 'config.json', '{"a":3}\n', 'main edit');
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/driver' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+  });
+
+  it('keeps a squash-merged branch once the remote main no longer has the squash', async () => {
+    // This machine fetched the squash, then main was force-reset past it. The
+    // cached origin/main must not clear the branch: it is fetched first.
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/reset', { commit: true, push: true });
+    const other = squashMerge(repo, root, 'bill10/reset');
+    execFileSync('git', ['-C', repo, 'fetch', '-q', 'origin']);
+    execFileSync('git', ['-C', other, 'push', '-q', '-f', 'origin', 'HEAD~1:main']);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/reset' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+  });
+
+  it('keeps commits made on a detached HEAD in the worktree', async () => {
+    // The branch is still at main, but the worktree's HEAD, the thing removal
+    // throws away, holds a commit nothing else reaches.
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/detached', { from: 'origin/main' });
+    execFileSync('git', ['-C', wt, 'checkout', '-q', '--detach']);
+    commitFile(wt, 'precious.txt', 'only here', 'detached work');
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/detached' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('keeps a squash-merged branch when origin cannot be fetched', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/offline', { commit: true, push: true });
+    squashMerge(repo, root, 'bill10/offline');
+    execFileSync('git', ['-C', repo, 'fetch', '-q', 'origin']);
+    execFileSync('git', ['-C', repo, 'remote', 'set-url', 'origin', join(root, 'gone.git')]);
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/offline' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    // The doctor reads local refs only, and there the work is on main.
+    expect(await commitsNotInBase({ repoPath: repo, branchName: 'bill10/offline' }, { fetch: false })).toBe(0);
+  });
+});
+
+describe('commitsNotInBase edges', () => {
+  it('cannot decide without a usable branch name or branch ref', async () => {
+    const { repo } = repoWithRemote();
+    expect(await commitsNotInBase({ repoPath: repo, branchName: '' })).toBe(-1);
+    // A name git would read as an option never reaches argv.
+    expect(await commitsNotInBase({ repoPath: repo, branchName: '--all' })).toBe(-1);
+    expect(await commitsNotInBase({ repoPath: repo, branchName: 'bill10/never-made' })).toBe(-1);
+  });
+
+  it('without fetch, a squash merge since the last fetch still counts as ahead', async () => {
+    // The doctor's path: local refs only, so the merge shows once something fetches.
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/stale-view', { commit: true, push: true });
+    squashMerge(repo, root, 'bill10/stale-view');
+    const session = { repoPath: repo, branchName: 'bill10/stale-view' };
+    expect(await commitsNotInBase(session, { fetch: false })).toBe(1);
+    expect(await commitsNotInBase(session)).toBe(0);
+    expect(existsSync(wt)).toBe(true);
+  });
+
+  it('counts a branch whose change conflicts with main as not there', async () => {
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/conflict', {});
+    commitFile(wt, 'README.md', 'branch version', 'branch edit');
+    const other = elsewhere(root);
+    commitFile(other, 'README.md', 'main version', 'main edit');
+    execFileSync('git', ['-C', other, 'push', '-q', 'origin', 'main']);
+    execFileSync('git', ['-C', repo, 'fetch', '-q', 'origin']);
+    expect(await commitsNotInBase({ repoPath: repo, branchName: 'bill10/conflict' })).toBe(1);
+  });
+
+  it('falls back to the local base branch when the repo has no origin', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'a007-cleanup-'));
+    const repo = join(root, 'repo');
+    execFileSync('git', ['init', '-q', repo]);
+    execFileSync('git', ['-C', repo, 'config', 'user.name', 'bill10']);
+    execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t']);
+    commitFile(repo, 'README.md', 'base', 'base');
+    execFileSync('git', ['-C', repo, 'branch', '-M', 'main']);
+    execFileSync('git', ['-C', repo, 'branch', 'bill10/empty']);
+    expect(await commitsNotInBase({ repoPath: repo, branchName: 'bill10/empty' })).toBe(0);
+    const wt = worktreeOn(repo, root, 'bill10/local-work', { commit: true });
+    expect(existsSync(wt)).toBe(true);
+    expect(await commitsNotInBase({ repoPath: repo, branchName: 'bill10/local-work' })).toBe(1);
   });
 });
 
