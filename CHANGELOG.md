@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.2.0] - 2026-10-10
+
+### Added
+
+- **Settings → Accounts marks the login Billion runs on.** When both a Claude and a Codex row say "Active", the one Billion itself is using now ends its status line with "Billion". No marker when Billion is off.
+
 ## [0.69.1.0] - 2026-10-10
 
 ### Changed
