@@ -670,6 +670,13 @@ describe('doctor stale orphans', () => {
     expect(stale.lines[0].text).toContain('Kite');
   });
 
+  it('leaves out a folder that is no longer a worktree', async () => {
+    // status there would answer for whatever repo holds the folder.
+    const p = { ...machine(), exists: (path) => !path.endsWith(join('Husk', '.git')) };
+    const lines = await checkOrphans(p, board({ orphans: [orphan('Husk', { reason: 'broken-worktree' })] }));
+    expect(lines).toEqual([expect.objectContaining({ status: 'ok', text: expect.stringMatching(/^1 orphaned worktree kept/) })]);
+  });
+
   it('reads the orphans from config.json for a full run', async () => {
     const files = { [CONFIG]: JSON.stringify({ repos: [{ path: '/r/app' }], jobs: [], orphans: [orphan('Falcon')] }) };
     const results = await runDoctor({ probes: { ...machine(), files, readFile: (p) => files[p], exists: () => true } });

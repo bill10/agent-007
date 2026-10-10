@@ -289,8 +289,7 @@ export async function checkRepos(p, board, origin, account = accountOf(p, new Ma
 // builds kept one per finished card as "unpushed". Report only: the Explorer's
 // delete button removes one, and a restart releases an "unpushed" one whose
 // card is finished. An orphan an open card may still re-adopt is left out. Local
-// refs only, so a PR merged since the last fetch reads as kept; the squash
-// test may leave git an unreferenced object or two, which gc removes.
+// refs only, so a PR merged since the last fetch reads as kept.
 export async function checkOrphans(p, board) {
   const orphans = board.orphans || [];
   if (!orphans.length) return [ok('no orphaned worktrees')];
@@ -299,6 +298,8 @@ export async function checkOrphans(p, board) {
   const stale = (await Promise.all(orphans.map(async (o) => {
     if (open(o)) return null;
     if (!p.exists(o.worktreePath)) return { o, why: 'its folder is gone' };
+    // No .git: status would walk up into whatever repo holds the folder.
+    if (!p.exists(join(o.worktreePath, '.git'))) return null;
     try {
       if ((await p.git(['-C', o.worktreePath, 'status', '--porcelain'], LOCAL_GIT_MS)).trim()) return null;
     } catch { return null; }

@@ -32,7 +32,7 @@ export function gitExec(args, opts = {}) {
   // hanging, so it is set for every git call.
   const env = { ...process.env, ...opts.env, LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0' };
   return new Promise((resolve, reject) => {
-    execFileCb('git', args, { timeout, maxBuffer: 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
+    execFileCb('git', args, { timeout, maxBuffer: opts.maxBuffer || 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;
         reject(err);
@@ -413,7 +413,7 @@ export async function worktreeRisk(session) {
 // ago is seen and a cached ref the remote has since moved off cannot clear a
 // branch; a failed fetch keeps it. Off for the doctor, which never talks to
 // the network.
-export async function commitsNotInBase({ repoPath, branchName }, { fetch = true } = {}) {
+export async function commitsNotInBase({ repoPath, branchName, worktreePath }, { fetch = true } = {}) {
   if (!branchName || branchName.startsWith('-')) return -1;
   // No base branch to compare against means no way to know whether the
   // branch holds commits nobody else has. Keep it: `branch -D` in
@@ -426,7 +426,15 @@ export async function commitsNotInBase({ repoPath, branchName }, { fetch = true 
   const remoteBase = `refs/remotes/origin/${base}`;
   const baseRef = await sha(remoteBase) ? remoteBase : `refs/heads/${base}`;
   const branchRef = `refs/heads/${branchName}`;
-  if (!await sha(baseRef) || !await sha(branchRef)) return -1;
+  const tip = await sha(branchRef);
+  if (!await sha(baseRef) || !tip) return -1;
+  // The worktree's HEAD is what removal throws away. An agent that detached
+  // it and committed there has commits the branch does not reach.
+  if (worktreePath) {
+    try {
+      if ((await gitExec(['-C', worktreePath, 'rev-parse', 'HEAD'])).trim() !== tip) return -1;
+    } catch { return -1; }
+  }
   const ahead = async () => {
     try {
       const n = parseInt((await gitExec(['-C', repoPath, 'rev-list', '--count', `${baseRef}..${branchRef}`])).trim(), 10);
@@ -454,9 +462,9 @@ function fetchBase(repoPath, base) {
   if (cached && Date.now() - cached.at < BASE_FETCH_REUSE_MS) return cached.done;
   const done = gitExec(['-C', repoPath, 'fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { timeout: FETCH_TIMEOUT })
     .then(() => true, () => false);
+  // A failure is reused too: offline, every worktree of the repo would
+  // otherwise wait out its own timeout in a row.
   baseFetches.set(key, { at: Date.now(), done });
-  // A failure is not reused: the next caller tries again.
-  done.then(ok => { if (!ok) baseFetches.delete(key); });
   return done;
 }
 
@@ -469,11 +477,14 @@ async function filesLanded(repoPath, baseRef, branchRef) {
     const mergeBase = (await gitExec(['-C', repoPath, 'merge-base', baseRef, branchRef])).trim();
     if (!mergeBase) return false;
     const wanted = parseRaw(await gitExec(['-C', repoPath, 'diff', '--raw', '--no-renames', '--no-abbrev', '-z', mergeBase, branchRef]));
-    if (!wanted.size) return false; // commits but no change: nothing to match, so keep
+    // Commits but no net change: nothing to match, so keep. Net is the test:
+    // a file the branch added and deleted again is not looked for, as a
+    // squash merge would not carry it either.
+    if (!wanted.size) return false;
     if (wanted.size > MAX_LANDED_PATHS) return false;
     // -m: a merge commit on the base counts by what it brought in, too.
     const seen = new Set();
-    const log = await gitExec(['-C', repoPath, 'log', '-m', '--raw', '--no-renames', '--no-abbrev', '-z', '--format=', `${mergeBase}..${baseRef}`, '--', ...[...wanted.keys()].map(p => `:(literal)${p}`)]);
+    const log = await gitExec(['-C', repoPath, 'log', '-m', '--raw', '--no-renames', '--no-abbrev', '-z', '--format=', `${mergeBase}..${baseRef}`, '--', ...[...wanted.keys()].map(p => `:(literal)${p}`)], { maxBuffer: 16 * 1024 * 1024, timeout: 15_000 });
     for (const [path, mb] of parseRaw(log, true)) for (const v of mb) seen.add(`${path}\0${v}`);
     return [...wanted].every(([path, [v]]) => seen.has(`${path}\0${v}`));
   } catch { return false; }

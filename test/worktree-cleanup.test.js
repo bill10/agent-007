@@ -304,6 +304,19 @@ describe('removeWorktree never mistakes different work for merged work', () => {
     expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
   });
 
+  it('keeps commits made on a detached HEAD in the worktree', async () => {
+    // The branch is still at main, but the worktree's HEAD, the thing removal
+    // throws away, holds a commit nothing else reaches.
+    const { root, repo } = repoWithRemote();
+    const wt = worktreeOn(repo, root, 'bill10/detached', { from: 'origin/main' });
+    execFileSync('git', ['-C', wt, 'checkout', '-q', '--detach']);
+    commitFile(wt, 'precious.txt', 'only here', 'detached work');
+
+    const result = await removeWorktree({ worktreePath: wt, repoPath: repo, branchName: 'bill10/detached' });
+    expect(result).toMatchObject({ orphaned: true, reason: 'unpushed' });
+    expect(existsSync(wt)).toBe(true);
+  });
+
   it('keeps a squash-merged branch when origin cannot be fetched', async () => {
     const { root, repo } = repoWithRemote();
     const wt = worktreeOn(repo, root, 'bill10/offline', { commit: true, push: true });
