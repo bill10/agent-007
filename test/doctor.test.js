@@ -618,7 +618,8 @@ describe('doctor stale orphans', () => {
   const orphan = (name, over = {}) => ({ name, reason: 'unpushed', repoPath: '/r/app', branchName: `bill/${name}`, worktreePath: `/home/.agent-007/worktrees/app-1/${name}`, ...over });
   // dirty: worktree paths with uncommitted files; ahead: commitsNotInBase per name.
   const machine = ({ dirty = [], ahead = {}, gone = [] } = {}) => probes({
-    exists: (p) => !gone.some(n => p.endsWith(`/${n}`)) && (p.startsWith('/r/') || p.startsWith('/home/')),
+    // checkOrphans joins paths, which on Windows turns / into a backslash.
+    exists: (p) => { const at = p.replace(/\\/g, '/'); return !gone.some(n => at.endsWith(`/${n}`)) && (at.startsWith('/r/') || at.startsWith('/home/')); },
     git: async (a) => (a.includes('status') ? (dirty.some(n => a[1].endsWith(`/${n}`)) ? ' M file\n' : '') : ''),
     commitsNotInBase: async (o) => ahead[o.name] ?? 0,
   });

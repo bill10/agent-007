@@ -27,6 +27,9 @@ function repoWithRemote() {
   // version, unlike `init -b`.
   execFileSync('git', ['-C', repo, 'branch', '-M', 'main']);
   execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
+  // The bare remote's HEAD still names init.defaultBranch (`master` on CI),
+  // so a second clone would check out nothing. Point it at main.
+  execFileSync('git', ['-C', bare, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
   return { root, repo };
 }
 
@@ -143,7 +146,7 @@ describe('removeWorktree after a job opens its PR', () => {
 // moving main on while this machine's checkout sits still.
 function elsewhere(root) {
   const other = join(root, `other-${readdirSync(root).length}`);
-  execFileSync('git', ['clone', '-q', join(root, 'remote.git'), other], { stdio: 'ignore' });
+  execFileSync('git', ['clone', '-q', '-b', 'main', join(root, 'remote.git'), other], { stdio: 'ignore' });
   execFileSync('git', ['-C', other, 'config', 'user.name', 'someone']);
   execFileSync('git', ['-C', other, 'config', 'user.email', 's@s']);
   return other;
