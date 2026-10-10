@@ -311,4 +311,17 @@ describe('one Accounts list: the scan\'s logins with the switch list', () => {
     expect(rows().map(r => [r.name, r.box])).toEqual([['a@x', false], ['~/.claude-old', false], ['g@x', false]]);
     expect(document.querySelectorAll('.account-body button, .account-body input, .account-body select')).toHaveLength(0);
   });
+  it('marks only the Active login of the CLI Billion runs on, and follows it', () => {
+    const both = billionCli => handleAccountState({ type: 'account-state', billionCli,
+      rotation: { enabled: false, active: 'a', accounts: [account('a', 'a@x', 'Active')] },
+      codexRotation: { enabled: false, active: 'c', accounts: [{ ...account('c', 'c@x', 'Active'), cli: 'codex' }] } });
+    const metas = () => [...document.querySelectorAll('.rotation-account')].map(r => r.querySelector('.account-meta')?.textContent);
+    both('claude');
+    expect(metas()).toEqual(['ActiveBillion', 'Active']);
+    expect(document.querySelector('[title="Billion runs on this login"]').closest('.rotation-account').dataset.cli).toBe('claude');
+    both('codex');
+    expect(metas()).toEqual(['Active', 'ActiveBillion']);
+    both(null);
+    expect(metas()).toEqual(['Active', 'Active']);
+  });
 });

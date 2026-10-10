@@ -372,7 +372,7 @@ async function switchBillion(to, reason) {
     to, current, currentAgent: billionAgent(), dir: billionDir(),
     writeHandover, saveAgent: (agent) => saveBillionAgent(agent, process.env, undefined, reason), stop: stopBillion, start: startBillion,
   });
-  try { return await switching; } finally { switching = null; }
+  try { return await switching; } finally { switching = null; announceAccount(); }
 }
 
 // The owner's Claude account switch (server/account-migration.js): every
@@ -392,7 +392,7 @@ async function switchBillion(to, reason) {
 const RECHECK_MS = 40_000;
 const CLI_LABEL = { claude: 'Claude', codex: 'Codex' };
 const rotationPayload = cli => ({ ...publicRotationState(undefined, undefined, cli), resumePending: [...sessions.values()].some(s => s.rotationResume && s.agent === cli) });
-const accountStatePayload = () => ({ type: 'account-state', ...accountState(), rotation: rotationPayload('claude'), codexRotation: rotationPayload('codex') });
+const accountStatePayload = () => ({ type: 'account-state', ...accountState(), rotation: rotationPayload('claude'), codexRotation: rotationPayload('codex'), billionCli: liveBillion()?.agent || null });
 const announceAccount = () => { if (mayAnswerOwner()) broadcastToBrowsers(accountStatePayload()); };
 async function tellOwnerOrShow(text, level, { show = true } = {}) {
   // In the Billion tab either way; a toast too unless it reached the phone.

@@ -77,6 +77,7 @@ describe('rotation through the owner socket', () => {
       await wait(() => old.every(s => s.ringBuffer.getAll().join('').includes('fixture started')));
       ws.send(JSON.stringify({ type: 'account', action: 'rotation-add', folder: '/fixture-b' }));
       const enrolled = await wait(() => seen.find(m => m.type === 'account-state' && m.rotation?.accounts.length === 2));
+      expect(enrolled.billionCli).toBe('claude');
       const target = enrolled.rotation.accounts.find(a => a.email === 'b@example.com');
       auth.activation = () => expect(old.every(s => s.exited)).toBe(true);
       old[0].messagesHeld = true;

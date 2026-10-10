@@ -237,6 +237,7 @@ function renderLogins(body, logins, switching) {
     else if (a) bit(a.status === 'Limited' && a.limitedUntil > Date.now() ? `Limited · until ${new Date(a.limitedUntil).toLocaleString()}` : a.status, 'account-state');
     else if (login?.loggedIn) bit('Logged in', 'settings-status in');
     if (login?.isDefault && a?.status !== 'Active') bit('Default');
+    if (a?.status === 'Active' && cli === state.billionCli) { bit('Billion'); meta.lastChild.title = 'Billion runs on this login'; }
     if (!meta.children.length) meta.remove();
     if (a?.error) { const error = document.createElement('span'); error.className = 'account-error'; error.textContent = a.error; el.append(error); }
   };
