@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.1.0] - 2026-10-10
+
+### Changed
+
+- **Accounts rows are two lines, not three.** Move up, Move down (now ↑ and ↓ buttons, with tooltips) and Switch now sit on the right of each account's row instead of on a line of their own, so the list is shorter and works on a phone.
+
 ## [0.69.0.0] - 2026-10-09
 
 ### Changed
