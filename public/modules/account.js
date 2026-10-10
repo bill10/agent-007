@@ -165,12 +165,12 @@ function render(body) {
     const box = row.querySelector('input'); box.onchange = () => { a.enabled = box.checked; edited(); updateControls(); };
     const controls = document.createElement('div'); controls.className = 'account-actions'; row.append(controls);
     const who = `${NAME[a.cli]} account ${a.email}`;
-    const up = button(controls, 'Move up', 'rotation-up', () => {
+    const up = button(controls, '↑', 'rotation-up', () => {
       [draft.accounts[index - 1], draft.accounts[index]] = [draft.accounts[index], draft.accounts[index - 1]]; edited(); renderAccount();
-    }, `Move ${who} up`); up.disabled = index === 0;
-    const down = button(controls, 'Move down', 'rotation-down', () => {
+    }, `Move ${who} up`); up.disabled = index === 0; up.title = 'Move up';
+    const down = button(controls, '↓', 'rotation-down', () => {
       [draft.accounts[index], draft.accounts[index + 1]] = [draft.accounts[index + 1], draft.accounts[index]]; edited(); renderAccount();
-    }, `Move ${who} down`); down.disabled = index === draft.accounts.length - 1;
+    }, `Move ${who} down`); down.disabled = index === draft.accounts.length - 1; down.title = 'Move down';
     if (a.id !== draft.active[a.cli]) button(controls, 'Switch now', 'rotation-switch', () => {
       if (confirm(`Switch ${NAME[a.cli]} to ${a.email}? The app's ${NAME[a.cli]} sessions will restart in their existing conversations.`)) transmit(body, 'rotation-switch', { ...cliField(a.cli), id: a.id });
     }, `Switch ${NAME[a.cli]} to ${a.email} now`);
@@ -212,8 +212,8 @@ function renderLogins(body, logins, switching) {
     const el = document.createElement('div'); el.className = 'rotation-account'; el.dataset.cli = cli; list.append(el);
     const identity = document.createElement('div'); identity.className = 'account-identity'; el.append(identity);
     const tag = document.createElement('span'); tag.className = 'account-cli-tag'; tag.textContent = NAME[cli] || cli;
-    const caption = document.createElement('span'); caption.textContent = name;
-    if (login) caption.title = login.folder;
+    const caption = document.createElement('span'); caption.textContent = name; caption.className = 'account-email';
+    caption.title = login ? login.folder : name;
     // The CLI leads the row, inside the checkbox's label: one email can be both a Claude and a Codex login.
     if (a) {
       el.dataset.index = index;
