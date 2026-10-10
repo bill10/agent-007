@@ -197,6 +197,17 @@ describe('one list of Claude and Codex accounts', () => {
     expect(send).toHaveBeenCalledWith({ type: 'account', action: 'rotation-switch', cli: 'codex', id: 'd' });
     expect(switches[1].getAttribute('aria-label')).toBe('Switch Codex to d@x now');
   });
+  it('puts compact arrow buttons in the account row, disabled at the ends', () => {
+    both(claude, codexState);
+    const ups = [...document.querySelectorAll('[data-action="rotation-up"]')], downs = [...document.querySelectorAll('[data-action="rotation-down"]')];
+    expect(ups.map(b => [b.textContent, b.title])).toEqual(ups.map(() => ['↑', 'Move up']));
+    expect(downs.map(b => [b.textContent, b.title])).toEqual(downs.map(() => ['↓', 'Move down']));
+    expect(ups[0].getAttribute('aria-label')).toBe('Move Claude account a@x up');
+    expect(ups.map(b => b.disabled)).toEqual([true, false, false, false]);
+    expect(downs.map(b => b.disabled)).toEqual([false, false, false, true]);
+    expect(ups[0].closest('.rotation-account').querySelector('.account-actions')).not.toBeNull();
+    expect(document.querySelector('.account-email').title).toBe('a@x');
+  });
   it('keeps unsaved edits when a state update arrives, and drops them once saved', () => {
     both(claude, codexState);
     document.querySelectorAll('[data-action="rotation-down"]')[1].click();   // b below c
