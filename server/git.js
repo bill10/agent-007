@@ -398,70 +398,102 @@ export async function worktreeRisk(session) {
   return { uncommitted, unpushed };
 }
 
-// How many of the branch's commits carry content the base branch does not
-// have: 0 when it has all of it, -1 when git cannot say. Measured against
-// `origin/<base>`, not the local base branch: agents branch from origin, so a
-// local main that has fallen behind counted every commit main gained since as
-// the branch's own, and a run that produced nothing came out "unpushed".
-// Three ways the content can be there already, cheapest first:
-//  - the same commits, or rebased equivalents (`--cherry-pick`, by patch-id);
-//  - a squash merge: the branch's whole diff as one patch, matched by patch-id
-//    against the base's commits since the fork (`git cherry`);
-//  - a squash merge the base has built on since: merging the branch into the
-//    base changes nothing (`merge-tree`; a conflict counts as not there).
-// fetch: refresh origin/<base> once before giving up, so a PR merged a moment
-// ago is seen. Off for the doctor, which never talks to the network.
+// How many of the branch's commits are not on the base branch: 0 when none
+// are, or when every file the branch changed has held exactly the branch's
+// version on the base branch since the fork; -1 when git cannot say. Measured
+// against `origin/<base>`, not the local base branch: agents branch from
+// origin, so a local main that has fallen behind counted every commit main
+// gained since as the branch's own, and a run that produced nothing came out
+// "unpushed".
+// The file test is what a squash or rebase merge leaves: the branch's commits
+// never reach main as they are, but its files do, byte for byte. Blob ids,
+// never patch-ids (which ignore whitespace, so two different edits can match)
+// and never a trial merge (which runs the repo's own merge drivers).
+// fetch: refresh origin/<base> before the file test, so a PR merged a moment
+// ago is seen and a cached ref the remote has since moved off cannot clear a
+// branch; a failed fetch keeps it. Off for the doctor, which never talks to
+// the network.
 export async function commitsNotInBase({ repoPath, branchName }, { fetch = true } = {}) {
   if (!branchName || branchName.startsWith('-')) return -1;
   // No base branch to compare against means no way to know whether the
   // branch holds commits nobody else has. Keep it: `branch -D` in
   // removeWorktree is the one step that can destroy work.
   const base = await resolveBaseBranch(repoPath);
-  if (!base) return -1;
-  const verified = async (ref) => {
-    try { await gitExec(['-C', repoPath, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`]); return true; } catch { return false; }
+  if (!base || base.startsWith('-')) return -1;
+  const sha = async (ref) => {
+    try { return (await gitExec(['-C', repoPath, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim() || null; } catch { return null; }
   };
   const remoteBase = `refs/remotes/origin/${base}`;
-  const baseRef = await verified(remoteBase) ? remoteBase : base;
+  const baseRef = await sha(remoteBase) ? remoteBase : `refs/heads/${base}`;
   const branchRef = `refs/heads/${branchName}`;
-  if (!await verified(branchRef)) return -1;
+  if (!await sha(baseRef) || !await sha(branchRef)) return -1;
   const ahead = async () => {
     try {
-      const out = await gitExec(['-C', repoPath, 'rev-list', '--count', '--cherry-pick', '--right-only', `${baseRef}...${branchRef}`]);
-      const n = parseInt(out.trim(), 10);
-      if (!Number.isFinite(n)) return -1;
-      return n && await squashedInto(repoPath, baseRef, branchRef) ? 0 : n;
+      const n = parseInt((await gitExec(['-C', repoPath, 'rev-list', '--count', `${baseRef}..${branchRef}`])).trim(), 10);
+      return Number.isFinite(n) ? n : -1;
     } catch { return -1; }
   };
+  // 0: every commit is on the base as it is (merged, or none made).
   let n = await ahead();
-  if (n > 0 && fetch && baseRef === remoteBase) {
-    try {
-      await gitExec(['-C', repoPath, 'fetch', '--quiet', 'origin', `+refs/heads/${base}:${remoteBase}`], { timeout: FETCH_TIMEOUT });
-      n = await ahead();
-    } catch {}
+  if (n <= 0) return n;
+  if (fetch && baseRef === remoteBase) {
+    if (!await fetchBase(repoPath, base)) return n;
+    n = await ahead();
+    if (n <= 0) return n;
   }
-  return n;
+  return await filesLanded(repoPath, baseRef, branchRef) ? 0 : n;
 }
 
-// Whether the base branch already holds the branch's combined change — the
-// shape a squash merge leaves. Only a definite yes returns true.
-async function squashedInto(repoPath, baseRef, branchRef) {
+// One fetch of origin/<base> per repo at a time, shared by every caller in
+// that window: the startup pass checks many orphans of one repo in a row.
+const baseFetches = new Map();
+const BASE_FETCH_REUSE_MS = 30_000;
+function fetchBase(repoPath, base) {
+  const key = `${repoPath}\0${base}`;
+  const cached = baseFetches.get(key);
+  if (cached && Date.now() - cached.at < BASE_FETCH_REUSE_MS) return cached.done;
+  const done = gitExec(['-C', repoPath, 'fetch', '--quiet', 'origin', `+refs/heads/${base}:refs/remotes/origin/${base}`], { timeout: FETCH_TIMEOUT })
+    .then(() => true, () => false);
+  baseFetches.set(key, { at: Date.now(), done });
+  // A failure is not reused: the next caller tries again.
+  done.then(ok => { if (!ok) baseFetches.delete(key); });
+  return done;
+}
+
+// Every path the branch changed since the fork (added, modified or deleted)
+// has, in some commit on the base since then, exactly the branch's mode and
+// blob, or none for a deletion. Only a definite yes returns true.
+const MAX_LANDED_PATHS = 1000;
+async function filesLanded(repoPath, baseRef, branchRef) {
   try {
     const mergeBase = (await gitExec(['-C', repoPath, 'merge-base', baseRef, branchRef])).trim();
-    // A commit object nothing points at, made only to give the branch's whole
-    // diff one patch-id; `gc` drops it. The identity is fixed so a repo with
-    // no user.name can still make it.
-    const squash = (await gitExec(['-C', repoPath, 'commit-tree', `${branchRef}^{tree}`, '-p', mergeBase, '-m', 'squash'], {
-      env: { GIT_AUTHOR_NAME: 'agent-007', GIT_AUTHOR_EMAIL: 'agent-007@localhost', GIT_COMMITTER_NAME: 'agent-007', GIT_COMMITTER_EMAIL: 'agent-007@localhost' },
-    })).trim();
-    const cherry = (await gitExec(['-C', repoPath, 'cherry', baseRef, squash, mergeBase])).trim();
-    if (cherry.startsWith('-')) return true;
-  } catch {}
-  try {
-    const merged = (await gitExec(['-C', repoPath, 'merge-tree', '--write-tree', baseRef, branchRef])).trim().split('\n')[0];
-    const baseTree = (await gitExec(['-C', repoPath, 'rev-parse', `${baseRef}^{tree}`])).trim();
-    return !!merged && merged === baseTree;
+    if (!mergeBase) return false;
+    const wanted = parseRaw(await gitExec(['-C', repoPath, 'diff', '--raw', '--no-renames', '--no-abbrev', '-z', mergeBase, branchRef]));
+    if (!wanted.size) return false; // commits but no change: nothing to match, so keep
+    if (wanted.size > MAX_LANDED_PATHS) return false;
+    // -m: a merge commit on the base counts by what it brought in, too.
+    const seen = new Set();
+    const log = await gitExec(['-C', repoPath, 'log', '-m', '--raw', '--no-renames', '--no-abbrev', '-z', '--format=', `${mergeBase}..${baseRef}`, '--', ...[...wanted.keys()].map(p => `:(literal)${p}`)]);
+    for (const [path, mb] of parseRaw(log, true)) for (const v of mb) seen.add(`${path}\0${v}`);
+    return [...wanted].every(([path, [v]]) => seen.has(`${path}\0${v}`));
   } catch { return false; }
+}
+
+// `--raw -z` output to path -> ["<new mode> <new blob>", ...]. A deletion is
+// "000000 000…0". all: keep every entry per path (a log), else the one diff.
+function parseRaw(out, all = false) {
+  const map = new Map();
+  const parts = out.split('\0');
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    const meta = parts[i].replace(/^\n+/, '');
+    if (!meta.startsWith(':')) { i--; continue; }
+    const [, newMode, , newBlob] = meta.slice(1).split(' ');
+    const path = parts[i + 1];
+    const value = `${newMode} ${newBlob}`;
+    if (!map.has(path)) map.set(path, []);
+    if (all || !map.get(path).length) map.get(path).push(value);
+  }
+  return map;
 }
 
 // discardChanges: uncommitted and untracked files are not worth keeping, for
