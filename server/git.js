@@ -362,9 +362,9 @@ export async function createWorktree(repoPath, agentName, customBranch, { suffix
 
 // Work in a worktree that exists nowhere else: `uncommitted` (anything in
 // `status --porcelain`, or a status git could not read) and `unpushed` (commits
-// the remote does not have: a count, or -1 when there is no base branch or log
-// to count against). removeWorktree orphans on either; the remove-repo dialog
-// warns on either, so both read it from here.
+// whose content is in neither the remote branch nor the base branch: a count,
+// or -1 when git cannot decide). removeWorktree orphans on either; the
+// remove-repo dialog warns on either, so both read it from here.
 export async function worktreeRisk(session) {
   let uncommitted = false;
   try {
@@ -392,21 +392,76 @@ export async function worktreeRisk(session) {
   // shared repo's refs/remotes/origin/<branch> on an old SHA. Ask the
   // remote itself; anything short of a matching SHA stays not-pushed.
   if (!fullyPushed) fullyPushed = await matchesRemote(session);
-  let unpushed = 0;
-  if (!fullyPushed) {
-    const baseBranch = await resolveBaseBranch(session.repoPath);
-    // No base branch to compare against means no way to know whether the
-    // branch holds commits nobody else has. Keep it: `branch -D` below is
-    // the one step here that can destroy work.
-    if (!baseBranch) unpushed = -1;
-    else {
-      try {
-        const log = await gitExec(['-C', session.repoPath, 'log', `${baseBranch}..${session.branchName}`, '--oneline']);
-        unpushed = log.trim() ? log.trim().split('\n').length : 0;
-      } catch { unpushed = -1; }
-    }
-  }
+  // Not on the remote branch (deleted after its PR merged, or never pushed):
+  // then it is safe only when the base branch already has its content.
+  const unpushed = fullyPushed ? 0 : await commitsNotInBase(session);
   return { uncommitted, unpushed };
+}
+
+// How many of the branch's commits carry content the base branch does not
+// have: 0 when it has all of it, -1 when git cannot say. Measured against
+// `origin/<base>`, not the local base branch: agents branch from origin, so a
+// local main that has fallen behind counted every commit main gained since as
+// the branch's own, and a run that produced nothing came out "unpushed".
+// Three ways the content can be there already, cheapest first:
+//  - the same commits, or rebased equivalents (`--cherry-pick`, by patch-id);
+//  - a squash merge: the branch's whole diff as one patch, matched by patch-id
+//    against the base's commits since the fork (`git cherry`);
+//  - a squash merge the base has built on since: merging the branch into the
+//    base changes nothing (`merge-tree`; a conflict counts as not there).
+// fetch: refresh origin/<base> once before giving up, so a PR merged a moment
+// ago is seen. Off for the doctor, which never talks to the network.
+export async function commitsNotInBase({ repoPath, branchName }, { fetch = true } = {}) {
+  if (!branchName || branchName.startsWith('-')) return -1;
+  // No base branch to compare against means no way to know whether the
+  // branch holds commits nobody else has. Keep it: `branch -D` in
+  // removeWorktree is the one step that can destroy work.
+  const base = await resolveBaseBranch(repoPath);
+  if (!base) return -1;
+  const verified = async (ref) => {
+    try { await gitExec(['-C', repoPath, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`]); return true; } catch { return false; }
+  };
+  const remoteBase = `refs/remotes/origin/${base}`;
+  const baseRef = await verified(remoteBase) ? remoteBase : base;
+  const branchRef = `refs/heads/${branchName}`;
+  if (!await verified(branchRef)) return -1;
+  const ahead = async () => {
+    try {
+      const out = await gitExec(['-C', repoPath, 'rev-list', '--count', '--cherry-pick', '--right-only', `${baseRef}...${branchRef}`]);
+      const n = parseInt(out.trim(), 10);
+      if (!Number.isFinite(n)) return -1;
+      return n && await squashedInto(repoPath, baseRef, branchRef) ? 0 : n;
+    } catch { return -1; }
+  };
+  let n = await ahead();
+  if (n > 0 && fetch && baseRef === remoteBase) {
+    try {
+      await gitExec(['-C', repoPath, 'fetch', '--quiet', 'origin', `+refs/heads/${base}:${remoteBase}`], { timeout: FETCH_TIMEOUT });
+      n = await ahead();
+    } catch {}
+  }
+  return n;
+}
+
+// Whether the base branch already holds the branch's combined change — the
+// shape a squash merge leaves. Only a definite yes returns true.
+async function squashedInto(repoPath, baseRef, branchRef) {
+  try {
+    const mergeBase = (await gitExec(['-C', repoPath, 'merge-base', baseRef, branchRef])).trim();
+    // A commit object nothing points at, made only to give the branch's whole
+    // diff one patch-id; `gc` drops it. The identity is fixed so a repo with
+    // no user.name can still make it.
+    const squash = (await gitExec(['-C', repoPath, 'commit-tree', `${branchRef}^{tree}`, '-p', mergeBase, '-m', 'squash'], {
+      env: { GIT_AUTHOR_NAME: 'agent-007', GIT_AUTHOR_EMAIL: 'agent-007@localhost', GIT_COMMITTER_NAME: 'agent-007', GIT_COMMITTER_EMAIL: 'agent-007@localhost' },
+    })).trim();
+    const cherry = (await gitExec(['-C', repoPath, 'cherry', baseRef, squash, mergeBase])).trim();
+    if (cherry.startsWith('-')) return true;
+  } catch {}
+  try {
+    const merged = (await gitExec(['-C', repoPath, 'merge-tree', '--write-tree', baseRef, branchRef])).trim().split('\n')[0];
+    const baseTree = (await gitExec(['-C', repoPath, 'rev-parse', `${baseRef}^{tree}`])).trim();
+    return !!merged && merged === baseTree;
+  } catch { return false; }
 }
 
 // discardChanges: uncommitted and untracked files are not worth keeping, for
