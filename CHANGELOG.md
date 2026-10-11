@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.4.2] - 2026-10-11
+
+### Added
+
+- **Solo Founder Field Guide.** A plain-language guide for non-technical founders running a one-person company with AI agents: ten things to know, what agents still leave to you, and just enough of the technical side to judge their work. See `docs/SOLO-FOUNDER-GUIDE.md`, linked from the README.
+
 ## [0.69.4.1] - 2026-10-11
 
 ### Changed
