@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.4.3] - 2026-10-11
+
+### Changed
+
+- **Solo Founder Guide: the MDN link is replaced by two explainer videos.** MDN was too hard for non-technical founders. The guide now links to a 5-minute video on the frontend, API, backend and database parts, and a 13-minute backend overview, with an optional 6-minute frontend companion.
+
 ## [0.69.4.2] - 2026-10-11
 
 ### Added
