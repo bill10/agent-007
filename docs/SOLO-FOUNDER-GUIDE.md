@@ -93,7 +93,8 @@ Domain, DNS, server, HTTPS, CDN: the path from typing your address to seeing the
 
 Frontend (what people see), backend (the logic), API (how parts talk), database (what's remembered). Your agents' plans will use these words in every sentence.
 
-- [MDN Learn](https://developer.mozilla.org/en-US/docs/Learn): the "how the web works" pages
+- [Frontend, API, Backend and Database explained](https://www.youtube.com/watch?v=NzEYYemQ3_8) (video, 5 min): the four parts and how a click travels through them.
+- [Backend web development, a complete overview](https://www.youtube.com/watch?v=XBu54nfzxAQ) (video, 13 min, SuperSimpleDev): languages, frameworks, databases, APIs and the cloud. Its [frontend companion](https://www.youtube.com/watch?v=WG5ikvJ2TKA) (6 min) is optional.
 
 #### What "the cloud" actually sells
 
