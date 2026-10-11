@@ -134,6 +134,8 @@ copies over what the current folder's `.env` has and that file lacks).
 
 The details and caveats of every feature -- phone layout, voice input, themes and more -- are in [docs/FEATURES.md](docs/FEATURES.md).
 
+Not technical? The [Solo Founder Field Guide](docs/SOLO-FOUNDER-GUIDE.md) covers what AI agents still leave to a one-person company, and just enough of the technical side to judge their work.
+
 ## Keyboard Shortcuts
 
 | Key | Action |
