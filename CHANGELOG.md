@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.4.4] - 2026-10-11
+
+### Fixed
+
+- **Leftover agents whose worktree folder is gone no longer linger.** If a leftover agent's worktree was removed outside the app (for example with `git worktree remove`), it is now dropped from the office at startup instead of showing forever.
+
 ## [0.69.4.3] - 2026-10-11
 
 ### Changed
