@@ -148,7 +148,7 @@ function render(body) {
       ? 'Two logged-in Claude or Codex accounts turn auto-switching on. Log in to another, then Refresh.'
       : 'Log in to a second Claude or Codex account, then Refresh, to enable auto-switching.')
       : enabledCount() < 2 ? 'Select at least two accounts to enable automatic switching.'
-      : 'Selected accounts are used top to bottom. Billion moves to the other CLI only if one of its accounts is selected. Save settings to apply changes.';
+      : 'Each CLI cycles through its selected accounts in list order. Billion switches to the other CLI only when every selected account of its own CLI is limited, and only if the other CLI has one selected. Save settings to apply changes.';
     if (saveButton) saveButton.disabled = draft.enabled && enabledCount() < 2;
   }
   updateControls();
