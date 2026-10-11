@@ -80,11 +80,17 @@ export function loadConfig() {
         : `Server restarted — agent lost. Work is on ${job.branchName}; re-adopt it from the orphans list so it can finish, or move this card by hand.`;
       job.lastErrorAt = new Date().toISOString();
     }
+    // An orphan whose folder was removed outside the app (git worktree remove)
+    // has nothing left to recover or delete; drop it so the office stops showing it.
+    const kept = config.orphans.filter(o => !o.worktreePath || existsSync(o.worktreePath));
+    const dropped = kept.length !== config.orphans.length;
+    config.orphans = kept;
     for (const o of config.orphans) {
       orphans.set(o.id, o);
       codenamePool.addUsed(o.name);
       if (o.worktreePath) codenamePool.addUsed(basename(o.worktreePath)); // the label may have been renamed
     }
+    if (dropped) saveConfig();
   } catch (err) {
     console.warn('Config corrupted, starting with empty config:', err.message);
     setConfig({ version: 1, repos: [], orphans: [], activeSessions: [], jobs: [], jobBoard: null });
