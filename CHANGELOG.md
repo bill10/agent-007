@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.69.4.1] - 2026-10-11
+
+### Changed
+
+- **The Accounts hint now matches how switching works.** Each CLI cycles through its own selected accounts in list order, and Billion moves to the other CLI only when every selected account of its own CLI is limited.
+
 ## [0.69.4.0] - 2026-10-10
 
 ### Fixed
