@@ -799,7 +799,8 @@ remembers which view was last open.
 ![Briefing on a phone](img/billion-round-numbers.png)
 
 **The owner's messages and the progress box.** What the owner types is never
-queued: it reaches Billion at once. Each message stays *pending* ("waiting
+held for a briefing: it goes to Billion's terminal as soon as Billion rests at
+its prompt. Each message stays *pending* ("waiting
 for Billion…") until a `tell_owner` answers it, oldest first, so two
 messages sent before a reply each get their own (the reply carries `replyTo`,
 the message it answered). A server notice (an account switch) answers none.
