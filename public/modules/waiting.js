@@ -27,6 +27,10 @@ import { talkBar, talkButton, talkHeard, talkOn, endTalk } from './talk.js';
 
 const errors = new Map();   // question id -> { error, status }: why the last tap did not go through
 const pending = new Map();  // question id -> its status when tapped, waiting for the server to move it on
+const cancelling = new Set();  // owner message ids whose Cancel is on its way to the server
+let armed = null;           // the queued message whose Cancel was tapped once: a second tap cancels it
+let armTimer = null;
+const ARM_MS = 4000;
 let sending = null;         // the nonce of the text box's message on its way
 let sendError = '';
 let replyTo = null;         // the question the owner picked to answer with the box
@@ -545,14 +549,48 @@ const waitingOnBillion = () => {
   return (Array.isArray(billionStatus?.pending) ? billionStatus.pending : []).filter(id => !answered.has(id));
 };
 
+// Cancel on the owner's message still waiting to be typed into Billion's
+// terminal (server/owner.js cancelOwnerMessage): tap, then tap again within
+// ARM_MS, so a stray tap on a phone takes nothing back.
+function cancelButton(m) {
+  const sure = armed === m.id;
+  const btn = el('button', 'chat-link chat-cancel', sure ? 'Tap again to cancel' : '× Cancel');
+  btn.type = 'button';
+  btn.disabled = cancelling.has(m.id);
+  btn.setAttribute('aria-label', sure ? 'Confirm: cancel this message so Billion never gets it' : 'Cancel this message before Billion gets it');
+  btn.onclick = () => {
+    clearTimeout(armTimer);
+    if (!sure) {
+      armed = m.id;
+      armTimer = setTimeout(() => { armed = null; renderWaiting(); }, ARM_MS);
+    } else {
+      armed = null;
+      if (send({ type: 'chat-cancel', id: m.id })) cancelling.add(m.id);
+    }
+    renderWaiting();
+  };
+  return btn;
+}
+
+// The server's answer to a Cancel. Delivery won the race when typing had
+// started: the message stands, and its bubble has already lost the button.
+export function handleChatCancelled(msg) {
+  cancelling.delete(msg.id);
+  if (msg.delivered) toast('Already sent to Billion');
+  else if (msg.error) toast(msg.error);
+  renderWaiting();
+}
+
 function bubble(m, detailsOpen, pendingIds, currentRequest) {
   const mine = m.from === 'owner';
-  const unanswered = mine && pendingIds.has(m.id);
-  const row = el('div', `chat-msg ${mine ? 'mine' : 'theirs'}${unanswered ? ' pending' : ''}`);
+  const unanswered = mine && !m.cancelled && pendingIds.has(m.id);
+  const queued = mine && m.queued && !m.cancelled;
+  const row = el('div', `chat-msg ${mine ? 'mine' : 'theirs'}${unanswered ? ' pending' : ''}${m.cancelled ? ' cancelled' : ''}`);
   row.dataset.id = m.id;
   // Keyed, so a redraw keeps an unchanged bubble (and its own scroll) as it is.
   row.dataset.key = m.id;
-  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id), unanswered, unanswered && [billionStatus?.progress?.[m.id], billionStatus?.working, currentRequest]]);
+  row.dataset.rev = rev([m, pending.get(m.q?.id), errors.get(m.q?.id), unanswered, unanswered && [billionStatus?.progress?.[m.id], billionStatus?.working, currentRequest],
+    queued && [armed === m.id, cancelling.has(m.id)]]);
   const box = el('div', 'chat-bubble');
   if (m.q) {
     row.dataset.q = m.q.id;
@@ -562,7 +600,7 @@ function bubble(m, detailsOpen, pendingIds, currentRequest) {
   if (m.re) box.appendChild(el('span', 'chat-re', `re Q${m.re}`));
   if (m.text || !m.files?.length) box.appendChild(el('p', 'chat-text', m.text));
   if (m.files?.length) box.appendChild(sentFiles(m));
-  const meta = [m.notice && 'System update', m.command && 'Command', m.screen && 'Billion\'s terminal', m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), unanswered && 'waiting for Billion…'].filter(Boolean);
+  const meta = [m.notice && 'System update', m.command && 'Command', m.screen && 'Billion\'s terminal', m.voice && '(voice)', mine && m.via === 'telegram' && (m.name ? `${m.name} on Telegram` : 'Telegram'), time(m.at), m.cancelled ? 'Cancelled — Billion never got it' : queued ? 'queued' : unanswered && 'waiting for Billion…'].filter(Boolean);
   const metaLine = el('span', 'chat-meta', meta.join(' · '));
   if (!mine && !m.screen && readAloudSupported()) {
     const foot = el('div', 'chat-meta-row');
@@ -570,6 +608,11 @@ function bubble(m, detailsOpen, pendingIds, currentRequest) {
     box.appendChild(foot);
   } else box.appendChild(metaLine);
   if (m.q) box.appendChild(questionFoot(m.q));
+  if (queued) {
+    const foot = el('div', 'chat-q-foot chat-cancel-foot');
+    foot.appendChild(cancelButton(m));
+    box.appendChild(foot);
+  }
   if (unanswered) box.append(progressBox(m, currentRequest === m.id));
   else if (!mine && m.replyTo) {
     const details = workDetails(m.workDetails);

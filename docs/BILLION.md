@@ -811,6 +811,19 @@ update). The last three summaries are kept; consecutive duplicates are ignored. 
 terminal output, tool calls/results and command arguments are never read by
 the progress stream. The configured Telegram token is redacted before storage.
 
+**Cancelling a message Billion has not got yet.** While Billion is busy, the
+owner's messages wait in its terminal queue and read *queued*, with a
+**× Cancel** link (tap twice; the first tap asks "Tap again to cancel"). A
+cancelled message never reaches Billion: it leaves the queue, stays in the
+thread greyed and struck through ("Cancelled — Billion never got it"), loses
+its progress box, and is saved that way in `chat.json`, so a reload or restart
+shows it cancelled and delivers nothing. Typed and voice (Talk to Billion)
+turns, attachments and Telegram messages all wait in the same queue, so all of
+them can be cancelled from the tab. Once typing into Billion's terminal has
+started, Cancel goes away; one tapped at that same moment loses to delivery
+and says "Already sent to Billion". Answers to questions and slash commands
+have no Cancel (a question's answer has Undo).
+
 When `tell_owner` binds the answer, the live box disappears immediately and
 its summaries become a small, closed **Work details** disclosure under that
 answer. Empty progress adds no disclosure. The owner can expand it, and

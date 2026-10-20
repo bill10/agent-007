@@ -57,6 +57,10 @@ const queues = new Map();   // recipient session id -> [{ text, id?, fromId? }]
 // crowd them out of the queue altogether.
 const serverAhead = new Map();
 const sends = new Map();    // `${from.id}>${to.id}` -> [timestamps]
+// The owner's own entries by their chat message id, while still waiting, so
+// the Billion tab can take one back (cancelQueuedText). The entry itself, not
+// its place: Billion moving CLI carries it between queues (takeMessages).
+const keyed = new Map();
 // Every agent message's id -> { fromId, toId }, kept past delivery so a late
 // withdraw can say "already delivered" rather than "no such message".
 const sent = new Map();
@@ -183,14 +187,18 @@ export function formatNotice(headline, lines = []) {
 // owner: the owner's own words (the Billion tab, Telegram), which Billion's
 // held inbox still lets in: its introduction is waiting for them.
 // after(session): called COMMAND_SETTLE_MS after the Enter, nothing else typed until then.
-export function sendText(session, text, now = Date.now(), { owner = false, after } = {}) {
+// key: the owner's chat message id, for cancelQueuedText; onDeliver(): called
+// as its typing starts, the moment it can no longer be cancelled.
+export function sendText(session, text, now = Date.now(), { owner = false, after, key, onDeliver } = {}) {
   if (!session || session.exited) return false;
   const queue = queues.get(session.id) || [];
   const ahead = serverAhead.get(session.id) || 0;
   // The owner's words get room of their own: notices piling up behind a held
   // inbox must not turn their answers away.
   if (ahead >= QUEUE_CAP * (owner ? 2 : 1)) return false;
-  queue.splice(ahead, 0, { text: clean(text), ...(owner ? { owner: true } : {}), ...(after ? { after } : {}) });
+  const entry = { text: clean(text), ...(owner ? { owner: true } : {}), ...(after ? { after } : {}), ...(key ? { key, onDeliver } : {}) };
+  queue.splice(ahead, 0, entry);
+  if (key) keyed.set(key, entry);
   queues.set(session.id, queue);
   serverAhead.set(session.id, ahead + 1);
   flushMessages(session, now);
@@ -207,6 +215,29 @@ export function unqueueText(sessionId, text) {
   const ahead = serverAhead.get(sessionId) || 0;
   if (at < ahead) serverAhead.set(sessionId, ahead - 1);
   if (!queue.length) queues.delete(sessionId);
+  return true;
+}
+
+// The Billion tab's Cancel on the owner's message still waiting to be typed.
+// True when it was taken back, so it is never typed; false when it is not
+// waiting (typing it has started, or it was never queued). Delivery takes an
+// entry off the queue before typing a byte of it, in the same tick, so whichever
+// of the two runs first wins and the other sees it gone.
+export function cancelQueuedText(key) {
+  const entry = keyed.get(key);
+  if (!entry) return false;
+  keyed.delete(key);
+  // Marked as well as removed: between takeMessages and restoreMessages it is
+  // in no queue, and restoreMessages leaves it out.
+  entry.cancelled = true;
+  for (const [sessionId, queue] of queues) {
+    const at = queue.indexOf(entry);
+    if (at === -1) continue;
+    queue.splice(at, 1);
+    const ahead = serverAhead.get(sessionId) || 0;
+    if (at < ahead) serverAhead.set(sessionId, ahead - 1);
+    if (!queue.length) queues.delete(sessionId);
+  }
   return true;
 }
 
@@ -252,7 +283,9 @@ export function pasteChunks(text) {
   });
 }
 
-function deliver(session, { text, after }, now) {
+function deliver(session, { text, after, key, onDeliver }, now) {
+  if (key) keyed.delete(key);
+  try { onDeliver?.(); } catch (err) { console.error('After delivering a message:', err.message); }
   session.messageDeliveredAt = now;
   session.messageTyping = true;
   const chunks = pasteChunks(text);
@@ -429,14 +462,18 @@ export function takeMessages(sessionId) {
 
 // Onto a session with nothing queued yet: one just started.
 export function restoreMessages(sessionId, taken) {
-  if (!taken?.queue.length) return;
-  queues.set(sessionId, taken.queue);
-  if (taken.ahead) serverAhead.set(sessionId, taken.ahead);
+  // Less any the owner cancelled in between (cancelQueuedText).
+  const queue = taken?.queue.filter(e => !e.cancelled) || [];
+  if (!queue.length) return;
+  queues.set(sessionId, queue);
+  const ahead = taken.ahead - taken.queue.slice(0, taken.ahead).filter(e => e.cancelled).length;
+  if (ahead) serverAhead.set(sessionId, ahead);
 }
 
 // The recipient is gone. Sessions do not survive a restart, so neither does
 // anything addressed to one.
 export function dropMessages(sessionId) {
+  for (const e of queues.get(sessionId) || []) if (e.key) keyed.delete(e.key);
   queues.delete(sessionId);
   serverAhead.delete(sessionId);
   for (const key of sends.keys()) {

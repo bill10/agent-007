@@ -26,7 +26,7 @@ import { setupVoice, stopVoice } from './modules/voice.js';
 import { setupJobBoard, handleJobsList, renderBoard, closeJobForm, showJobBoard } from './modules/jobs.js';
 import { isAbsolutePath, joinBrowsePath } from './modules/paths.js';
 import { talkHeardAll, talkStatus } from './modules/talk.js';
-import { renderWaiting, handleWaitingError, handleChatSent, handleChatMessage, settleFromThread, showWaiting, leaveWaiting, leftChat, setBillionNotice, setQuestionsOpen, setTelegramState } from './modules/waiting.js';
+import { renderWaiting, handleWaitingError, handleChatSent, handleChatCancelled, handleChatMessage, settleFromThread, showWaiting, leaveWaiting, leftChat, setBillionNotice, setQuestionsOpen, setTelegramState } from './modules/waiting.js';
 import { handleAccountState, handleAccountError, renderAccount } from './modules/account.js';
 import { captureTokenFromUrl, authHeaders, showLogin, renderPresence, escapeHtml } from './modules/auth.js';
 
@@ -569,6 +569,7 @@ function onMessage(msg) {
     case 'chat-list': setChatMessages(msg.messages); renderWaiting(); talkHeardAll(msg.messages); settleFromThread(); break;
     case 'chat-message': handleChatMessage(msg.message); break;
     case 'chat-sent': handleChatSent(msg); break;
+    case 'chat-cancelled': handleChatCancelled(msg); break;
     case 'telegram-state': handleTelegramState(msg); break;
     case 'account-state': handleAccountState(msg); break;
     case 'account-error': handleAccountError(msg); break;

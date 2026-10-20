@@ -695,6 +695,13 @@ async function submitted(request, ended) {
 
 // Every chat message the page sees passes here (waiting.js, app.js).
 export function talkHeard(m) {
+  // A turn the owner cancelled before Billion got it: no reply is coming.
+  if (m?.from === 'owner' && m.cancelled && awaiting.delete(m.id)) {
+    save();
+    if (!thinkingFor()) clearTimeout(progressTimer);
+    paint();
+    return;
+  }
   if (!on || !shouldSpeak(m, awaiting, spoken)) return;
   spoken.add(m.id);
   awaiting.delete(m.replyTo);
