@@ -536,7 +536,11 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
     ws.user = user; // null when auth is disabled
     clients.add(ws);
     ws.isAlive = true;
+    // Any message proves the link too: through a proxy (cloudflared, Tailscale
+    // Serve) or from a suspended tab a protocol pong can go missing while the
+    // page's own 15 s ping still arrives, and a healthy page was being cut.
     ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('message', () => { ws.isAlive = true; });
 
     // Tell the client who it is and whether auth is on.
     // platform lets the client offer the right shell preset (bash vs PowerShell).

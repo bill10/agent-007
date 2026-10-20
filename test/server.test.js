@@ -629,6 +629,30 @@ describe('terminal output on a slow link', () => {
     dead.terminate();
     await new Promise(r => wss.close(r));
   });
+
+  // A proxy or a suspended tab can lose protocol pongs; the page's own ping
+  // (public/modules/ws.js) still counts.
+  it('keeps a socket whose protocol pongs go missing while the page still pings', async () => {
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise(r => wss.once('listening', r));
+    setupWebSocket(wss, { heartbeatMs: 100 });
+    const url = `ws://127.0.0.1:${wss.address().port}`;
+    const connect = () => new Promise((resolve, reject) => {
+      const ws = new WebSocket(url, { autoPong: false });
+      ws.on('open', () => resolve(ws));
+      ws.on('error', reject);
+    });
+    const pinging = await connect();
+    const silent = await connect();
+    const pinger = setInterval(() => pinging.send('{"type":"ping"}'), 50);
+    await vi.waitFor(() => expect(wss.clients.size).toBe(1), { timeout: 3000 });
+    await new Promise(r => setTimeout(r, 400));   // several heartbeats on
+    expect(pinging.readyState).toBe(1);
+    expect(silent.readyState).not.toBe(1);
+    clearInterval(pinger);
+    pinging.close();
+    await new Promise(r => wss.close(r));
+  });
 });
 
 // --- One skill store (server/skill-store.js) ---
