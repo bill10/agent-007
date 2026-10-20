@@ -46,8 +46,8 @@ let lastShown = null;       // the newest message when the thread was last drawn
 // data (base64, once read), reading, url (a thumbnail's object URL) }.
 let attached = [];
 
-// A reconnect reloads the page (ws.js). The box's text, its files and a send
-// still unsettled ride across it in sessionStorage, taken once at load.
+// A server restart reloads the page (ws.js). The box's text, its files and a
+// send still unsettled ride across it in sessionStorage, taken once at load.
 const DRAFT_KEY = 'agent007-chat-draft';
 const restored = (() => {
   try {
@@ -290,7 +290,7 @@ function submit() {
 
 // A slow link is not a lost message: while the socket is up the box waits on,
 // for the late chat-sent or the message itself in the thread. Only a dropped
-// socket frees it, text kept; the reload after the reconnect checks the thread.
+// socket frees it, text kept; the thread the reconnect sends settles it.
 function awaitAnswer(nonce) {
   setTimeout(() => {
     if (sending !== nonce) return;
