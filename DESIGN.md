@@ -1129,9 +1129,12 @@ terminal panel on this tab.
 - The office canvas repaints once on toggle — the animation loop skips frames
   when no agents are alive, so without it the canvas kept the old theme's colors
 
-### Auto-reload on reconnect
-- WebSocket reconnection triggers full page reload
-- Clears stale agent state after server restart
+### Reconnect in place, reload on a server restart
+- A dropped WebSocket (a proxy's idle timeout, a network blip) reconnects
+  without reloading: the server's welcome carries `sessionIds`, so tabs closed
+  meanwhile go, and the terminal on screen asks for its scrollback again
+- The welcome also carries a per-start `bootId`; a different one means the
+  server restarted or updated, and the page reloads once for the new code
 
 ### Clipboard paste
 - Cmd+V with image data in clipboard uploads as screenshot
