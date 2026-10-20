@@ -36,6 +36,7 @@ it('clears active progress on socket loss, never invents an answer, and restores
   connect(receive);
   const emit = (socket, data) => socket.onmessage({ data: JSON.stringify(data) });
   sockets[0].onopen();
+  emit(sockets[0], { type: 'welcome', bootId: 'boot-1', sessionIds: [] });
   const messages = [{ id: 'm1', from: 'owner', text: 'Check the run', at: new Date().toISOString(), awaitsReply: true, workDetails: ['Checking evidence'] }];
   const status = { type: 'billion-status', running: true, working: true, pending: ['m1'], currentRequest: 'm1', progress: { m1: ['Checking evidence'] } };
   emit(sockets[0], { type: 'chat-list', messages });
@@ -53,8 +54,10 @@ it('clears active progress on socket loss, never invents an answer, and restores
   vi.advanceTimersByTime(1000);
   expect(sockets).toHaveLength(2);
   sockets[1].onopen();
-  expect(location.reload).toHaveBeenCalledOnce();
-  // A fresh page's handshake carries persisted chat before current status.
+  // The same server: the page stays, and the handshake's replay carries
+  // persisted chat before current status.
+  emit(sockets[1], { type: 'welcome', bootId: 'boot-1', sessionIds: [] });
+  expect(location.reload).not.toHaveBeenCalled();
   emit(sockets[1], { type: 'chat-list', messages });
   emit(sockets[1], status);
   expect(document.querySelector('.chat-progress.active li').textContent).toBe('Checking evidence');

@@ -5,7 +5,11 @@ let ws = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
 let messageHandler = null;
-let hasConnectedBefore = false;
+// The server's boot this page was loaded against (its first welcome). A
+// reconnect, which any proxy's idle timeout or a network blip causes, keeps
+// the page and resyncs from the server's replay; only a different boot (a
+// restart or an update) reloads it, for the server's new code.
+let bootId = null;
 // A socket half-dead after a network change can stay OPEN for minutes. The
 // page pings every PING_MS and gives up on a ping left unanswered (by anything
 // at all) for DEAD_MS, so the reconnect below runs. Judged by the ping, not by
@@ -25,14 +29,7 @@ export function connect(onMessage) {
   ws = new WebSocket(`${protocol}//${location.host}${query}`);
 
   ws.onopen = () => {
-    if (hasConnectedBefore) {
-      // Server restarted, reload to get clean state
-      location.reload();
-      return;
-    }
-    hasConnectedBefore = true;
     document.getElementById('reconnecting').style.display = 'none';
-    reconnectDelay = 1000;
   };
 
   lastHeard = lastPing = 0;
@@ -72,6 +69,19 @@ export function connect(onMessage) {
     lastHeard = Date.now();
     const msg = JSON.parse(event.data);
     if (msg.type === 'pong') return;
+    if (msg.type === 'welcome') {
+      if (bootId && msg.bootId !== bootId) {
+        // The old page takes no more of this replay: the reloaded one gets its own.
+        ws.onmessage = null;
+        location.reload();
+        return;
+      }
+      // The backoff restarts only once a server has taken the socket: one a
+      // proxy opens and the server never answers keeps backing off.
+      reconnectDelay = 1000;
+      msg.reconnected = !!bootId;
+      bootId = msg.bootId;
+    }
     if (messageHandler) messageHandler(msg);
   };
 }

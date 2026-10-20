@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, existsSync, writeFileSync, rmSync, realpathSync
 import { join, basename } from 'path';
 import { execFileSync } from 'child_process';
 import { WebSocketServer } from 'ws';
-import { setupWebSocket, ACTIVITY_MS } from '../server/ws.js';
+import { setupWebSocket, ACTIVITY_MS, BOOT_ID } from '../server/ws.js';
 import { STORE_FILE, writeStoreState } from '../server/skill-store.js';
 import { removeTempDir } from './temp-dir.js';
 
@@ -760,6 +760,9 @@ describe('auth enforcement (live enable)', () => {
     expect(welcome.authEnabled).toBe(true);
     expect(welcome.user.displayName).toBe('Tester');
     expect(welcome.platform).toBe(process.platform);
+    // The same boot for every socket, so a reconnecting page keeps its state.
+    expect(welcome.bootId).toBe(BOOT_ID);
+    expect(welcome.sessionIds).toEqual([...sessions.keys()]);
   });
 });
 

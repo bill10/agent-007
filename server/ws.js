@@ -2,6 +2,7 @@
 
 import { existsSync, rmSync, writeFileSync, mkdirSync } from 'fs';
 import { basename, join } from 'path';
+import { randomUUID } from 'crypto';
 import {
   config, sessions, orphans, adoptingOrphans,
   codenamePool, colorCycler, nextSessionId,
@@ -32,6 +33,10 @@ export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Conti
 
 // --- Client tracking ---
 const clients = new Set();
+// New on every server start. A page that reconnects to the same boot keeps
+// its state and resyncs from the replay; a different one means a restart or
+// an update, and the page reloads for the new code (public/modules/ws.js).
+export const BOOT_ID = randomUUID();
 
 export function broadcast(message) {
   // The owner's chat with Billion (server/owner.js) is theirs alone: their
@@ -535,7 +540,8 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
 
     // Tell the client who it is and whether auth is on.
     // platform lets the client offer the right shell preset (bash vs PowerShell).
-    ws.send(JSON.stringify({ type: 'welcome', authEnabled: enabled, user: publicUser(user), platform: process.platform, billionEnabled: billionRuns() }));
+    // sessionIds: a page reconnecting in place drops tabs closed while it was away.
+    ws.send(JSON.stringify({ type: 'welcome', bootId: BOOT_ID, sessionIds: [...sessions.keys()], authEnabled: enabled, user: publicUser(user), platform: process.platform, billionEnabled: billionRuns() }));
 
     // Send repos list
     ws.send(JSON.stringify({
