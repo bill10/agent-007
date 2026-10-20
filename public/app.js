@@ -492,6 +492,16 @@ function setupResize() {
 function onMessage(msg) {
   switch (msg.type) {
     case 'welcome':
+      if (msg.reconnected) {
+        // Back on the same server after a dropped socket (public/modules/ws.js):
+        // tabs closed meanwhile go, and the terminal on screen asks again for
+        // its scrollback, which a new socket only gets once it says so.
+        const live = new Set(msg.sessionIds || []);
+        for (const id of [...agents.keys()]) {
+          if (!live.has(id)) { noteAgentDeparture(id); handleSessionRemoved({ sessionId: id }); }
+        }
+        fitActiveTerminal();
+      }
       setSelf(msg.user ? msg.user.id : null, msg.authEnabled, msg.platform);
       setBillionEnabled(msg.billionEnabled);
       document.body.classList.toggle('no-billion', billionOff());

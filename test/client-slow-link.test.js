@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 // A slow or dropped link (remote, over a relay): the box's send outlasts its
-// timeout, the socket's heartbeat, the draft across the reconnect's reload,
-// and the stalled badge fed by pty-activity for a terminal not on screen.
+// timeout, the socket's heartbeat, a reconnect that keeps the page, the draft
+// across a restart's reload, and the stalled badge fed by pty-activity for a
+// terminal not on screen.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const DOM = '<div id="reconnecting"></div><div id="terminal-tabs"></div><div id="terminal-empty"></div><div id="job-board"></div>'
@@ -69,7 +70,7 @@ describe('a send on a slow link', () => {
   });
 });
 
-describe('the draft across the reconnect reload', () => {
+describe("the draft across a restart's reload", () => {
   it('brings back the text and files, and clears them once the thread shows the send went in', async () => {
     const first = await page();
     first.waiting.attachFiles([new File(['xyz'], 'a.pdf', { type: 'application/pdf' })]);
@@ -148,6 +149,77 @@ describe('the socket heartbeat', () => {
     vi.advanceTimersByTime(1000);
     expect(sockets).toHaveLength(2);
     vi.unstubAllGlobals();
+  });
+});
+
+// Behind a proxy (Tailscale Serve, a tunnel) a socket drops on an idle
+// timeout or a blip: the page reconnects in place, and reloads only when the
+// server it reaches is a different boot (a restart or an update).
+describe('a reconnect', () => {
+  async function socket() {
+    vi.resetModules();
+    vi.doUnmock('../public/modules/ws.js');
+    const sockets = [];
+    vi.stubGlobal('WebSocket', class {
+      constructor() { this.readyState = 1; this.send = vi.fn(); this.close = vi.fn(); sockets.push(this); }
+    });
+    const reload = vi.fn();
+    vi.stubGlobal('location', { protocol: 'https:', host: 'mac.tailnet.ts.net', reload });
+    document.body.innerHTML = DOM;
+    const { connect } = await import('../public/modules/ws.js');
+    const heard = vi.fn();
+    connect(heard);
+    const welcome = (bootId) => sockets.at(-1).onmessage({ data: JSON.stringify({ type: 'welcome', bootId, sessionIds: [] }) });
+    const drop = () => sockets.at(-1).onclose({ code: 1006 });
+    return { sockets, reload, heard, welcome, drop };
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('keeps the page across drops to the same server, and says it reconnected', async () => {
+    const { sockets, reload, heard, welcome, drop } = await socket();
+    sockets[0].onopen();
+    welcome('boot-1');
+    expect(heard).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'welcome', reconnected: false }));
+    for (let i = 1; i <= 3; i++) {
+      drop();
+      expect(document.getElementById('reconnecting').style.display).toBe('block');
+      vi.advanceTimersByTime(1000);   // a server that answered resets the backoff
+      expect(sockets).toHaveLength(i + 1);
+      sockets[i].onopen();
+      expect(document.getElementById('reconnecting').style.display).toBe('none');
+      welcome('boot-1');
+      expect(heard).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'welcome', reconnected: true }));
+    }
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('reloads exactly once when the server restarted, and passes on nothing after', async () => {
+    const { sockets, reload, heard, welcome, drop } = await socket();
+    sockets[0].onopen();
+    welcome('boot-1');
+    drop();
+    vi.advanceTimersByTime(1000);
+    sockets[1].onopen();
+    expect(reload).not.toHaveBeenCalled();   // the open alone proves nothing
+    heard.mockClear();
+    welcome('boot-2');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(heard).not.toHaveBeenCalled();
+    expect(sockets[1].onmessage).toBeNull();
+  });
+
+  it('backs off, to a ceiling, while sockets open and close without a server answering', async () => {
+    const { sockets, drop } = await socket();
+    const waits = [];
+    for (let i = 0; i < 8; i++) {
+      sockets.at(-1).onopen();
+      drop();
+      const before = sockets.length;
+      let waited = 0;
+      while (sockets.length === before) { vi.advanceTimersByTime(1000); waited += 1000; }
+      waits.push(waited);
+    }
+    expect(waits).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
   });
 });
 

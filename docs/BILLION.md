@@ -1156,9 +1156,10 @@ computer has no `say`) cannot be routed and goes where iOS sends it.
 - **Limits**: the mic stops on **End**, when you leave the Billion tab, while
   the page is hidden (it comes back with the page), and after 10 minutes with
   no speech. An utterance can be up to 5 minutes; 30 utterances a minute.
-  With user accounts on, like the chat itself, it is off. A reconnect reloads
-  the page; tap **Resume talking** and any reply that came meanwhile is
-  spoken.
+  With user accounts on, like the chat itself, it is off. A dropped connection
+  keeps the conversation: once it is back, any reply that came meanwhile is
+  spoken. A server restart or update reloads the page; tap **Resume talking**
+  and the same happens.
 
 ### Voice
 

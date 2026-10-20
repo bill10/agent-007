@@ -20,7 +20,7 @@ import { stopReading, plainForSpeech, chunkForSpeech, pickVoice, progressPhrase,
 
 const HEADERS = { 'X-Agent007-Talk': '1' };
 const SETUP_DOCS = 'https://github.com/bill10/agent-007/blob/main/docs/BILLION.md#voice';
-const STORE_KEY = 'agent007-talk';              // sessionStorage: survives the reload a reconnect does
+const STORE_KEY = 'agent007-talk';              // sessionStorage: survives a server restart's reload
 const CONSENT_KEY = 'agent007-talk-browser-stt'; // localStorage: the one-time notice was accepted
 const OUTPUT_KEY = 'agent007-talk-output';       // localStorage: 'speaker' or 'earpiece' (iPhone)
 export const IDLE_END_MS = 10 * 60 * 1000;
@@ -581,7 +581,7 @@ function beginBrowserRecognition() {
   ready();
 }
 
-// Listening. Replies that came while the page reloaded (a reconnect) play now.
+// Listening. Replies that came while the page reloaded (a restart) play now.
 function ready() {
   armIdle();
   afterSpeech();
