@@ -304,3 +304,40 @@ describe('the progress box', () => {
     expect(row('m3').querySelector('img')).toBeNull();
   });
 });
+
+describe('cancelling a queued message', () => {
+  const owner = (id, extra = {}) => ({ id, at: new Date().toISOString(), from: 'owner', text: `Question ${id}?`, ...extra });
+  const row = id => document.querySelector(`.chat-msg[data-id="${id}"]`);
+
+  it('offers Cancel on a queued message only, and sends chat-cancel on the second tap', () => {
+    setChatMessages([owner('m1', { queued: true, awaitsReply: true }), owner('m2', { awaitsReply: true })]);
+    setBillionStatus({ running: true, working: true, pending: ['m1', 'm2'], progress: {} });
+    renderWaiting();
+    expect(row('m2').querySelector('.chat-cancel')).toBeNull();
+    expect(row('m1').querySelector('.chat-meta').textContent).toContain('queued');
+    row('m1').querySelector('.chat-cancel').click();
+    expect(send).not.toHaveBeenCalled();
+    expect(row('m1').querySelector('.chat-cancel').textContent).toBe('Tap again to cancel');
+    row('m1').querySelector('.chat-cancel').click();
+    expect(send).toHaveBeenCalledWith({ type: 'chat-cancel', id: 'm1' });
+    expect(row('m1').querySelector('.chat-cancel').disabled).toBe(true);
+  });
+
+  it('shows a cancelled message struck through, with no progress box and no Cancel', () => {
+    setChatMessages([owner('m1', { cancelled: true, awaitsReply: false })]);
+    setBillionStatus({ running: true, working: true, pending: ['m1'], progress: {} });
+    renderWaiting();
+    expect(row('m1').classList.contains('cancelled')).toBe(true);
+    expect(row('m1').classList.contains('pending')).toBe(false);
+    expect(row('m1').querySelector('.chat-progress')).toBeNull();
+    expect(row('m1').querySelector('.chat-cancel')).toBeNull();
+    expect(row('m1').querySelector('.chat-meta').textContent).toContain('Cancelled');
+  });
+
+  it('says "Already sent to Billion" when delivery won the race', async () => {
+    document.body.insertAdjacentHTML('beforeend', '<div id="chat-toast" hidden></div>');
+    const { handleChatCancelled } = await import('../public/modules/waiting.js');
+    handleChatCancelled({ id: 'm1', delivered: true, error: 'Already sent to Billion.' });
+    expect(document.getElementById('chat-toast').textContent).toBe('Already sent to Billion');
+  });
+});

@@ -16,7 +16,7 @@ import { redactEmails } from './account-migration.js';
 import { autoTrusts, trustClaudeFolder } from './claude-trust.js';
 import { statusPayload } from './billion-status.js';
 import { roundView, startRoundNow, markDone } from './owner.js';
-import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
+import { waitingPayload, dismissWaiting, answerWaiting, reopenQuestion, chatPayload, ownerSays, cancelOwnerMessage, telegramPayload, useTelegramChat, dismissTelegramChat, forgetTelegramChat } from './owner.js';
 import { parseGitStatus, buildFileTree, safeFilename } from '../lib/helpers.js';
 import { isValidJobAgent, sessionAgentFromCommand, jobRequiresPr, modelFromCommand } from '../lib/jobs.js';
 import { jobSkillFamilies } from './skill-families.js';
@@ -720,6 +720,16 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
             : await ownerSays(msg.text, { answers: typeof msg.answers === 'string' ? msg.answers : undefined, files: msg.files, broadcast,
               utterance: typeof msg.nonce === 'string' && msg.nonce.length <= 64 ? `chat-${msg.nonce}` : undefined });
           ws.send(JSON.stringify({ type: 'chat-sent', nonce: msg.nonce, ...(result.error ? { error: result.error } : {}) }));
+          break;
+        }
+        // Cancel on the owner's message still waiting to be typed into
+        // Billion's terminal: the owner's browser only, like chat-send.
+        case 'chat-cancel': {
+          if (typeof msg.id !== 'string') break;
+          const result = !mayAnswerOwner() ? { error: 'Only the owner talks to Billion here, and with user accounts on nobody does.' }
+            : !ws.fromBrowser ? { error: 'Billion is messaged from the browser only.' }
+            : cancelOwnerMessage(msg.id, { broadcast });
+          ws.send(JSON.stringify({ type: 'chat-cancelled', id: msg.id, ...(result.delivered ? { delivered: true } : {}), ...(result.error ? { error: result.error } : {}) }));
           break;
         }
         // The Billion tab's "Start the round now", and Done on a round's item

@@ -14,7 +14,7 @@ import { join, resolve, sep, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
-import { sendText } from './messages.js';
+import { sendText, cancelQueuedText } from './messages.js';
 import { detectState } from '../lib/helpers.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
 import { billionReplied, publishStatus, MAX_STEPS, SHORT_ID_CHARS } from './billion-status.js';
@@ -689,15 +689,58 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   // A voice turn names itself, so Billion can bind its spoken reply to it (tell_owner reply_to).
   const prefix = voice ? `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}]` : APP_PREFIX;
   const said = voice ? body : unescapeSlash(body);
-  if (!sendText(billion, withFiles(said ? `${prefix} ${said}` : prefix, saved.paths), undefined, OWNER)) {
+  const typing = typedWhen(id, broadcast);
+  if (!sendText(billion, withFiles(said ? `${prefix} ${said}` : prefix, saved.paths), undefined, { ...OWNER, key: id, onDeliver: typing.now })) {
     if (files.length) removeChatFiles(id);
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel('app');
-  addChat({ id, from: 'owner', via: 'app', text: said, awaitsReply: true, ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: said, awaitsReply: true, ...typing.queued(), ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   // Pending, with the progress box under it, until a tell_owner answers it.
   publishStatus(broadcast);
   return { ok: true, id };
+}
+
+// --- Cancel: the owner takes back a message Billion has not been given yet ---
+//
+// A message the owner sends is `queued` in the thread while it waits in
+// Billion's queue (server/messages.js) and loses the mark the moment its
+// typing starts, which is when Cancel stops being offered. sendText may type
+// it before addChat has written it, so queued() asks whether that happened.
+function typedWhen(id, broadcast) {
+  let typed = false;
+  return {
+    now: () => {
+      typed = true;
+      const messages = chatMessages();
+      const m = messages.find(x => x.id === id && x.queued);
+      if (!m) return;
+      delete m.queued;
+      saveChat(messages);
+      broadcast?.({ type: 'chat-message', message: m });
+    },
+    queued: () => (typed ? {} : { queued: true }),
+  };
+}
+
+// The tab's Cancel. Idempotent: cancelling a cancelled message is { ok }.
+// When typing has started, delivery won: { delivered: true } and the message
+// stands. A message still marked queued but in no queue was queued before a
+// restart emptied the queue; it never reached Billion, so it cancels too.
+// Persisted in chat.json, so it reads as cancelled after a reload or restart.
+export function cancelOwnerMessage(id, { broadcast } = {}) {
+  const messages = chatMessages();
+  const m = messages.find(x => x.id === id && x.from === 'owner');
+  if (!m) return { error: 'That message is gone.' };
+  if (m.cancelled) return { ok: true, message: m };
+  if (!cancelQueuedText(id) && !m.queued) return { delivered: true, error: 'Already sent to Billion.' };
+  delete m.queued;
+  Object.assign(m, { cancelled: true, cancelledAt: new Date().toISOString(), awaitsReply: false });
+  saveChat(messages);
+  broadcast?.({ type: 'chat-message', message: m });
+  // Off the pending list, and out of the progress box.
+  publishStatus(broadcast);
+  return { ok: true, message: m };
 }
 
 // Answered everywhere: the item moves to Answered in every browser, and the
@@ -1241,11 +1284,13 @@ export async function handleUpdate(update, { broadcast, env = process.env } = {}
     line = `${telegramPrefix(name, true)} ${heard.transcript}${caption}`;
     said = { from: 'owner', via: 'telegram', ...who, voice: true, text: `${heard.transcript}${caption}` };
   }
-  if (!sendText(billion, line, undefined, OWNER)) {
+  const id = randomUUID();
+  const typing = typedWhen(id, broadcast);
+  if (!sendText(billion, line, undefined, { ...OWNER, key: id, onDeliver: typing.now })) {
     await sendTelegram('Billion has too much waiting for it; try again in a while.', { env });
     return 'full';
   }
-  addChat({ ...said, awaitsReply: true }, broadcast, env);
+  addChat({ id, ...said, awaitsReply: true, ...typing.queued() }, broadcast, env);
   publishStatus(broadcast);
   return 'delivered';
 }
