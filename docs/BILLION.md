@@ -1099,8 +1099,9 @@ runs in the browser (`speechSynthesis` and the Web Speech API's
 
 A hands-free conversation with the same Billion, in the Chat view of the
 Billion tab. Tap **Talk to Billion**, allow the microphone, and speak: when
-you stop, what you said is sent to Billion as a voice turn,
-Billion's `tell_owner` reply is spoken, and it listens again. The bar says
+you have finished, what you said is sent to Billion as a voice turn, a short
+"Got it, one sec." is said at once, Billion's `tell_owner` reply is spoken as
+soon as it comes, and it listens again. The bar says
 **Listening**, **Thinking…** (with Billion's status line, and a spoken "Still
 working on it." after 20 seconds of nothing else to say), **Speaking**, **Muted** or
 **Disconnected**; **Mute** turns the mic off, **End** ends it. The thread is
@@ -1113,15 +1114,39 @@ silences the mic without closing it, so iOS no longer moves the sound between
 the loudspeaker and the earpiece mid-call. The browser's own voice (when the
 computer has no `say`) cannot be routed and goes where iOS sends it.
 
-- **Audio stays on this machine**: the end of each utterance is found in the
-  browser by a small voice detector (Silero VAD, served by Agent 007 itself),
-  the audio is transcribed on the computer running Agent 007 by whisper.cpp,
-  and replies are spoken there by `say`, with your `SAY_VOICE` and
-  `SAY_RATE`, so Billion sounds the same as on Telegram. Set up whisper.cpp
-  as in [Voice](#voice). Without it, the browser's own speech recognition is
+- **Pauses are yours**: a small voice detector in the browser (Silero VAD,
+  served by Agent 007 itself) hears each stretch of speech end, and each is
+  transcribed at once, but the turn ends only after a real pause: about
+  1.2 seconds after a finished sentence or question, 1.5 seconds otherwise,
+  and 2.6 seconds when the words so far stop mid-thought ("...and the", "um",
+  a trailing comma). Speak again before then and it is the same turn.
+- **Adding to a turn**: speak again after the turn went but before Billion's
+  reply came, and your words join that turn. While Billion has not been
+  given it yet they are added to it, so Billion gets one message; once it
+  has, they go as `[Owner via app, voice #b2c1d3e4, adds to #3f9a0c1e] ...`,
+  and Billion answers both at once.
+- **A fast first response**: the moment a turn ends, a short acknowledgment
+  plays ("Got it, one sec.", "Okay, let me check.", ..., never the same one
+  twice in a row), fetched when the conversation starts, while Billion works
+  on the reply. The reply streams in as soon as `tell_owner` sends it.
+  The browser console logs each turn's `[talk] latency`: end of turn to the
+  acknowledgment's first sound (`ackMs`), to the reply arriving
+  (`billionMs`), and to its first sound (`totalMs`).
+- **Billion's voice**: with `ELEVENLABS_API_KEY` set in
+  `~/.agent-007/.env`, replies are spoken by ElevenLabs (voice
+  `ELEVENLABS_VOICE`, a name on your account or a voice id, default Eric;
+  model `ELEVENLABS_MODEL`, default `eleven_flash_v2_5`), streamed and
+  played as they arrive. Only the reply's text goes to ElevenLabs; each
+  acknowledgment is made once per voice and kept in
+  `~/.agent-007/talk-voice/`. If ElevenLabs fails, `say` speaks instead and
+  the server log says why. Without the key, replies are spoken by `say` on
+  the computer running Agent 007, with your `SAY_VOICE` and `SAY_RATE`.
+- **Your audio stays on this machine**: what you say is transcribed on the
+  computer running Agent 007 by whisper.cpp. Set it up as in
+  [Voice](#voice). Without it, the browser's own speech recognition is
   used after a one-time notice that it may send the audio to the browser's
-  maker (Chrome: Google); without `say` (Linux, Windows), the browser speaks
-  the replies. The bar always says which.
+  maker (Chrome: Google); without ElevenLabs or `say` (Linux, Windows), the
+  browser speaks the replies. The bar always says which.
 - **Only its own replies are spoken**: each turn is a message of its own,
   typed into Billion as `[Owner via app, voice #3f9a0c1e] ...`, and Billion
   answers it with `tell_owner` and `reply_to: "3f9a0c1e"`, which binds the
@@ -1142,20 +1167,26 @@ computer has no `say`) cannot be routed and goes where iOS sends it.
   The detector's raised bar while Billion talks covers updates too, and an
   update is never treated as a reply you might be echoing.
 - **Interrupting**: start talking while Billion speaks, or tap **Stop
-  speaking**, and it stops at once; the rest of that reply is dropped (it is
-  still in the thread). Stopping the voice never stops Billion's work.
+  speaking**, and it stops at once (it drops in volume the moment the
+  detector hears what may be speech, and stops a few frames in); the rest of
+  that reply is dropped (it is still in the thread), and what you say is
+  sent as usual. A reply that comes while you are speaking, or pausing
+  mid-turn, waits until your turn is sent, then plays. Stopping the voice
+  never stops Billion's work.
 - **Echo**: the microphone runs with echo cancellation, the detector needs
   louder speech to interrupt while Billion talks, and an utterance that
   repeats six or more words of the reply that was playing, in order, is
   dropped as Billion's own voice (the bar says so; say it again if it was
-  you). A shorter repeat, like "merge PR 196 now", is yours.
-- **Once each**: every utterance carries an id, and the server sends an id to
+  you). A shorter repeat, like "merge PR 196 now", is yours. Speech that
+  is the acknowledgment playing when you started is dropped the same way;
+  the same words with nothing playing are yours.
+- **Once each**: every turn carries an id, and the server sends an id to
   Billion once, so a retry after a dropped connection never makes a second
   message. Voice turns are always messages to Billion, never "start the
   briefing" or "1d": a misheard word cannot act for you.
 - **Limits**: the mic stops on **End**, when you leave the Billion tab, while
   the page is hidden (it comes back with the page), and after 10 minutes with
-  no speech. An utterance can be up to 5 minutes; 30 utterances a minute.
+  no speech. A stretch of speech can be up to 5 minutes; 60 a minute.
   With user accounts on, like the chat itself, it is off. A dropped connection
   keeps the conversation: once it is back, any reply that came meanwhile is
   spoken. A server restart or update reloads the page; tap **Resume talking**
