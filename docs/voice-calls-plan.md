@@ -24,6 +24,19 @@ seconds to minutes in a terminal, too slow for conversation. What the owner
 says comes back to Billion as owner messages, and question answers resolve
 the Qnn they answer. Recommended voice: **Eric** (samples below).
 
+The owner's bar, from today's Talk to Billion: "if I stop talking, you don't
+let me talk more … The response is also slow. They [MEGA] answer
+immediately." So the call must (1) not end his turn on a short pause, and
+fold what he adds into the same turn, and (2) start answering in under a
+second. Measured below ([Turn-taking and latency](#turn-taking-and-latency-measured)):
+no option meets both with a fixed silence timer, because waiting longer
+makes every answer slower. It takes an end-of-turn model plus an instant
+spoken acknowledgment, and ElevenLabs has both as settings. The proof of
+concept has to show it: under a second to first audio, and no cut-in on a
+1.5-second pause. If it fails, the next option is OpenAI Realtime with its
+semantic end-of-turn detection. The same fixes apply to the in-app Talk to
+Billion ([Fixing Talk to Billion](#fixing-talk-to-billion-in-the-app)).
+
 ## How voice works today
 
 The Billion tab's *Talk to Billion* (`server/talk.js`, `public/modules/talk.js`,
@@ -73,8 +86,8 @@ vendors' claims; the proof of concept measures the real one.
 |---|---|---|---|---|---|
 | How it works | Pipeline: their STT, any LLM, their TTS; turn-taking model | One speech-to-speech model | One speech-to-speech model, full duplex | Pipeline: pick each provider | Pipeline, managed |
 | Voice quality | Best: thousands of voices, ours included; expressive | Very natural prosody; ~10 built-in voices | Good; ~30 built-in voices | As good as the TTS picked (ElevenLabs voices possible) | Good; ElevenLabs/own voices |
-| Latency | ~1 s turn (Flash TTS ~75 ms) | ~0.5–1 s; hears audio directly | ~0.5–1 s | ~1 s; tunable | ~1 s |
-| Interruptions | Good (barge-in, turn model) | Very good | Very good (full duplex) | Good, configurable | Good |
+| Latency (first audio after you stop) | est. ~0.9–1.1 s + end-of-turn wait (TTS measured 0.27 s, LLM 0.4–0.5 s) | vendor: ~0.5–1 s; not measured | **measured 1.27–1.39 s** (3.8 / 3.1 Live) | vendor: ~1 s; not measured | vendor: ~1 s; not measured |
+| End of turn and barge-in | Turn model; `turn_eagerness` patient, `spelling_patience`, `speculative_turn`, filler (`soft_timeout_config`) | `semantic_vad` with eagerness setting | Silence timer only; **measured: cuts in on a 1.5 s pause**, stops ~0.2 s after you resume; own detector possible (manual activity signals) | Smart endpointing models, start/stop-speaking plans | Own turn model, responsiveness and interruption settings |
 | Model cost / min | $0.08 platform + LLM ~$0.001–0.02 | ~$0.06–0.11 (gpt-realtime); ~$0.02–0.05 mini | ~$0.02–0.03 | $0.05 platform + STT + LLM + TTS ≈ $0.10–0.15 | ~$0.07–0.12 all in |
 | Phone, per min (US outbound) | Twilio $0.014 | Twilio $0.014 + SIP ~$0.004 | Twilio $0.014 | Vapi/Twilio/Telnyx ~$0.01–0.02 | $0.015 |
 | Number / month | Twilio $1.15 | Twilio $1.15 | Twilio $1.15 | ~$1–2 | $2 |
@@ -93,12 +106,75 @@ Why ElevenLabs over the others:
   bill (Vapi, plus a voice and an LLM provider, plus phone) for about the same
   result as ElevenLabs alone.
 - **Escape hatch.** If ElevenLabs' turn-taking disappoints in the proof of
-  concept, OpenAI Realtime over SIP is the runner-up: best interruption
-  handling, same Twilio number.
+  concept, OpenAI Realtime over SIP is the runner-up: semantic end-of-turn
+  detection, good interruption handling, same Twilio number.
+- **Gemini Live measured worst on the owner's two complaints.** It was 1.3 s
+  to first audio, cut in on every mid-sentence pause with its default timer,
+  and with the timer raised to 2 s it waited but took 2.3–2.6 s. Next
+  section.
 
 The LLM inside the call: ElevenLabs offers several (Gemini Flash, GPT-4.1/5
 mini, Claude Haiku/Sonnet). Start with a fast one (Gemini 2.5 Flash or Claude
 Haiku); the call is short, so the LLM is a cent or two a call either way.
+
+## Turn-taking and latency (measured)
+
+The owner's two complaints, turned into a test anyone can rerun
+(`scripts/voice-bench/`, see its README). It streams a recorded owner line to
+each option in real time, from the Mac mini, then silence, and logs when the
+option's audio comes back:
+
+- **Latency.** "What's the status of the dark mode pull request?" (2.5 s):
+  time from the end of speech to the option's first audio.
+- **Pause.** "I want you to look at the landing page copy" … 1.5 s of silence
+  … "and also check the pricing section before lunch." Does it start
+  answering in the pause, does it stop when he goes on, and does the answer
+  cover both halves?
+
+The voice is macOS `say`, not a person, and there is no phone leg (a call
+adds roughly 0.1–0.3 s). Numbers are from 2026-10-22.
+
+| Option | First audio after he stops | 1.5 s mid-sentence pause |
+|---|---|---|
+| Gemini 3.8 Live, default end of turn | **1.27–1.29 s** (3 of 3) | **Cut in** 1.2–1.35 s into the pause (2 of 2), stopped ~0.2 s after he resumed, then answered **only the second half** as a separate turn |
+| Gemini 3.8 Live, 2 s silence, low sensitivity | 2.3–2.6 s | Waited; one answer covering both halves (2 of 2) |
+| Gemini 3.1 Flash Live, default | 1.36–1.39 s (3 of 3) | Cut in (2 of 2), same as above |
+| Gemini 3.1 Flash Live, 2 s silence | ~2.3 s | Waited; one answer (2 of 2) |
+| Gemini 2.5 Flash native audio | 2.6–5.4 s | Did not cut in, but slow |
+| ElevenLabs Agents | **Not measured**: our API key can only do text-to-speech (it lacks the Agents permission, `convai_read`/`convai_write`). Its pieces, measured: Flash v2.5 streaming TTS first audio 0.27–0.29 s (Turbo v2.5 0.30–0.32 s, Multilingual v2 0.69–0.73 s); a fast LLM's first token 0.37–0.53 s (Gemini 2.5 Flash / Flash-Lite; 3.8 Flash 1.5–2.1 s). Estimate: ~0.9–1.1 s once it has decided the turn is over | — |
+| OpenAI Realtime, Vapi, Retell | Not measured: no key or account (none opened, per the card) | — |
+| **Today's Talk to Billion** | 0.8 s silence + whisper 0.2–0.5 s + **Billion's turn: 15 s to 2.5 min** (the five app voice turns in `chat.json`, 2026-10-19) + `say` ~0.75 s a sentence | Ends the turn after **0.8 s** of silence; each piece goes to Billion as its own message. The history shows one thought sent as three messages 3–6 s apart |
+
+What it shows:
+
+1. **A fixed silence timer can't satisfy both complaints.** Short enough
+   to answer fast (Gemini's default), it cuts in on a pause. Long enough not
+   to cut in (2 s), it is slower than MEGA on every turn. The answer is an
+   **end-of-turn model**: one that hears whether a sentence is finished
+   ("…before lunch." vs "…the landing page copy, and"). It ends a complete
+   turn in a few hundred ms and holds an unfinished one for 2–3 s.
+   ElevenLabs (its turn model, `turn_eagerness: "patient"`,
+   `spelling_patience`), OpenAI (`semantic_vad`), Vapi (smart endpointing)
+   and Retell (its turn model) have one. Gemini Live has only the timer,
+   unless we run our own detector and send it activity start/end signals.
+2. **Barge-in works everywhere it was measured:** Gemini stopped ~0.2 s
+   after he resumed. The miss is what happens next: the new words became a
+   new turn, answered on their own. The agent must treat speech that
+   resumes within a few seconds as the same turn. ElevenLabs' and OpenAI's
+   turn handling do this. For Talk, the fold is our code (next section).
+3. **Sub-second means saying something before the answer is ready.** Even
+   at ~1 s for a short reply, anything that needs Billion (seconds to
+   minutes) needs an instant acknowledgment ("Got it, the landing page and
+   pricing. Checking now."). Then the real answer follows by voice when it
+   comes. ElevenLabs has this as `soft_timeout_config` (a filler, static or
+   LLM-made, after N seconds of LLM wait). `speculative_turn` starts the LLM
+   during the pause, so the answer is ready the moment the turn ends.
+
+Settings to start the proof of concept with (ElevenLabs): `turn_eagerness:
+"patient"`, `spelling_patience: "auto"`, `speculative_turn: true`,
+`soft_timeout_config: { timeout_seconds: 0.8, use_llm_generated_message:
+true }`, TTS `eleven_flash_v2_5`, LLM Gemini 2.5 Flash (fastest first token
+measured). Then run the same two clips through it and on the real call.
 
 ## How it plugs into Billion
 
@@ -222,7 +298,13 @@ Ship outbound first; inbound is phase 3.
 
 Goal: one outbound call to the owner's phone, 2–3 minutes, Eric's voice, the
 current brief and open questions as context, and the transcript saved to the
-chat. No server changes beyond a script.
+chat. No server changes beyond a script. It passes only if:
+
+- the first audio comes within **1 s** of the end of a short question (the
+  bench, then the owner's own impression on the call);
+- a 1.5 s mid-sentence pause gets **no cut-in**, and the answer covers both
+  halves;
+- talking over the agent stops it within ~0.3 s.
 
 What the owner does (about 15 minutes, and the spending decision):
 
@@ -234,10 +316,15 @@ What the owner does (about 15 minutes, and the spending decision):
 
 What a worker does:
 
+0. With an ElevenLabs API key that has the Agents permission (made in the
+   ElevenLabs dashboard, no cost), run `scripts/voice-bench/` against the
+   agent: the two clips, 3 runs each. This fills the ElevenLabs row of the
+   table above before any call is placed.
 1. Create the agent with the ElevenLabs API: voice Eric
-   (`cjVigY5qzO86Huf0OWal`, `eleven_flash_v2_5`), the prompt above, max
-   duration 5 minutes, overrides allowed for `first_message`, audio retention
-   off.
+   (`cjVigY5qzO86Huf0OWal`, `eleven_flash_v2_5`), the prompt above, the turn
+   settings from [Turn-taking and latency](#turn-taking-and-latency-measured),
+   max duration 5 minutes, overrides allowed for `first_message`, audio
+   retention off.
 2. Import the Twilio number into ElevenLabs (`POST /v1/convai/phone-numbers`).
 3. `scripts/phone-poc.mjs`: build the variables from the live server
    (`/api/...` for the brief and questions, `STATE.md`), refuse any number but
@@ -247,6 +334,7 @@ What a worker does:
 4. Poll `GET /v1/convai/conversations/{conversation_id}` until it is done;
    save the transcript to `~/.agent-007/calls/<id>.json` and print it, with
    the measured turn latency and the call's cost from the response.
+   ElevenLabs reports each turn's timing in the conversation's details.
 5. The owner listens for: does it sound like the samples, is it ever awkward
    to interrupt, how long are the pauses. Go or no-go on ElevenLabs vs. OpenAI
    Realtime (then a one-day spike on that).
@@ -266,6 +354,76 @@ the $20 Twilio credit that stays in the account.
    Funnel; then inbound with the passphrase.
 4. Docs in BILLION.md and FEATURES.md; `agent007 doctor` checks the phone
    settings.
+
+## Fixing Talk to Billion in the app
+
+The owner uses it today, and both complaints come from how it is built
+(`public/modules/talk.js`, `server/talk.js`):
+
+- **"You don't let me talk more."** Silero VAD ends an utterance after
+  `redemptionMs: 800` of silence, and `onSpeechEnd` sends it at once as its
+  own `[Owner via app, voice]` message. A breath mid-thought is a finished
+  turn, Billion starts on half a sentence, and the rest arrives as a second
+  message that gets its own reply.
+- **"The response is also slow."** The local parts are quick: whisper.cpp
+  0.2–0.5 s, `say` ~0.75 s a sentence. Billion's turn is the slow part, 15 s
+  to 2.5 min in the history, because a voice turn waits behind whatever
+  Billion is doing. The progress phrase (`PROGRESS_QUIET_MS`) only plays once
+  the transcript has reached the server, and it reads Billion's status line,
+  not an acknowledgment of what he said.
+
+The fix, in order (each one shippable alone, all local, so no audio leaves
+the machine):
+
+1. **Hold the turn open.** Keep the VAD's short segments, but make the server
+   hold a *pending turn* instead of sending each one:
+   - transcribe each segment at once (whisper is fast enough);
+   - end the turn quickly (~0.4 s) when it sounds finished;
+   - hold it 2–2.5 s when it doesn't: no closing punctuation from whisper, a
+     trailing "and / so / but / um / the", or a list in progress;
+   - speech that starts inside the hold joins the same turn.
+
+   For a better judge than those rules, run **Smart Turn v3**
+   (Pipecat's open-source, audio-based end-of-turn model, ~8M parameters,
+   ONNX, tens of ms on a CPU) in the page. The page already loads
+   onnxruntime-web for Silero, so it fits beside it. The LiveKit turn
+   detector (open weights, text-based) is the alternative.
+2. **Fold late additions into the same turn.** If he goes on after the turn
+   was sent:
+   - while the message still waits in Billion's queue (the *queued* state
+     from #262), amend it in place, so Billion gets one message;
+   - once Billion has it, send the addition as a follow-up of the same turn
+     (`[Owner via app, voice, continuing #id] …`), stop any reply to the
+     first part that hasn't played yet, and speak only the reply to the
+     whole turn.
+3. **Barge-in while thinking, not only while speaking.** Today speech
+   interrupts playback (`onSpeechRealStart` → `interrupt()`). Also cancel a
+   pending acknowledgment or progress phrase, and treat what he says then as
+   step 2.
+4. **Acknowledge at once.** When a turn ends, speak a short local
+   acknowledgment within ~0.5 s: a few `say` phrases synthesized once at
+   start and cached ("Got it.", "On it.", "Okay, checking."), optionally
+   with the gist ("Okay: landing page and pricing."). Then the progress
+   phrases, then the answer. This is the "answer immediately" feel without
+   pretending to have the answer.
+5. **Make Billion's first reply fast.** Charter rule: a voice turn gets a
+   one-line `tell_owner` first (what it will do), and the work after. A
+   voice turn also skips ahead of board notices in Billion's queue, so
+   Billion doesn't finish another task first.
+6. **Optional, not local: a better voice and a fast front agent.** Two
+   choices for the owner, since they send text or audio off the machine:
+   - ElevenLabs streaming TTS (Eric, first audio 0.27 s measured) in place
+     of `say`;
+   - or run Talk in the tab on the same ElevenLabs agent as the phone (a
+     browser WebSocket with a signed URL), keeping today's local mode as
+     "private mode". One agent, one set of turn settings, phone and tab
+     alike.
+
+Measure before and after with what the page already logs: each turn's
+`transcriptionMs`, `whisperMs`, `billionMs`, `speechStartMs` and `totalMs`
+in `window.agent007TalkLatency`. Add "time to first sound" (acknowledgment
+included) and the number of turns that got split. Targets: first sound
+under 1 s, no split turns on the pause clip.
 
 ## Costs
 
@@ -331,5 +489,6 @@ designed or cloned one, can be swapped in later by changing one id.
 - OpenAI Realtime: [Fora Soft pricing](https://www.forasoft.com/blog/article/openai-realtime-api-pricing), [Fora Soft SIP](https://www.forasoft.com/blog/article/openai-realtime-api-webrtc-sip-websockets-integration), [Layer3 Labs](https://www.layer3labs.io/guides/openai-realtime-api-pricing).
 - Gemini Live: [Google blog](https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/), [TokenKarma](https://tokenkarma.app/blog/gemini-live-api-pricing-voice-agents-2026/), [Vertex AI docs](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/2-5-flash-live-api).
 - Vapi and Retell: [Retell vs Vapi](https://www.retellai.com/comparisons/retell-vs-vapi), [Lindy on Vapi](https://www.lindy.ai/blog/vapi-ai), [Superdupr](https://superdupr.com/blog/vapi-vs-bland-vs-retell), [StackBinary](https://stackbinary.io/insights/voice-ai-pricing-per-minute-2026).
+- Turn detection: [Smart Turn v3 (Daily)](https://www.daily.co/blog/announcing-smart-turn-v3-with-cpu-inference-in-just-12ms/), [Pipecat Smart Turn docs](https://docs.pipecat.ai/api-reference/server/utilities/turn-detection/smart-turn-overview), [Smart Turn v3.2 ONNX](https://huggingface.co/soniqo/Smart-Turn-v3.2-ONNX), [LiveKit turn detector](https://docs.livekit.io/agents/logic/turns/turn-detector), [ElevenLabs conversation flow (turn eagerness, timeouts)](https://elevenlabs.io/docs/eleven-agents/customization/conversation-flow), [ElevenLabs agent API (turn settings)](https://elevenlabs.io/docs/api-reference/agents/create).
 - Comparisons: [andrew.ooo](https://andrew.ooo/answers/gpt-realtime-2-vs-elevenlabs-vs-gemini-live-may-2026/), [apiscout](https://apiscout.dev/guides/realtime-voice-ai-apis-comparison-2026).
 - Twilio: [voice and number pricing](https://www.twilio.com/en-us/phone-numbers/pricing).
