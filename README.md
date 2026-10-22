@@ -283,6 +283,9 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `TELEGRAM_VOICE` | `mirror` | Voice on Telegram: `mirror` answers in the mode of your last message, `always` speaks, `never` is text. Speaking needs macOS `say` and ffmpeg. See [Voice](docs/BILLION.md#voice) |
 | `WHISPER_MODEL` | *(none)* | Full path to a whisper.cpp ggml model (e.g. `ggml-base.en.bin`); with `whisper-cli` installed, your voice notes are transcribed locally for Billion |
 | `WHISPER_CPP_BIN` | *(on PATH)* | whisper.cpp's CLI, when `whisper-cli`/`whisper-cpp`/`main` is not on `PATH` |
+| `ELEVENLABS_API_KEY` | *(off)* | Talk to Billion speaks its replies with ElevenLabs, streamed as they are made; only the reply's text is sent. Off, macOS `say` speaks them. See [Talk to Billion](docs/BILLION.md#talk-to-billion) |
+| `ELEVENLABS_VOICE` | `Eric` | The ElevenLabs voice: a name on your account or a voice id |
+| `ELEVENLABS_MODEL` | `eleven_flash_v2_5` | The ElevenLabs model (Flash is the fastest) |
 | `SKILL_FAMILIES` | *(on)* | `0` (or `false`/`off`/`no`) lists every skill in full for the Claude Code agents the app starts, as Claude Code does on its own. See [Skill families](#skill-families-every-agent-sees-a-short-index-and-a-card-picks-what-it-needs) |
 | `TRUST_BOARD_WORKTREES` | *(on)* | Board-dispatched Claude Code and Codex workers skip the workspace-trust dialog, so queued jobs start unattended. That also lets the repo's own `.claude/settings.json` (or Codex project config, hooks and exec policies) apply without asking. `0` (or `false`/`off`/`no`) keeps the dialog. Hand-started agents always keep it |
 
@@ -469,7 +472,8 @@ server/
   codex-login.js   The Codex side of rotation: capture and activate auth.json, stop Codex's background server
   claude-rotation-sessions.js  Resume exact Claude or Codex conversations after a shared login switch
   claude-processes.js  Detect Claude or Codex processes outside the app before a login switch
-  talk.js          Talk to Billion: an utterance's audio transcribed (whisper.cpp) and sent once, a voice reply spoken (say), /api/talk routes
+  talk.js          Talk to Billion: each stretch of speech transcribed (whisper.cpp), a turn sent once (or added to), acknowledgments, the voice reply spoken (ElevenLabs or say), /api/talk routes
+  elevenlabs.js    ElevenLabs streaming text-to-speech for Talk to Billion (on with ELEVENLABS_API_KEY)
   approvals.js     Hands a worker's permission request to Billion and waits for its answer
   permission-hook.js  PermissionRequest hook (Claude Code and Codex) a worker on Billion's cards runs
   agent-mcp.js     Per-session MCP config + the flags that connect Claude Code and Codex to it
@@ -491,7 +495,8 @@ public/
     jobs.js        Job board UI (columns, cards, the job form)
     waiting.js     The Billion tab: your chat with Billion (its replies and questions, your messages, a text box, its mic, pasted/dropped files)
     readaloud.js   Read aloud in the Billion tab (speechSynthesis: a speaker button per message, read new messages aloud)
-    talk.js        Talk to Billion: hands-free voice turns in the Billion tab (VAD, utterance upload, spoken replies)
+    talk.js        Talk to Billion: hands-free voice turns in the Billion tab (VAD, segment upload, acknowledgments, barge-in, streamed spoken replies)
+    talk-turns.js  Talk to Billion's turn-taking: when you have finished speaking (adaptive end-of-turn pause)
     ws.js          WebSocket client: reconnects in place, reloads on a server restart
     state.js       Shared client state (agents, repos, viewer identity, server platform, the panel a phone shows)
     shortcuts.js   Keyboard shortcuts
