@@ -14,7 +14,7 @@ import { join, resolve, sep, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
-import { sendText, cancelQueuedText } from './messages.js';
+import { sendText, cancelQueuedText, editQueuedText } from './messages.js';
 import { detectState } from '../lib/helpers.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
 import { billionReplied, publishStatus, MAX_STEPS, SHORT_ID_CHARS } from './billion-status.js';
@@ -402,9 +402,21 @@ export function chatMessages() {
   }
 }
 
+// Owner messages a reply answers: those it names, and the voice turns those
+// continue (words the owner added after Billion had the turn: one answer
+// answers them all).
+function answeredIds(messages) {
+  const answered = new Set(messages.filter(m => m.from === 'billion' && m.replyTo).map(m => m.replyTo));
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.continues && answered.has(m.id)) answered.add(m.continues);
+  }
+  return answered;
+}
+
 function saveChat(messages) {
   // Keep open questions and unanswered requests until their answer arrives.
-  const answered = new Set(messages.filter(m => m.from === 'billion' && m.replyTo).map(m => m.replyTo));
+  const answered = answeredIds(messages);
   for (const m of messages) if (m.from === 'owner' && answered.has(m.id)) m.awaitsReply = false;
   let over = messages.length - CHAT_CAP;
   const kept = messages.filter(m => !(over > 0 && m.q?.status !== 'open' && !(m.from === 'owner' && m.awaitsReply === true) && over--));
@@ -421,7 +433,7 @@ function saveChat(messages) {
 // round commands and worker/server notifications never consume owner replies.
 export function pendingOwnerMessages() {
   const messages = chatMessages();
-  const answered = new Set(messages.filter(m => m.from === 'billion' && m.replyTo).map(m => m.replyTo));
+  const answered = answeredIds(messages);
   return messages.filter(m => m.from === 'owner' && m.awaitsReply === true && !answered.has(m.id));
 }
 
@@ -657,16 +669,20 @@ export function runCommand(command, via, { broadcast, env = process.env, name = 
 // never a round shortcut a misheard word could trigger. utterance: its id, so
 // the same utterance sent again (a retry, a revised transcript) is the
 // message already sent, not a second one. Checked and written with no await
-// between, so two at once cannot both get through.
-// { ok, id } (duplicate: the utterance was in already) or { error }.
-export async function ownerSays(text, { answers, files: list, broadcast, env = process.env, voice = false, utterance } = {}) {
+// between, so two at once cannot both get through. continues: a voice turn
+// still waiting for its reply that these words add to (continueVoiceTurn).
+// { ok, id } (duplicate: the utterance was in already; merged: added to
+// the turn continued) or { error }.
+export async function ownerSays(text, { answers, files: list, broadcast, env = process.env, voice = false, utterance, continues } = {}) {
   const body = typeof text === 'string' ? text.trim() : '';
   const { files, error } = planChatFiles(list);
   if (error) return { error };
   if (utterance) {
-    const sent = chatMessages().find(m => m.utterance === utterance);
+    const sent = byUtterance(utterance);
     if (sent) return { ok: true, id: sent.id, duplicate: true };
   }
+  const earlier = voice && continues && body ? continueVoiceTurn(continues, body, utterance, { broadcast, env }) : null;
+  if (earlier?.merged) return { ok: true, id: earlier.id, merged: true };
   if (!body && !files.length) return { error: 'The message is empty.' };
   if (answers && !voice) return answerWaiting(answers, body, 'app', { broadcast, env, typed: true, files });
   if (!voice && !files.length && slashCommand(body)) return runCommand(body, 'app', { broadcast, env });
@@ -687,7 +703,7 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
   const saved = files.length ? saveChatFiles(id, files) : { paths: [], records: [] };
   if (saved.error) return saved;
   // A voice turn names itself, so Billion can bind its spoken reply to it (tell_owner reply_to).
-  const prefix = voice ? `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}]` : APP_PREFIX;
+  const prefix = voice ? voicePrefix(id, earlier?.id) : APP_PREFIX;
   const said = voice ? body : unescapeSlash(body);
   const typing = typedWhen(id, broadcast);
   if (!sendText(billion, withFiles(said ? `${prefix} ${said}` : prefix, saved.paths), undefined, { ...OWNER, key: id, onDeliver: typing.now })) {
@@ -695,10 +711,38 @@ export async function ownerSays(text, { answers, files: list, broadcast, env = p
     return { error: 'Billion has too much waiting for it; try again in a while.' };
   }
   setOwnerChannel('app');
-  addChat({ id, from: 'owner', via: 'app', text: said, awaitsReply: true, ...typing.queued(), ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
+  addChat({ id, from: 'owner', via: 'app', text: said, awaitsReply: true, ...typing.queued(), ...(voice ? { voice: true } : {}), ...(utterance ? { utterance } : {}), ...(earlier ? { continues: earlier.id } : {}), ...(files.length ? { files: saved.records } : {}) }, broadcast, env);
   // Pending, with the progress box under it, until a tell_owner answers it.
   publishStatus(broadcast);
   return { ok: true, id };
+}
+
+// The message a Talk to Billion utterance became, merged into or sent as.
+export const byUtterance = (utterance) => chatMessages().find(m => m.utterance === utterance || m.utterances?.includes(utterance));
+
+// [Owner via app, voice #3f9a0c1e], or [Owner via app, voice #3f9a0c1e, adds to #77d0b1aa]
+// for words that continue a turn Billion already has.
+const voicePrefix = (id, adds) => `${APP_VOICE_PREFIX.slice(0, -1)} #${id.slice(0, SHORT_ID_CHARS)}${adds ? `, adds to #${adds.slice(0, SHORT_ID_CHARS)}` : ''}]`;
+
+// The owner spoke again before Billion answered their voice turn: the new
+// words belong to that turn. While it still waits in Billion's queue they
+// are added to it in place ({ merged, id }): Billion gets one turn. Once
+// Billion has it, { id } of the turn, and ownerSays sends the words as an
+// addition that names it (Billion answers both at once, and that answer
+// closes both). null when there is no such turn waiting.
+function continueVoiceTurn(id, words, utterance, { broadcast, env }) {
+  const messages = chatMessages();
+  const m = messages.find(x => x.id === id && x.from === 'owner' && x.via === 'app' && x.voice && x.awaitsReply && !x.cancelled);
+  if (!m || answeredIds(messages).has(m.id)) return null;
+  const text = `${m.text} ${words}`;
+  if (m.queued && editQueuedText(m.id, `${voicePrefix(m.id, m.continues)} ${text}`)) {
+    m.text = redact(text, env);
+    if (utterance) m.utterances = [...(m.utterances || []), utterance];
+    saveChat(messages);
+    broadcast?.({ type: 'chat-message', message: m });
+    return { merged: true, id: m.id };
+  }
+  return { id: m.id };
 }
 
 // --- Cancel: the owner takes back a message Billion has not been given yet ---
