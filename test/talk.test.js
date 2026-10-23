@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { EventEmitter } from 'events';
-import { writeFileSync, readFileSync, rmSync, mkdtempSync } from 'fs';
+import { writeFileSync, readFileSync, rmSync, mkdtempSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import express from 'express';
@@ -37,11 +37,12 @@ vi.mock('../server/command-path.js', async (importOriginal) => ({
 }));
 
 const { ownerSays, tellOwner, notifyOwner, chatMessages, pendingOwnerMessages, addChat, NOTIFY_WINDOW_MS } = await import('../server/owner.js');
-const { talkSetup, voiceUtterance, voiceSays, voiceAudio, looksLikeEcho, speechPieces, _resetTalk, MAX_UTTERANCE_BYTES, UTTERANCE_LIMIT } = await import('../server/talk.js');
+const { talkSetup, voiceUtterance, voiceSegment, voiceSays, voiceAudio, voiceAudioBuffer, looksLikeEcho, speechPieces, ACKS, _resetTalk, MAX_UTTERANCE_BYTES, UTTERANCE_LIMIT } = await import('../server/talk.js');
+const { _resetEleven } = await import('../server/elevenlabs.js');
 const { setupRoutes } = await import('../server/http.js');
 const { setBillionStatus, _resetStatus } = await import('../server/billion-status.js');
 const { sessions, CONFIG_DIR } = await import('../server/state.js');
-const { dropMessages } = await import('../server/messages.js');
+const { dropMessages, flushMessages } = await import('../server/messages.js');
 
 const model = join(mkdtempSync(join(tmpdir(), 'a007-talk-')), 'ggml-base.en.bin');
 writeFileSync(model, 'model');
@@ -52,6 +53,8 @@ const now = () => (clock += 10 * NOTIFY_WINDOW_MS);
 let b;
 const typed = () => b.pty.write.mock.calls.map(c => c[0]).join('').replace(/\x1b\[20[01]~/g, '');
 const id = (n) => `utt-${n}-0123456789`;
+// Billion idle again, so what waits in its queue is typed.
+const deliver = () => { b.state = 'WAITING'; b.stateChangedAt = Date.now() + 1; b.messageDeliveredAt = 0; b.messageTyping = false; flushMessages(b); };
 
 beforeEach(() => {
   rmSync(join(CONFIG_DIR, 'chat.json'), { force: true });
@@ -217,8 +220,8 @@ describe('a reply\'s audio', () => {
     const { reply } = await voiceTurnAnswered(long);
     const pieces = speechPieces(reply.text);
     expect(pieces.length).toBeGreaterThan(1);
-    const first = await voiceAudio(reply.id, 0, { env: ENV, platform: 'darwin' });
-    expect(first).toEqual({ audio: Buffer.from('AUDIO'), count: pieces.length });
+    const first = await voiceAudioBuffer(reply.id, 0, { env: ENV, platform: 'darwin' });
+    expect(first).toEqual({ type: 'audio/mp4', audio: Buffer.from('AUDIO'), count: pieces.length });
     expect(tools.said[0]).toBe(pieces[0]);
     const ffmpeg = tools.calls.find(([cmd]) => cmd === 'ffmpeg')[1];
     expect(ffmpeg).toEqual(expect.arrayContaining(['-c:a', 'aac']));
@@ -251,7 +254,7 @@ describe('a reply\'s audio', () => {
     const { reply } = await voiceTurnAnswered('Done.');
     expect(await voiceAudio(reply.id, 0, { env: ENV, platform: 'linux' })).toMatchObject({ status: 503 });
     expect(talkSetup(ENV, 'linux')).toMatchObject({ stt: 'whisper', tts: null, ttsMissing: expect.stringMatching(/macOS/) });
-    expect(talkSetup(ENV, 'darwin')).toEqual({ stt: 'whisper', tts: 'say' });
+    expect(talkSetup(ENV, 'darwin')).toEqual({ stt: 'whisper', tts: 'say', acks: ACKS });
     expect(talkSetup({}, 'darwin')).toMatchObject({ stt: null, sttMissing: expect.stringMatching(/^Talking needs a whisper\.cpp model/) });
   });
 
@@ -293,6 +296,276 @@ describe('a reply\'s audio', () => {
   });
 });
 
+describe('a turn gathered from segments', () => {
+  it('a segment is transcribed here and sent nowhere; the turn goes to Billion once', async () => {
+    tools.whisperOut = 'Check the release';
+    expect(await voiceSegment(WAV, { segment: id(40), env: ENV })).toMatchObject({ text: 'Check the release' });
+    expect(chatMessages()).toEqual([]);
+    expect(typed()).toBe('');
+    expect((await voiceSegment(WAV, { segment: 'bad', env: ENV })).error).toMatch(/Bad segment/);
+    expect((await voiceSegment(Buffer.alloc(0), { segment: id(41), env: ENV })).error).toMatch(/No audio/);
+    const sent = await voiceSays('Check the release and then merge it.', { utterance: id(42), env: ENV });
+    expect(typed()).toContain(`[Owner via app, voice #${sent.id.slice(0, 8)}] Check the release and then merge it.`);
+  });
+
+  it('a segment that is the acknowledgment playing, or the reply playing, comes back empty as echo', async () => {
+    tools.whisperOut = 'Got it, one sec.';
+    expect(await voiceSegment(WAV, { segment: id(43), echoOf: 'ack-0', env: ENV })).toMatchObject({ text: '', echo: true });
+    // The owner's own "got it" with no acknowledgment playing is theirs.
+    tools.whisperOut = 'Got it';
+    expect(await voiceSegment(WAV, { segment: id(44), env: ENV })).toMatchObject({ text: 'Got it' });
+    tools.whisperOut = 'Something else entirely about the board';
+    expect(await voiceSegment(WAV, { segment: id(45), echoOf: 'ack-0', env: ENV })).toMatchObject({ text: 'Something else entirely about the board' });
+    // Sharing words with the acknowledgment is not being it.
+    tools.whisperOut = 'No, give me a second.';
+    expect(await voiceSegment(WAV, { segment: id(46), echoOf: 'ack-7', env: ENV })).toMatchObject({ text: 'No, give me a second.' });
+    tools.whisperOut = 'me a second';
+    expect(await voiceSegment(WAV, { segment: id(47), echoOf: 'ack-7', env: ENV })).toMatchObject({ text: '', echo: true });
+  });
+
+  it('a fragment of the owner\'s turn that shares words with a progress phrase is kept; the whole turn is checked', async () => {
+    _resetStatus();
+    setBillionStatus('Running the tests');
+    const t = Date.now();
+    await voiceAudio('status', 0, { env: ENV, platform: 'darwin', now: t });
+    tools.whisperOut = 'the tests';
+    expect(await voiceSegment(WAV, { segment: id(48), env: ENV, now: t + 1000 })).toMatchObject({ text: 'the tests' });
+    expect(await voiceSays('Stop running the tests and merge.', { utterance: id(49), env: ENV, now: t + 1000 })).toMatchObject({ ok: true, id: expect.any(String) });
+    expect(await voiceSays('Running the tests.', { utterance: id(56), env: ENV, now: t + 1000 })).toEqual({ ok: true, echo: true });
+    _resetStatus();
+  });
+
+  it('words added while the turn still waits in Billion\'s queue join it: one turn, typed once', async () => {
+    b.state = 'WORKING';
+    const broadcast = vi.fn();
+    const first = await voiceSays('Can you check the release', { utterance: id(50), env: ENV, broadcast });
+    expect(chatMessages()[0]).toMatchObject({ queued: true });
+    const more = await voiceSays('and the open pull requests.', { utterance: id(51), continues: first.id, env: ENV, broadcast });
+    expect(more).toEqual({ ok: true, id: first.id, merged: true });
+    expect(chatMessages()).toHaveLength(1);
+    expect(chatMessages()[0].text).toBe('Can you check the release and the open pull requests.');
+    expect(broadcast).toHaveBeenLastCalledWith({ type: 'chat-message', message: expect.objectContaining({ text: 'Can you check the release and the open pull requests.' }) });
+    // A retry of the added words is the same turn.
+    expect(await voiceSays('and the open pull requests.', { utterance: id(51), continues: first.id, env: ENV })).toMatchObject({ id: first.id, duplicate: true });
+    deliver();
+    expect(typed().split('[Owner via app, voice #')).toHaveLength(2);
+    expect(typed()).toContain(`[Owner via app, voice #${first.id.slice(0, 8)}] Can you check the release and the open pull requests.`);
+  });
+
+  it('words added after Billion has the turn are sent naming it, and one answer closes both', async () => {
+    const first = await voiceSays('Can you check the release', { utterance: id(52), env: ENV });
+    const more = await voiceSays('and the open pull requests', { utterance: id(53), continues: first.id, env: ENV });
+    deliver();
+    expect(more.id).not.toBe(first.id);
+    expect(more.merged).toBeUndefined();
+    expect(typed()).toContain(`[Owner via app, voice #${more.id.slice(0, 8)}, adds to #${first.id.slice(0, 8)}] and the open pull requests`);
+    expect(chatMessages().at(-1)).toMatchObject({ continues: first.id });
+    expect(pendingOwnerMessages().map(m => m.id)).toEqual([first.id, more.id]);
+    await tellOwner('The release is out and two PRs are open.', { env: {}, now: now(), replyTo: more.id.slice(0, 8) });
+    expect(pendingOwnerMessages()).toEqual([]);
+    expect(chatMessages().find(m => m.id === first.id).awaitsReply).toBe(false);
+  });
+
+  it('a segment retried while it is transcribed is one transcription; no whisper.cpp and a flood are refused', async () => {
+    tools.delay = 30;
+    const [one, two] = await Promise.all([voiceSegment(WAV, { segment: id(46), env: ENV }), voiceSegment(WAV, { segment: id(46), env: ENV })]);
+    expect(two).toEqual(one);
+    expect(tools.calls.filter(([cmd]) => cmd === 'whisper-cli')).toHaveLength(1);
+    tools.delay = 0;
+    tools.available.delete('whisper-cli');
+    expect(await voiceSegment(WAV, { segment: id(47), env: ENV })).toMatchObject({ noWhisper: true, error: expect.stringMatching(/^Talking needs/) });
+    tools.available.add('whisper-cli');
+    for (let i = 0; i < UTTERANCE_LIMIT; i++) await voiceSegment(WAV, { segment: id(200 + i), env: ENV, now: 1 });
+    expect((await voiceSegment(WAV, { segment: id(299), env: ENV, now: 2 })).error).toMatch(/Too many/);
+    expect(chatMessages()).toEqual([]);
+  });
+
+  it('a chain of additions: one answer to the last closes every turn it adds to', async () => {
+    const a = await voiceSays('Check the release', { utterance: id(56), env: ENV });
+    const bb = await voiceSays('and the open PRs', { utterance: id(57), continues: a.id, env: ENV });
+    deliver();
+    const c = await voiceSays('and the board', { utterance: id(58), continues: bb.id, env: ENV });
+    expect(chatMessages().at(-1)).toMatchObject({ id: c.id, continues: bb.id });
+    expect(pendingOwnerMessages()).toHaveLength(3);
+    await tellOwner('All fine.', { env: {}, now: now(), replyTo: c.id.slice(0, 8) });
+    expect(pendingOwnerMessages()).toEqual([]);
+  });
+
+  it('continuing a typed message or an unknown id is a turn of its own', async () => {
+    const typedMsg = await ownerSays('A typed question', { env: ENV });
+    const next = await voiceSays('Then ship it', { utterance: id(59), continues: typedMsg.id, env: ENV });
+    expect(next.merged).toBeUndefined();
+    expect(chatMessages().at(-1).continues).toBeUndefined();
+    const other = await voiceSays('Something else', { utterance: id(61), continues: 'no-such-message', env: ENV });
+    expect(chatMessages().find(m => m.id === other.id).continues).toBeUndefined();
+    expect(typed()).not.toContain('adds to');
+  });
+
+  it('a turn already answered is not continued: the words are a turn of their own', async () => {
+    const first = await voiceSays('Is the build green', { utterance: id(54), env: ENV });
+    await tellOwner('Yes.', { env: {}, now: now(), replyTo: first.id.slice(0, 8) });
+    const next = await voiceSays('Then ship it', { utterance: id(55), continues: first.id, env: ENV });
+    deliver();
+    expect(typed()).toContain(`[Owner via app, voice #${next.id.slice(0, 8)}] Then ship it`);
+    expect(chatMessages().at(-1).continues).toBeUndefined();
+  });
+});
+
+describe('ElevenLabs', () => {
+  const ELEVEN = { ...ENV, ELEVENLABS_API_KEY: 'xi-secret-key' };
+  const realFetch = globalThis.fetch;
+  let calls, tts;
+  // ElevenLabs stands in; anything else (the routes' own requests) is real.
+  function stubEleven() {
+    calls = [];
+    tts = (body) => new Response(new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode(`MP3[${body.text}]`)); c.enqueue(new TextEncoder().encode('MORE')); c.close(); },
+    }), { status: 200, headers: { 'Content-Type': 'audio/mpeg' } });
+    vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+      if (!String(url).startsWith('https://api.elevenlabs.io/')) return realFetch(url, init);
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith('/voices')) return Response.json({ voices: [{ voice_id: 'R'.repeat(20), name: 'Roger - Laid-Back' }] });
+      return tts(JSON.parse(init.body));
+    }));
+  }
+  beforeEach(() => {
+    stubEleven();
+    _resetEleven();
+    rmSync(join(CONFIG_DIR, 'talk-voice'), { recursive: true, force: true });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('speaks with Eric on Flash by default, streamed as MP3, and the page is told', async () => {
+    expect(talkSetup(ELEVEN, 'linux')).toMatchObject({ tts: 'elevenlabs', voice: 'Eric' });
+    expect(talkSetup(ELEVEN, 'linux').ttsMissing).toBeUndefined();
+    const asked = await voiceSays('What is next?', { utterance: id(60), env: ENV });
+    await tellOwner('The release is out.', { env: {}, now: now(), replyTo: asked.id.slice(0, 8) });
+    const reply = chatMessages().at(-1);
+    const got = await voiceAudio(reply.id, 0, { env: ELEVEN, platform: 'linux' });
+    expect(got).toMatchObject({ type: 'audio/mpeg', count: 1 });
+    const chunks = [];
+    for await (const c of got.stream) chunks.push(c.toString());
+    expect(chunks).toEqual(['MP3[The release is out.]', 'MORE']);
+    const call = calls.find(c => c.url.includes('/text-to-speech/'));
+    expect(call.url).toMatch(/\/text-to-speech\/cjVigY5qzO86Huf0OWal\/stream\?output_format=mp3_/);
+    expect(JSON.parse(call.init.body)).toEqual({ text: 'The release is out.', model_id: 'eleven_flash_v2_5' });
+    expect(call.init.headers['xi-api-key']).toBe('xi-secret-key');
+    expect(tools.said).toEqual([]);
+  });
+
+  it('ELEVENLABS_VOICE names a voice on the account (or is its id); ELEVENLABS_MODEL picks the model', async () => {
+    const env = { ...ELEVEN, ELEVENLABS_VOICE: 'Roger', ELEVENLABS_MODEL: 'eleven_turbo_v2_5' };
+    const got = await voiceAudioBuffer('ack-1', 0, { env, platform: 'linux' });
+    expect(got.audio.toString()).toBe(`MP3[${ACKS[1]}]MORE`);
+    const call = calls.find(c => c.url.includes('/text-to-speech/'));
+    expect(call.url).toContain(`/text-to-speech/${'R'.repeat(20)}/stream`);
+    expect(JSON.parse(call.init.body).model_id).toBe('eleven_turbo_v2_5');
+  });
+
+  it('an acknowledgment is made once per voice and kept on disk across restarts', async () => {
+    await voiceAudioBuffer('ack-2', 0, { env: ELEVEN, platform: 'linux' });
+    await new Promise(r => setTimeout(r, 10));
+    _resetTalk();
+    const again = await voiceAudioBuffer('ack-2', 0, { env: ELEVEN, platform: 'linux' });
+    expect(again.audio.toString()).toBe(`MP3[${ACKS[2]}]MORE`);
+    expect(calls.filter(c => c.url.includes('/text-to-speech/'))).toHaveLength(1);
+    expect((await voiceAudio('ack-99', 0, { env: ELEVEN, platform: 'linux' })).status).toBe(404);
+  });
+
+  it('an acknowledgment that came out far too long (a phrase said twice) is not kept', async () => {
+    const said = ACKS[0];
+    tts = () => new Response(new Uint8Array(40000));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await voiceAudioBuffer('ack-0', 0, { env: ELEVEN, platform: 'linux' });
+    await new Promise(r => setTimeout(r, 10));
+    expect(log.mock.calls.join(' ')).toMatch(/came out too long/);
+    tts = (body) => new Response(`MP3[${body.text}]`);
+    expect((await voiceAudioBuffer('ack-0', 0, { env: ELEVEN, platform: 'linux' })).audio.toString()).toBe(`MP3[${said}]`);
+    expect(calls.filter(c => c.url.includes('/text-to-speech/'))).toHaveLength(2);
+    log.mockRestore();
+  });
+
+  it('ELEVENLABS_VOICE as an id is used as is; a name not on the account, or a failed lookup, is Eric', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await voiceAudioBuffer('ack-0', 0, { env: { ...ELEVEN, ELEVENLABS_VOICE: 'A'.repeat(20) }, platform: 'linux' });
+    expect(calls.map(c => c.url)).toEqual([expect.stringContaining(`/text-to-speech/${'A'.repeat(20)}/stream`)]);
+    calls.length = 0;
+    await voiceAudioBuffer('ack-1', 0, { env: { ...ELEVEN, ELEVENLABS_VOICE: 'Nobody' }, platform: 'linux' });
+    expect(calls.find(c => c.url.includes('/text-to-speech/')).url).toContain('/text-to-speech/cjVigY5qzO86Huf0OWal/');
+    expect(log.mock.calls.join(' ')).toMatch(/"Nobody" is not on this account; using Eric/);
+    // The voice list cannot be had: Eric, not an error.
+    vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith('/voices')) return new Response('down', { status: 500 });
+      return tts(JSON.parse(init.body));
+    }));
+    calls.length = 0;
+    const got = await voiceAudioBuffer('ack-2', 0, { env: { ...ELEVEN, ELEVENLABS_VOICE: 'Someone' }, platform: 'linux' });
+    expect(got.audio.toString()).toBe(`MP3[${ACKS[2]}]MORE`);
+    expect(calls.find(c => c.url.includes('/text-to-speech/')).url).toContain('/text-to-speech/cjVigY5qzO86Huf0OWal/');
+    expect(log.mock.calls.join(' ')).not.toMatch(/"Someone" is not on this account/);
+    // ElevenLabs is back: the name is looked up again, not pinned to Eric.
+    stubEleven();
+    await voiceAudioBuffer('ack-3', 0, { env: { ...ELEVEN, ELEVENLABS_VOICE: 'Roger' }, platform: 'linux' });
+    _resetTalk();
+    vi.stubGlobal('fetch', vi.fn(async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith('/voices')) return new Response('down', { status: 500 });
+      return tts(JSON.parse(init.body));
+    }));
+    _resetEleven();
+    await voiceAudioBuffer('ack-4', 0, { env: { ...ELEVEN, ELEVENLABS_VOICE: 'Roger' }, platform: 'linux' });
+    stubEleven();
+    await voiceAudioBuffer('ack-6', 0, { env: { ...ELEVEN, ELEVENLABS_VOICE: 'Roger' }, platform: 'linux' });
+    expect(calls.find(c => c.url.includes('/text-to-speech/')).url).toContain(`/text-to-speech/${'R'.repeat(20)}/`);
+    log.mockRestore();
+  });
+
+  it('no audio back, or an error with no detail, falls back to say', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    tts = () => new Response(new ReadableStream({ start(c) { c.close(); } }));
+    expect(await voiceAudioBuffer('ack-5', 0, { env: ELEVEN, platform: 'darwin' })).toMatchObject({ type: 'audio/mp4', audio: Buffer.from('AUDIO') });
+    expect(errors.mock.calls.join(' ')).toMatch(/no audio came back/);
+    _resetTalk();
+    tts = () => new Response('<html>oops</html>', { status: 500 });
+    expect(await voiceAudioBuffer('ack-6', 0, { env: ELEVEN, platform: 'darwin' })).toMatchObject({ type: 'audio/mp4' });
+    expect(errors.mock.calls.join(' ')).toMatch(/ElevenLabs HTTP 500(?! \()/);
+    errors.mockRestore();
+  });
+
+  it('audio that breaks off after it started throws to the reader, and is made again next time', async () => {
+    let n = 0;
+    tts = (body) => new Response(new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(`MP3[${body.text}]`));
+        if (n++ === 0) setTimeout(() => c.error(new Error('connection reset')), 5);
+        else c.close();
+      },
+    }));
+    const got = await voiceAudio('ack-7', 0, { env: ELEVEN, platform: 'linux' });
+    expect(got).toMatchObject({ type: 'audio/mpeg' });
+    await expect((async () => { for await (const _ of got.stream); })()).rejects.toThrow(/connection reset/);
+    await new Promise(r => setTimeout(r, 10));
+    expect(existsSync(join(CONFIG_DIR, 'talk-voice'))).toBe(false);
+    const again = await voiceAudioBuffer('ack-7', 0, { env: ELEVEN, platform: 'linux' });
+    expect(again.audio.toString()).toBe(`MP3[${ACKS[7]}]`);
+    expect(calls.filter(c => c.url.includes('/text-to-speech/'))).toHaveLength(2);
+  });
+
+  it('falls back to say when ElevenLabs refuses, and never shows the key', async () => {
+    tts = () => Response.json({ detail: { status: 'quota_exceeded' } }, { status: 401 });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const got = await voiceAudioBuffer('ack-3', 0, { env: ELEVEN, platform: 'darwin' });
+    expect(got).toMatchObject({ type: 'audio/mp4', audio: Buffer.from('AUDIO') });
+    expect(tools.said).toEqual([ACKS[3]]);
+    expect(errors.mock.calls.join(' ')).toMatch(/so say does: ElevenLabs HTTP 401 \(quota_exceeded\)/);
+    // No say either (Linux): a 503 for the page to speak it itself.
+    expect(await voiceAudio('ack-4', 0, { env: ELEVEN, platform: 'linux' })).toMatchObject({ status: 503 });
+    expect(errors.mock.calls.join(' ')).not.toContain('xi-secret-key');
+    errors.mockRestore();
+  });
+});
+
 describe('the routes', () => {
   let base, server;
   beforeAll(async () => {
@@ -318,6 +591,37 @@ describe('the routes', () => {
     const first = await send();
     expect(await send()).toMatchObject({ id: first.id, duplicate: true });
     expect(typed().split('[Owner via app, voice #')).toHaveLength(2);
+  });
+
+  it('transcribe a segment without sending it, and stream a reply\'s audio with its type', async () => {
+    tools.whisperOut = 'Is it done';
+    vi.stubEnv('WHISPER_MODEL', model);
+    const seg = await fetch(`${base}/api/talk/segment`, { method: 'POST', headers: { ...H, 'Content-Type': 'audio/wav', 'X-Segment-Id': id(70) }, body: WAV }).then(r => r.json());
+    expect(seg, JSON.stringify(seg)).toMatchObject({ text: 'Is it done' });
+    expect(typed()).toBe('');
+    // ElevenLabs stands in, streaming two chunks.
+    vi.stubEnv('ELEVENLABS_API_KEY', 'k');
+    rmSync(join(CONFIG_DIR, 'talk-voice'), { recursive: true, force: true });
+    const realFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async (url, init) => (String(url).startsWith('https://api.elevenlabs.io/')
+      ? new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('ID3')); c.enqueue(new TextEncoder().encode('MP3')); c.close(); } }))
+      : realFetch(url, init)));
+    const res = await fetch(`${base}/api/talk/audio/ack-0/0`, { headers: H });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('audio/mpeg');
+    expect(res.headers.get('X-Pieces')).toBe('1');
+    expect(await res.text()).toBe('ID3MP3');
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it('refuse a segment with a bad id or no audio with a 400', async () => {
+    const post = (headers, body) => fetch(`${base}/api/talk/segment`, { method: 'POST', headers: { ...H, 'Content-Type': 'audio/wav', ...headers }, body });
+    const bad = await post({ 'X-Segment-Id': 'x' }, WAV);
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/Bad segment/);
+    expect((await post({}, WAV)).status).toBe(400);
+    expect(typed()).toBe('');
   });
 
   it('refuse an utterance over the size limit', async () => {

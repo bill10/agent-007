@@ -26,7 +26,7 @@ import { setNextWake } from './billion-wake.js';
 import { setBillionNotice } from './billion.js';
 import { agentAccounts, refreshAgentAccounts } from './agent-accounts.js';
 import { cliUpdates, startCliUpdate } from './cli-update.js';
-import { talkSetup, voiceUtterance, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
+import { talkSetup, voiceUtterance, voiceSegment, voiceSays, voiceAudio, MAX_UTTERANCE_BYTES } from './talk.js';
 import { updateInfo, startUpdate, updateNotes } from './self-update.js';
 import { readStoreState, writeStoreState, syncSkillStore, summarize, codexBusy } from './skill-store.js';
 import { busyWorkers } from './control.js';
@@ -408,19 +408,36 @@ export function setupRoutes(app, staticDir, { broadcast, killSession, respawnAge
     });
     res.status(result.error ? 400 : 200).json(result);
   });
-  // The browser's own transcript, when whisper.cpp is not set up.
+  // One stretch of speech (WAV), transcribed here and sent nowhere: the page
+  // gathers a turn's segments and sends the turn as text.
+  app.post('/api/talk/segment', talkGate, express.raw({ type: 'audio/wav', limit: MAX_UTTERANCE_BYTES }), async (req, res) => {
+    const result = await voiceSegment(Buffer.isBuffer(req.body) ? req.body : null, {
+      segment: req.get('X-Segment-Id'), echoOf: req.get('X-Echo-Of') || undefined,
+    });
+    res.status(result.error ? 400 : 200).json(result);
+  });
+  // A whole turn's transcript (its segments', or the browser's own).
   app.post('/api/talk/text', talkGate, async (req, res) => {
-    const { utterance, text, echoOf } = req.body || {};
-    const result = await voiceSays(text, { utterance, echoOf, broadcast })
+    const { utterance, text, echoOf, continues } = req.body || {};
+    const result = await voiceSays(text, { utterance, echoOf, continues, broadcast })
       .catch(err => ({ error: `Could not send that to Billion: ${err.message}` }));
     res.status(result.error ? 400 : 200).json(result);
   });
-  // One spoken piece of a voice reply.
+  // One spoken piece of a voice reply, streamed as it is made.
   app.get('/api/talk/audio/:id/:index', talkGate, async (req, res) => {
     const result = await voiceAudio(req.params.id, Number(req.params.index));
     if (result.error) return res.status(result.status).json({ error: result.error });
-    res.set({ 'Content-Type': 'audio/mp4', 'X-Pieces': String(result.count), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-    res.send(result.audio);
+    res.set({ 'Content-Type': result.type, 'X-Pieces': String(result.count), 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+    try {
+      for await (const chunk of result.stream) {
+        if (res.destroyed) return;   // the page stopped it (the owner spoke)
+        if (!res.write(chunk)) await new Promise(resolve => { res.once('drain', resolve); res.once('close', resolve); });
+      }
+      res.end();
+    } catch (err) {
+      console.error('Talk: a reply\'s audio broke off:', err.message);
+      res.destroy();
+    }
   });
 
   // Settings → Accounts: the last scan, or a fresh one on POST (Refresh).

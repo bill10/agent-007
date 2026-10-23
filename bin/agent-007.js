@@ -116,6 +116,10 @@ Settings (default in brackets):
   WHISPER_MODEL           whisper.cpp model file; your voice notes are
                           transcribed locally [off]
   WHISPER_CPP_BIN         whisper.cpp CLI if not on PATH [whisper-cli]
+  ELEVENLABS_API_KEY      Talk to Billion speaks with ElevenLabs, streamed
+                          [off: macOS say]
+  ELEVENLABS_VOICE        Its voice: a name on your account or an id [Eric]
+  ELEVENLABS_MODEL        Its model [eleven_flash_v2_5]
   TRUST_BOARD_WORKTREES   0 keeps Claude Code's and Codex's folder-trust
                           prompt for job board workers [on]
   SKILL_FAMILIES          0 lists every skill in full for the Claude Code

@@ -1,22 +1,28 @@
 // "Talk to Billion": a hands-free voice conversation in the Billion tab
 // (server/talk.js, docs/BILLION.md "Talk to Billion"). One tap, then turns:
 // the owner speaks, the voice detector (Silero VAD, served by this app from
-// /vendor) hears the utterance end, its audio goes to the server once (an id
-// per utterance: a retry is never a second message), Billion's tell_owner
-// reply bound to that message is spoken, and it listens again.
+// /vendor) reports each stretch of speech, the server transcribes it at once,
+// and the turn ends only after a real pause (talk-turns.js: longer after an
+// unfinished phrase). The turn goes to Billion once (an id per turn: a retry
+// is never a second message), a short acknowledgment is spoken at once, then
+// Billion's tell_owner reply bound to that message, and it listens again.
+// Words the owner adds before the reply continue the same turn.
 //
 // Only a reply whose replyTo is one of this conversation's own messages is
 // spoken; replies to typed or Telegram messages stay in the thread, silent.
 // Speaking while Billion talks stops it (and drops the pieces not yet played);
 // stopping playback never cancels Billion's work.
 //
-// Audio stays on the machine running Agent 007 when it has whisper.cpp (and
-// `say` for the voice). Without whisper.cpp the browser's own speech
-// recognition is the fallback, after a one-time notice that it may send audio
-// to the browser's maker; without `say`, the browser's speechSynthesis.
+// The owner's audio stays on the machine running Agent 007 when it has
+// whisper.cpp; replies are spoken by ElevenLabs (streamed, played as they
+// arrive) when it is set up there, else by `say`. Without whisper.cpp the
+// browser's own speech recognition is the fallback, after a one-time notice
+// that it may send audio to the browser's maker; with neither voice, the
+// browser's speechSynthesis.
 import { chatMessages, billionStatus } from './state.js';
 import { stopVoice } from './voice.js';
 import { stopReading, plainForSpeech, chunkForSpeech, pickVoice, progressPhrase, progressSpeech } from './readaloud.js';
+import { createTurns, pickAck } from './talk-turns.js';
 
 const HEADERS = { 'X-Agent007-Talk': '1' };
 const SETUP_DOCS = 'https://github.com/bill10/agent-007/blob/main/docs/BILLION.md#voice';
@@ -33,6 +39,12 @@ const SAMPLE_RATE = 16000;
 // of its own voice after echo cancellation does not cut it off.
 const SPEECH_THRESHOLD = 0.5;
 const SPEECH_THRESHOLD_PLAYING = 0.8;
+// The silence that ends a stretch of speech (a segment, transcribed at once).
+// The turn waits longer (talk-turns.js PAUSE_MS) before it is sent.
+export const SEGMENT_SILENCE_MS = 500;
+// Billion's voice while the detector thinks the owner may be speaking: low
+// at once, stopped when it is sure (a few frames in).
+const DUCK_VOLUME = 0.3;
 
 // --- Pure helpers, exported for tests ---
 
@@ -104,17 +116,22 @@ let muted = false;
 let hidden = false;
 let connected = true;
 let mode = null;          // 'whisper' (VAD + server) or 'browser' (SpeechRecognition)
-let tts = 'say';          // 'say' (server) or 'browser' (speechSynthesis)
+let tts = 'say';          // 'elevenlabs' or 'say' (the server speaks), or 'browser' (speechSynthesis)
 let vad = null;
 let rec = null;
 let uploads = 0;
-let playing = null;       // id of the reply being spoken, 'status' for a progress update
+let playing = null;       // id of the reply being spoken, 'status' for a progress update, 'ack-<n>' for an acknowledgment
 let playingReply = null;  // that reply's message, to play again after a hidden tab
 let playGen = 0;
 let stopPlay = null;      // ends the piece playing now
 let fetches = null;       // AbortController for the pieces being fetched
 let replyQueue = [];
-let echoOf = null;        // the reply that was playing when the owner started speaking
+let echoOf = null;        // the reply or acknowledgment that was playing when the owner started speaking
+let acks = [];            // [{ text, blob }]: what is said the moment a turn ends
+let lastAck = -1;
+let lastTurn = null;      // the turn sent latest whose reply has not come: more words continue it
+let sending = Promise.resolve();   // turns go one after another, so a continuation knows its turn
+const continues = new Map();       // turn id → the turn it adds to
 let hearing = false;      // the detector hears the owner speaking now: no update talks over them
 let note = '';
 let noteLink = false;
@@ -138,8 +155,8 @@ const spoken = new Set();
 // restart may never be answered; it waits in the thread).
 const restored = new Set();
 const thinkingFor = () => [...awaiting].filter(id => !restored.has(id)).length;
-// Progress updates: never a reply, so never an echo to report.
-const filler = (id) => id === 'status';
+// Progress updates and acknowledgments: never a reply.
+const filler = (id) => id === 'status' || /^ack-\d+$/.test(id ?? '');
 const marks = new Map();  // message id → latency marks
 
 const restore = () => { try { return JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch { return null; } };
@@ -291,7 +308,7 @@ function paint() {
   privacy.textContent = !on ? '' : consent
     ? 'whisper.cpp is not set up on the computer running Agent 007, so this browser\'s own speech recognition would hear you. It may send your audio to the browser\'s maker (Chrome: Google).'
     : `${mode === 'browser' ? 'Your browser recognises your speech and may send the audio to its maker (Chrome: Google).' : 'Your voice is transcribed on the computer running Agent 007 (whisper.cpp); no audio leaves it.'}`
-      + ` ${tts === 'say' ? 'Replies are spoken by that computer\'s voice.' : 'Replies are spoken by this browser.'}`;
+      + ` ${tts === 'elevenlabs' ? 'Replies are spoken by ElevenLabs: their text is sent there.' : tts === 'say' ? 'Replies are spoken by that computer\'s voice.' : 'Replies are spoken by this browser.'}`;
   privacy.hidden = !on;
   bar.querySelector('.talk-notes').hidden = !(detail.textContent || !start.hidden || !privacy.hidden);
   clearInterval(clockTimer);
@@ -351,7 +368,8 @@ export async function startTalk() {
     return current() && failStart(`Could not start: ${err.message}`);
   }
   if (!current()) return;
-  tts = setup.tts === 'say' ? 'say' : 'browser';
+  tts = setup.tts === 'elevenlabs' || setup.tts === 'say' ? setup.tts : 'browser';
+  loadAcks(setup.acks, gen);
   if (tts === 'browser' && !window.speechSynthesis) return failStart(`Billion cannot speak here: ${setup.ttsMissing}, and this browser has no speech synthesis.`);
   if (setup.stt === 'whisper') {
     try {
@@ -401,6 +419,9 @@ export function endTalk({ keepNote = false, notice } = {}) {
   consent = false;
   muted = false;
   hearing = false;
+  turns.reset();
+  lastTurn = null;
+  continues.clear();
   interrupt();
   clearTimeout(idleTimer);
   clearTimeout(progressTimer);
@@ -520,27 +541,40 @@ async function startVad(current) {
     ortConfig: (ort) => { ort.env.logLevel = 'error'; ort.env.wasm.numThreads = 1; },
     positiveSpeechThreshold: SPEECH_THRESHOLD,
     negativeSpeechThreshold: 0.35,
-    redemptionMs: 800,
+    redemptionMs: SEGMENT_SILENCE_MS,
     // Room for the first word of a barge-in, heard late under the raised bar.
     preSpeechPadMs: 600,
     minSpeechMs: 300,
     startOnLoad: false,
     ...(audioCtx ? { audioContext: audioCtx } : {}),
+    // Maybe speech: the turn holds, and Billion's voice drops.
+    onSpeechStart: () => {
+      turns.speechStart();
+      if (playing && audioEl) audioEl.volume = DUCK_VOLUME;
+    },
     // A real start, a few frames in, interrupts: a click or the tail of
     // Billion's own voice past the echo canceller is not enough.
     onSpeechRealStart: () => {
       armIdle();
       hearing = true;
+      turns.speechStart();
       if (playing) {
-        echoOf = filler(playing) ? null : playing;
+        echoOf = playing === 'status' ? null : playing;
         interrupt();
       }
     },
-    onVADMisfire: () => { echoOf = null; hearing = false; },
+    onVADMisfire: () => {
+      echoOf = null;
+      hearing = false;
+      if (audioEl) audioEl.volume = 1;
+      turns.speechMisfire();
+    },
     onSpeechEnd: (audio) => {
       hearing = false;
-      if (!on || muted) return;
-      sendAudio(audio);
+      if (!on || muted) return turns.speechMisfire();
+      const echo = echoOf;
+      echoOf = null;
+      turns.segment(audio, echo);
     },
   });
   self = v;
@@ -559,6 +593,9 @@ function startMic() {
 
 function stopMic() {
   hearing = false;
+  // The detector says nothing when paused mid-speech: what was heard so far
+  // ends the turn after the usual pause, not never.
+  turns.speechMisfire();
   // A muted mic is only disabled; a hidden tab closes it (start opens it again).
   if (hidden) micStream?.getTracks().forEach(t => t.stop());
   if (mode === 'whisper') vad?.pause().catch(() => {});
@@ -600,7 +637,7 @@ function startRecognition() {
     if (rec !== r) return;
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const result = event.results[i];
-      if (result.isFinal && result[0].transcript.trim()) sendText(result[0].transcript);
+      if (result.isFinal && result[0].transcript.trim()) turns.segment(result[0].transcript.trim());
     }
   };
   r.onerror = (event) => {
@@ -652,24 +689,44 @@ async function postOnce(url, init) {
 
 const newId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
-async function sendAudio(samples) {
-  const id = newId();
-  const ended = performance.now();
-  const echo = echoOf;
-  echoOf = null;
-  const headers = { ...HEADERS, 'Content-Type': 'audio/wav', 'X-Utterance-Id': id, ...(echo ? { 'X-Echo-Of': echo } : {}) };
-  await submitted(postOnce('/api/talk/utterance', { method: 'POST', headers, body: encodeWav(samples) }), ended);
+// One stretch of speech → its transcript (the server's whisper.cpp), sent nowhere.
+async function transcribeSegment(samples, echo) {
+  const headers = { ...HEADERS, 'Content-Type': 'audio/wav', 'X-Segment-Id': newId(), ...(echo ? { 'X-Echo-Of': echo } : {}) };
+  const result = await postOnce('/api/talk/segment', { method: 'POST', headers, body: encodeWav(samples) });
+  if (result?.error && on) setNote(result.error);
+  return result || {};
 }
 
-async function sendText(text) {
-  const ended = performance.now();
-  const body = JSON.stringify({ utterance: newId(), text });
-  await submitted(postOnce('/api/talk/text', { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body }), ended);
+// The owner has finished: say an acknowledgment now, and send the turn once
+// (after the one before it, so words added to a turn name it).
+const turns = createTurns({
+  transcribe: transcribeSegment,
+  newId,
+  lead: SEGMENT_SILENCE_MS,
+  send: ({ text, utterance }) => {
+    const mark = { ended: performance.now() };
+    // A reply that waited for the owner to finish goes first, no acknowledgment.
+    if (replyQueue.length) playWaiting();
+    else sayAck(mark);
+    uploads++;
+    paint();
+    sending = sending.then(() => sendTurn(text, utterance, mark));
+  },
+  onEcho: () => setNote('That sounded like Billion\'s own voice, so it was not sent. Say it again if it was you.'),
+  onIdle: () => playWaiting(),
+});
+
+// Replies that came while the owner spoke, once they have finished.
+function playWaiting() {
+  if (on && replyQueue.length && !playing && !hidden && !hearing && !turns.gathering()) playNext();
 }
 
-async function submitted(request, ended) {
-  uploads++;
-  paint();
+async function sendTurn(text, utterance, mark) {
+  const body = JSON.stringify({ utterance, text, ...(lastTurn ? { continues: lastTurn } : {}) });
+  await submitted(postOnce('/api/talk/text', { method: 'POST', headers: { ...HEADERS, 'Content-Type': 'application/json' }, body }), mark);
+}
+
+async function submitted(request, mark) {
   const result = await request;
   uploads--;
   if (!on || !result) return paint();
@@ -679,9 +736,12 @@ async function submitted(request, ended) {
   }
   if (result.echo) return setNote('That sounded like Billion\'s own voice, so it was not sent. Say it again if it was you.');
   note = '';
+  if (lastTurn && result.id !== lastTurn && !result.merged) continues.set(result.id, lastTurn);
+  lastTurn = result.id;
   awaiting.add(result.id);
   save();
-  marks.set(result.id, { ended, submitted: performance.now(), transcribeMs: result.transcribeMs });
+  mark.submitted = performance.now();
+  marks.set(result.id, mark);
   // Only a status line that changes from here on is news for this turn.
   progress = { since: Date.now(), said: progressPhrase(billionStatus) };
   clearTimeout(progressTimer);
@@ -689,6 +749,33 @@ async function submitted(request, ended) {
   // A fast reply can beat this answer to the page.
   for (const m of chatMessages) talkHeard(m);
   paint();
+}
+
+// --- Acknowledgments ---
+
+// The acknowledgments' audio, fetched once at the start so one plays the
+// moment a turn ends. gen: the start this belongs to.
+async function loadAcks(phrases, gen) {
+  acks = (Array.isArray(phrases) ? phrases : []).map(text => ({ text, blob: null }));
+  if (tts === 'browser') return;
+  // One at a time: ElevenLabs allows only a few requests at once.
+  for (const [i, a] of acks.entries()) {
+    if (gen !== startGen) return;
+    try {
+      const res = await fetch(`/api/talk/audio/ack-${i}/0`, { headers: HEADERS });
+      if (res.ok && gen === startGen) a.blob = await res.blob();
+    } catch {}
+  }
+}
+
+// "Got it, one sec." the moment a turn ends, never the same one twice in a
+// row, unless something is already playing.
+function sayAck(mark) {
+  if (!acks.length || playing || hidden) return;
+  const i = pickAck(acks.length, lastAck);
+  if (tts !== 'browser' && !acks[i].blob) return;
+  lastAck = i;
+  speak(`ack-${i}`, acks[i].text, null, mark);
 }
 
 // --- Replies ---
@@ -704,15 +791,22 @@ export function talkHeard(m) {
   }
   if (!on || !shouldSpeak(m, awaiting, spoken)) return;
   spoken.add(m.id);
-  awaiting.delete(m.replyTo);
+  // One answer answers the turns it adds to as well.
+  for (let id = m.replyTo; id; id = continues.get(id)) {
+    awaiting.delete(id);
+    if (lastTurn === id) lastTurn = null;
+  }
   save();
   const mark = marks.get(m.replyTo);
   if (mark) mark.reply = performance.now();
   if (!thinkingFor()) clearTimeout(progressTimer);
-  // A progress update gives way to the answer at once.
-  if (filler(playing)) interrupt();
+  // A progress update gives way to the answer at once; an acknowledgment,
+  // a second long, is let finish.
+  if (playing === 'status') interrupt();
   replyQueue.push(m);
-  if (!playing && !hidden) playNext();
+  // Never over the owner: a reply that comes while they speak, or while a
+  // turn is still being gathered, plays once the turn is sent.
+  if (!playing && !hidden && !hearing && !turns.gathering()) playNext();
   else paint();
 }
 
@@ -751,7 +845,7 @@ function sayProgress() {
   const phrase = progressSpeech(billionStatus);
   const wait = progressWait(phrase, progress, Date.now());
   if (wait === null) return;
-  if (wait > 0 || playing || uploads || hearing) {
+  if (wait > 0 || playing || uploads || hearing || turns.gathering()) {
     progressTimer = setTimeout(sayProgress, wait || 250);
     return;
   }
@@ -759,22 +853,27 @@ function sayProgress() {
   speak('status', phrase);
 }
 
-async function speak(id, text, replyTo) {
+// mark: an acknowledgment's turn, for the latency log.
+async function speak(id, text, replyTo, mark) {
   const mine = ++playGen;
   playing = id;
   // The browser's recognition would hear the reply: it waits for the end.
   if (mode === 'browser') stopRecognition();
   vad?.setOptions({ positiveSpeechThreshold: SPEECH_THRESHOLD_PLAYING });
   paint();
+  const started = () => { if (mark) mark.ack = performance.now(); else if (replyTo) logLatency(replyTo); };
+  const ack = mark && acks[lastAck]?.blob;
   try {
     // A progress update the server no longer has (the status moved on) is
     // just skipped; only a reply it cannot speak means its voice is gone.
-    if (tts === 'say' && !(await speakFromServer(id, mine, replyTo)) && mine === playGen && id !== 'status') {
+    if (ack && tts !== 'browser') {
+      await playBlob(ack, mine, started);
+    } else if (tts !== 'browser' && !(await speakFromServer(id, mine, started)) && mine === playGen && !filler(id)) {
       tts = 'browser';
       setNote('This computer could not speak the reply; using the browser\'s voice.');
-      await speakInBrowser(text, mine, replyTo);
+      await speakInBrowser(text, mine, started);
     } else if (tts === 'browser') {
-      await speakInBrowser(text, mine, replyTo);
+      await speakInBrowser(text, mine, started);
     }
   } finally {
     if (mine === playGen) {
@@ -785,28 +884,38 @@ async function speak(id, text, replyTo) {
 }
 
 // The reply's pieces from the server, each fetched while the one before
-// plays. false when the first piece could not be had.
-async function speakFromServer(id, mine, replyTo) {
+// plays, each played as it streams in where the browser can. false when the
+// first piece could not be had. started(): its first sound.
+async function speakFromServer(id, mine, started) {
   fetches = new AbortController();
   const signal = fetches.signal;
   const piece = (i) => fetch(`/api/talk/audio/${encodeURIComponent(id)}/${i}`, { headers: HEADERS, signal })
-    .then(async res => (res.ok ? { blob: await res.blob(), count: Number(res.headers.get('X-Pieces')) || 1 } : null))
+    .then(res => (res.ok ? res : null))
     .catch(() => null);
   let next = piece(0);
   for (let i = 0, count = 1; i < count; i++) {
-    const got = await next;
+    const res = await next;
     if (mine !== playGen) return true;
-    if (!got) return i > 0;
-    count = got.count;
+    if (!res) return i > 0;
+    count = Number(res.headers.get('X-Pieces')) || 1;
     next = i + 1 < count ? piece(i + 1) : null;
-    await playBlob(got.blob, mine, i === 0 && replyTo);
+    const first = i === 0 ? started : null;
+    const type = res.headers.get('Content-Type') || '';
+    if (streamable(type) && res.body) await playStream(res, type, mine, first);
+    else await playBlob(await res.blob().catch(() => null), mine, first);
   }
   return true;
 }
 
-function playBlob(blob, mine, replyTo) {
+// Media Source Extensions (ManagedMediaSource on iPhone) play MP3 as it
+// arrives; elsewhere a piece plays once it is all here.
+const mediaSource = () => (typeof window !== 'undefined' && (window.ManagedMediaSource || window.MediaSource)) || null;
+const streamable = (type) => /^audio\/mpeg/.test(type) && !!mediaSource()?.isTypeSupported?.('audio/mpeg');
+
+// started(): called as the first sound plays.
+function playBlob(blob, mine, started) {
   return new Promise(resolve => {
-    if (mine !== playGen) return resolve();
+    if (mine !== playGen || !blob) return resolve();
     const url = URL.createObjectURL(blob);
     const done = () => {
       audioEl.onended = audioEl.onerror = null;
@@ -817,12 +926,71 @@ function playBlob(blob, mine, replyTo) {
     stopPlay = done;
     audioEl.onended = done;
     audioEl.onerror = done;
+    audioEl.volume = 1;
     audioEl.src = url;
-    audioEl.play().then(() => { if (replyTo) logLatency(replyTo); }).catch(done);
+    audioEl.play().then(() => started?.()).catch(done);
   });
 }
 
-function speakInBrowser(text, mine, replyTo) {
+function playStream(res, type, mine, started) {
+  return new Promise(resolve => {
+    if (mine !== playGen) return resolve();
+    const MS = mediaSource();
+    const source = new MS();
+    const url = URL.createObjectURL(source);
+    const reader = res.body.getReader();
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      audioEl.onended = audioEl.onerror = null;
+      reader.cancel().catch(() => {});
+      URL.revokeObjectURL(url);
+      if (stopPlay === done) stopPlay = null;
+      resolve();
+    };
+    stopPlay = done;
+    audioEl.onended = done;
+    audioEl.onerror = done;
+    audioEl.volume = 1;
+    // ManagedMediaSource plays only with AirPlay off.
+    if (MS === window.ManagedMediaSource) audioEl.disableRemotePlayback = true;
+    source.addEventListener('sourceopen', async () => {
+      try {
+        const buffer = source.addSourceBuffer('audio/mpeg');
+        const append = (chunk) => new Promise((ok, fail) => {
+          const settle = (e) => {
+            buffer.removeEventListener('updateend', settle);
+            buffer.removeEventListener('error', settle);
+            (e.type === 'error' ? fail : ok)(e);
+          };
+          buffer.addEventListener('updateend', settle);
+          buffer.addEventListener('error', settle);
+          buffer.appendBuffer(chunk);
+        });
+        let playingNow = false;
+        for (;;) {
+          const { value, done: end } = await reader.read();
+          if (finished || mine !== playGen) return;
+          if (end) break;
+          await append(value);
+          if (!playingNow) {
+            playingNow = true;
+            audioEl.play().then(() => started?.()).catch(done);
+          }
+        }
+        if (source.readyState === 'open') source.endOfStream();
+        if (!playingNow) done();
+      } catch (err) {
+        console.warn('[talk] streamed audio failed', err);
+        done();
+      }
+    }, { once: true });
+    audioEl.src = url;
+  });
+}
+
+function speakInBrowser(text, mine, started) {
   const synth = window.speechSynthesis;
   const chunks = chunkForSpeech(plainForSpeech(text));
   const voice = pickVoice(synth.getVoices(), null);
@@ -834,7 +1002,7 @@ function speakInBrowser(text, mine, replyTo) {
     stopPlay = done;
     u.onend = done;
     u.onerror = done;
-    if (i === 0 && replyTo) u.onstart = () => logLatency(replyTo);
+    if (i === 0 && started) u.onstart = () => started();
     synth.speak(u);
   })), Promise.resolve());
 }
@@ -847,7 +1015,7 @@ export function interrupt() {
   replyQueue = [];
   fetches?.abort();
   fetches = null;
-  try { audioEl?.pause(); } catch {}
+  try { audioEl?.pause(); if (audioEl) audioEl.volume = 1; } catch {}
   try { window.speechSynthesis?.cancel(); } catch {}
   const stop = stopPlay;
   stopPlay = null;
@@ -858,15 +1026,16 @@ export function interrupt() {
   }
 }
 
-// End of speech → reply on the page → first sound, per turn, in the console
-// (and window.agent007TalkLatency) for measuring.
+// End of turn → acknowledgment's first sound, and → reply on the page →
+// its first sound, per turn, in the console (and window.agent007TalkLatency)
+// for measuring. The turn's words were transcribed while the owner paused.
 function logLatency(id) {
   const m = marks.get(id);
   if (!m || m.logged || !m.reply) return;
   m.logged = true;
   const row = {
-    transcriptionMs: Math.round(m.submitted - m.ended),
-    whisperMs: m.transcribeMs,
+    ackMs: m.ack ? Math.round(m.ack - m.ended) : null,
+    sendMs: Math.round(m.submitted - m.ended),
     billionMs: Math.round(m.reply - m.submitted),
     speechStartMs: Math.round(performance.now() - m.reply),
     totalMs: Math.round(performance.now() - m.ended),
@@ -905,6 +1074,9 @@ export function _resetTalk() {
   spoken.clear();
   marks.clear();
   progress = { since: 0, at: -Infinity, said: '' };
+  acks = [];
+  lastAck = -1;
+  sending = Promise.resolve();
   tts = 'say';
   mode = null;
   connected = true;

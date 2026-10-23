@@ -241,6 +241,16 @@ export function cancelQueuedText(key) {
   return true;
 }
 
+// Rewrite an owner message still waiting in a queue (cancelQueuedText's key):
+// a Talk to Billion turn the owner added to before Billion was given it.
+// false once its typing has started.
+export function editQueuedText(key, text) {
+  const entry = keyed.get(key);
+  if (!entry) return false;
+  entry.text = clean(text);
+  return true;
+}
+
 // A notice over the cap is dropped: the board still has the card.
 export function sendNotice(session, headline, lines, now = Date.now()) {
   return sendText(session, formatNotice(headline, lines), now);
