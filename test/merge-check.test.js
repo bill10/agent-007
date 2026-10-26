@@ -142,8 +142,8 @@ describe('mergeCheck', () => {
     return hit[1];
   };
   const base = {
-    'repos/o/r/pulls/7/files': 'scraper/a.py\n',
-    'repos/o/r/pulls/7': JSON.stringify({ title: 'T', state: 'open', base: { ref: 'main' }, changed_files: 1 }),
+    'repos/o/r/pulls/7/files': 'modified\tscraper/a.py\t\n',
+    'repos/o/r/pulls/7': JSON.stringify({ title: 'T', state: 'open', base: { ref: 'main' }, head: { sha: 'abc', repo: { full_name: 'f/r' } }, changed_files: 1 }),
     'repos/o/r/contents/.github/workflows?': JSON.stringify([{ type: 'file', name: 'deploy-scraper.yml', path: '.github/workflows/deploy-scraper.yml' }]),
     'repos/o/r/contents/.github/workflows/deploy-scraper.yml': DEPLOY_SCRAPER.text,
     'repos/o/r/environments': 'production\n',
@@ -165,6 +165,43 @@ describe('mergeCheck', () => {
     const { 'repos/o/r/contents/.github/workflows?': _, ...rest } = base;
     const r = await mergeCheck(PR, opts(rest));
     expect(r).toMatchObject({ deploys: false, unknown: [] });
+  });
+
+  // The PR's own workflow changes, read at its head (a fork, f/r).
+  const changing = (lines, extra = {}) => ({
+    ...base, ...extra,
+    'repos/o/r/pulls/7/files': lines.map(l => `${l}\n`).join(''),
+    'repos/o/r/pulls/7': JSON.stringify({ title: 'T', state: 'open', base: { ref: 'main' }, head: { sha: 'abc', repo: { full_name: 'f/r' } }, changed_files: lines.length }),
+  });
+  const PUSH_DEPLOY = 'on: { push: { branches: [main] } }\njobs:\n  deploy:\n    runs-on: x\n    steps: [{ run: "fly deploy" }]\n';
+
+  it('a workflow the PR adds counts', async () => {
+    const r = await mergeCheck(PR, opts(changing(['added\t.github/workflows/cd.yml\t'], { 'repos/f/r/contents/.github/workflows/cd.yml': PUSH_DEPLOY })));
+    expect(r.deploys).toBe(true);
+    expect(r.matches).toEqual([expect.objectContaining({ workflow: '.github/workflows/cd.yml', job: 'deploy' })]);
+    expect(r.notes).toContain('This PR changes .github/workflows/cd.yml; judged as it will be after the merge.');
+  });
+
+  it('a workflow the PR edits is judged at the head, not the base', async () => {
+    const edited = 'on: { push: { branches: [main] } }\njobs:\n  ship:\n    runs-on: x\n    environment: production\n';
+    const routes = changing(['modified\t.github/workflows/deploy-scraper.yml\t'], {
+      'repos/o/r/contents/.github/workflows/deploy-scraper.yml': TESTS.text,
+      'repos/f/r/contents/.github/workflows/deploy-scraper.yml': edited,
+    });
+    expect(await mergeCheck(PR, opts({ ...routes, 'repos/f/r/contents/.github/workflows/deploy-scraper.yml': TESTS.text }))).toMatchObject({ deploys: false });
+    const r = await mergeCheck(PR, opts(routes));
+    expect(r.matches).toEqual([expect.objectContaining({ job: 'ship', environment: 'production' })]);
+  });
+
+  it('a deploying workflow the PR removes drops out', async () => {
+    const r = await mergeCheck(PR, opts(changing(['removed\t.github/workflows/deploy-scraper.yml\t', 'modified\tscraper/a.py\t'])));
+    expect(r).toMatchObject({ deploys: false, triggered: [], unknown: [] });
+  });
+
+  it('a changed workflow it cannot read at the head is unknown', async () => {
+    const r = await mergeCheck(PR, opts(changing(['renamed\t.github/workflows/cd.yml\t.github/workflows/deploy-scraper.yml'])));
+    expect(r.unknown).toEqual(['.github/workflows/cd.yml: could not read it (at the PR head: gh: Not Found (HTTP 404))']);
+    expect(r.triggered).toEqual([]);
   });
 
   it('a card with no PR, or an unknown ref, is an error', async () => {

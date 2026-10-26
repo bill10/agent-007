@@ -107,7 +107,7 @@ function jobSignals(id, job) {
 /**
  * Which workflows a merge into `base` sets off, and which of their jobs deploy.
  *
- * @param workflows [{ path, text } | { path, error }] — .github/workflows at the base
+ * @param workflows [{ path, text } | { path, error }] — .github/workflows after the merge (base, with the PR's changes)
  * @param base      the PR's base branch
  * @param files     the PR's changed files, or null when they could not be read
  * @returns { triggered: [{ workflow, trigger }], matches: [{ workflow, job, trigger, why, environment }], unknown: [string], notes: [string] }
@@ -196,6 +196,7 @@ export function analyzeWorkflows({ workflows, base, files }) {
 }
 
 const PR_URL = /github\.com\/([^/\s]+)\/([^/\s]+)\/pull\/(\d+)/i;
+const drop = (workflows, path) => { const i = workflows.findIndex(w => w.path === path); if (i >= 0) workflows.splice(i, 1); };
 const errLine = (err) => String(err?.stderr || err?.message || err).trim().split('\n')[0].slice(0, 200);
 
 // The configured repo whose origin is this slug, for its policy and account.
@@ -245,10 +246,14 @@ export async function mergeCheck(ref, {
   const notes = [];
 
   let files = null;
+  let changes = [];   // [status, filename, previous filename]
   try {
-    files = String(await api(['--paginate', `repos/${slug}/pulls/${number}/files?per_page=100`, '--jq', '.[].filename'])).split('\n').filter(Boolean);
+    changes = String(await api(['--paginate', `repos/${slug}/pulls/${number}/files?per_page=100`, '--jq', '.[] | "\\(.status)\\t\\(.filename)\\t\\(.previous_filename // "")"']))
+      .split('\n').filter(Boolean).map(l => l.split('\t'));
+    files = changes.map(c => c[1]);
     if (Number.isFinite(pr.changed_files) && files.length < pr.changed_files) {
       notes.push(`GitHub listed ${files.length} of ${pr.changed_files} changed files; path filters were taken as matching.`);
+      unknown.push('changed files: GitHub did not list them all, so a workflow change may be missing');
       files = null;
     }
   } catch (err) { unknown.push(`changed files: ${errLine(err)}`); }
@@ -267,6 +272,23 @@ export async function mergeCheck(ref, {
     if (/HTTP 404/.test(String(err?.stderr || err?.message))) notes.push(`${base} has no .github/workflows.`);
     else unknown.push(`.github/workflows: ${errLine(err)}`);
   }
+
+  // The merge runs the workflows as the PR leaves them: judge changed ones at the head.
+  const isWorkflow = (p) => /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(p);
+  const changed = [];
+  const headSlug = pr.head?.repo?.full_name || slug;
+  for (const [status, path, previous] of changes) {
+    if (previous && isWorkflow(previous)) drop(workflows, previous);
+    if (!isWorkflow(path)) continue;
+    changed.push(path);
+    drop(workflows, path);
+    if (status === 'removed') continue;
+    try {
+      const enc = path.split('/').map(encodeURIComponent).join('/');
+      workflows.push({ path, text: String(await api(['-H', 'Accept: application/vnd.github.raw', `repos/${headSlug}/contents/${enc}?ref=${encodeURIComponent(pr.head?.sha)}`])) });
+    } catch (err) { workflows.push({ path, error: `at the PR head: ${errLine(err)}` }); }
+  }
+  if (changed.length) notes.push(`This PR changes ${changed.join(', ')}; judged as it will be after the merge.`);
 
   let environments = [];
   try { environments = String(await api([`repos/${slug}/environments`, '--jq', '.environments[].name'])).split('\n').filter(Boolean); } catch (err) {
