@@ -573,7 +573,10 @@ runs first: the Billion-only board tool `merge_check` (`server/merge-check.js`),
 given a PR URL or a card id. Read-only, through the repo's gh account
 (`ghAccountFor`); it never writes to GitHub or runs a workflow.
 
-- **What the merge runs.** `.github/workflows/*.yml` at the PR's base branch:
+- **What the merge runs.** `.github/workflows/*.yml` as they will be after the
+  merge: the base branch's, with each workflow the PR adds, edits, renames or
+  deletes taken from the PR's head instead (a note names them; one it cannot
+  read at the head is unknown):
   `push` whose branch filters match the base and whose path filters match the
   PR's changed files, `pull_request` / `pull_request_target` with
   `types: [closed]`, `workflow_run` chains from those, and the jobs of a local

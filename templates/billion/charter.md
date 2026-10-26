@@ -245,7 +245,8 @@ first when it isn't. Merge on your own unless the change is on the
 
 **Deploys.** A revert undoes a merge, but not a deploy the merge set off.
 Before every merge, run `merge_check` on the PR (its URL or the card id). It
-reads the repo's workflows at the base branch and says which ones the merge
+reads the repo's workflows as the merge leaves them (the base branch's, with
+the PR's own workflow changes) and says which ones the merge
 runs and which of their jobs deploy (each with its environment, if any), and
 anything it could not read as unknown.
 
