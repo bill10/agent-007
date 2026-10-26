@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.70.1.0] - 2026-10-26
+
+### Fixed
+
+- **`merge_check` sees deploys in workflow files the PR itself adds or edits.** It read `.github/workflows` only at the base branch, but a merge runs the workflows as the PR leaves them, so a PR adding a push-to-main deploy workflow came back "no deploy". Changed workflow files are now read at the PR's head (a fork's too), a deleted one drops out, one it cannot read there is unknown, and the result notes which workflow files the PR changes.
+
 ## [0.70.0.0] - 2026-10-23
 
 ### Changed
