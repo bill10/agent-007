@@ -58,7 +58,7 @@ import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcrip
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
 import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
 import { comingRound } from './server/rounds.js';
-import { setStatusFacts, publishStatus } from './server/billion-status.js';
+import { setStatusFacts, publishStatus, noteScreenSteps, STEP_TICK_MS } from './server/billion-status.js';
 import { startModelRefresh, modelsReady, availableModels, onModelsChange } from './server/models.js';
 import { agentAccounts, setOnScan } from './server/agent-accounts.js';
 
@@ -639,6 +639,7 @@ function startBillionWakes() {
 // (server/billion-status.js): whether or not Billion runs, a round still
 // comes due and the line still says so.
 let roundTimer = null;
+let stepTimer = null;
 const sessionForJob = (job) => (job.agentSessionId ? sessions.get(job.agentSessionId) : null);
 function startRounds() {
   setStatusFacts(() => ({
@@ -662,6 +663,17 @@ function startRounds() {
     }
   }, WAKE_TICK_MS);
   roundTimer.unref?.();
+  // The step log under a waiting message: the tools Billion uses, read off its
+  // screen this often. publishStatus sends only when something changed.
+  clearInterval(stepTimer);
+  stepTimer = setInterval(() => {
+    try {
+      if (noteScreenSteps().length) publishStatus(broadcast);
+    } catch (err) {
+      console.error('Billion: step log failed:', err.message);
+    }
+  }, STEP_TICK_MS);
+  stepTimer.unref?.();
 }
 
 // --- WebSocket ---
@@ -767,6 +779,7 @@ function gracefulShutdown({ restart = false } = {}) {
   stopTelegram();
   clearInterval(wakeTimer);
   clearInterval(roundTimer);
+  clearInterval(stepTimer);
   const killPromises = [];
   for (const [, session] of sessions) {
     clearInterval(session.stateCheckInterval);

@@ -801,19 +801,48 @@ remembers which view was last open.
 
 ![Briefing on a phone](img/billion-round-numbers.png)
 
-**The owner's messages and the progress box.** What the owner types is never
+**The owner's messages and the step log.** What the owner types is never
 held for a briefing: it goes to Billion's terminal as soon as Billion rests at
 its prompt. Each message stays *pending* ("waiting
 for Billion…") until a `tell_owner` answers it, oldest first, so two
 messages sent before a reply each get their own (the reply carries `replyTo`,
 the message it answered). A server notice (an account switch) answers none.
-Each pending message has its own bounded **progress box**. Only the oldest
-request receives Billion's `set_status` summaries; later messages wait for
-that reply. Use short, owner-facing summaries of the current step, evidence
-or findings, uncertainty or blockers, and the next check (140 characters per
-update). The last three summaries are kept; consecutive duplicates are ignored. Private reasoning,
-terminal output, tool calls/results and command arguments are never read by
-the progress stream. The configured Telegram token is redacted before storage.
+
+Under each pending message a box says where it stands, in so many words:
+
+- **Waiting for Billion to finish its current step**: the message is *queued*,
+  not given to Billion yet (Billion is mid-turn; it is typed in when Billion
+  next rests at its prompt).
+- **Billion is working on this**: Billion has it and it is the one being
+  answered, with a timer from when Billion got it until the first step.
+- **Billion has this, and is answering your earlier message first**: given
+  to Billion, behind an older message still waiting for its reply.
+
+Below the heading is the **step log**: every step of the work on the message
+being answered, oldest first, each with its time. It scrolls on its own once
+long, follows the newest step, and the newest step is highlighted with a
+running timer ("12 s"). Steps come from two places:
+
+- **Billion's own words.** Each `set_status` call adds a step (it no longer
+  replaces the last one). Use short, owner-facing summaries of the current
+  step, evidence or findings, uncertainty or blockers, and the next check
+  (140 characters per update). These show in full weight.
+- **The tools Billion uses.** Every 2 seconds while Billion works on the
+  message, the server looks at Billion's screen for new tool calls (Claude
+  Code's `⏺ Bash(…)`, Codex's `• Ran …`) and adds each as a fixed phrase
+  picked by the tool's name alone: "Running a command", "Reading a file",
+  "Searching files", "Checking the job board", "Posting a card", "Reading a
+  worker's screen" and so on (`toolStep` in `server/billion-status.js`).
+  Nothing else on the line is shown: no command, arguments, output, file
+  path or contents, and none of Billion's prose or reasoning. The one
+  exception is the name of one of Billion's own notes files ("Reading
+  STATE.md"). An unknown tool, `set_status` and `tell_owner` add no step.
+  These show in italics, after Billion's own words in importance.
+
+Only the oldest waiting message gets steps; the same text twice in a row is
+one step, and the newest 30 are kept. The configured Telegram token is
+redacted from Billion's words before storage. None of this needs Telegram or
+a new setting, and it fits a phone-width tab.
 
 **Cancelling a message Billion has not got yet.** While Billion is busy, the
 owner's messages wait in its terminal queue and read *queued*, with a
@@ -829,10 +858,10 @@ and says "Already sent to Billion". Answers to questions and slash commands
 have no Cancel (a question's answer has Undo).
 
 When `tell_owner` binds the answer, the live box disappears immediately and
-its summaries become a small, closed **Work details** disclosure under that
-answer. Empty progress adds no disclosure. The owner can expand it, and
-ordinary updates leave it expanded. The existing status stream updates the
-box; there is no separate polling or transcript stream.
+its steps become a small, closed **Work details (N steps)** disclosure under
+that answer, each step with its time. An empty log adds no disclosure. The
+owner can expand it, and ordinary updates leave it expanded. The existing
+status stream carries the steps to the browser; the timers tick in the page.
 
 Request markers and summaries are stored with the chat so new requests keep
 their oldest-first reply bindings across reconnects and server restarts.
@@ -844,8 +873,8 @@ animated activity dot. Worker updates and server notices do not close a request.
 
 ![Earlier progress layout, before per-message summaries and Work details](img/billion-chat-progress.png)
 
-*Earlier layout shown above: progress now sits inside each pending message,
-uses explicit summaries, and folds under the answer as Work details.*
+*Earlier layout shown above: progress now sits inside each pending message
+as a timestamped step log, and folds under the answer as Work details.*
 
 **Status line.** One line in the bar at the top of both views, beside the
 *Briefing | Chat* switch (under it on a phone or a narrow pane): what Billion is doing and

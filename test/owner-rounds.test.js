@@ -27,6 +27,7 @@ const TOKEN = '123456:SECRET-token';
 const ENV = { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_CHAT_ID: '42' };
 const UTC = { on: true, slots: ['08:30', '15:30'], max: 2, timeZone: 'UTC' };
 const at = (iso) => Date.parse(iso);
+const texts = (steps) => steps.map(step => step.text);
 let fetchMock;
 let clock = 3e12;
 const now = () => (clock += 10 * NOTIFY_WINDOW_MS);
@@ -485,7 +486,8 @@ describe('the owner\'s messages wait for replies of their own', () => {
     expect(chatMessages()).toHaveLength(500);
     expect(pendingOwnerMessages().map(m => m.id)).toEqual([first, second]);
     await tellOwner('First answer.', { env: {}, now: now() });
-    expect(chatMessages().at(-1)).toMatchObject({ replyTo: first, workDetails: ['Checking first'] });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: first });
+    expect(texts(chatMessages().at(-1).workDetails)).toEqual(['Checking first']);
     expect(chatMessages().some(m => m.id === first)).toBe(false);
     await tellOwner('Second answer.', { env: {}, now: now() });
     expect(chatMessages().at(-1).replyTo).toBe(second);
@@ -498,7 +500,7 @@ describe('the owner\'s messages wait for replies of their own', () => {
     expect(pendingOwnerMessages()).toEqual([]);
   });
 
-  it('accepts only explicit status summaries, never reading raw analysis, tool calls or secrets off the screen', async () => {
+  it('takes status summaries as steps, and never reads the screen for the status payload itself', async () => {
     const getAll = vi.fn(() => ['private analysis\n• Ran echo SECRET_COMMAND_OUTPUT\n⏺ Bash(secret)']);
     setStatusFacts(() => ({ billion: { ...billion, state: 'WORKING', ringBuffer: { getAll } } }));
     await ownerSays('Check it.', { env: {} });
@@ -507,7 +509,7 @@ describe('the owner\'s messages wait for replies of their own', () => {
     vi.stubEnv('TELEGRAM_BOT_TOKEN', TOKEN);
     try {
       setBillionStatus(`Checking evidence ${TOKEN}`);
-      expect(statusPayload().progress[id]).toEqual(['Checking evidence <token>']);
+      expect(statusPayload().progress[id]).toEqual([{ text: 'Checking evidence <token>', at: expect.any(String), kind: 'status' }]);
       expect(readFileSync(join(CONFIG_DIR, 'chat.json'), 'utf8')).not.toContain(TOKEN);
     } finally { vi.unstubAllEnvs(); }
     expect(getAll).not.toHaveBeenCalled();
@@ -524,9 +526,11 @@ describe('the owner\'s messages wait for replies of their own', () => {
     expect(setBillionStatus(null)).toHaveProperty('error');
     expect(setBillionStatus('x'.repeat(MAX_STATUS_CHARS + 1))).toHaveProperty('error');
     expect(setBillionStatus('  ')).toEqual({ ok: true, cleared: true });
-    expect(statusPayload()).toMatchObject({ text: '', progress: { [id]: ['Checking evidence'] } });
+    expect(statusPayload()).toMatchObject({ text: '' });
+    expect(texts(statusPayload().progress[id])).toEqual(['Checking evidence']);
     await tellOwner('Answer.', { env: {}, now: now() });
-    expect(chatMessages().at(-1)).toMatchObject({ replyTo: id, workDetails: ['Checking evidence'] });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: id });
+    expect(texts(chatMessages().at(-1).workDetails)).toEqual(['Checking evidence']);
   });
 
   it('persists distinct summaries and oldest-first bindings across a server restart, without stale activity', async () => {
@@ -539,7 +543,8 @@ describe('the owner\'s messages wait for replies of their own', () => {
     _resetStatus();
     expect(statusPayload()).toMatchObject({ running: false, pending: [], awaitingReply: false });
     setStatusFacts(() => ({ billion }));
-    expect(statusPayload()).toMatchObject({ pending: [first, second], progress: { [first]: ['Found evidence', 'Checking uncertainty', 'Next: verify'], [second]: [] } });
+    expect(statusPayload()).toMatchObject({ pending: [first, second], progress: { [second]: [] } });
+    expect(texts(statusPayload().progress[first])).toEqual(['Starting', 'Found evidence', 'Checking uncertainty', 'Next: verify']);
     expect(statusPayload(Date.now() + AWAIT_REPLY_MS)).toMatchObject({ pending: [], awaitingReply: false });
     const saved = chatMessages();
     saved[0].at = new Date(Date.now() - AWAIT_REPLY_MS - 1).toISOString();
@@ -548,10 +553,12 @@ describe('the owner\'s messages wait for replies of their own', () => {
     await tellOwner('Worker finished.', { env: {}, now: now(), notice: true });
     expect(statusPayload().pending).toEqual([second]);
     await tellOwner('First answer.', { env: {}, now: now() });
-    expect(chatMessages().at(-1)).toMatchObject({ replyTo: first, workDetails: ['Found evidence', 'Checking uncertainty', 'Next: verify'] });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: first });
+    expect(texts(chatMessages().at(-1).workDetails)).toEqual(['Starting', 'Found evidence', 'Checking uncertainty', 'Next: verify']);
     setBillionStatus('Checking second');
     await tellOwner('Second answer.', { env: {}, now: now() });
-    expect(chatMessages().at(-1)).toMatchObject({ replyTo: second, workDetails: ['Checking second'] });
+    expect(chatMessages().at(-1)).toMatchObject({ replyTo: second });
+    expect(texts(chatMessages().at(-1).workDetails)).toEqual(['Checking second']);
     _resetStatus();
     setStatusFacts(() => ({ billion }));
     expect(statusPayload()).toMatchObject({ pending: [], progress: {} });

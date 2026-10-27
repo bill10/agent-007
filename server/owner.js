@@ -437,11 +437,15 @@ export function pendingOwnerMessages() {
   return messages.filter(m => m.from === 'owner' && m.awaitsReply === true && !answered.has(m.id));
 }
 
-export function updateOwnerProgress(id, text) {
+// One step of the log under a waiting message: { text, at, kind }, kind
+// 'status' (Billion's set_status) or 'tool'. The same text twice in a row is
+// one step. Older chat.json files keep steps as bare strings.
+export function updateOwnerProgress(id, step) {
   const messages = chatMessages();
   const message = messages.find(m => m.id === id && m.from === 'owner' && m.awaitsReply);
-  if (!message || message.workDetails?.at(-1) === text) return;
-  message.workDetails = [...(message.workDetails || []), text].slice(-MAX_STEPS);
+  const last = message?.workDetails?.at(-1);
+  if (!message || (typeof last === 'string' ? last : last?.text) === step.text) return;
+  message.workDetails = [...(message.workDetails || []), step].slice(-MAX_STEPS);
   saveChat(messages);
 }
 
@@ -751,19 +755,21 @@ function continueVoiceTurn(id, words, utterance, { broadcast, env }) {
 // Billion's queue (server/messages.js) and loses the mark the moment its
 // typing starts, which is when Cancel stops being offered. sendText may type
 // it before addChat has written it, so queued() asks whether that happened.
+// deliveredAt is when Billion was given it: the step log's clock starts there.
 function typedWhen(id, broadcast) {
-  let typed = false;
+  let typed = null;
   return {
     now: () => {
-      typed = true;
+      typed = new Date().toISOString();
       const messages = chatMessages();
       const m = messages.find(x => x.id === id && x.queued);
       if (!m) return;
       delete m.queued;
+      m.deliveredAt = typed;
       saveChat(messages);
       broadcast?.({ type: 'chat-message', message: m });
     },
-    queued: () => (typed ? {} : { queued: true }),
+    queued: () => (typed ? { deliveredAt: typed } : { queued: true }),
   };
 }
 
