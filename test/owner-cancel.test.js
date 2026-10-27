@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { rmSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { ownerSays, chatMessages, cancelOwnerMessage, handleUpdate, pendingOwnerMessages } from '../server/owner.js';
+import { ownerSays, chatMessages, cancelOwnerMessage, handleUpdate, pendingOwnerMessages, requeueOwnerMessages } from '../server/owner.js';
 import { dropMessages, flushMessages, pendingMessages, takeMessages, restoreMessages } from '../server/messages.js';
 import { sessions, CONFIG_DIR } from '../server/state.js';
 
@@ -151,5 +151,73 @@ describe('cancelling a queued message', () => {
 
   it('refuses an id that is not the owner\'s message', () => {
     expect(cancelOwnerMessage('nope')).toEqual({ error: 'That message is gone.' });
+  });
+});
+
+// A restart empties Billion's queue but not chat.json: a message still marked
+// queued was never typed, and nothing would ever type it. The new session
+// gets it again (server.js, when Billion starts).
+describe('requeueing what a restart dropped', () => {
+  it('types a message a restart dropped into the new session, and unmarks it', async () => {
+    busy();
+    const { id } = await ownerSays('check out this repo');
+    dropMessages(b.id);          // the old server's queue, gone
+    expect(flushMessages(b)).toBe(false);
+    const broadcast = vi.fn();
+    expect(requeueOwnerMessages(b, { broadcast })).toBe(1);
+    expect(pendingMessages(b.id)).toBe(1);
+    rest();
+    expect(flushMessages(b)).toBe(true);
+    await vi.waitFor(() => expect(b.messageTyping).toBeFalsy());
+    expect(typed()).toContain('[Owner via app] check out this repo');
+    expect(chatMessages().find(m => m.id === id).queued).toBeUndefined();
+    expect(broadcast).toHaveBeenCalledWith({ type: 'chat-message', message: expect.objectContaining({ id }) });
+  });
+
+  it('lets a held inbox take it, as it takes any owner message', async () => {
+    busy();
+    await ownerSays('while held');
+    dropMessages(b.id);
+    b.messagesHeld = true;
+    requeueOwnerMessages(b);
+    rest();
+    expect(flushMessages(b)).toBe(true);
+    await vi.waitFor(() => expect(b.messageTyping).toBeFalsy());
+    expect(typed()).toContain('while held');
+  });
+
+  it('keeps the order, rebuilds voice, Telegram and attachment lines, and leaves cancelled and delivered ones out', async () => {
+    busy();
+    const first = await ownerSays('first');
+    const gone = await ownerSays('cancelled');
+    const voice = await ownerSays('spoken', { voice: true, utterance: 'u-r' });
+    const files = await ownerSays('see this', { files: [{ name: 'a.txt', data: Buffer.from('hi').toString('base64') }] });
+    expect(await handleUpdate({ message: { chat: { id: 42, type: 'private' }, text: 'from my phone' } }, { env: ENV })).toBe('delivered');
+    cancelOwnerMessage(gone.id);
+    dropMessages(b.id);
+    expect(requeueOwnerMessages(b)).toBe(4);
+    for (let i = 0; i < 4; i++) { rest(); flushMessages(b); await vi.waitFor(() => expect(b.messageTyping).toBeFalsy()); }
+    const out = typed();
+    expect(out).not.toContain('cancelled');
+    expect(out).toContain(`[Owner via app, voice #${voice.id.slice(0, 8)}] spoken`);
+    expect(out).toMatch(new RegExp(`see this \\(attached: .*${files.id}.a\\.txt\\)`));
+    expect(out).toContain('from my phone');
+    expect(out.indexOf('first')).toBeLessThan(out.indexOf('spoken'));
+    expect(out.indexOf('spoken')).toBeLessThan(out.indexOf('see this'));
+    expect(out.indexOf('see this')).toBeLessThan(out.indexOf('from my phone'));
+    expect(chatMessages().filter(m => m.queued)).toEqual([]);
+    expect(chatMessages().find(m => m.id === first.id).queued).toBeUndefined();
+    expect(requeueOwnerMessages(b)).toBe(0);
+  });
+
+  it('does not queue twice what a queue still holds, and Cancel reaches a requeued one', async () => {
+    busy();
+    const { id } = await ownerSays('still waiting');
+    expect(requeueOwnerMessages(b)).toBe(0);
+    expect(pendingMessages(b.id)).toBe(1);
+    dropMessages(b.id);
+    requeueOwnerMessages(b);
+    expect(cancelOwnerMessage(id)).toMatchObject({ ok: true });
+    expect(pendingMessages(b.id)).toBe(0);
   });
 });

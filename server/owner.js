@@ -14,7 +14,7 @@ import { join, resolve, sep, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { CONFIG_DIR, config } from './state.js';
 import { liveBillion } from './billion.js';
-import { sendText, cancelQueuedText, editQueuedText } from './messages.js';
+import { sendText, cancelQueuedText, editQueuedText, isQueuedKey } from './messages.js';
 import { detectState } from '../lib/helpers.js';
 import { roundSettings, roundState, saveRoundState, lastRound, comingRound, roundPayload, byPriority, appLink } from './rounds.js';
 import { billionReplied, publishStatus, MAX_STEPS, SHORT_ID_CHARS } from './billion-status.js';
@@ -765,6 +765,27 @@ function typedWhen(id, broadcast) {
     },
     queued: () => (typed ? {} : { queued: true }),
   };
+}
+
+// A new Billion session: the owner's messages chat.json still marks queued.
+// Their queue lived in memory and went with the old server or the old
+// session, so nothing would ever type them: the tab showed them queued for
+// good, and as the oldest messages waiting for a reply they took the replies
+// meant for later ones. Each goes back in the queue, oldest first, as it was
+// sent (from what chat.json kept, so redacted where the original was not),
+// and Cancel still reaches it. One a queue still holds (carried across a CLI
+// switch) is left alone. Returns how many went back.
+export function requeueOwnerMessages(billion, { broadcast } = {}) {
+  let n = 0;
+  for (const m of chatMessages()) {
+    if (m.from !== 'owner' || !m.queued || m.cancelled || isQueuedKey(m.id)) continue;
+    const prefix = m.via === 'telegram' ? telegramPrefix(m.name, !!m.voice) : m.voice ? voicePrefix(m.id, m.continues) : APP_PREFIX;
+    const paths = (m.files || []).map(f => join(chatFilesDir(), m.id, f.name));
+    const typing = typedWhen(m.id, broadcast);
+    if (!sendText(billion, withFiles(m.text ? `${prefix} ${m.text}` : prefix, paths), undefined, { ...OWNER, key: m.id, onDeliver: typing.now })) break;
+    n++;
+  }
+  return n;
 }
 
 // The tab's Cancel. Idempotent: cancelling a cancelled message is { ok }.

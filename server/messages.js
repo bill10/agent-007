@@ -241,6 +241,9 @@ export function cancelQueuedText(key) {
   return true;
 }
 
+// Whether an owner message (cancelQueuedText's key) is waiting in a queue.
+export const isQueuedKey = (key) => keyed.has(key);
+
 // Rewrite an owner message still waiting in a queue (cancelQueuedText's key):
 // a Talk to Billion turn the owner added to before Billion was given it.
 // false once its typing has started.
