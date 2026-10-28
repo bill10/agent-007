@@ -382,7 +382,10 @@ statement into a plan and the plan into cards.
   `CLAUDE.md` and `COMPANY.md`, that is all of Billion's files.
 - **It manages work, not agents.** It posts cards, follows them with
   `list_jobs`, and messages only the workers of its own cards. Agents you start
-  by hand are yours. Throughput is capped by the board's `maxPerRepo`.
+  by hand are yours. Throughput is capped by the board's `maxPerRepo` and, across all repos, its
+  `maxWorkers` (lowered while the machine is short of memory; see
+  [FEATURES.md](FEATURES.md)). `post_job`'s `urgent: true` puts one of its
+  cards at the front of the queue when the board is full.
 - **Tools and limits:** as in #92, plus Billion's own `billion_ready`,
   `add_repo`, `close_job` and `answer_permission`, and `read_agent_screen`:
   the last lines (default 40, at most 200) of a worker's terminal, ANSI
@@ -866,8 +869,10 @@ status stream carries the steps to the browser; the timers tick in the page.
 Request markers and summaries are stored with the chat so new requests keep
 their oldest-first reply bindings across reconnects and server restarts.
 Messages written before request markers existed are not guessed into the queue.
-After an hour without a reply, while Billion is stopped, or while the browser is disconnected, the active box
-is hidden. A late answer still binds to its original request; an activity
+After an hour without a reply, or while Billion is stopped, the active box
+is hidden. While the browser is disconnected the box stays with the progress
+last heard, not active and headed "Reconnecting… your message is kept", and
+the reconnect's replay brings it up to date. A late answer still binds to its original request; an activity
 timeout never shifts an answer to a newer message. A waiting CLI shows no
 animated activity dot. Worker updates and server notices do not close a request.
 
@@ -886,7 +891,8 @@ cards and the next briefing. From the moment the owner sends a message (in the
 tab or on Telegram) until its `tell_owner` reply, it says "Billion is
 working on your message…" while the CLI is working, or "Waiting for Billion
 to reply…" while it waits (for at most an hour). A disconnected browser says
-"Reconnecting…" and clears active progress until the connection returns. It is
+"Reconnecting…" and shows no activity until the connection returns, keeping
+each pending message and its progress box as last heard. It is
 the owner's, like the chat: sent to the owner's browser only.
 
 ## Telegram

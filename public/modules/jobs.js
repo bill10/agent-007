@@ -172,9 +172,9 @@ export function renderBoard() {
     if (byState.has(job.state)) byState.get(job.state).push(job);
   }
   // Newest first within To do would bury the next thing to be dispatched, so
-  // To do stays oldest-first to match the dispatcher's own ordering. The other
-  // columns show most-recent activity first.
-  byState.get('todo').sort((a, b) => String(a.postedAt).localeCompare(String(b.postedAt)));
+  // To do stays in the dispatcher's own order (urgent cards and schedule runs,
+  // then oldest first). The other columns show most-recent activity first.
+  byState.get('todo').sort(dispatchOrder);
   byState.get('in-progress').sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
   byState.get('review').sort((a, b) => String(b.reviewAt || '').localeCompare(String(a.reviewAt || '')));
 
@@ -214,6 +214,17 @@ export function renderBoard() {
       start.onclick = () => send({ type: 'job-settings', running: true });
       stopped.appendChild(start);
       colEl.insertBefore(stopped, cards);
+    }
+    // The board-wide limit or the memory gate holding the queue: why, once,
+    // at the top of To do (the server's words, lib/memory.js dispatchGate).
+    colEl.querySelector(':scope > .job-board-gate')?.remove();
+    const gate = boardSettings.gate;
+    if (col.state === 'todo' && boardSettings.running && gate?.reason && list.some(j => !isScheduled(j) && !j.paused)) {
+      const held = document.createElement('div');
+      held.className = `job-board-gate${gate.level === 'ok' ? '' : ' memory'}`;
+      held.setAttribute('role', 'status');
+      held.textContent = gate.reason;
+      colEl.insertBefore(held, cards);
     }
 
     const nodes = list.map(renderCard);
@@ -716,10 +727,15 @@ function renderRunLine(job) {
     say(`runs ${dateTime(job.runAt)} · ${untilTime(job.runAt)}`);
   } else if (!boardSettings.running) {
     say('queued · board stopped', true, 'Nothing is dispatched until the board is started');
+  } else if (job.delayedByMemoryAt && boardSettings.gate?.room === 0 && boardSettings.gate.level !== 'ok') {
+    // Kept in its place, never skipped: it goes out as soon as memory allows.
+    say(`delayed by memory · since ${clockTime(job.delayedByMemoryAt)}`, true, boardSettings.gate.reason || '');
+  } else if (boardSettings.gate?.room === 0) {
+    say('runs when a slot frees', true, boardSettings.gate.reason || '');
   } else {
     const queue = [...jobs.values()]
       .filter(j => j.state === 'todo' && !isScheduled(j) && !j.paused && !isHeld(j) && !startsLater(j) && j.repoPath === job.repoPath)
-      .sort((a, b) => String(a.postedAt).localeCompare(String(b.postedAt)));
+      .sort(dispatchOrder);
     const inFlight = [...jobs.values()]
       .filter(j => j.state === 'in-progress' && j.repoPath === job.repoPath && agents.has(j.agentSessionId)).length;
     const free = Math.max(0, (Number(boardSettings.maxPerRepo) || 1) - inFlight);
@@ -729,6 +745,13 @@ function renderRunLine(job) {
       `This repo is at its limit of ${boardSettings.maxPerRepo} agent${boardSettings.maxPerRepo === 1 ? '' : 's'} at once`);
   }
   return line;
+}
+
+// Mirrors compareDispatchOrder in lib/jobs.js, which public/ cannot import:
+// Billion's urgent cards and the runs of a schedule first, then oldest first.
+function dispatchOrder(a, b) {
+  const tier = (j) => ((j.urgent === true && j.postedByBillion === true) || j.scheduleId ? 0 : 1);
+  return tier(a) - tier(b) || String(a.postedAt).localeCompare(String(b.postedAt));
 }
 
 function isHeld(job) {
@@ -824,6 +847,7 @@ function renderToolbar() {
   const toggle = document.getElementById('btn-dispatcher-toggle');
   const status = document.getElementById('job-dispatcher-status');
   const cap = document.getElementById('job-max-per-repo');
+  const total = document.getElementById('job-max-workers');
   const perm = document.getElementById('job-permission-mode');
   if (!toggle) return;
 
@@ -831,11 +855,18 @@ function renderToolbar() {
   toggle.textContent = running ? 'Stop' : 'Start';
   toggle.classList.toggle('running', running);
   const mins = Math.round((boardSettings.intervalMs || 300000) / 60000);
+  // Workers running against the limit as it stands now: lower than the one
+  // set while memory is short, and the reason in the tooltip.
+  const gate = boardSettings.gate;
+  const workers = gate ? ` · ${gate.running}/${gate.cap} workers${gate.cap < gate.maxWorkers ? ' (memory)' : ''}` : '';
   status.textContent = running
-    ? `scanning every ${mins}m`
+    ? `scanning every ${mins}m${workers}`
     : 'dispatcher stopped';
   status.classList.toggle('running', running);
+  status.classList.toggle('memory', !!gate && gate.level !== 'ok');
+  status.title = gate?.reason || (gate && gate.level !== 'ok' ? `Memory: ${gate.reasons.join(', ')}` : '');
   if (document.activeElement !== cap) cap.value = boardSettings.maxPerRepo;
+  if (total && document.activeElement !== total) total.value = gate?.maxWorkers ?? boardSettings.maxWorkers ?? '';
   // The mode a card falls back to when it does not name one of its own. With
   // none picked here and a .env default in play, that default is what workers
   // start in, so the dropdown says so (an entry of its own, so that picking
@@ -1267,6 +1298,11 @@ export function setupJobBoard() {
   document.getElementById('job-max-per-repo').onchange = (e) => {
     const value = parseInt(e.target.value, 10);
     if (Number.isFinite(value)) send({ type: 'job-settings', maxPerRepo: value });
+  };
+  const totalEl = document.getElementById('job-max-workers');
+  if (totalEl) totalEl.onchange = (e) => {
+    const value = parseInt(e.target.value, 10);
+    if (Number.isFinite(value)) send({ type: 'job-settings', maxWorkers: value });
   };
   const permEl = document.getElementById('job-permission-mode');
   // Sending this is what records the mode as CHOSEN on the server, which is

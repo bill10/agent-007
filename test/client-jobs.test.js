@@ -28,6 +28,7 @@ const BOARD_HTML = `
         <button id="btn-dispatch-now"></button>
         <span id="job-dispatcher-status"></span>
         <input type="number" id="job-max-per-repo">
+        <input type="number" id="job-max-workers">
         <select id="job-permission-mode">
           <option value="auto">auto</option>
           <option value="acceptEdits">acceptEdits</option>
@@ -353,6 +354,58 @@ describe('a repo with no GitHub remote', () => {
   it('drops both once the card has its pull request', () => {
     handleJobsList({ jobs: [JOB({ noGithubRemote: true, noShipSkill: 'claude', prUrl: 'https://github.com/o/r/pull/4', prNumber: 4 })], settings: {} });
     expect(document.querySelector('.job-card .job-card-error')).toBeNull();
+  });
+});
+
+describe('the board-wide worker limit and memory gate', () => {
+  const gate = (over = {}) => ({ maxWorkers: 5, cap: 5, running: 2, room: 3, level: 'ok', reasons: [], reason: null, memoryHeld: false, ...over });
+  const todoNote = () => document.querySelector('.job-column[data-state="todo"] .job-board-gate');
+
+  it('shows running against the limit, and the limit lowered for memory', () => {
+    handleJobsList({ jobs: [], settings: { running: true, maxPerRepo: 2, intervalMs: 300000, gate: gate() } });
+    expect(document.getElementById('job-dispatcher-status').textContent).toBe('scanning every 5m · 2/5 workers');
+    expect(document.getElementById('job-max-workers').value).toBe('5');
+    handleJobsList({ jobs: [], settings: { running: true, maxPerRepo: 2, intervalMs: 300000, gate: gate({ cap: 3, room: 1, level: 'pressure', reasons: ['swap 80% full'] }) } });
+    const status = document.getElementById('job-dispatcher-status');
+    expect(status.textContent).toBe('scanning every 5m · 2/3 workers (memory)');
+    expect(status.classList.contains('memory')).toBe(true);
+    expect(status.title).toBe('Memory: swap 80% full');
+  });
+
+  it('says why To do waits, and marks a card delayed by memory without dropping it', () => {
+    const reason = 'Waiting: Mac memory is low (6.0 GB disk free). No new workers start until it recovers; running ones continue.';
+    const held = gate({ cap: 0, room: 0, level: 'critical', reasons: ['6.0 GB disk free'], reason, memoryHeld: true });
+    handleJobsList({ jobs: [JOB({ scheduleId: 'sched-1', delayedByMemoryAt: new Date().toISOString() })], settings: { running: true, maxPerRepo: 2, gate: held } });
+    expect(todoNote().textContent).toBe(reason);
+    expect(todoNote().classList.contains('memory')).toBe(true);
+    expect(cards()[0].querySelector('.job-card-next').textContent).toMatch(/^delayed by memory · since /);
+  });
+
+  it('a full board with memory fine: the limit, not memory', () => {
+    const full = gate({ running: 5, room: 0, reason: "Waiting: 5 of 5 workers running, the board's limit across all repos." });
+    handleJobsList({ jobs: [JOB()], settings: { running: true, maxPerRepo: 2, gate: full } });
+    expect(todoNote().textContent).toMatch(/5 of 5 workers running/);
+    expect(todoNote().classList.contains('memory')).toBe(false);
+    expect(cards()[0].querySelector('.job-card-next').textContent).toBe('runs when a slot frees');
+    handleJobsList({ jobs: [JOB()], settings: { running: true, maxPerRepo: 2, gate: gate() } });
+    expect(todoNote()).toBeNull();
+  });
+
+  it('lists To do in dispatch order: urgent Billion cards and schedule runs first', () => {
+    const at = (m) => new Date(Date.UTC(2026, 9, 28, 8, m)).toISOString();
+    handleJobsList({ jobs: [
+      JOB({ id: 'old', title: 'old', postedAt: at(0) }),
+      JOB({ id: 'run', title: 'run', postedAt: at(5), scheduleId: 's' }),
+      JOB({ id: 'urgent', title: 'urgent', postedAt: at(9), urgent: true, postedByBillion: true }),
+    ], settings: { running: true, maxPerRepo: 2, gate: gate() } });
+    expect(cards().map(c => c.dataset.jobId)).toEqual(['run', 'urgent', 'old']);
+  });
+
+  it('sends a new board-wide limit', () => {
+    const total = document.getElementById('job-max-workers');
+    total.value = '4';
+    total.dispatchEvent(new Event('change'));
+    expect(send).toHaveBeenCalledWith({ type: 'job-settings', maxWorkers: 4 });
   });
 });
 

@@ -99,6 +99,7 @@ Settings (default in brackets):
   CODEX_PERMISSION_MODE   The same for Codex agents [Codex's own]
   AGENT_MESSAGING         open = any agent may message any other [guarded]
   RESPAWN_BOARD_WORKERS   0 = Billion's workers stay orphaned after a restart [on]
+  MEMORY_BACK_PRESSURE    0 = start board workers whatever swap and disk say [on]
   BILLION                 0 turns off Billion, the always-on agent [on]
   BILLION_DIR             Billion's folder and repo [~/.agent-007/billion]
   BILLION_AGENT           claude or codex: the CLI Billion runs on. A switch

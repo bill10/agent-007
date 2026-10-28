@@ -32,7 +32,7 @@ import { setupWebSocket, broadcast, broadcastToBrowsers, sessionPayload, broadca
 import { setupRoutes, checkOrigin } from './server/http.js';
 import { proxySeen } from './server/proxy.js';
 import { controlRoutes, writeServerFile, busyWorkers, RESTART_EXIT, VERSION } from './server/control.js';
-import { startDispatcher, stopDispatcher, boardSettings, releasePushedOrphans, requestDispatch, ghEnvForRepo, retireSpentSchedules, convertOnceSchedules } from './server/jobs.js';
+import { startDispatcher, stopDispatcher, boardSettings, boardGate, releasePushedOrphans, requestDispatch, ghEnvForRepo, retireSpentSchedules, convertOnceSchedules } from './server/jobs.js';
 import { orphans, config, CONFIG_DIR } from './server/state.js';
 import { toolsFor } from './server/mcp.js';
 import { sweepMcpConfigs, startCodexHookLookup } from './server/agent-mcp.js';
@@ -86,10 +86,16 @@ setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession, respawnAge
 // `agent007 status` and `restart` (server/control.js); server.json carries
 // the token once the server listens.
 const controlToken = randomBytes(32).toString('hex');
+// The board's worker limit as `agent007 status` and `agent007 doctor` show it.
+function dispatchStatus() {
+  const { maxWorkers, cap, running, level, reasons, reason } = boardGate();
+  return { maxWorkers, cap, running, level, reasons, reason, maxPerRepo: boardSettings().maxPerRepo, boardRunning: !!boardSettings().running };
+}
+
 controlRoutes(app, {
   token: controlToken,
   checkOrigin,
-  status: () => ({ pid: process.pid, version: VERSION, port: Number(PORT), service: process.env.AGENT007_SERVICE || null, uptime: Math.round(process.uptime()), sessions: sessions.size, workers: busyWorkers(sessions), publicUrl: PUBLIC_URL, proxy: proxySeen() }),
+  status: () => ({ pid: process.pid, version: VERSION, port: Number(PORT), service: process.env.AGENT007_SERVICE || null, uptime: Math.round(process.uptime()), sessions: sessions.size, workers: busyWorkers(sessions), dispatch: dispatchStatus(), publicUrl: PUBLIC_URL, proxy: proxySeen() }),
   restart: () => gracefulShutdown({ restart: true }),
 });
 

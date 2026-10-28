@@ -180,6 +180,10 @@
               max/repo
               <input type="number" id="job-max-per-repo" min="1" max="10" step="1">
             </label>
+            <label class="job-cap-label job-workers-label" title="Maximum agents the board will run at once across every repository. Lowered by two while the machine is under memory pressure, and to none while memory is critical (swap over 90% full or under 8 GB of disk free); running agents always continue.">
+              max total
+              <input type="number" id="job-max-workers" min="1" max="20" step="1">
+            </label>
             <label class="job-cap-label job-perm-label" title="How much a dispatched agent may do without asking. Auto lets Claude Code's classifier decide and escalate the rest to you; it needs a supported model, and where it is unavailable the agent quietly starts in manual and waits for a permission nobody is there to give. A card can override this for itself.">
               permissions
               <select id="job-permission-mode">

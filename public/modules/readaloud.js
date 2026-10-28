@@ -117,8 +117,10 @@ export function progressPhrase(status, max = PROGRESS_WORDS) {
 // The step log heading for one pending message. `queued`: it still waits in
 // Billion's queue, not given to Billion yet. `first`: Billion has it and it
 // is the one being answered. waiting.js shows it and progressSpeech says it,
-// so they cannot differ.
+// so they cannot differ. A dropped link keeps the message; what Billion is
+// doing is unknown until it reconnects.
 export function progressHeading(status, first, queued = false) {
+  if (status?.disconnected) return 'Reconnecting… your message is kept';
   if (queued) return 'Waiting for Billion to finish its current step';
   return first ? 'Billion is working on this' : 'Billion has this, and is answering your earlier message first';
 }
