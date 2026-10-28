@@ -98,7 +98,8 @@ const TOOL_WORDS = {
 };
 export function progressPhrase(status, max = PROGRESS_WORDS) {
   const steps = status?.progress?.[status?.currentRequest];
-  const raw = String(status?.text || (Array.isArray(steps) ? steps.at(-1) : '') || '');
+  const lastStep = Array.isArray(steps) ? steps.at(-1) : '';
+  const raw = String(status?.text || (typeof lastStep === 'string' ? lastStep : lastStep?.text) || '');
   const tool = raw.match(/^\s*(?:mcp__[\w-]+?__)?(\w+)\s*\(/);
   if (tool) return TOOL_WORDS[tool[1].toLowerCase()] || '';
   const t = raw
@@ -113,16 +114,19 @@ export function progressPhrase(status, max = PROGRESS_WORDS) {
   return words.slice(0, max).join(' ');
 }
 
-// The progress box heading for one pending message: `first` is the one Billion
-// is on. waiting.js shows it and progressSpeech says it, so they cannot differ.
-export function progressHeading(status, first) {
-  return first ? (status?.working ? 'Working on your message…' : 'Starting on your message…') : 'Answering your earlier message first…';
+// The step log heading for one pending message. `queued`: it still waits in
+// Billion's queue, not given to Billion yet. `first`: Billion has it and it
+// is the one being answered. waiting.js shows it and progressSpeech says it,
+// so they cannot differ.
+export function progressHeading(status, first, queued = false) {
+  if (queued) return 'Waiting for Billion to finish its current step';
+  return first ? 'Billion is working on this' : 'Billion has this, and is answering your earlier message first';
 }
 
-// What a progress update says: Billion's status line, else the box heading of
-// the request it is on (no ellipsis), else nothing.
+// What a progress update says: Billion's status line, else the heading of the
+// request it is on, else nothing.
 export function progressSpeech(status) {
-  return progressPhrase(status) || (status?.currentRequest ? progressHeading(status, true).replace('…', '') : '');
+  return progressPhrase(status) || (status?.currentRequest ? progressHeading(status, true) : '');
 }
 
 // The best installed English voice: the owner's pick if it is still there,

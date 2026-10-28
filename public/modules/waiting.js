@@ -402,29 +402,85 @@ function renderAttached() {
   }
 }
 
-// Progress belongs to one owner request. Only allowlisted server summaries
-// enter here; textContent (el) keeps both live and saved details inert.
+// The step log under a pending owner message: each step Billion's status
+// (kind 'status') or a tool it used (kind 'tool', a fixed phrase the server
+// picked), with its time. The server sends only those summaries; textContent
+// (el) keeps them inert. Older chat.json steps are bare strings.
+export function stepList(lines) {
+  return (Array.isArray(lines) ? lines : [])
+    .map(line => (typeof line === 'string' ? { text: line } : line))
+    .filter(step => typeof step?.text === 'string' && step.text.trim())
+    .map(step => ({ text: step.text, at: typeof step.at === 'string' ? step.at : null, kind: step.kind === 'tool' ? 'tool' : 'status' }));
+}
+
+// "12 s", "3 min 4 s", "1 h 5 min": how long a step has been going.
+export function elapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}`;
+  return `${Math.floor(s / 3600)} h${Math.floor(s / 60) % 60 ? ` ${Math.floor(s / 60) % 60} min` : ''}`;
+}
+
+// The running timers tick once a second, in place, so the thread is not
+// redrawn for them; the ticker stops when none is on screen.
+let timerTick = null;
+function tickTimers() {
+  const timers = document.querySelectorAll('.chat-step-timer[data-since]');
+  for (const t of timers) t.textContent = elapsed(Date.now() - Date.parse(t.dataset.since));
+  if (!timers.length) { clearInterval(timerTick); timerTick = null; }
+}
+export function _resetStepTimers() { clearInterval(timerTick); timerTick = null; }
+function runningTimer(since) {
+  const t = el('span', 'chat-step-timer', elapsed(Date.now() - Date.parse(since)));
+  t.dataset.since = since;
+  if (!timerTick) timerTick = setInterval(tickTimers, 1000);
+  return t;
+}
+
+function stepItem(step, current) {
+  const li = el('li', `chat-step ${step.kind}${current ? ' current' : ''}`);
+  if (step.at && !Number.isNaN(Date.parse(step.at))) {
+    const at = el('time', 'chat-step-at', new Date(step.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    at.dateTime = step.at;
+    li.append(at);
+  }
+  li.append(el('span', 'chat-step-text', step.text));
+  if (current && step.at && !Number.isNaN(Date.parse(step.at))) li.append(runningTimer(step.at));
+  return li;
+}
+
+// Queued: still in Billion's queue, behind what it is doing now. Otherwise
+// Billion has it: `first` is the one it is answering, whose newest step
+// shows a running timer (or, before any step, the heading does, from when
+// Billion was given it).
 function progressBox(m, first) {
   const s = billionStatus;
-  const box = el('div', 'chat-progress');
+  const queued = !!m.queued;
+  const working = first && !queued;
+  const box = el('div', `chat-progress${queued ? ' queued' : ''}`);
   box.setAttribute('role', 'status');
   box.setAttribute('aria-live', 'polite');
-  box.classList.toggle('active', first && !!s?.working);
-  box.append(el('p', 'chat-progress-head', progressHeading(s, first)));
-  const lines = (s?.progress?.[m.id] || m.workDetails || []).filter(line => typeof line === 'string' && line.trim());
-  const list = el('ul', 'chat-progress-steps');
-  for (const line of lines.length ? lines : [first && s?.working ? 'Working…' : 'Waiting to start…']) list.append(el('li', null, line));
-  box.append(list);
+  box.classList.toggle('active', working && !!s?.working);
+  const steps = queued ? [] : stepList(s?.progress?.[m.id] || m.workDetails);
+  const head = el('p', 'chat-progress-head', progressHeading(s, first, queued));
+  const since = m.deliveredAt || m.at;
+  if (working && !steps.length && since && !Number.isNaN(Date.parse(since))) head.append(' ', runningTimer(since));
+  box.append(head);
+  if (steps.length) {
+    const list = el('ol', 'chat-progress-steps chat-step-log');
+    steps.forEach((step, i) => list.append(stepItem(step, working && i === steps.length - 1)));
+    box.append(list);
+  }
   return box;
 }
 
 function workDetails(lines) {
-  const safe = Array.isArray(lines) ? lines.filter(line => typeof line === 'string' && line.trim()) : [];
-  if (!safe.length) return null;
+  const steps = stepList(lines);
+  if (!steps.length) return null;
   const details = el('details', 'chat-work-details');
-  details.append(el('summary', null, 'Work details'));
-  const list = el('ul', 'chat-progress-steps');
-  for (const line of safe) list.append(el('li', null, line));
+  details.append(el('summary', null, `Work details (${steps.length} step${steps.length === 1 ? '' : 's'})`));
+  const list = el('ol', 'chat-progress-steps chat-step-log');
+  for (const step of steps) list.append(stepItem(step, false));
   details.append(list);
   return details;
 }
@@ -1178,6 +1234,8 @@ export function renderWaiting({ toBottom = false } = {}) {
     nodes.push(empty);
   }
   patchChildren(list, nodes);
+  // A pending message's step log follows its newest step.
+  for (const log of list.querySelectorAll('.chat-progress .chat-step-log')) log.scrollTop = log.scrollHeight;
   // Drawn again when an Undo link's minute is up, so it goes.
   if (undoSoonest < Infinity) undoTimer = setTimeout(() => renderWaiting(), Math.min(undoSoonest, UNDO_MS) + 50);
   const jump = document.getElementById('chat-jump');
