@@ -1880,7 +1880,7 @@ body {
 .round-done { color: var(--state-waiting); }
 .round-start { align-self: flex-start; padding: 0 14px; }
 
-/* The progress box: what Billion is doing while the owner's message waits. */
+/* The step log: what Billion is doing while the owner's message waits. */
 .chat-progress {
   align-self: flex-start;
   max-width: 88%;
@@ -1892,8 +1892,21 @@ body {
 }
 .chat-progress-head { margin: 0 0 4px; color: var(--text); font-weight: 700; }
 .chat-progress.active .chat-progress-head::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--state-working); animation: billion-status-pulse 1.4s ease-in-out infinite; }
+.chat-progress.queued { border-color: var(--border); }
+.chat-progress.queued .chat-progress-head { color: var(--text-muted); font-weight: 600; }
 .chat-progress-steps { margin: 0; padding-left: 16px; color: var(--text-muted); }
 .chat-progress-steps li { overflow-wrap: anywhere; white-space: normal; }
+/* Scrolls on its own once long, so the thread stays put; follows the newest. */
+.chat-step-log { max-height: 180px; overflow-y: auto; padding-left: 0; list-style: none; overscroll-behavior: contain; }
+.chat-step { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 6px; border-radius: 4px; }
+.chat-step-at { flex: none; color: var(--text-dim); font-variant-numeric: tabular-nums; font-size: 11px; }
+.chat-step-text { flex: 1 1 8em; min-width: 0; }
+.chat-step.status .chat-step-text { color: var(--text); }
+.chat-step.tool .chat-step-text { font-style: italic; }
+.chat-step.current { background: var(--bg-panel); box-shadow: inset 2px 0 0 var(--state-working); }
+.chat-step.current .chat-step-text { color: var(--text); font-weight: 600; }
+.chat-step-timer { flex: none; margin-left: auto; color: var(--state-working); font-variant-numeric: tabular-nums; font-size: 11px; font-weight: 600; }
+.chat-progress-head .chat-step-timer { margin-left: 4px; }
 .chat-bubble .chat-progress { max-width: 100%; margin-top: 8px; text-align: left; }
 .chat-work-details { margin-top: 8px; font-size: 12px; text-align: left; }
 .chat-work-details summary { padding: 8px 0; cursor: pointer; color: var(--text-muted); }

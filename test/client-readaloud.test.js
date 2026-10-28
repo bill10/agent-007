@@ -230,9 +230,11 @@ describe('the speaker', () => {
 describe('progressSpeech', () => {
   it('says the status line, else the box heading of the current request, else nothing', () => {
     expect(progressSpeech({ text: 'Drafting the reply', working: true, currentRequest: 'a' })).toBe('Drafting the reply');
-    expect(progressSpeech({ text: '', working: true, currentRequest: 'a' })).toBe('Working on your message');
-    expect(progressSpeech({ text: '', working: false, currentRequest: 'a' })).toBe('Starting on your message');
+    expect(progressSpeech({ text: '', working: true, currentRequest: 'a' })).toBe('Billion is working on this');
+    expect(progressSpeech({ text: '', working: false, currentRequest: 'a' })).toBe('Billion is working on this');
     expect(progressSpeech({ text: '', working: true, currentRequest: null })).toBe('');
-    expect(progressHeading({ working: true }, false)).toBe('Answering your earlier message first…');
+    expect(progressSpeech({ text: '', currentRequest: 'm1', progress: { m1: [{ text: 'Checking the job board', at: 'x', kind: 'tool' }] } })).toBe('Checking the job board');
+    expect(progressHeading({ working: true }, false)).toBe('Billion has this, and is answering your earlier message first');
+    expect(progressHeading({ working: true }, true, true)).toBe('Waiting for Billion to finish its current step');
   });
 });

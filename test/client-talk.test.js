@@ -376,23 +376,18 @@ describe('progress updates while Billion works', () => {
     theAudio.end();
     await wait(0);
 
-    heading(true);                                // "Starting…" -> "Working…"
-    await wait(300);
-    expect(said()).toHaveLength(2);
-    theAudio.end();
-    await wait(0);
-    heading(true);
+    heading(true);                                // the same heading: not said again
     await wait(5000);
-    expect(said()).toHaveLength(2);
+    expect(said()).toHaveLength(1);
 
     heading(true, 'Reading the talk code');       // a status line wins
     await wait(300);
-    expect(said()).toHaveLength(3);
+    expect(said()).toHaveLength(2);
     theAudio.end();
     await wait(0);
     heading(true);                                // cleared: the heading again
     await wait(300);
-    expect(said()).toHaveLength(4);
+    expect(said()).toHaveLength(3);
     expect(requests.some(r => r.url.includes('/audio/cue/'))).toBe(false);
   });
 });

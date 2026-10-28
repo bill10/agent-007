@@ -11,7 +11,7 @@ vi.mock('../public/modules/ws.js', () => ({ send: vi.fn(() => true) }));
 import { send } from '../public/modules/ws.js';
 import { setWaitingItems, setRoundInfo, setBillionStatus, setWaitingActive, setChatMessages } from '../public/modules/state.js';
 import { renderRound, renderBillionStatus, roundModel, statusLine, setSubTab, subTab, initSubTabs, handleRoundError, _resetRound, doneNumbers } from '../public/modules/round.js';
-import { renderWaiting } from '../public/modules/waiting.js';
+import { renderWaiting, _resetStepTimers } from '../public/modules/waiting.js';
 
 const ROUND = { id: '2026-10-01 15:30', label: '10/1 pm', name: 'Afternoon briefing', at: '2026-10-01T15:30:00Z', releasedAt: '2026-10-01T15:30:05Z' };
 const INFO = { type: 'round-state', on: true, max: 2, current: { ...ROUND, brief: 'Billing fix shipped. Two pricing calls below.' }, next: { id: '2026-10-02 08:30', label: '10/2 am', at: Date.parse('2026-10-02T08:30:00Z') } };
@@ -217,7 +217,7 @@ describe('the progress box', () => {
     setChatMessages([owner('m1')]);
     setBillionStatus({ running: true, working: true, pending: ['m1'], progress: { m1: [] } });
     renderWaiting();
-    expect(row('m1').querySelector('.chat-progress').textContent).toContain('Working…');
+    expect(row('m1').querySelector('.chat-progress-head').textContent).toMatch(/^Billion is working on this \d+ s$/);
     setBillionStatus({ running: true, working: true, pending: ['m1'], progress: { m1: ['Checking launch metrics', 'Found two missing runs'] } });
     renderWaiting();
     expect(row('m1').querySelectorAll('li').length).toBe(2);
@@ -227,7 +227,7 @@ describe('the progress box', () => {
     expect(row('m1').classList.contains('pending')).toBe(false);
     const details = row('a1').querySelector('details');
     expect(details.open).toBe(false);
-    expect(details.querySelector('summary').textContent).toBe('Work details');
+    expect(details.querySelector('summary').textContent).toBe('Work details (2 steps)');
     details.open = true;
     renderWaiting();
     expect(row('a1').querySelector('details')).toBe(details);
@@ -241,7 +241,7 @@ describe('the progress box', () => {
     expect(row('notice').textContent).toContain('System update');
     expect(row('m1').textContent).toContain('Checking first');
     expect(row('m2').textContent).not.toContain('Checking first');
-    expect(row('m2').textContent).toContain('Answering your earlier message first');
+    expect(row('m2').textContent).toContain('answering your earlier message first');
     expect(document.body.textContent).not.toContain('SECRET_RAW_TOOL_OUTPUT');
     expect(document.querySelectorAll('.chat-progress.active')).toHaveLength(1);
     setChatMessages([owner('m1'), owner('m2'), { id: 'a1', from: 'billion', text: 'First answer', replyTo: 'm1' }]);
@@ -258,7 +258,7 @@ describe('the progress box', () => {
     setBillionStatus({ running: true, working: true, pending: ['m2'], currentRequest: 'm1', progress: { m1: ['Checking first'], m2: [] } });
     renderWaiting();
     expect(row('m1').querySelector('.chat-progress')).toBeNull();
-    expect(row('m2').textContent).toContain('Answering your earlier message first');
+    expect(row('m2').textContent).toContain('answering your earlier message first');
     expect(document.querySelector('.chat-progress.active')).toBeNull();
   });
 
@@ -284,7 +284,8 @@ describe('the progress box', () => {
     setChatMessages([owner('m1'), { id: 'a2', from: 'billion', replyTo: 'm2', text: 'Done', workDetails: [null, '', '  ', 42] }]);
     setBillionStatus({ running: true, working: false, pending: ['m1'], progress: { m1: [null, '', '  ', 42] } });
     renderWaiting();
-    expect(row('m1').querySelector('li').textContent).toBe('Waiting to start…');
+    expect(row('m1').querySelector('li')).toBeNull();
+    expect(row('m1').querySelector('.chat-progress-head').textContent).toMatch(/^Billion is working on this/);
     expect(row('a2').querySelector('details')).toBeNull();
   });
 
@@ -302,6 +303,76 @@ describe('the progress box', () => {
     renderWaiting();
     expect(row('m3').querySelector('li').textContent).toBe(text);
     expect(row('m3').querySelector('img')).toBeNull();
+  });
+});
+
+describe('the step log', () => {
+  const owner = (id, extra = {}) => ({ id, at: new Date().toISOString(), from: 'owner', text: `Question ${id}?`, awaitsReply: true, ...extra });
+  const row = id => document.querySelector(`.chat-msg[data-id="${id}"]`);
+  const ago = (s) => new Date(Date.now() - s * 1000).toISOString();
+
+  it('lists every step with its time, Billion\'s words and tool phrases apart, the newest highlighted with a running timer', () => {
+    _resetStepTimers();
+    vi.useFakeTimers();
+    try {
+      setChatMessages([owner('m1')]);
+      setBillionStatus({ running: true, working: true, pending: ['m1'], currentRequest: 'm1', progress: { m1: [
+        { text: 'Checking the release run', at: ago(40), kind: 'status' },
+        { text: 'Running a command', at: ago(30), kind: 'tool' },
+        { text: 'Found two failed jobs', at: ago(12), kind: 'status' },
+      ] } });
+      renderWaiting();
+      const items = [...row('m1').querySelectorAll('.chat-step')];
+      expect(items.map(li => li.querySelector('.chat-step-text').textContent)).toEqual(['Checking the release run', 'Running a command', 'Found two failed jobs']);
+      expect(items.map(li => li.classList.contains('tool'))).toEqual([false, true, false]);
+      expect(items.every(li => li.querySelector('time'))).toBe(true);
+      expect(items.map(li => li.classList.contains('current'))).toEqual([false, false, true]);
+      expect(row('m1').querySelectorAll('.chat-step-timer')).toHaveLength(1);
+      expect(items[2].querySelector('.chat-step-timer').textContent).toBe('12 s');
+      vi.advanceTimersByTime(3000);
+      expect(items[2].querySelector('.chat-step-timer').textContent).toBe('15 s');
+    } finally { _resetStepTimers(); vi.useRealTimers(); }
+  });
+
+  it('follows the newest step while the message waits', () => {
+    setChatMessages([owner('m1')]);
+    const steps = Array.from({ length: 30 }, (_, i) => ({ text: `Step ${i}`, at: ago(60 - i), kind: 'status' }));
+    setBillionStatus({ running: true, working: true, pending: ['m1'], currentRequest: 'm1', progress: { m1: steps } });
+    const log = () => row('m1').querySelector('.chat-step-log');
+    renderWaiting();
+    Object.defineProperty(log(), 'scrollHeight', { configurable: true, value: 900 });
+    renderWaiting();
+    expect(log().scrollTop).toBe(log().scrollHeight);
+  });
+
+  it('says a queued message waits for Billion to finish its current step, and a delivered one is being worked on', () => {
+    setChatMessages([owner('m1', { deliveredAt: ago(5) }), owner('m2', { queued: true })]);
+    setBillionStatus({ running: true, working: true, pending: ['m1', 'm2'], currentRequest: 'm1', progress: { m1: [], m2: [] } });
+    renderWaiting();
+    expect(row('m1').querySelector('.chat-progress-head').textContent).toBe('Billion is working on this 5 s');
+    expect(row('m1').querySelector('.chat-progress.active')).not.toBeNull();
+    expect(row('m2').querySelector('.chat-progress-head').textContent).toBe('Waiting for Billion to finish its current step');
+    expect(row('m2').querySelector('.chat-progress').classList.contains('queued')).toBe(true);
+    expect(row('m2').querySelector('.chat-progress').classList.contains('active')).toBe(false);
+    expect(row('m2').querySelector('.chat-step-timer')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/waiting to start/i);
+    // Billion was given it: the same bubble now says it is being worked on.
+    setChatMessages([owner('m1', { deliveredAt: ago(5) }), owner('m2', { deliveredAt: ago(1) })]);
+    renderWaiting();
+    expect(row('m2').querySelector('.chat-progress-head').textContent).toMatch(/^Billion has this, and is answering your earlier message first/);
+  });
+
+  it('collapses the log into Work details with each step\'s time when the answer comes, and no timer', () => {
+    const steps = [{ text: 'Checking the board', at: ago(20), kind: 'status' }, { text: 'Checking the job board', at: ago(10), kind: 'tool' }];
+    setChatMessages([owner('m1', { awaitsReply: false }), { id: 'a1', from: 'billion', text: 'Two cards.', replyTo: 'm1', workDetails: steps }]);
+    setBillionStatus({ running: true, working: false, pending: [], progress: {} });
+    renderWaiting();
+    expect(document.querySelector('.chat-progress')).toBeNull();
+    const details = row('a1').querySelector('details.chat-work-details');
+    expect(details.open).toBe(false);
+    expect(details.querySelectorAll('.chat-step time')).toHaveLength(2);
+    expect(details.querySelector('.chat-step-timer')).toBeNull();
+    expect(details.querySelector('.current')).toBeNull();
   });
 });
 

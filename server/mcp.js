@@ -539,8 +539,10 @@ export const SET_STATUS_TOOL = {
   description:
     `Say in one line (up to ${MAX_STATUS_CHARS} characters) what you are doing now, e.g. "reviewing PR #120". It shows `
     + 'at the top of the owner\'s Billion tab beside what the server knows (workers running, the next briefing), so a '
-    + 'slow reply is never a blank screen; while the owner waits on a reply it heads the progress box under their message, '
-    + 'and folds into Work details when tell_owner answers it. Use concise, user-facing summaries: current step, findings, '
+    + 'slow reply is never a blank screen; while the owner waits on a reply each call adds a timestamped step to the step log '
+    + 'under their message (beside the tools you use, which the server lists as plain phrases like "Running a command"), '
+    + 'and the log folds into Work details when tell_owner answers it. Call it at each step and finding, so the owner can '
+    + 'follow along. Use concise, user-facing summaries: current step, findings, '
     + 'uncertainty or blocker, and next check. Never include private reasoning, raw analysis, tool output, command arguments or secrets. '
     + 'During a Talk to Billion call its first few words are spoken while the owner waits, so lead with plain words '
     + '("Running the tests"), not a path or command. '
