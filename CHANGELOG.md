@@ -5,6 +5,17 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.71.0.0] - 2026-10-28
+
+### Added
+
+- **A live step log under your message in the Billion tab.** While Billion works on your message, the box under it lists every step, each with its time, and highlights the newest with a running timer ("12 s"), so you can see it is working and what it has found. Each `set_status` adds a step instead of replacing the last, and the tools Billion uses show as plain phrases ("Running a command", "Reading STATE.md", "Checking the job board", "Posting a card"), never a command, its arguments or output, a file's contents, a secret or Billion's reasoning. The log scrolls on its own and folds into the reply's **Work details (N steps)** when Billion answers. Works on a phone and without Telegram; no new setting.
+- **Queued versus being worked on, said plainly.** A message still in Billion's queue reads "Waiting for Billion to finish its current step"; one Billion has reads "Billion is working on this" (or, behind an older one, "Billion has this, and is answering your earlier message first"), in place of the old "Waiting to start…".
+
+### Fixed
+
+- **A message you sent Billion survives a restart.** Billion's queue lived only in the server's memory, so a message still waiting when Agent 007 or Billion restarted was never typed in. The Billion tab showed it "queued" for good, and as the oldest message waiting for a reply it took Billion's next reply, leaving every later answer bound one message too early. When Billion starts, the owner's messages still marked queued go back in its queue, oldest first, and Cancel still works on them.
+
 ## [0.70.1.0] - 2026-10-26
 
 ### Fixed
