@@ -56,7 +56,7 @@ import { parseCommand, envSwitchOn } from './lib/helpers.js';
 import { refreshListing } from './server/skill-listing.js';
 import { hasClaudeTranscript, codexSessionIdFor } from './server/agent-transcripts.js';
 import { autoTrusts, trustClaudeFolder } from './server/claude-trust.js';
-import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick } from './server/owner.js';
+import { startTelegram, stopTelegram, notifyOwner, tellOwner, roundTick, requeueOwnerMessages } from './server/owner.js';
 import { comingRound } from './server/rounds.js';
 import { setStatusFacts, publishStatus, noteScreenSteps, STEP_TICK_MS } from './server/billion-status.js';
 import { startModelRefresh, modelsReady, availableModels, onModelsChange } from './server/models.js';
@@ -313,6 +313,9 @@ async function startBillion({ handover = false, carried = null } = {}) {
   result.session.messagesHeld = true;
   restoreMessages(result.session.id, carried);
   sessions.set(result.session.id, result.session);
+  // What the owner sent that the last session never got.
+  const requeued = requeueOwnerMessages(result.session, { broadcast });
+  if (requeued) console.log(`  Billion: queued ${requeued} owner message(s) the last session never got`);
   reportUngrouped(result.session, sendNotice);
   reportDuplicates(result.session, sendNotice);
   reportStoreConflicts(result.session, sendNotice);
