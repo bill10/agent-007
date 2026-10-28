@@ -135,6 +135,13 @@ export const POST_JOB_TOOL = {
           + 'research, an investigation, an ops chore — so the agent reports a '
           + 'summary instead of opening a PR.',
       },
+      urgent: {
+        type: 'boolean',
+        description:
+          'Optional, Billion only. true puts the card at the front of the queue, '
+          + 'ahead of older cards, when the board is at its worker limit. Ignored '
+          + 'on a card any other agent posts.',
+      },
     },
     required: ['title'],
     additionalProperties: false,
@@ -771,6 +778,7 @@ const CALLS = {
       model: args.model,
       skills: args.skills,
       requiresPr: args.requires_pr,
+      urgent: args.urgent,
       session: ctx.session || null,
     });
     if (result.error) return toolText(result.error, true);

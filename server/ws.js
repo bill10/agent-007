@@ -26,8 +26,9 @@ import { billionRuns, billionDir } from './billion.js';
 import {
   addJob, updateJob, deleteJob, moveJob, updateSettings, setJobPaused, releaseJobHold, archiveJob,
   jobsPayload, broadcastJobs, runScan, relinkSessionToJob, allJobs,
-  orphanResumePlan, findJobForBranch, returnJobsOfRemovedRepo, repoAtCap, boardSettings, ghEnvForRepo,
+  orphanResumePlan, findJobForBranch, returnJobsOfRemovedRepo, repoAtCap, boardGate, boardSettings, ghEnvForRepo,
 } from './jobs.js';
+import { memoryStatus } from './memory.js';
 
 export const RESPAWN_NUDGE = 'Agent 007 restarted and you were re-spawned. Continue your card where you left off.';
 
@@ -406,6 +407,9 @@ export async function respawnAgent(from, name) {
   if (repoAtCap(orphan.repoPath)) {
     return { error: `${orphan.repoSlug || orphan.repoPath} already has ${boardSettings().maxPerRepo} agent(s) at work, the board's cap. Try again when one finishes.` };
   }
+  // The board-wide limit and the memory gate hold for a re-spawn too.
+  const gate = boardGate(await memoryStatus());
+  if (!gate.room) return { error: `${gate.reason} Try again later.` };
   const card = billionCardOf(orphan);
   const result = await respawnOrphan(orphan.id);
   if (result.error) return { error: `Could not re-spawn ${name}: ${result.error}` };
@@ -422,12 +426,16 @@ export async function respawnAgent(from, name) {
 export const RESPAWN_PACE_MS = 2000;
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-export async function respawnBoardWorkers({ paceMs = RESPAWN_PACE_MS, env = process.env } = {}) {
+export async function respawnBoardWorkers({ paceMs = RESPAWN_PACE_MS, env = process.env, memory = memoryStatus } = {}) {
   if (env.RESPAWN_BOARD_WORKERS === '0') return [];
   const due = (o) => orphans.has(o.id) && o.reason === 'server-restart'
     && billionCardOf(o)?.state === 'in-progress' && existsSync(join(o.worktreePath, '.git'));
   const back = [];
-  const ready = (o) => due(o) && !repoAtCap(o.repoPath);
+  // Read only when there is someone to bring back.
+  const reading = [...orphans.values()].some(due) ? await Promise.resolve().then(() => memory()).catch(() => null) : null;
+  // The board-wide limit and the memory gate count too: a worker brought back
+  // is one more process, the same as a new one.
+  const ready = (o) => due(o) && !repoAtCap(o.repoPath) && boardGate(reading).room > 0;
   for (const orphan of [...orphans.values()].filter(due)) {
     if (!ready(orphan)) continue;
     // Checked again after the wait: the owner may have acted meanwhile.
@@ -999,7 +1007,7 @@ export function setupWebSocket(wss, { createSession, killSession, startBillion, 
         }
         case 'job-settings': {
           updateSettings({
-            running: msg.running, maxPerRepo: msg.maxPerRepo,
+            running: msg.running, maxPerRepo: msg.maxPerRepo, maxWorkers: msg.maxWorkers,
             intervalMs: msg.intervalMs, permissionMode: msg.permissionMode,
           }, broadcast);
           break;

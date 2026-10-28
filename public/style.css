@@ -2320,6 +2320,7 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 
 .job-dispatcher-status { font-size: 10px; color: var(--text-dim); }
 .job-dispatcher-status.running { color: var(--state-waiting); }
+.job-dispatcher-status.memory { color: var(--state-message); }
 
 .job-cap-label {
   display: flex;
@@ -2342,7 +2343,8 @@ a.chat-file-chip:hover { border-color: var(--accent); }
 }
 /* Only the first control in the group takes the slack; a second `margin-left:
    auto` would split it and strand the two labels at opposite ends. */
-.job-perm-label { margin-left: 0; }
+.job-perm-label,
+.job-workers-label { margin-left: 0; }
 .job-cap-label select { width: auto; max-width: 200px; }
 /* bypassPermissions is the one mode with no check on the agent at all, and it
    reads as just another entry in a list of six. The danger token says so on the
@@ -2517,6 +2519,13 @@ select.job-mode-danger {
   border-bottom: 1px solid var(--border);
 }
 .job-board-stopped .job-run-toggle { flex-shrink: 0; margin-left: auto; }
+.job-board-gate {
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.job-board-gate.memory { color: var(--state-message); }
 .job-column-empty {
   padding: 12px 4px;
   font-size: 10px;

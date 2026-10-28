@@ -15,7 +15,7 @@ export let boardActive = false;
 export function setBoardActive(on) { boardActive = !!on; }
 
 export const jobs = new Map(); // jobId -> job record from the server
-export let boardSettings = { running: false, maxPerRepo: 2, intervalMs: 300000, permissionMode: 'auto' };
+export let boardSettings = { running: false, maxPerRepo: 2, maxWorkers: null, intervalMs: 300000, permissionMode: 'auto', gate: null };
 export function setBoardSettings(s) { boardSettings = { ...boardSettings, ...s }; }
 
 // --- Viewer identity & ownership (phase 2) ---
@@ -51,7 +51,19 @@ export function upsertChatMessage(message) {
 export let roundInfo = { on: true, max: 2, current: null, next: null };
 export function setRoundInfo(info) { roundInfo = info && typeof info === 'object' ? info : roundInfo; }
 export let billionStatus = null;
-export function setBillionStatus(status) { billionStatus = status && typeof status === 'object' ? status : null; }
+// A dropped socket (ws.js) sends a status with `disconnected` and no queue of
+// its own: the owner's pending messages and their saved progress stay as last
+// heard, shown as not active, so a short drop loses neither. The reconnect's
+// replay replaces them with the server's.
+export function setBillionStatus(status) {
+  const next = status && typeof status === 'object' ? status : null;
+  if (next?.disconnected && !Array.isArray(next.pending) && billionStatus) {
+    const { pending, progress, currentRequest } = billionStatus;
+    billionStatus = { ...next, pending: pending || [], progress: progress || {}, currentRequest: currentRequest ?? null };
+    return;
+  }
+  billionStatus = next;
+}
 export let waitingActive = false;
 export function setWaitingActive(on) { waitingActive = !!on; }
 

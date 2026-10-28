@@ -116,6 +116,8 @@ export function progressPhrase(status, max = PROGRESS_WORDS) {
 // The progress box heading for one pending message: `first` is the one Billion
 // is on. waiting.js shows it and progressSpeech says it, so they cannot differ.
 export function progressHeading(status, first) {
+  // The link dropped: the message is kept; what Billion is doing is unknown.
+  if (status?.disconnected) return 'Reconnecting… your message is kept';
   return first ? (status?.working ? 'Working on your message…' : 'Starting on your message…') : 'Answering your earlier message first…';
 }
 

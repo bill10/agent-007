@@ -19,7 +19,7 @@ import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
 import { liveBillion } from './billion.js';
 import {
-  createJob, selectDispatchableJobs, countInFlightByRepo, buildJobCommand, deriveJobStatus,
+  createJob, selectDispatchableJobs, countInFlightByRepo, countInFlight, buildJobCommand, deriveJobStatus,
   parsePrList, parseMergedPr, openPrListArgs, mergedPrListArgs, closedPrViewArgs, parseClosedPr, prCiViewArgs, parsePrCi,
   branchSlugFromTitle, isValidPermissionMode, resolveJobPermissionMode, dispatchPermissionMode,
   JOB_STATES,
@@ -36,6 +36,8 @@ import { scheduleStatus } from '../lib/schedule-status.js';
 import { commandExists, missingCommandMessage } from './command-path.js';
 import { skillHomes, skillDir } from './skills.js';
 import { jobSkillFamilies, knownFamilies, missingPlugins, missingPluginsNote } from './skill-families.js';
+import { dispatchGate, maxWorkersSetting, MAX_WORKERS_LIMIT } from '../lib/memory.js';
+import { memoryStatus, lastMemoryStatus } from './memory.js';
 
 // --- Board settings ---
 
@@ -47,6 +49,9 @@ function defaultSettings() {
     // boardSettings() puts the stored object over these defaults.
     running: true,
     maxPerRepo: MAX_AGENTS_PER_REPO,
+    // Workers at once across every repo; null is DEFAULT_MAX_WORKERS
+    // (lib/memory.js). Lowered further while the machine is short of memory.
+    maxWorkers: null,
     intervalMs: DISPATCH_INTERVAL_MS,
     permissionMode: DEFAULT_PERMISSION_MODE,
     // Whether a human ever picked that mode in the toolbar. Written only by
@@ -143,7 +148,7 @@ export function jobsPayload() {
   const envModes = { claude: envPermissionMode('claude'), codex: envPermissionMode('codex') };
   // The models each CLI's dropdown offers (server/models.js).
   // The family names the form's Skills field suggests (server/skill-families.js).
-  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes }, models: availableModels(), skillFamilies: knownFamilies() };
+  return { type: 'jobs-list', jobs, settings: { ...boardSettings(), envModes, gate: boardGate() }, models: availableModels(), skillFamilies: knownFamilies() };
 }
 
 export function broadcastJobs(broadcast) {
@@ -329,8 +334,8 @@ function clearFinishedAttachments() {
 
 // --- CRUD ---
 
-export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, skills, requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById, attachments }, broadcast) {
-  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, skills, availableModels: availableModels(), requiresPr, postedBy, postedByName, postedByAgent, postedByBillion, postedById });
+export function addJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, skills, requiresPr, urgent, postedBy, postedByName, postedByAgent, postedByBillion, postedById, attachments }, broadcast) {
+  const result = createJob({ title, detail, repoPath, type, schedule, runAt, permissionMode, agent, model, skills, availableModels: availableModels(), requiresPr, urgent, postedBy, postedByName, postedByAgent, postedByBillion, postedById });
   if (result.error) return result;
   const plan = planAttachments(result.job, attachments);
   if (plan?.error) return plan;
@@ -443,7 +448,7 @@ export function posterId({ user, session, anonymous = false }) {
   return anonymous ? 'anonymous' : null;
 }
 
-export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, skills, requiresPr, session, user, poster }, broadcast) {
+export function postJobForAgent({ title, detail, repo, schedule, once, runAt, type, agent, model, skills, requiresPr, urgent, session, user, poster }, broadcast) {
   // The repo the calling agent is working in is the overwhelmingly likely
   // answer, so an agent only names one when it means a different repo.
   const resolved = resolveRepoRef(repo || (session && session.repoPath) || '');
@@ -469,6 +474,9 @@ export function postJobForAgent({ title, detail, repo, schedule, once, runAt, ty
   if (requiresPr != null && typeof requiresPr !== 'boolean') {
     return { error: 'requires_pr must be true or false' };
   }
+  if (urgent != null && typeof urgent !== 'boolean') {
+    return { error: 'urgent must be true or false' };
+  }
 
   const result = addJob({
     // Typed explicitly: this comes off the wire, and a non-string would be
@@ -491,6 +499,8 @@ export function postJobForAgent({ title, detail, repo, schedule, once, runAt, ty
     model,
     skills,
     requiresPr,
+    // Honoured on Billion's cards only (createJob).
+    urgent,
     // No permissionMode: an agent posting a card must not be able to pick the
     // mode the board will spawn with, which would be a way around every gate
     // its own session runs under. A card an agent files inherits the board's.
@@ -1375,9 +1385,10 @@ export async function releasePushedOrphans(broadcast) {
 export function updateSettings(fields, broadcast) {
   const settings = boardSettings();
   // Starting the board, or raising its cap, makes room right away.
-  const before = { running: settings.running, maxPerRepo: settings.maxPerRepo };
+  const before = { running: settings.running, maxPerRepo: settings.maxPerRepo, maxWorkers: maxWorkersSetting(settings) };
   if (typeof fields.running === 'boolean') settings.running = fields.running;
   if (Number.isFinite(fields.maxPerRepo)) settings.maxPerRepo = Math.max(1, Math.min(10, Math.floor(fields.maxPerRepo)));
+  if (Number.isFinite(fields.maxWorkers)) settings.maxWorkers = Math.max(1, Math.min(MAX_WORKERS_LIMIT, Math.floor(fields.maxWorkers)));
   if (Number.isFinite(fields.intervalMs)) settings.intervalMs = Math.max(30_000, Math.min(60 * 60_000, Math.floor(fields.intervalMs)));
   // Allowlisted: this value is interpolated into the agent's command line.
   // A valid one is also the only thing that ever sets permissionModeChosen —
@@ -1387,7 +1398,8 @@ export function updateSettings(fields, broadcast) {
     settings.permissionModeChosen = true;
   }
   persist(broadcast);
-  if (settings.running && (!before.running || settings.maxPerRepo > before.maxPerRepo)) requestDispatch();
+  if (settings.running && (!before.running || settings.maxPerRepo > before.maxPerRepo
+    || maxWorkersSetting(settings) > before.maxWorkers)) requestDispatch();
   return { settings };
 }
 
@@ -1405,6 +1417,24 @@ export function repoAtCap(repoPath) {
   return (countInFlightByRepo(allJobs(), liveSessionIds()).get(repoPath) || 0) >= boardSettings().maxPerRepo;
 }
 
+// Board workers at work right now, across every repo.
+export function runningWorkers() {
+  return countInFlight(allJobs(), liveSessionIds());
+}
+
+// The board-wide limit as it stands: config's maxWorkers, lowered by the
+// memory reading (the last one taken, or `memory` when the caller just read
+// one), with the number running and why nothing more starts, if it doesn't.
+export function boardGate(memory = lastMemoryStatus()) {
+  return dispatchGate({ maxWorkers: maxWorkersSetting(boardSettings()), running: runningWorkers(), memory: memory || undefined });
+}
+
+// Whether the board may start one more worker anywhere. respawnBoardWorkers
+// and Billion's respawn_agent ask this as well as repoAtCap.
+export function boardAtCap(memory) {
+  return boardGate(memory).room === 0;
+}
+
 // Repos we can actually spawn into right now. A repo removed from the sidebar
 // (or whose directory has gone missing) leaves its jobs queued rather than
 // failing them — the path may well come back.
@@ -1419,7 +1449,7 @@ function availableRepos() {
 // sessionPayload() here would close a cycle. Without it a board agent would run
 // invisibly — a PTY with no tab, which is precisely the thing the user must be
 // able to reach to answer a question.
-export async function dispatchOnce(createSession, broadcast, { onSessionCreated, killSession } = {}) {
+export async function dispatchOnce(createSession, broadcast, { onSessionCreated, killSession, memory = memoryStatus } = {}) {
   // Snapshot the queue, not reservations: a failed spawn must leave room for
   // the next card in this pass. A finite snapshot also tries each card at most
   // once, even if it fails or is edited while its spawn is in flight.
@@ -1431,11 +1461,27 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
   const dispatched = [];
   const blockedRepos = new Set();
   let attempted = false;
+  // Read once a pass, and only when there is something to start: the
+  // board-wide limit and the memory gate (lib/memory.js).
+  const reading = candidates.length ? await Promise.resolve().then(() => memory()).catch(() => null) : null;
+  if (reading) logMemoryLevel(boardGate(reading));
+  let marked = false;
   for (const job of candidates) {
     // Earlier awaits can change both eligibility and live capacity.
     if (!allJobs().includes(job) || job.state !== 'todo' || isScheduled(job)
       || !isJobDue(job) || !availableRepos().has(job.repoPath)
       || repoAtCap(job.repoPath) || blockedRepos.has(job.repoPath)) continue;
+    // Board-wide: no room, so this card and every one after it waits. Each
+    // keeps its place in the queue; one held for memory says so on its card.
+    const gate = boardGate(reading);
+    if (!gate.room) {
+      for (const waiting of candidates.slice(candidates.indexOf(job))) {
+        if (waiting.state === 'todo' && allJobs().includes(waiting)) marked = noteMemoryWait(waiting, gate) || marked;
+      }
+      if (gate.memoryHeld || gate.level === 'critical') retryAfterMemory();
+      break;
+    }
+    marked = noteMemoryWait(job, null) || marked;
     attempted = true;
     const command = buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) });
     // Kept so the recheck below can tell whether the card still dispatches
@@ -1490,7 +1536,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     const stillQueued = allJobs().includes(job) && job.state === 'todo' && !isScheduled(job)
       && buildJobCommand(job, { permissionMode: boardModeFor(jobAgent(job)) }) === command
       && job.repoPath === spawnedRepo && isJobDue(job)
-      && availableRepos().has(spawnedRepo) && !repoAtCap(spawnedRepo);
+      && availableRepos().has(spawnedRepo) && !repoAtCap(spawnedRepo) && !boardAtCap(reading);
     if (!stillQueued) {
       let cleaned = false;
       if (killSession) {
@@ -1505,6 +1551,7 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
     }
 
     if (onSessionCreated) onSessionCreated(session);
+    job.delayedByMemoryAt = null;
     job.state = 'in-progress';
     job.agentSessionId = session.id;
     job.agentName = session.name;
@@ -1522,8 +1569,37 @@ export async function dispatchOnce(createSession, broadcast, { onSessionCreated,
 
     dispatched.push({ job, session });
   }
-  if (attempted) persist(broadcast);
+  if (attempted || marked) persist(broadcast);
   return dispatched;
+}
+
+// A queued card the memory gate holds back says so ("delayed by memory"),
+// from the first pass that held it until it starts or the gate lets it be.
+// Returns whether the card changed, so a pass persists only when one did.
+let loggedMemoryLevel = 'ok';
+function logMemoryLevel(gate) {
+  const level = gate?.level || 'ok';
+  if (level === loggedMemoryLevel) return;
+  loggedMemoryLevel = level;
+  console.log(level === 'ok' ? 'Job board: memory recovered, workers start again'
+    : `Job board: memory ${level} (${gate.reasons.join(', ')}), at most ${gate.cap} of ${gate.maxWorkers} workers`);
+}
+
+function noteMemoryWait(job, gate) {
+  const held = !!gate && (gate.memoryHeld || gate.level === 'critical');
+  if (held && !job.delayedByMemoryAt) { job.delayedByMemoryAt = new Date().toISOString(); return true; }
+  if (!held && job.delayedByMemoryAt) { job.delayedByMemoryAt = null; return true; }
+  return false;
+}
+
+// Memory frees up without any event the board hears, so a pass held by it
+// looks again after a minute rather than at the next scan, five away.
+export const MEMORY_RETRY_MS = 60_000;
+let memoryRetryTimer = null;
+function retryAfterMemory() {
+  if (memoryRetryTimer) return;
+  memoryRetryTimer = setTimeout(() => { memoryRetryTimer = null; requestDispatch(); }, MEMORY_RETRY_MS);
+  memoryRetryTimer.unref?.();
 }
 
 // Reconnect a re-adopted orphan to the job it was working on.
@@ -2637,6 +2713,8 @@ export function stopDispatcher() {
   clearTimeout(dispatchTimer);
   clearTimeout(ciTimer);
   clearTimeout(kickTimer);
+  clearTimeout(memoryRetryTimer);
+  memoryRetryTimer = null;
   dispatchTimer = null;
   ciTimer = null;
   kickTimer = null;

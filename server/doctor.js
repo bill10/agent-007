@@ -30,6 +30,8 @@ import { callServer } from './control.js';
 import { tailscaleBin, serveTargets } from './tailscale.js';
 import { whisperSetup } from './voice.js';
 import { skillHomes, skillsDirs, skillDir } from './skills.js';
+import { readMemory, backPressureOn } from './memory.js';
+import { maxWorkersSetting, workerCap, SWAP_CRITICAL_PCT, DISK_CRITICAL_GB } from '../lib/memory.js';
 
 export const MARKS = { ok: '✓', fail: '✗', na: '–' };
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
@@ -123,6 +125,8 @@ export function defaultProbes({ env = process.env, settingsLine = null, installC
     service: () => installedService(),
     // The running server's /control/status (agent007 status), or null.
     serverStatus: () => callServer('/control/status'),
+    // Swap, disk, macOS's pressure level and the mac-mini-guard file.
+    memory: () => readMemory(),
     whichIn: (cmd, PATH) => commandPath(cmd, { PATH }),
     installCommand,
     settingsFile: join(configDir(env), '.env'),
@@ -150,7 +154,8 @@ function readBoard(p) {
     const explorer = new Set((Array.isArray(c.repos) ? c.repos : []).map(r => r?.path).filter(isPath));
     const repos = [...new Set([...explorer, ...jobs.map(j => j.repoPath).filter(isPath)])];
     const orphans = (Array.isArray(c.orphans) ? c.orphans : []).filter(o => o && isPath(o.worktreePath) && isPath(o.repoPath) && isPath(o.branchName));
-    return { repos, jobs, explorer, orphans };
+    const jobBoard = c.jobBoard && typeof c.jobBoard === 'object' ? c.jobBoard : {};
+    return { repos, jobs, explorer, orphans, jobBoard };
   } catch (err) {
     // Only where it broke: V8's message quotes the file's text, which may be anything.
     const at = /position (\d+)/.exec(err.message);
@@ -315,6 +320,41 @@ export async function checkOrphans(p, board) {
       : 'Delete it in the Explorer (the orphan\'s delete button)',
   ));
   if (kept) lines.push(ok(`${kept} orphaned worktree${kept === 1 ? '' : 's'} kept: uncommitted files, work not on the base branch, or a card that may re-adopt it`));
+  return lines;
+}
+
+// Memory, and the board's worker limit because of it (lib/memory.js): the
+// machine's readings, then the running server's limit, running count and
+// reason. Without a server, the limit config.json sets.
+export async function checkMemory(p, board) {
+  if (!p.memory) return [];
+  const lines = [];
+  const m = await p.memory();
+  const parts = [];
+  if (Number.isFinite(m.swapPct)) parts.push(`swap ${Math.round(m.swapPct)}% of ${(m.swapTotalMb / 1024).toFixed(1)} GB`);
+  if (Number.isFinite(m.diskFreeGb)) parts.push(`${m.diskFreeGb.toFixed(1)} GB disk free`);
+  if (m.guard) parts.push(`mac-mini-guard says ${m.guard.level}`);
+  const seen = parts.length ? parts.join(', ') : 'no swap or disk reading on this system';
+  const off = backPressureOn(p.env) ? '' : ' (MEMORY_BACK_PRESSURE=0: the board ignores it)';
+  if (m.level === 'critical') {
+    lines.push(fail(`memory critical: ${m.reasons.join(', ')}; the board starts no new workers${off}`,
+      `Free disk (below ${DISK_CRITICAL_GB} GB swap cannot grow) and close Chrome windows or idle agents; swap over ${SWAP_CRITICAL_PCT}% stays critical`));
+  } else if (m.level === 'pressure') {
+    lines.push(ok(`memory under pressure (${m.reasons.join(', ')}): the board runs two workers fewer${off}`));
+  } else {
+    lines.push(ok(`memory ok: ${seen}`));
+  }
+  const s = await Promise.resolve().then(() => p.serverStatus?.()).catch(() => null);
+  const d = s?.dispatch;
+  if (d) {
+    const limit = d.cap === d.maxWorkers ? `${d.maxWorkers}` : `${d.cap} (lowered from ${d.maxWorkers} for memory)`;
+    lines.push(ok(`board workers: ${d.running} running, limit ${limit} across all repos, ${d.maxPerRepo} per repo${d.boardRunning ? '' : ' (board stopped)'}`));
+    if (d.reason) lines.push(na(d.reason));
+  } else {
+    const max = maxWorkersSetting(board.jobBoard);
+    const why = s ? 'the running Agent 007 is older than this check; restart it for its live count' : 'Agent 007 is not running';
+    lines.push(na(`board worker limit: ${max} across all repos (${workerCap(max, m.level)} at this memory level); ${why}`));
+  }
   return lines;
 }
 
@@ -540,6 +580,7 @@ function checks(fast) {
     // and none when git is missing (that line is the only one).
     { title: 'Git', section: 'System', run: async (c) => (await checkRepos(c.p, { repos: [], jobs: [] }, c.origin, c.account)).slice(0, 1) },
     { title: 'Port', section: 'System', run: (c) => checkPort(c.p, { starting: fast }) },
+    { title: 'Memory', section: 'System', run: (c) => checkMemory(c.p, c.board) },
     { title: 'Agent CLIs', section: 'Agents', run: (c) => checkClis(c.p, c.board) },
     { title: 'GitHub', section: 'GitHub', run: (c) => checkGh(c.p, c.board, c.origin, { fast, account: c.account }) },
     { title: 'Repos', section: 'Repos', slow: true, run: async (c) => (await checkRepos(c.p, c.board, c.origin, c.account)).slice(1) },

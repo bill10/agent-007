@@ -17,6 +17,11 @@ for (const [, key] of readFileSync(join(import.meta.dirname, '../.env.example'),
 // with fixture folders of its own.
 process.env.SKILL_FAMILIES = '0';
 
+// Memory back-pressure reads the real machine's swap and disk; a developer's
+// busy Mac would hold the dispatch tests back. Tests of the gate inject their
+// own readings.
+process.env.MEMORY_BACK_PRESSURE = '0';
+
 // Point auth at a throwaway users path so the suite is hermetic: the file does
 // not exist, so auth starts DISABLED regardless of the dev machine's real
 // ~/.agent-007/users.json. Auth-specific tests create/remove users at this path.

@@ -48,9 +48,10 @@ export function connect(onMessage) {
 
   ws.onclose = (event) => {
     clearInterval(pinger);
-    // Activity is unknown while disconnected. Clear live progress through the
-    // existing status handler; the reconnect snapshot restores saved details.
-    messageHandler?.({ type: 'billion-status', disconnected: true, running: false, working: false, awaitingReply: false, pending: [] });
+    // Activity is unknown while disconnected, so nothing is shown as active.
+    // No `pending`: the owner's waiting messages and their progress boxes stay
+    // as last heard (setBillionStatus), and the reconnect's replay refreshes them.
+    messageHandler?.({ type: 'billion-status', disconnected: true, running: false, working: false, awaitingReply: false });
     // 4401 = server requires auth and our token was missing/invalid. Don't
     // reconnect-loop; clear the bad token and prompt for a new one.
     if (event && event.code === WS_UNAUTHORIZED) {
