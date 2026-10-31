@@ -17,6 +17,7 @@ import { gitExec, removeWorktree, hasGithubRemote } from './git.js';
 import { transcriptsFor, codexSessionIdFor } from './agent-transcripts.js';
 import { safeFilename, expandHome } from '../lib/helpers.js';
 import { sendNotice } from './messages.js';
+import { autoContinueTick } from './auto-continue.js';
 import { liveBillion } from './billion.js';
 import {
   createJob, selectDispatchableJobs, countInFlightByRepo, countInFlight, buildJobCommand, deriveJobStatus,
@@ -628,6 +629,8 @@ export function readJobForAgent(jobId) {
       lastError: job.lastError || null,
       prCheckError: job.prCheckError || null,
       pluginNote: job.pluginNote || null,
+      // server/auto-continue.js: each "continue" the board typed after a transient API error.
+      autoContinues: job.autoContinue?.log || [],
       attachments: (Array.isArray(job.attachments) ? job.attachments : []).map(a => a && a.name).filter(Boolean),
     },
   };
@@ -2075,6 +2078,20 @@ export async function findPrCi(repoPath, branchName, prNumber, {
 // Whether a card's worker can be closed without cutting someone off: exited,
 // or idle at its prompt. One paused by an account switch has exited only for
 // the switch and is about to resume mid-turn, so it is not quiet.
+// The wake loop's tick: a worker stopped by a transient API error is told to
+// continue (server/auto-continue.js). Only board workers: a card links them.
+export function autoContinueWorkers(broadcast, { now = Date.now() } = {}) {
+  let changed = false;
+  for (const job of allJobs()) {
+    if (job.state !== 'in-progress' || !job.agentSessionId) continue;
+    const session = sessions.get(job.agentSessionId);
+    const did = autoContinueTick(job, session, { now });
+    if (did === 'continued' || did === 'spent') console.log(`${session.name}: ${job.autoContinue.log.at(-1).text}`);
+    if (did) changed = true;
+  }
+  if (changed) persist(broadcast);
+}
+
 function quietWorker(session) {
   if (session.accountRotating || session.rotationResume) return false;
   return session.exited || session.state === 'WAITING';
