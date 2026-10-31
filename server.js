@@ -50,7 +50,7 @@ import { takeMessages, restoreMessages, dropMessages, screenTail, sendNotice } f
 import { readMap as readFamilyMap, reportUngrouped } from './server/skill-families.js';
 import { reportDuplicates } from './server/skill-duplicates.js';
 import { autoSync, reportStoreConflicts, reportRepoSkills } from './server/skill-store.js';
-import { allJobs } from './server/jobs.js';
+import { allJobs, autoContinueWorkers } from './server/jobs.js';
 import { commandExists, missingCommandMessage } from './server/command-path.js';
 import { parseCommand, envSwitchOn } from './lib/helpers.js';
 import { refreshListing } from './server/skill-listing.js';
@@ -663,6 +663,8 @@ function startRounds() {
     if (ticking) return;
     ticking = true;
     try {
+      // Here, not in the wake loop: board workers run with Billion off too.
+      try { autoContinueWorkers(broadcast); } catch (err) { console.error('Worker auto-continue failed:', err.message); }
       await roundTick({ broadcast });
       publishStatus(broadcast);
     } catch (err) {
