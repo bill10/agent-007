@@ -2075,8 +2075,9 @@ export async function findPrCi(repoPath, branchName, prNumber, {
     { listAccounts, tokenFor, label: 'gh pr view' });
 }
 
-// The wake loop's tick: a worker stopped by a transient API error is told to
-// continue (server/auto-continue.js). Only board workers: a card links them.
+// On the rounds tick (startRounds in server.js): a worker stopped by a
+// transient API error is told to continue (server/auto-continue.js). Only
+// board workers: a card links them.
 export function autoContinueWorkers(broadcast, { now = Date.now() } = {}) {
   let changed = false;
   for (const job of allJobs()) {

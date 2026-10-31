@@ -1,8 +1,8 @@
 // A board worker whose turn died on a transient API error (429, 5xx,
 // overloaded, a dropped connection) sits at its prompt until someone types
-// "continue", often all night. The wake loop's tick does it for them: at most
-// MAX_AUTO_CONTINUES per card, BACKOFF_MS after the error, the count reset by
-// a turn that ends cleanly. Each one is logged on the card (read_job). Usage
+// "continue", often all night. The rounds tick (startRounds in server.js)
+// does it for them: at most MAX_AUTO_CONTINUES per card, BACKOFF_MS after the
+// error, the count reset by a turn that ends cleanly. Each one is logged on the card (read_job). Usage
 // limits and logins are not this: billion-limit.js and account-rotation.js
 // handle those, so a screen showing either is left alone.
 //
