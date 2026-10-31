@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.72.1.0] - 2026-10-31
+
+### Fixed
+
+- **Server git calls no longer run repo hooks or fsmonitor, and no longer see server-only secrets.** A worker can write the shared `.git`, so a `post-checkout` hook or `core.fsmonitor` fired by `git worktree add` used to run with the server's `TELEGRAM_BOT_TOKEN` and friends in its env. Git now runs with `core.hooksPath` and `core.fsmonitor` off and the same env stripping workers get.
+
 ## [0.72.0.0] - 2026-10-28
 
 ### Added
