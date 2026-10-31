@@ -2075,9 +2075,6 @@ export async function findPrCi(repoPath, branchName, prNumber, {
     { listAccounts, tokenFor, label: 'gh pr view' });
 }
 
-// Whether a card's worker can be closed without cutting someone off: exited,
-// or idle at its prompt. One paused by an account switch has exited only for
-// the switch and is about to resume mid-turn, so it is not quiet.
 // The wake loop's tick: a worker stopped by a transient API error is told to
 // continue (server/auto-continue.js). Only board workers: a card links them.
 export function autoContinueWorkers(broadcast, { now = Date.now() } = {}) {
@@ -2092,6 +2089,9 @@ export function autoContinueWorkers(broadcast, { now = Date.now() } = {}) {
   if (changed) persist(broadcast);
 }
 
+// Whether a card's worker can be closed without cutting someone off: exited,
+// or idle at its prompt. One paused by an account switch has exited only for
+// the switch and is about to resume mid-turn, so it is not quiet.
 function quietWorker(session) {
   if (session.accountRotating || session.rotationResume) return false;
   return session.exited || session.state === 'WAITING';
