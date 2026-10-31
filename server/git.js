@@ -13,12 +13,23 @@ import {
   GIT_AUTO_TIMEOUT, GIT_USER_TIMEOUT, WORKTREE_DIR,
 } from './state.js';
 import { saveConfig, syncOrphansToConfig } from './config.js';
-import { parseGitStatus, buildFileTree, repoDirName } from '../lib/helpers.js';
+import { parseGitStatus, buildFileTree, repoDirName, ptyEnv } from '../lib/helpers.js';
 
 // Deleted worktrees wait here, under WORKTREE_DIR, until emptyTrash removes them.
 const TRASH_DIR = '.trash';
 
 // --- Git Exec ---
+// Repo hooks and core.fsmonitor live in the shared .git, which a worker can write,
+// and they run as the server. Switch both off for every server-run git command
+// (nothing here relies on a hook). NUL on Windows, where /dev/null is not a path.
+export const GIT_SAFE_ARGS = ['-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-c', 'core.fsmonitor=false'];
+
+// The server's own env minus its secrets (ptyEnv), so whatever git spawns gets
+// what a worker gets.
+export function gitEnv(extra) {
+  return { ...ptyEnv(process.env), ...extra, LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0' };
+}
+
 export function gitExec(args, opts = {}) {
   const timeout = opts.timeout || GIT_AUTO_TIMEOUT;
   const cwd = opts.cwd;
@@ -30,9 +41,9 @@ export function gitExec(args, opts = {}) {
   // of blocking on a prompt nobody can answer. Only the pre-spawn fetch talks to
   // a network today, but a server must never be one auth prompt away from
   // hanging, so it is set for every git call.
-  const env = { ...process.env, ...opts.env, LC_ALL: 'C', LANGUAGE: '', GIT_TERMINAL_PROMPT: '0' };
+  const env = gitEnv(opts.env);
   return new Promise((resolve, reject) => {
-    execFileCb('git', args, { timeout, maxBuffer: opts.maxBuffer || 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
+    execFileCb('git', [...GIT_SAFE_ARGS, ...args], { timeout, maxBuffer: opts.maxBuffer || 1024 * 1024, cwd, env }, (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;
         reject(err);
