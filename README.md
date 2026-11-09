@@ -121,7 +121,7 @@ Uncomment what you want, then restart. The ones people change:
 | `BILLION=0` | Turns off Billion, the always-on agent. The Billion tab and the phone's Billion button go too, and the page opens on the Jobs board |
 | `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` | Billion's questions and replies reach your phone as well as the Billion tab, and you answer from either, with a tap when it is a pick ([setup](docs/BILLION.md#telegram)) |
 | `HOST=0.0.0.0` + `ALLOWED_ORIGINS=<tailnet name>` | Reach it from your phone or another machine (behind Tailscale only, see [docs/REMOTE.md](docs/REMOTE.md)) |
-| `AGENT007_STATIC_DIR` | `public/` in the package | Directory the web UI is served from, for an app that embeds the engine and brings its own UI. `/api` routes are unaffected |
+| `AGENT007_STATIC_DIR` | Directory the web UI is served from (default: the package's `public/`), for an app that embeds the engine and brings its own UI. `/api` routes are unaffected |
 | `CLAUDE_PERMISSION_MODE` | Mode Claude Code agents start in, e.g. `bypassPermissions` |
 | `CODEX_PERMISSION_MODE` | The same for Codex |
 | `TRUST_BOARD_WORKTREES=0` | Keeps Claude Code's and Codex's folder-trust prompt for job board workers |
@@ -271,6 +271,7 @@ ALLOWED_ORIGINS=mac-mini.tailXXXX.ts.net npm start   # Allow a remote browser or
 | `HOST` | `127.0.0.1` | Bind interface. Use `0.0.0.0` only behind Tailscale/a trusted network |
 | `ALLOWED_ORIGINS` | *(none)* | Comma-separated extra origins for the cross-origin check (`localhost` is always allowed) |
 | `PUBLIC_URL` | *(none)* | The https address a reverse proxy or tunnel you run serves the app at (Cloudflare Tunnel, caddy, nginx). Allowed as an origin and used in the links the app sends. Keep `HOST` on `127.0.0.1`. See [docs/REMOTE.md](docs/REMOTE.md#cloudflare-tunnel--access) |
+| `AGENT007_STATIC_DIR` | `public/` in the package | Directory the web UI is served from, for an app that embeds the engine and brings its own UI. `/api` routes are unaffected |
 | `CLAUDE_PERMISSION_MODE` | *(the CLI's own)* | Permission mode every Claude Code agent the app starts runs in (`auto`, `acceptEdits`, `bypassPermissions`, `manual`, `dontAsk`, `plan`). Flags in the command, a card's own mode or a mode picked in the board's dropdown win over it |
 | `CODEX_PERMISSION_MODE` | *(the CLI's own)* | The same for Codex agents, mapped onto Codex's sandbox and approval flags |
 | `AGENT_MESSAGING` | *(guarded)* | `open` lets any of your agents message any other. By default an agent that asks before acting cannot message one that never asks |
