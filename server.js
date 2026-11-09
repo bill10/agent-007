@@ -82,7 +82,7 @@ const wss = new WebSocketServer({
 // argument: http.js must not import ws.js, and a job posted through the MCP
 // tool has to repaint every open board the moment it lands.
 // killSession is a hoisted declaration below: close_job retires a card's worker.
-setupRoutes(app, join(__dirname, 'public'), { broadcast, killSession, respawnAgent });
+setupRoutes(app, process.env.AGENT007_STATIC_DIR || join(__dirname, 'public'), { broadcast, killSession, respawnAgent });
 // `agent007 status` and `restart` (server/control.js); server.json carries
 // the token once the server listens.
 const controlToken = randomBytes(32).toString('hex');
