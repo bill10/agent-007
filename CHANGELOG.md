@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.74.0.0] - 2026-11-09
+
+### Added
+
+- **`AGENT007_STATIC_DIR` picks the directory the web UI is served from.** An app that imports the engine (such as Star Quest) can serve its own UI without replacing the HTTP server's request listener. Unset, it serves the bundled `public/` as before.
+
 ## [0.73.0.0] - 2026-10-31
 
 ### Added
