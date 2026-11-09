@@ -94,6 +94,8 @@ Settings (default in brackets):
   PUBLIC_URL              The https address a reverse proxy or tunnel serves
                           the app at; allowed as an origin and used in links
                           (docs/REMOTE.md) [none]
+  AGENT007_STATIC_DIR     Directory the web UI is served from [public/ in the
+                          package]
   CLAUDE_PERMISSION_MODE  Mode Claude Code agents start in: auto, acceptEdits,
                           bypassPermissions, manual, dontAsk, plan [Claude's own]
   CODEX_PERMISSION_MODE   The same for Codex agents [Codex's own]
