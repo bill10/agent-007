@@ -5,6 +5,12 @@ All notable changes to Agent 007 are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a four-part `MAJOR.MINOR.PATCH.MICRO` version.
 
+## [0.74.1.0] - 2026-11-11
+
+### Removed
+
+- **`AGENT007_STATIC_DIR` is gone; the web UI is always served from the bundled `public/`.**
+
 ## [0.74.0.0] - 2026-11-09
 
 ### Added
